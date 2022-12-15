@@ -28,6 +28,10 @@ COMMON_COPTS = [
 ] + if_cuda([
     "-DUSE_CUDA",
     "-DUSE_CUDNN",
+    # TODO: This should be passed only when building for CUDA-11.5 or newer
+    # use cub in a safe manner, see:
+    # https://github.com/pytorch/pytorch/pull/55292
+    "-DCUB_WRAPPED_NAMESPACE=at_cuda_detail",
 ])
 
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
@@ -47,6 +51,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterSparseCsrCPU.cpp",
     "aten/src/ATen/RegisterZeroTensor.cpp",
     "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
+    "aten/src/ATen/RegisterCompositeImplicitAutogradNestedTensor.cpp",
     "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
     "aten/src/ATen/RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "aten/src/ATen/RegisterMeta.cpp",
@@ -62,6 +67,8 @@ generated_cpu_cpp = [
     "aten/src/ATen/CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeImplicitAutogradNestedTensorFunctions.h",
+    "aten/src/ATen/CompositeImplicitAutogradNestedTensorFunctions_inl.h",
     "aten/src/ATen/CompositeViewCopyKernels.cpp",
     "aten/src/ATen/FunctionalInverses.h",
     "aten/src/ATen/Functions.h",
@@ -126,6 +133,7 @@ filegroup(
     name = "aten_base_cpp",
     srcs = glob([
         "aten/src/ATen/*.cpp",
+        "aten/src/ATen/functorch/*.cpp",
         "aten/src/ATen/detail/*.cpp",
         "aten/src/ATen/cpu/*.cpp",
     ]),
@@ -421,6 +429,7 @@ cu_library(
         "@cuda//:cublas",
         "@cuda//:cufft",
         "@cuda//:cusparse",
+        "@cutlass",
     ],
     alwayslink = True,
 )
@@ -1639,6 +1648,17 @@ cu_library(
     deps = [":torch_headers"],
 )
 
+torch_sources = ({
+    k: "" for k in (
+    libtorch_core_sources +
+    libtorch_distributed_sources +
+    torch_cpp_srcs +
+    libtorch_extra_sources +
+    jit_core_sources +
+    lazy_tensor_ts_sources +
+    GENERATED_AUTOGRAD_CPP)
+}).keys()
+
 cc_library(
     name = "torch",
     srcs = if_cuda(glob(
@@ -1648,11 +1668,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
-    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources + GENERATED_AUTOGRAD_CPP + [
-        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
-        "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
-        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
-    ],
+    )) + torch_sources,
     copts = TORCH_COPTS,
     defines = [
         "CAFFE2_NIGHTLY_VERSION=20200115",
@@ -1665,6 +1681,7 @@ cc_library(
     ] + if_cuda([
         ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",
+        "@cutlass",
     ]),
     alwayslink = True,
 )
@@ -1740,10 +1757,28 @@ cc_library(
 # Torch integration tests rely on a labeled data set from the MNIST database.
 # http://yann.lecun.com/exdb/mnist/
 
-# imethod.cpp is excluded since torch/csrc/deploy* build is not yet supported.
 cpp_api_tests = glob(
     ["test/cpp/api/*.cpp"],
-    exclude = ["test/cpp/api/imethod.cpp"],
+    exclude = [
+        "test/cpp/api/imethod.cpp",
+        "test/cpp/api/integration.cpp",
+    ],
+)
+
+cc_test(
+      name = "integration_test",
+      size = "medium",
+      srcs = ["test/cpp/api/integration.cpp"],
+      deps = [
+          ":test_support",
+          "@com_google_googletest//:gtest_main",
+      ],
+      tags = [
+        "gpu-required",
+      ],
+      data = [
+        ":download_mnist",
+      ],
 )
 
 [
@@ -1877,6 +1912,7 @@ test_suite(
         "aten/src/ATen/templates/LazyIr.h",
         "aten/src/ATen/templates/LazyNonNativeIr.h",
         "aten/src/ATen/templates/RegisterDispatchKey.cpp",
+        "aten/src/ATen/templates/RegisterDispatchDefinitions.ini",
         "aten/src/ATen/native/native_functions.yaml",
         "aten/src/ATen/native/tags.yaml",
         "aten/src/ATen/native/ts_native_functions.yaml",
@@ -1884,3 +1920,15 @@ test_suite(
         "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
     ]
 ]
+
+genrule(
+    name = "download_mnist",
+    srcs = ["//:tools/download_mnist.py"],
+    outs = [
+        "mnist/train-images-idx3-ubyte",
+        "mnist/train-labels-idx1-ubyte",
+        "mnist/t10k-images-idx3-ubyte",
+        "mnist/t10k-labels-idx1-ubyte",
+    ],
+    cmd = "python3 tools/download_mnist.py -d $(RULEDIR)/mnist",
+)

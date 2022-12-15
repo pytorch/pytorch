@@ -22,7 +22,6 @@ static void setupLayerNorm(Fusion* fusion, DataType dtype) {
 
   FusionGuard fg(fusion);
 
-  const int kReductionAxis = 1;
   const float kEps = 1e-5;
 
   Double* eps_ptr = IrBuilder::create<Double>(kEps);
@@ -61,7 +60,6 @@ static void NvFuserScheduler_LayerNorm(
 
   std::vector<int64_t> input_shape{
       benchmark_state.range(0), benchmark_state.range(1)};
-  const float kEps = 1e-5;
 
   // inputs
   at::manual_seed(0);
@@ -105,14 +103,14 @@ static void Baseline_LayerNorm(
   at::Tensor bias = at::randn({input_shape[1]}, options);
 
   clearL2Cache();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     auto output = at::layer_norm(input, norm_shape, weight, bias);
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     clearL2Cache();
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   benchmark_state.SetBytesProcessed(

@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Size.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -11,6 +12,7 @@
 
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/utils/pybind.h>
 
 struct THPSize {
   PyTupleObject tuple;
@@ -57,7 +59,9 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
       TORCH_CHECK(
           !torch::jit::tracer::isTracing(),
           "JIT Tracing of SymInts isn't supported");
-      auto py_symint = py::cast(si.toSymbolicIntNode()).release().ptr();
+      auto py_symint = py::cast(si).release().ptr();
+      if (!py_symint)
+        throw python_error();
       PyTuple_SET_ITEM(ret.get(), i, py_symint);
     } else {
       if (torch::jit::tracer::isTracing()) {
@@ -67,7 +71,8 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
           throw python_error();
         PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
       } else {
-        PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(si.data()));
+        PyTuple_SET_ITEM(
+            ret.get(), i, THPUtils_packInt64(si.as_int_unchecked()));
       }
     }
   }
@@ -93,7 +98,7 @@ static PyObject* THPSize_pynew(
       if (THPUtils_checkLong(item)) {
         continue;
       }
-      if (torch::is_symint_node(item)) {
+      if (torch::is_symint(item)) {
         continue;
       }
       if (torch::jit::tracer::isTracing() && isTracedZeroDimVar(item)) {
@@ -130,7 +135,7 @@ static PyObject* THPSize_repr(THPSize* self) {
     auto item = PyTuple_GET_ITEM(self, i);
     auto ih = py::handle(item);
 
-    repr += torch::is_symint_node(ih)
+    repr += torch::is_symint(ih)
         ? std::string(py::str(ih))
         : std::to_string(THPUtils_unpackLong(PyTuple_GET_ITEM(self, i)));
   }

@@ -18,7 +18,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
-from typing import List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
 from setuptools.command.build_ext import build_ext
@@ -38,33 +38,44 @@ _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 
 
-BUILD_SPLIT_CUDA = os.getenv('BUILD_SPLIT_CUDA') or (os.path.exists(os.path.join(
-    TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cu{CLIB_EXT}')) and os.path.exists(os.path.join(TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cpp{CLIB_EXT}')))
-
 SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 
+VersionRange = Tuple[Tuple[int, ...], Tuple[int, ...]]
+VersionMap = Dict[str, VersionRange]
 # The following values were taken from the following GitHub gist that
 # summarizes the minimum valid major versions of g++/clang++ for each supported
 # CUDA version: https://gist.github.com/ax3l/9489132
-CUDA_GCC_VERSIONS = {
-    '10.2': (MINIMUM_GCC_VERSION, (8, 0, 0)),
-    '11.1': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.2': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.3': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
+# Or from include/crt/host_config.h in the CUDA SDK
+# The second value is the exclusive(!) upper bound, i.e. min <= version < max
+CUDA_GCC_VERSIONS: VersionMap = {
+    '10.2': (MINIMUM_GCC_VERSION, (9, 0)),
+    '11.0': (MINIMUM_GCC_VERSION, (10, 0)),
+    '11.1': (MINIMUM_GCC_VERSION, (11, 0)),
+    '11.2': (MINIMUM_GCC_VERSION, (11, 0)),
+    '11.3': (MINIMUM_GCC_VERSION, (11, 0)),
+    '11.4': ((6, 0, 0), (12, 0)),
+    '11.5': ((6, 0, 0), (12, 0)),
+    '11.6': ((6, 0, 0), (12, 0)),
+    '11.7': ((6, 0, 0), (12, 0)),
 }
 
-CUDA_CLANG_VERSIONS = {
-    '10.2': ((3, 3, 0), (8, 0, 0)),
-    '11.1': ((6, 0, 0), (10, 0, 0)),
-    '11.2': ((6, 0, 0), (10, 0, 0)),
-    '11.3': ((6, 0, 0), (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
+MINIMUM_CLANG_VERSION = (3, 3, 0)
+CUDA_CLANG_VERSIONS: VersionMap = {
+    '10.2': (MINIMUM_CLANG_VERSION, (9, 0)),
+    '11.1': (MINIMUM_CLANG_VERSION, (11, 0)),
+    '11.2': (MINIMUM_CLANG_VERSION, (12, 0)),
+    '11.3': (MINIMUM_CLANG_VERSION, (12, 0)),
+    '11.4': (MINIMUM_CLANG_VERSION, (13, 0)),
+    '11.5': (MINIMUM_CLANG_VERSION, (13, 0)),
+    '11.6': (MINIMUM_CLANG_VERSION, (14, 0)),
+    '11.7': (MINIMUM_CLANG_VERSION, (14, 0)),
 }
 
-
+__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
+           "CppExtension", "CUDAExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
+           "verify_ninja_availability"]
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
 def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
@@ -286,7 +297,9 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     if any(name in compiler_path for name in _accepted_compilers_for_platform()):
         return True
     # If compiler wrapper is used try to infer the actual compiler by invoking it with -v flag
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
+    env = os.environ.copy()
+    env['LC_ALL'] = 'C'  # Don't localize output
+    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
     if IS_LINUX:
         # Check for 'gcc' or 'g++' for sccache warpper
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
@@ -381,17 +394,19 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             _is_binary_build()):
         return
 
-    cuda_compiler_bounds = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
+    cuda_compiler_bounds: VersionMap = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
 
     if cuda_str_version not in cuda_compiler_bounds:
         warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
     else:
-        min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
+        min_compiler_version, max_excl_compiler_version = cuda_compiler_bounds[cuda_str_version]
+        # Special case for 11.4.0, which has lower compiler bounds than 11.4.1
+        if "V11.4.48" in cuda_version_str and cuda_compiler_bounds == CUDA_GCC_VERSIONS:
+            max_excl_compiler_version = (11, 0)
         min_compiler_version_str = '.'.join(map(str, min_compiler_version))
-        max_compiler_version_str = '.'.join(map(str, max_compiler_version))
+        max_excl_compiler_version_str = '.'.join(map(str, max_excl_compiler_version))
 
-        version_bound_str = f'>={min_compiler_version_str}'
-        version_bound_str = f'{version_bound_str}, <={max_compiler_version_str}'
+        version_bound_str = f'>={min_compiler_version_str}, <{max_excl_compiler_version_str}'
 
         if compiler_version < TorchVersion(min_compiler_version_str):
             raise RuntimeError(
@@ -399,10 +414,10 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
                 f'than the minimum required version by CUDA {cuda_str_version} ({min_compiler_version_str}). '
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
-        if compiler_version > TorchVersion(max_compiler_version_str):
+        if compiler_version >= TorchVersion(max_excl_compiler_version_str):
             raise RuntimeError(
                 f'The current installed version of {compiler_name} ({compiler_version}) is greater '
-                f'than the maximum required version by CUDA {cuda_str_version} ({max_compiler_version_str}). '
+                f'than the maximum required version by CUDA {cuda_str_version}. '
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
 
@@ -416,7 +431,7 @@ class BuildExtension(build_ext, object):
     A custom :mod:`setuptools` build extension .
 
     This :class:`setuptools.build_ext` subclass takes care of passing the
-    minimum required compiler flags (e.g. ``-std=c++14``) as well as mixed
+    minimum required compiler flags (e.g. ``-std=c++17``) as well as mixed
     C++/CUDA compilation (and support for CUDA files in general).
 
     When using :class:`BuildExtension`, it is allowed to supply a dictionary
@@ -520,12 +535,12 @@ class BuildExtension(build_ext, object):
         else:
             original_compile = self.compiler._compile
 
-        def append_std14_if_no_std_present(cflags) -> None:
+        def append_std17_if_no_std_present(cflags) -> None:
             # NVCC does not allow multiple -std to be passed, so we avoid
             # overriding the option if the user explicitly passed it.
             cpp_format_prefix = '/{}:' if self.compiler.compiler_type == 'msvc' else '-{}='
             cpp_flag_prefix = cpp_format_prefix.format('std')
-            cpp_flag = cpp_flag_prefix + 'c++14'
+            cpp_flag = cpp_flag_prefix + 'c++17'
             if not any(flag.startswith(cpp_flag_prefix) for flag in cflags):
                 cflags.append(cpp_flag)
 
@@ -570,7 +585,7 @@ class BuildExtension(build_ext, object):
                     cflags = cflags['cxx']
                 if IS_HIP_EXTENSION:
                     cflags = COMMON_HIP_FLAGS + cflags
-                append_std14_if_no_std_present(cflags)
+                append_std17_if_no_std_present(cflags)
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
@@ -619,7 +634,7 @@ class BuildExtension(build_ext, object):
                 post_cflags = list(extra_postargs)
             if IS_HIP_EXTENSION:
                 post_cflags = COMMON_HIP_FLAGS + post_cflags
-            append_std14_if_no_std_present(post_cflags)
+            append_std17_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
             cuda_cflags = None
@@ -634,7 +649,7 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS + cuda_post_cflags
                 else:
                     cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
-                append_std14_if_no_std_present(cuda_post_cflags)
+                append_std17_if_no_std_present(cuda_post_cflags)
                 cuda_cflags = [shlex.quote(f) for f in cuda_cflags]
                 cuda_post_cflags = [shlex.quote(f) for f in cuda_post_cflags]
 
@@ -770,7 +785,7 @@ class BuildExtension(build_ext, object):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
-            append_std14_if_no_std_present(post_cflags)
+            append_std17_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
             cuda_cflags = None
@@ -896,19 +911,20 @@ def CppExtension(name, sources, *args, **kwargs):
     constructor.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
         >>> setup(
-                name='extension',
-                ext_modules=[
-                    CppExtension(
-                        name='extension',
-                        sources=['extension.cpp'],
-                        extra_compile_args=['-g']),
-                ],
-                cmdclass={
-                    'build_ext': BuildExtension
-                })
+        ...     name='extension',
+        ...     ext_modules=[
+        ...         CppExtension(
+        ...             name='extension',
+        ...             sources=['extension.cpp'],
+        ...             extra_compile_args=['-g']),
+        ...     ],
+        ...     cmdclass={
+        ...         'build_ext': BuildExtension
+        ...     })
     '''
     include_dirs = kwargs.get('include_dirs', [])
     include_dirs += include_paths()
@@ -942,20 +958,21 @@ def CUDAExtension(name, sources, *args, **kwargs):
     constructor.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         >>> setup(
-                name='cuda_extension',
-                ext_modules=[
-                    CUDAExtension(
-                            name='cuda_extension',
-                            sources=['extension.cpp', 'extension_kernel.cu'],
-                            extra_compile_args={'cxx': ['-g'],
-                                                'nvcc': ['-O2']})
-                ],
-                cmdclass={
-                    'build_ext': BuildExtension
-                })
+        ...     name='cuda_extension',
+        ...     ext_modules=[
+        ...         CUDAExtension(
+        ...                 name='cuda_extension',
+        ...                 sources=['extension.cpp', 'extension_kernel.cu'],
+        ...                 extra_compile_args={'cxx': ['-g'],
+        ...                                     'nvcc': ['-O2']})
+        ...     ],
+        ...     cmdclass={
+        ...         'build_ext': BuildExtension
+        ...     })
 
     Compute capabilities:
 
@@ -989,10 +1006,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
     To workaround the issue, move python binding logic to pure C++ file.
 
     Example use:
+        >>> # xdoctest: +SKIP
         >>> #include <ATen/ATen.h>
         >>> at::Tensor SigmoidAlphaBlendForwardCuda(....)
 
     Instead of:
+        >>> # xdoctest: +SKIP
         >>> #include <torch/extension.h>
         >>> torch::Tensor SigmoidAlphaBlendForwardCuda(...)
 
@@ -1017,13 +1036,14 @@ def CUDAExtension(name, sources, *args, **kwargs):
     Note: Ninja is required to build a CUDA Extension with RDC linking.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> CUDAExtension(
-                    name='cuda_extension',
-                    sources=['extension.cpp', 'extension_kernel.cu'],
-                    dlink=True,
-                    dlink_libraries=["dlink_lib"],
-                    extra_compile_args={'cxx': ['-g'],
-                                        'nvcc': ['-O2', '-rdc=true']})
+        ...        name='cuda_extension',
+        ...        sources=['extension.cpp', 'extension_kernel.cu'],
+        ...        dlink=True,
+        ...        dlink_libraries=["dlink_lib"],
+        ...        extra_compile_args={'cxx': ['-g'],
+        ...                            'nvcc': ['-O2', '-rdc=true']})
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs += library_paths(cuda=True)
@@ -1042,11 +1062,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     else:
         libraries.append('cudart')
         libraries.append('c10_cuda')
-        if BUILD_SPLIT_CUDA:
-            libraries.append('torch_cuda_cu')
-            libraries.append('torch_cuda_cpp')
-        else:
-            libraries.append('torch_cuda')
+        libraries.append('torch_cuda')
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
@@ -1155,7 +1171,7 @@ def library_paths(cuda: bool = False) -> List[str]:
             paths.append(os.path.join(HIP_HOME, 'lib'))
     elif cuda:
         if IS_WINDOWS:
-            lib_dir = 'lib/x64'
+            lib_dir = os.path.join('lib', 'x64')
         else:
             lib_dir = 'lib64'
             if (not os.path.exists(_join_cuda_home(lib_dir)) and
@@ -1255,12 +1271,13 @@ def load(name,
             added to the PATH environment variable as a side effect.)
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torch.utils.cpp_extension import load
         >>> module = load(
-                name='extension',
-                sources=['extension.cpp', 'extension_kernel.cu'],
-                extra_cflags=['-O2'],
-                verbose=True)
+        ...     name='extension',
+        ...     sources=['extension.cpp', 'extension_kernel.cu'],
+        ...     extra_cflags=['-O2'],
+        ...     verbose=True)
     '''
     return _jit_compile(
         name,
@@ -1346,14 +1363,14 @@ def load_inline(name,
 
     Example:
         >>> from torch.utils.cpp_extension import load_inline
-        >>> source = \'\'\'
+        >>> source = """
         at::Tensor sin_add(at::Tensor x, at::Tensor y) {
           return x.sin() + y.sin();
         }
-        \'\'\'
+        """
         >>> module = load_inline(name='inline_extension',
-                                 cpp_sources=[source],
-                                 functions=['sin_add'])
+        ...                      cpp_sources=[source],
+        ...                      functions=['sin_add'])
 
     .. note::
         By default, the Ninja backend uses #CPUS + 2 workers to build the
@@ -1638,15 +1655,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('c10_cuda.lib')
         extra_ldflags.append('torch_cpu.lib')
-        if BUILD_SPLIT_CUDA and with_cuda:
-            extra_ldflags.append('torch_cuda_cu.lib')
-            # See [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu] in native_functions.yaml
-            extra_ldflags.append('-INCLUDE:?_torch_cuda_cu_linker_symbol_op_cuda@native@at@@YA?AVTensor@2@AEBV32@@Z')
-            extra_ldflags.append('torch_cuda_cpp.lib')
-            # /INCLUDE is used to ensure torch_cuda_cpp is linked against in a project that relies on it.
-            # Related issue: https://github.com/pytorch/pytorch/issues/31611
-            extra_ldflags.append('-INCLUDE:?warp_size@cuda@at@@YAHXZ')
-        elif with_cuda:
+        if with_cuda:
             extra_ldflags.append('torch_cuda.lib')
             # /INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
             # Related issue: https://github.com/pytorch/pytorch/issues/31611
@@ -1663,9 +1672,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('-lc10_hip' if IS_HIP_EXTENSION else '-lc10_cuda')
         extra_ldflags.append('-ltorch_cpu')
-        if BUILD_SPLIT_CUDA and with_cuda:
-            extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda_cu -ltorch_cuda_cpp')
-        elif with_cuda:
+        if with_cuda:
             extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda')
         extra_ldflags.append('-ltorch')
         if not is_standalone:
@@ -1681,10 +1688,10 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if verbose:
             print('Detected CUDA files, patching ldflags', file=sys.stderr)
         if IS_WINDOWS:
-            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib/x64")}')
+            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/x64'))
+                extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, "lib", "x64")}')
         elif not IS_HIP_EXTENSION:
             extra_ldflags.append(f'-L{_join_cuda_home("lib64")}')
             extra_ldflags.append('-lcudart')
@@ -1727,10 +1734,12 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
         ('Ampere', '8.0;8.6+PTX'),
+        ('Ada', '8.9+PTX'),
+        ('Hopper', '9.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0', '8.6']
+                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.9', '9.0']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -1985,7 +1994,7 @@ def _write_ninja_file_to_build_library(path,
         cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
         cflags = _nt_quote_args(cflags)
     else:
-        cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
+        cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
         cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
@@ -2004,7 +2013,7 @@ def _write_ninja_file_to_build_library(path,
             cuda_flags += ['--compiler-options', "'-fPIC'"]
             cuda_flags += extra_cuda_cflags
             if not any(flag.startswith('-std=') for flag in cuda_flags):
-                cuda_flags.append('-std=c++14')
+                cuda_flags.append('-std=c++17')
             if os.getenv("CC") is not None:
                 cuda_flags = ['-ccbin', os.getenv("CC")] + cuda_flags
     else:

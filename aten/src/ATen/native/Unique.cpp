@@ -1,8 +1,27 @@
 // Returns unique elements of input tensor.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
+#include <c10/util/Load.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_unique2_native.h>
+#include <ATen/ops/_unique_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/equal.h>
+#include <ATen/ops/narrow.h>
+#include <ATen/ops/stack.h>
+#include <ATen/ops/unbind.h>
+#include <ATen/ops/unique_consecutive_native.h>
+#include <ATen/ops/unique_dim_consecutive_native.h>
+#include <ATen/ops/unique_dim_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <tuple>
 #include <unordered_map>
@@ -283,7 +302,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 
   // reshape back
   auto output = at::stack(input_unbind, 0);
-  auto new_sizes = std::vector<int64_t>(orig_sizes);
+  auto new_sizes = std::vector<int64_t>(std::move(orig_sizes));
   new_sizes[0] = -1;
   output = output.view(new_sizes);
   output = output.transpose(0, dim);

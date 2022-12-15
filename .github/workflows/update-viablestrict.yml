@@ -7,23 +7,28 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   do_update_viablestrict:
     runs-on: ubuntu-20.04
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
-
       - name: Checkout repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
           token: ${{ secrets.MERGEBOT_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/.circleci/docker/requirements-ci.txt
+            **/.github/requirements-gha-cache.txt
 
       - name: Install Python Packages
         run: |
@@ -35,8 +40,8 @@ jobs:
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
-          output=$(python3 .github/scripts/print_latest_commits.py)
-          echo "::set-output name=latest_viable_sha::$output"
+          output=$(python3 .github/scripts/fetch_latest_green_commit.py)
+          echo "latest_viable_sha=$output" >> "${GITHUB_OUTPUT}"
         id: get-latest-commit
 
       - name: Push SHA to viable/strict branch
@@ -47,4 +52,6 @@ jobs:
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
           git config --global user.name "PyTorch MergeBot"
           echo "Set the latest sha variable to be ${{ steps.get-latest-commit.outputs.latest_viable_sha }}"
-          git push origin "${{ steps.get-latest-commit.outputs.latest_viable_sha }}":viable/strict
+          # Pushing an older green commit here will fail because it's non-fast-forward, which is ok
+          # to ignore because we already have the later green commit in visable/strict
+          git push origin "${{ steps.get-latest-commit.outputs.latest_viable_sha }}":viable/strict || true

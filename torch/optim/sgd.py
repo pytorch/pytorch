@@ -55,6 +55,7 @@ class SGD(Optimizer):
             is used (default: None)
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> optimizer.zero_grad()
         >>> loss_fn(model(input), target).backward()
@@ -90,8 +91,8 @@ class SGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False, *, maximize=False, foreach: Optional[bool] = None,
-                 differentiable=False):
+                 weight_decay=0, nesterov=False, *, maximize: bool = False, foreach: Optional[bool] = None,
+                 differentiable: bool = False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -113,13 +114,14 @@ class SGD(Optimizer):
             group.setdefault('nesterov', False)
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
+            group.setdefault('differentiable', False)
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None

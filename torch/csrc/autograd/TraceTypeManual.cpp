@@ -54,7 +54,9 @@ const Tensor& resize_(
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   if (torch::jit::tracer::isTracing()) {
-    jit::tracer::ArgumentStash::popIntArrayRef("size");
+    if (jit::tracer::ArgumentStash::hasIntArrayRef("size")) {
+      jit::tracer::ArgumentStash::popIntArrayRef("size");
+    }
     jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
   }

@@ -93,126 +93,6 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_7-cuda10_2-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-cuda10_2
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  manywheel-py3_7-cuda10_2-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda10_2-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-cuda10_2
-      build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_7-cuda10_2-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda10_2-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-cuda10_2
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_7-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-cuda11_3
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  manywheel-py3_7-cuda11_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda11_3-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-cuda11_3
-      build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_7-cuda11_3-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda11_3-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-cuda11_3
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_7-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -267,6 +147,67 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda11_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_7-cuda11_7-with-pypi-cudnn-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.7"
+      build_name: manywheel-py3_7-cuda11_7-with-pypi-cudnn
+      build_environment: linux-binary-manywheel
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  manywheel-py3_7-cuda11_7-with-pypi-cudnn-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_7-cuda11_7-with-pypi-cudnn-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.7"
+      build_name: manywheel-py3_7-cuda11_7-with-pypi-cudnn
+      build_environment: linux-binary-manywheel
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_7-cuda11_7-with-pypi-cudnn-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_7-cuda11_7-with-pypi-cudnn-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.7"
+      build_name: manywheel-py3_7-cuda11_7-with-pypi-cudnn
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
@@ -333,7 +274,7 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_7-rocm5_0-build:
+  manywheel-py3_7-rocm5_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -342,19 +283,19 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-rocm5_0
+      build_name: manywheel-py3_7-rocm5_2
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  manywheel-py3_7-rocm5_0-test:  # Testing
+  manywheel-py3_7-rocm5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-rocm5_0-build
+    needs: manywheel-py3_7-rocm5_2-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -363,11 +304,11 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Clean workspace
@@ -396,7 +337,12 @@ jobs:
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
+              if [[ $ngpu -eq 0 ]]; then
+                echo "Error: Failed to detect any GPUs on the runner"
+              else
+                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
+              fi
+              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -407,10 +353,10 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_7-rocm5_0
+          name: manywheel-py3_7-rocm5_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -439,9 +385,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.0
+          docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -452,28 +398,28 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-rocm5_0-upload:  # Uploading
+  manywheel-py3_7-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-rocm5_0-test
+    needs: manywheel-py3_7-rocm5_2-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-rocm5_0
+      build_name: manywheel-py3_7-rocm5_2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_7-rocm5_1_1-build:
+  manywheel-py3_7-rocm5_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -482,19 +428,19 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-rocm5_1_1
+      build_name: manywheel-py3_7-rocm5_3
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  manywheel-py3_7-rocm5_1_1-test:  # Testing
+  manywheel-py3_7-rocm5_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-rocm5_1_1-build
+    needs: manywheel-py3_7-rocm5_3-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -503,11 +449,11 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Clean workspace
@@ -536,7 +482,12 @@ jobs:
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
+              if [[ $ngpu -eq 0 ]]; then
+                echo "Error: Failed to detect any GPUs on the runner"
+              else
+                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
+              fi
+              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -547,10 +498,10 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_7-rocm5_1_1
+          name: manywheel-py3_7-rocm5_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -579,9 +530,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.1.1
+          docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -592,21 +543,21 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-rocm5_1_1-upload:  # Uploading
+  manywheel-py3_7-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-rocm5_1_1-test
+    needs: manywheel-py3_7-rocm5_3-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-rocm5_1_1
+      build_name: manywheel-py3_7-rocm5_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
@@ -664,126 +615,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_8-cuda10_2-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-cuda10_2
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  manywheel-py3_8-cuda10_2-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-cuda10_2-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-cuda10_2
-      build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_8-cuda10_2-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-cuda10_2-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-cuda10_2
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_8-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-cuda11_3
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  manywheel-py3_8-cuda11_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-cuda11_3-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-cuda11_3
-      build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_8-cuda11_3-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-cuda11_3-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-cuda11_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
@@ -850,6 +681,67 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_8-cuda11_7-with-pypi-cudnn-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.8"
+      build_name: manywheel-py3_8-cuda11_7-with-pypi-cudnn
+      build_environment: linux-binary-manywheel
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  manywheel-py3_8-cuda11_7-with-pypi-cudnn-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_8-cuda11_7-with-pypi-cudnn-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.8"
+      build_name: manywheel-py3_8-cuda11_7-with-pypi-cudnn
+      build_environment: linux-binary-manywheel
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_8-cuda11_7-with-pypi-cudnn-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_8-cuda11_7-with-pypi-cudnn-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.8"
+      build_name: manywheel-py3_8-cuda11_7-with-pypi-cudnn
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_8-cuda11_7-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -910,7 +802,7 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_8-rocm5_0-build:
+  manywheel-py3_8-rocm5_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -919,19 +811,19 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-rocm5_0
+      build_name: manywheel-py3_8-rocm5_2
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  manywheel-py3_8-rocm5_0-test:  # Testing
+  manywheel-py3_8-rocm5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-rocm5_0-build
+    needs: manywheel-py3_8-rocm5_2-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -940,11 +832,11 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Clean workspace
@@ -973,7 +865,12 @@ jobs:
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
+              if [[ $ngpu -eq 0 ]]; then
+                echo "Error: Failed to detect any GPUs on the runner"
+              else
+                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
+              fi
+              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -984,10 +881,10 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_8-rocm5_0
+          name: manywheel-py3_8-rocm5_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1016,9 +913,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.0
+          docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -1029,28 +926,28 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-rocm5_0-upload:  # Uploading
+  manywheel-py3_8-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-rocm5_0-test
+    needs: manywheel-py3_8-rocm5_2-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-rocm5_0
+      build_name: manywheel-py3_8-rocm5_2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_8-rocm5_1_1-build:
+  manywheel-py3_8-rocm5_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1059,19 +956,19 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-rocm5_1_1
+      build_name: manywheel-py3_8-rocm5_3
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  manywheel-py3_8-rocm5_1_1-test:  # Testing
+  manywheel-py3_8-rocm5_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-rocm5_1_1-build
+    needs: manywheel-py3_8-rocm5_3-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -1080,11 +977,11 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Clean workspace
@@ -1113,7 +1010,12 @@ jobs:
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
+              if [[ $ngpu -eq 0 ]]; then
+                echo "Error: Failed to detect any GPUs on the runner"
+              else
+                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
+              fi
+              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -1124,10 +1026,10 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_8-rocm5_1_1
+          name: manywheel-py3_8-rocm5_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1156,9 +1058,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.1.1
+          docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -1169,21 +1071,21 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-rocm5_1_1-upload:  # Uploading
+  manywheel-py3_8-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_8-rocm5_1_1-test
+    needs: manywheel-py3_8-rocm5_3-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.8"
-      build_name: manywheel-py3_8-rocm5_1_1
+      build_name: manywheel-py3_8-rocm5_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
@@ -1241,126 +1143,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_9-cuda10_2-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda10_2
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  manywheel-py3_9-cuda10_2-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda10_2-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda10_2
-      build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-cuda10_2-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda10_2-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda10_2
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_9-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda11_3
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  manywheel-py3_9-cuda11_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda11_3-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda11_3
-      build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-cuda11_3-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda11_3-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda11_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
@@ -1427,6 +1209,67 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_9-cuda11_7-with-pypi-cudnn-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.9"
+      build_name: manywheel-py3_9-cuda11_7-with-pypi-cudnn
+      build_environment: linux-binary-manywheel
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  manywheel-py3_9-cuda11_7-with-pypi-cudnn-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_9-cuda11_7-with-pypi-cudnn-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.9"
+      build_name: manywheel-py3_9-cuda11_7-with-pypi-cudnn
+      build_environment: linux-binary-manywheel
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_9-cuda11_7-with-pypi-cudnn-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_9-cuda11_7-with-pypi-cudnn-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.9"
+      build_name: manywheel-py3_9-cuda11_7-with-pypi-cudnn
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_9-cuda11_7-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -1487,7 +1330,7 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_9-rocm5_0-build:
+  manywheel-py3_9-rocm5_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1496,19 +1339,19 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-rocm5_0
+      build_name: manywheel-py3_9-rocm5_2
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  manywheel-py3_9-rocm5_0-test:  # Testing
+  manywheel-py3_9-rocm5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-rocm5_0-build
+    needs: manywheel-py3_9-rocm5_2-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -1517,11 +1360,11 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Clean workspace
@@ -1550,7 +1393,12 @@ jobs:
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
+              if [[ $ngpu -eq 0 ]]; then
+                echo "Error: Failed to detect any GPUs on the runner"
+              else
+                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
+              fi
+              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -1561,10 +1409,10 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_9-rocm5_0
+          name: manywheel-py3_9-rocm5_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1593,9 +1441,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.0
+          docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -1606,28 +1454,28 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-rocm5_0-upload:  # Uploading
+  manywheel-py3_9-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-rocm5_0-test
+    needs: manywheel-py3_9-rocm5_2-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-rocm5_0
+      build_name: manywheel-py3_9-rocm5_2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_9-rocm5_1_1-build:
+  manywheel-py3_9-rocm5_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1636,19 +1484,19 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-rocm5_1_1
+      build_name: manywheel-py3_9-rocm5_3
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  manywheel-py3_9-rocm5_1_1-test:  # Testing
+  manywheel-py3_9-rocm5_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-rocm5_1_1-build
+    needs: manywheel-py3_9-rocm5_3-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -1657,11 +1505,11 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Clean workspace
@@ -1690,7 +1538,12 @@ jobs:
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
+              if [[ $ngpu -eq 0 ]]; then
+                echo "Error: Failed to detect any GPUs on the runner"
+              else
+                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
+              fi
+              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -1701,10 +1554,10 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_9-rocm5_1_1
+          name: manywheel-py3_9-rocm5_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1733,9 +1586,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.1.1
+          docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -1746,21 +1599,21 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-rocm5_1_1-upload:  # Uploading
+  manywheel-py3_9-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-rocm5_1_1-test
+    needs: manywheel-py3_9-rocm5_3-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-rocm5_1_1
+      build_name: manywheel-py3_9-rocm5_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
@@ -1818,126 +1671,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_10-cuda10_2-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda10_2
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  manywheel-py3_10-cuda10_2-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda10_2-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda10_2
-      build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda10_2-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda10_2-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda10_2
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_10-cuda11_3-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda11_3
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  manywheel-py3_10-cuda11_3-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda11_3-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda11_3
-      build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda11_3-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda11_3-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu113
-      GPU_ARCH_VERSION: 11.3
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda11_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
@@ -2004,6 +1737,67 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_10-cuda11_7-with-pypi-cudnn-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-cuda11_7-with-pypi-cudnn
+      build_environment: linux-binary-manywheel
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  manywheel-py3_10-cuda11_7-with-pypi-cudnn-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_10-cuda11_7-with-pypi-cudnn-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-cuda11_7-with-pypi-cudnn
+      build_environment: linux-binary-manywheel
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_10-cuda11_7-with-pypi-cudnn-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_10-cuda11_7-with-pypi-cudnn-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-cuda11_7-with-pypi-cudnn
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
   manywheel-py3_10-cuda11_7-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -2064,7 +1858,7 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_10-rocm5_0-build:
+  manywheel-py3_10-rocm5_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2073,19 +1867,19 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-rocm5_0
+      build_name: manywheel-py3_10-rocm5_2
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  manywheel-py3_10-rocm5_0-test:  # Testing
+  manywheel-py3_10-rocm5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-rocm5_0-build
+    needs: manywheel-py3_10-rocm5_2-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -2094,11 +1888,11 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Clean workspace
@@ -2127,7 +1921,12 @@ jobs:
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
+              if [[ $ngpu -eq 0 ]]; then
+                echo "Error: Failed to detect any GPUs on the runner"
+              else
+                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
+              fi
+              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -2138,10 +1937,10 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_10-rocm5_0
+          name: manywheel-py3_10-rocm5_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -2170,9 +1969,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.0
+          docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -2183,28 +1982,28 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-rocm5_0-upload:  # Uploading
+  manywheel-py3_10-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-rocm5_0-test
+    needs: manywheel-py3_10-rocm5_2-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.0
-      GPU_ARCH_VERSION: 5.0
+      DESIRED_CUDA: rocm5.2
+      GPU_ARCH_VERSION: 5.2
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-rocm5_0
+      build_name: manywheel-py3_10-rocm5_2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  manywheel-py3_10-rocm5_1_1-build:
+  manywheel-py3_10-rocm5_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2213,19 +2012,19 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-rocm5_1_1
+      build_name: manywheel-py3_10-rocm5_3
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  manywheel-py3_10-rocm5_1_1-test:  # Testing
+  manywheel-py3_10-rocm5_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-rocm5_1_1-build
+    needs: manywheel-py3_10-rocm5_3-build
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -2234,11 +2033,11 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Clean workspace
@@ -2267,7 +2066,12 @@ jobs:
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
+              if [[ $ngpu -eq 0 ]]; then
+                echo "Error: Failed to detect any GPUs on the runner"
+              else
+                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
+              fi
+              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -2278,10 +2082,10 @@ jobs:
         run: |
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
+      - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_10-rocm5_1_1
+          name: manywheel-py3_10-rocm5_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -2310,9 +2114,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.1.1
+          docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -2323,21 +2127,259 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-rocm5_1_1-upload:  # Uploading
+  manywheel-py3_10-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-rocm5_1_1-test
+    needs: manywheel-py3_10-rocm5_3-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm5.1.1
-      GPU_ARCH_VERSION: 5.1.1
+      DESIRED_CUDA: rocm5.3
+      GPU_ARCH_VERSION: 5.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-rocm5_1_1
+      build_name: manywheel-py3_10-rocm5_3
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-cpu-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cpu
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  manywheel-py3_11-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_11-cpu-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cpu
+      build_environment: linux-binary-manywheel
+      runs_on: linux.4xlarge
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_11-cpu-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_11-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-cuda11_6-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda11_6
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  manywheel-py3_11-cuda11_6-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_11-cuda11_6-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda11_6
+      build_environment: linux-binary-manywheel
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_11-cuda11_6-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_11-cuda11_6-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda11_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-cuda11_7-with-pypi-cudnn-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda11_7-with-pypi-cudnn
+      build_environment: linux-binary-manywheel
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  manywheel-py3_11-cuda11_7-with-pypi-cudnn-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_11-cuda11_7-with-pypi-cudnn-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda11_7-with-pypi-cudnn
+      build_environment: linux-binary-manywheel
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_11-cuda11_7-with-pypi-cudnn-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_11-cuda11_7-with-pypi-cudnn-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda11_7-with-pypi-cudnn
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-cuda11_7-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda11_7
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  manywheel-py3_11-cuda11_7-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_11-cuda11_7-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda11_7
+      build_environment: linux-binary-manywheel
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_11-cuda11_7-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: manywheel-py3_11-cuda11_7-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu117
+      GPU_ARCH_VERSION: 11.7
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.7
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda11_7
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}

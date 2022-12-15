@@ -141,8 +141,7 @@ should write your code this way:
 
 Example::
 
-    model = [Parameter(torch.randn(2, 2, requires_grad=True))]
-    optimizer = SGD(model, 0.1)
+    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     scheduler = ExponentialLR(optimizer, gamma=0.9)
 
     for epoch in range(20):
@@ -160,8 +159,7 @@ other on the learning rate obtained by the one preceding it.
 
 Example::
 
-    model = [Parameter(torch.randn(2, 2, requires_grad=True))]
-    optimizer = SGD(model, 0.1)
+    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     scheduler1 = ExponentialLR(optimizer, gamma=0.9)
     scheduler2 = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
 
@@ -204,6 +202,7 @@ algorithms.
     lr_scheduler.ConstantLR
     lr_scheduler.LinearLR
     lr_scheduler.ExponentialLR
+    lr_scheduler.PolynomialLR
     lr_scheduler.CosineAnnealingLR
     lr_scheduler.ChainedScheduler
     lr_scheduler.SequentialLR

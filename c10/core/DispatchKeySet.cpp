@@ -46,8 +46,19 @@ bool isBackendDispatchKey(DispatchKey t) {
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and
 // autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
 // maps to [math_dispatch_keyset x full_backend_mask]
-constexpr DispatchKeySet math_dispatch_keyset =
-    backend_dispatch_keyset | autograd_dispatch_keyset;
+constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
+    autograd_dispatch_keyset |
+    // See Note [NestedTensor Not Included in Backend Keys]
+    // The caveat to that note is that nested_tensor is a special case
+    // where we would like to support composite implicit kernels but not
+    // explicit kernels therefore we manually add the key to the
+    // math_dispatch_keyset
+    DispatchKeySet{DispatchKey::NestedTensor};
+
+constexpr DispatchKeySet nested_dispatch_keyset =
+    DispatchKeySet(
+        {DispatchKey::AutogradNestedTensor, DispatchKey::NestedTensor}) |
+    DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
@@ -61,6 +72,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
           DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
     case DispatchKey::CompositeImplicitAutograd:
       return math_dispatch_keyset;
+    case DispatchKey::CompositeImplicitAutogradNestedTensor:
+      return nested_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutograd:
       return backend_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
@@ -78,6 +91,9 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
     case DispatchKey::CompositeImplicitAutograd:
       // See Note [NestedTensor Not Included in Backend Keys]
       return math_dispatch_keyset.has(k);
+    case DispatchKey::CompositeImplicitAutogradNestedTensor:
+      // See Note [NestedTensor Not Included in Backend Keys]
+      return nested_dispatch_keyset.has(k);
     case DispatchKey::CompositeExplicitAutograd:
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor && backend_dispatch_keyset.has(k);
@@ -85,6 +101,8 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor &&
           non_functional_backend_dispatch_keyset.has(k);
+    case DispatchKey::FuncTorchBatchedDecomposition:
+      return functorch_batched_ks.has(k);
     default:
       return t == k;
   }

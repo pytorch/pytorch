@@ -570,6 +570,198 @@ jobs:
           paths:
             - miniconda3
 
+  mac_build:
+    parameters:
+      build-environment:
+        type: string
+        description: Top-level label for what's being built/tested.
+      xcode-version:
+        type: string
+        default: "13.3.1"
+        description: What xcode version to build with.
+      build-generates-artifacts:
+        type: boolean
+        default: true
+        description: if the build generates build artifacts
+      python-version:
+        type: string
+        default: "3.8"
+    macos:
+      xcode: << parameters.xcode-version >>
+    resource_class: medium
+    environment:
+      BUILD_ENVIRONMENT: << parameters.build-environment >>
+      AWS_REGION: us-east-1
+    steps:
+
+      - checkout
+      - run_brew_for_macos_build
+
+      - run:
+          name: Install sccache
+          command: |
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            echo "export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${BASH_ENV}"
+            echo "export SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${BASH_ENV}"
+
+            set +x
+            echo "export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}" >> "${BASH_ENV}"
+            echo "export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}" >> "${BASH_ENV}"
+            set -x
+
+      - run:
+          name: Get workflow job id
+          command: |
+            echo "export OUR_GITHUB_JOB_ID=${CIRCLE_WORKFLOW_JOB_ID}" >> "${BASH_ENV}"
+
+      - run:
+          name: Build
+          command: |
+            set -x
+
+            git submodule sync
+            git submodule update --init --recursive --depth 1 --jobs 0
+
+            export PATH="/usr/local/bin:$PATH"
+            export WORKSPACE_DIR="${HOME}/workspace"
+            mkdir -p "${WORKSPACE_DIR}"
+            MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-py38_4.12.0-MacOSX-x86_64.sh"
+            if [  << parameters.python-version >> == 3.9.12 ]; then
+              MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-py39_4.12.0-MacOSX-x86_64.sh"
+            fi
+
+            # If a local installation of conda doesn't exist, we download and install conda
+            if [ ! -d "${WORKSPACE_DIR}/miniconda3" ]; then
+              mkdir -p "${WORKSPACE_DIR}"
+              curl --retry 3 ${MINICONDA_URL} -o "${WORKSPACE_DIR}"/miniconda3.sh
+              bash "${WORKSPACE_DIR}"/miniconda3.sh -b -p "${WORKSPACE_DIR}"/miniconda3
+            fi
+            export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
+            # shellcheck disable=SC1091
+            source "${WORKSPACE_DIR}"/miniconda3/bin/activate
+
+            brew link --force libomp
+
+            echo "export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${BASH_ENV}"
+            .jenkins/pytorch/macos-build.sh
+
+      - when:
+          condition: << parameters.build-generates-artifacts >>
+          steps:
+            - run:
+                name: Archive artifacts into zip
+                command: |
+                  zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .pytorch-test-times.json
+                  cp artifacts.zip /Users/distiller/workspace
+
+      - persist_to_workspace:
+          root: /Users/distiller/workspace/
+          paths:
+            - miniconda3
+            - artifacts.zip
+
+      - store_artifacts:
+          path: /Users/distiller/project/artifacts.zip
+
+  mac_test:
+    parameters:
+      build-environment:
+        type: string
+      shard-number:
+        type: string
+      num-test-shards:
+        type: string
+      xcode-version:
+        type: string
+      test-config:
+        type: string
+        default: 'default'
+
+    macos:
+      xcode: << parameters.xcode-version >>
+    environment:
+      GIT_DEFAULT_BRANCH: 'master'
+      BUILD_ENVIRONMENT: << parameters.build-environment >>
+      TEST_CONFIG: << parameters.test-config >>
+      SHARD_NUMBER: << parameters.shard-number >>
+      NUM_TEST_SHARDS: << parameters.num-test-shards >>
+      PYTORCH_RETRY_TEST_CASES: 1
+      PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/workspace
+      - run_brew_for_macos_build
+      - run:
+          name: Test
+          no_output_timeout: "2h"
+          command: |
+            set -x
+
+            git submodule sync --recursive
+            git submodule update --init --recursive
+
+            mv ~/workspace/artifacts.zip .
+            unzip artifacts.zip
+
+            export IN_CI=1
+
+            COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+
+            export PATH="/usr/local/bin:$PATH"
+            export WORKSPACE_DIR="${HOME}/workspace"
+            mkdir -p "${WORKSPACE_DIR}"
+
+            export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
+            source "${WORKSPACE_DIR}"/miniconda3/bin/activate
+
+            # sanitize the input commit message and PR body here:
+
+            # trim all new lines from commit messages to avoid issues with batch environment
+            # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+            COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+
+            # then trim all special characters like single and double quotes to avoid unescaped inputs to
+            # wreak havoc internally
+            export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+
+            python3 -mpip install dist/*.whl
+            .jenkins/pytorch/macos-test.sh
+      - run:
+          name: Copy files for uploading test stats
+          command: |
+            # copy into a parent folder test-reports because we can't use CIRCLEI_BUILD_NUM in path when persisting to workspace
+            mkdir -p test-reports/test-reports_${CIRCLE_BUILD_NUM}/test/test-reports
+            cp -r test/test-reports test-reports/test-reports_${CIRCLE_BUILD_NUM}/test/test-reports
+      - store_test_results:
+          path: test/test-reports
+      - persist_to_workspace:
+          root: /Users/distiller/project/
+          paths:
+            - test-reports
+
+  upload_test_stats:
+    machine: # executor type
+      image: ubuntu-2004:202010-01 # # recommended linux image - includes Ubuntu 20.04, docker 19.03.13, docker-compose 1.27.4
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/workspace
+      - run:
+          name: upload
+          command: |
+            set -ex
+            if [ -z ${AWS_ACCESS_KEY_FOR_OSSCI_ARTIFACT_UPLOAD} ]; then
+              echo "No credentials found, cannot upload test stats (are you on a fork?)"
+              exit 0
+            fi
+            cp -r ~/workspace/test-reports/* ~/project
+            pip3 install requests==2.26 rockset==0.8.3 boto3==1.19.12 six==1.16.0
+            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
+            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
+            # i dont know how to get the run attempt number for reruns so default to 1
+            python3 -m tools.stats.upload_test_stats --workflow-run-id "${CIRCLE_WORKFLOW_JOB_ID}" --workflow-run-attempt 1 --head-branch << pipeline.git.branch >> --circleci
   pytorch_macos_10_13_py3_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
@@ -795,10 +987,43 @@ jobs:
     macos:
       xcode: "12.5.1"
     steps:
-      - checkout
+      - run:
+          name: checkout with retry
+          command: |
+            checkout() {
+              set -ex
+              # Workaround old docker images with incorrect $HOME
+              # check https://github.com/docker/docker/issues/2968 for details
+              if [ "${HOME}" = "/" ]
+                then
+                export HOME=$(getent passwd $(id -un) | cut -d: -f6)
+              fi
+
+              mkdir -p ~/.ssh
+
+              echo 'github.com ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAq2A7hRGmdnm9tUDbO9IDSwBK6TbQa+PXYPCPy6rbTrTtw7PHkccKrpp0yVhp5HdEIcKr6pLlVDBfOLX9QUsyCOV0wzfjIJNlGEYsdlLJizHhbn2mUjvSAHQqZETYP81eFzLQNnPHt4EVVUh7VfDESU84KezmD5QlWpXLmvU31/yMf+Se8xhHTvKSCZIFImWwoG6mbUoWf9nzpIoaSjB+weqqUUmpaaasXVal72J+UX2B+2RPW3RcT0eOzQgqlJL3RKrTJvdsjE3JEAvGq3lGHSZXy28G3skua2SmVi/w4yCE6gbODqnTWlg7+wC604ydGXA8VJiS5ap43JXiUFFAaQ==
+              ' >> ~/.ssh/known_hosts
+
+              # use git+ssh instead of https
+              git config --global url."ssh://git@github.com".insteadOf "https://github.com" || true
+              git config --global gc.auto 0 || true
+
+              echo 'Cloning git repository'
+              mkdir -p '/Users/distiller/project'
+              cd '/Users/distiller/project'
+              git clone "$CIRCLE_REPOSITORY_URL" .
+              echo 'Checking out branch'
+              git checkout --force -B "$CIRCLE_BRANCH" "$CIRCLE_SHA1"
+              git --no-pager log --no-color -n 1 --format='HEAD is now at %h %s'
+            }
+
+            retry () {
+              $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+            }
+            retry checkout
       - run_brew_for_ios_build
       - run:
-          name: Run Fastlane
+          name: Setup Fastlane
           no_output_timeout: "1h"
           command: |
             set -e
@@ -806,20 +1031,6 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp
             # install fastlane
             sudo gem install bundler && bundle install
-            # install certificates
-            echo ${IOS_CERT_KEY_2022} >> cert.txt
-            base64 --decode cert.txt -o Certificates.p12
-            rm cert.txt
-            bundle exec fastlane install_root_cert
-            bundle exec fastlane install_dev_cert
-            # install the provisioning profile
-            PROFILE=PyTorch_CI_2022.mobileprovision
-            PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
-            mkdir -pv "${PROVISIONING_PROFILES}"
-            cd "${PROVISIONING_PROFILES}"
-            echo ${IOS_SIGN_KEY_2022} >> cert.txt
-            base64 --decode cert.txt -o ${PROFILE}
-            rm cert.txt
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -877,18 +1088,12 @@ jobs:
           command: |
             set -e
             PROJ_ROOT=/Users/distiller/project
-            PROFILE=PyTorch_CI_2022
             # run the ruby build script
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
               exit 1
             fi
-            echo ${IOS_DEV_TEAM_ID}
-            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
-              ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
-            else
-              ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM}
-            fi
+            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM}
             if ! [ "$?" -eq "0" ]; then
               echo 'xcodebuild failed!'
               exit 1
@@ -911,12 +1116,13 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             mkdir -p ../models
             if [ ${USE_COREML_DELEGATE} == 1 ]; then
-              pip install coremltools==5.0b5
-              pip install six
+              pip install coremltools==5.0b5 protobuf==3.20.1 six==1.16.0
               python coreml_backend.py
             else
-              python trace_model.py
+              cd "${PROJ_ROOT}"
+              python test/mobile/model_test/gen_test_model.py ios-test
             fi
+            cd "${PROJ_ROOT}/ios/TestApp/benchmark"
             if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
               echo "Setting up the TestApp for LiteInterpreter"
               ruby setup.rb --lite 1
@@ -924,10 +1130,10 @@ jobs:
               echo "Setting up the TestApp for Full JIT"
               ruby setup.rb
             fi
-            cd ${PROJ_ROOT}/ios/TestApp
-            instruments -s -devices
-            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              if [ ${USE_COREML_DELEGATE} == 1 ]; then
+            cd "${PROJ_ROOT}/ios/TestApp"
+            # instruments -s -devices
+            if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
+              if [ "${USE_COREML_DELEGATE}" == 1 ]; then
                 fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
               else
                 fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
@@ -1241,4 +1447,27 @@ workflows:
             branches:
               only:
                 - postnightly
+      - pytorch_ios_build:
+          build_environment: ios-12-5-1-x86-64
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
+          ios_arch: x86_64
+          ios_platform: SIMULATOR
+          lite_interpreter: "1"
+          name: ios-12-5-1-x86-64
+      - pytorch_ios_build:
+          build_environment: ios-12-5-1-x86-64-coreml
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
+          ios_arch: x86_64
+          ios_platform: SIMULATOR
+          lite_interpreter: "1"
+          name: ios-12-5-1-x86-64-coreml
+          use_coreml: "1"
     when: << pipeline.parameters.run_build >>

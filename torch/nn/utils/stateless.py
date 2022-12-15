@@ -1,5 +1,6 @@
+import warnings
 import contextlib
-from typing import Any, Callable, Dict, Iterator, List, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -35,10 +36,22 @@ def _change_class(module, params_and_buffers) -> None:
     module.__class__ = param_cls
     module._orig_class = cls
 
-def _create_swap_params(params_and_buffers):
+
+def _check_tied_val_already_replaced(old_val, new_val, replaced_tensors_map):
+    if old_val not in replaced_tensors_map:
+        replaced_tensors_map[old_val] = new_val
+    elif replaced_tensors_map[old_val] is not new_val:
+        warnings.warn("functional_call was passed multiple values for tied weights. "
+                      "This behavior is deprecated and will be an error in future versions")
+
+
+def _create_swap_params(params_and_buffers, replaced_tensors_map):
     def _swap_parameters(module, tensor_name: str, full_path: str, tensor: Tensor) -> None:
         # Changes the module class to get a new __getattr__ dunder method
         # that looks for the reparametrized tensor
+        if hasattr(module, tensor_name):
+            old_val = getattr(module, tensor_name)
+            _check_tied_val_already_replaced(old_val, tensor, replaced_tensors_map)
         if hasattr(module, "_attr_to_path"):
             module._attr_to_path[tensor_name] = full_path
         else:
@@ -60,9 +73,10 @@ def _reparametrize_module(
     module: 'torch.nn.Module',
     parameters_and_buffers: Dict[str, Tensor],
 ) -> Iterator[None]:
+    orig_tensors_to_replacements: Dict[Tensor, Tensor] = {}
     for name, tensor in parameters_and_buffers.items():
         _apply_func_submodules(
-            _create_swap_params(parameters_and_buffers),
+            _create_swap_params(parameters_and_buffers, orig_tensors_to_replacements),
             module, name.split("."), name, (tensor,))
     try:
         yield
@@ -89,8 +103,8 @@ def _apply_func_submodules(
 def functional_call(
     module: 'torch.nn.Module',
     parameters_and_buffers: Dict[str, Tensor],
-    args: Tuple,
-    kwargs : Dict[str, Any] = None,
+    args: Union[Any, Tuple],
+    kwargs: Dict[str, Any] = None,
 ):
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.
@@ -107,6 +121,7 @@ def functional_call(
         Example::
 
             >>> a = {'foo': torch.zeros(())}
+            >>> # xdoctest: +SKIP
             >>> mod = Foo()  # does self.foo = self.foo + 1
             >>> print(mod.foo)  # tensor(0.)
             >>> functional_call(mod, a, torch.ones(()))
@@ -117,7 +132,7 @@ def functional_call(
         module (torch.nn.Module): the module to call
         parameters_and_buffers (dict of str and Tensor): the parameters that will be used in
             the module call.
-        args (tuple): arguments to be passed to the module call
+        args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
 
     Returns:

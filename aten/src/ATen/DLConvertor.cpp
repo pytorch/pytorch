@@ -215,11 +215,22 @@ void deleter(DLManagedTensor* arg) {
 // This function returns a shared_ptr to memory managed DLpack tensor
 // constructed out of ATen tensor
 DLManagedTensor* toDLPack(const Tensor& src) {
+  // create a new tensor with possibly normalized strides
+  // gh-83069
+  auto shape = src.sizes();
+  auto strides = src.strides().vec();
+  for (int i=0; i<src.dim(); i++) {
+    if (shape[i] < 2) {
+      strides[i] = 1;
+    }
+  }
+
+  auto view = src.as_strided(shape, strides, src.storage_offset());
   ATenDLMTensor* atDLMTensor(new ATenDLMTensor);
-  atDLMTensor->handle = src;
+  atDLMTensor->handle = view;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
   atDLMTensor->tensor.deleter = &deleter;
-  atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
+  atDLMTensor->tensor.dl_tensor.data = view.data_ptr();
   int64_t device_id = 0;
   if (src.is_cuda()) {
     device_id = src.get_device();
@@ -229,10 +240,10 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape =
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<int64_t*>(src.sizes().data());
+      const_cast<int64_t*>(view.sizes().data());
   atDLMTensor->tensor.dl_tensor.strides =
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<int64_t*>(src.strides().data());
+      const_cast<int64_t*>(view.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   return &(atDLMTensor->tensor);
 }
@@ -241,8 +252,10 @@ Tensor fromDLPack(const DLManagedTensor* src) {
   Device device = getATenDevice(src->dl_tensor.device);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void* self) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    src->deleter(const_cast<DLManagedTensor*>(src));
+    if (src->deleter) {
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      src->deleter(const_cast<DLManagedTensor*>(src));
+    }
   };
   if (!src->dl_tensor.strides) {
     return at::from_blob(src->dl_tensor.data,

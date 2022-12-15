@@ -12,7 +12,7 @@ using namespace api::utils;
 
 Tensor mean(
     const at::Tensor& input_arg,
-    const IntArrayRef dim,
+    const OptionalIntArrayRef opt_dim,
     const bool keepdim,
     const optional<ScalarType> dtype) {
   TORCH_CHECK(input_arg.dim() == 4, "Vulkan mean expects 4-dimensional input!");
@@ -20,8 +20,11 @@ Tensor mean(
   static const std::unordered_set<int64_t> expected_dims_set({2, 3});
   std::unordered_set<int64_t> dims_set;
 
-  for (const auto& d : dim) {
-    dims_set.insert(utils::normalize(d, 4));
+  if (opt_dim.has_value()) {
+    auto dim = opt_dim.value();
+    for (const auto& d : dim) {
+      dims_set.insert(utils::normalize(d, 4));
+    }
   }
 
   TORCH_CHECK(

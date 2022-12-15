@@ -10,25 +10,6 @@ from ._common import (
 )
 from torch.distributed._shard.common_op_utils import _register_default_op
 
-@_sharded_op_impl(torch.Tensor.__deepcopy__)
-def tensor_deepcopy(types, args=(), kwargs=None, pg=None):
-    # NOTE: we directly implement deepcopy magic method
-    # instead of using the default tensor.__deepcopy__
-    # and implement clone(). This is because the default
-    # tensor deepcopy copies every attribute, but the
-    # process_group in ShardedTensor cannot be deep copied.
-    self_st = args[0]
-    # Validate types
-    if not isinstance(self_st, ShardedTensor):
-        raise TypeError("input needs to be a ShardedTensor")
-
-    return ShardedTensor._init_from_local_shards_and_global_metadata(
-        local_shards=copy.deepcopy(self_st.local_shards()),
-        sharded_tensor_metadata=copy.deepcopy(self_st.metadata()),
-        process_group=self_st._process_group,
-        init_rrefs=self_st._init_rrefs
-    )
-
 
 # Tensor properties access
 _register_default_op(torch.Tensor.shape.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
@@ -39,6 +20,7 @@ _register_default_op(torch.Tensor.dim, _sharded_op_impl)
 _register_default_op(torch.Tensor.ndim.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 _register_default_op(torch.Tensor.is_contiguous, _sharded_op_impl)
 _register_default_op(torch.Tensor.contiguous, _sharded_op_impl)
+_register_default_op(torch.Tensor.is_floating_point, _sharded_op_impl)
 
 # __reduce_ex__ to dispatch to get_state/set_state
 _register_default_op(torch.Tensor.__reduce_ex__, _sharded_op_impl)
@@ -60,8 +42,18 @@ def tensor_device(types, args=(), kwargs=None, pg=None):
     # Validate types
     if not isinstance(self_st, ShardedTensor):
         raise TypeError("input needs to be a ShardedTensor")
+    dev: torch.device
+    if self_st._local_shards:
+        dev = self_st._local_shards[0].tensor.device
+    elif pg and pg._get_backend_name() == "gloo":
+        dev = torch.device("cpu")
+    else:
+        dev = torch.device(torch.cuda.current_device())
+    return dev
 
-    return self_st.local_shards()[0].tensor.device
+@_sharded_op_impl(torch.Tensor.is_meta.__get__)  # type: ignore[attr-defined]
+def st_is_meta(types, args=(), kwargs=None, pg=None):
+    return args[0].local_tensor().is_meta
 
 
 def sharded_type_as_check(*args, **kwargs):
@@ -119,6 +111,7 @@ _register_sharded_op_on_local_shards(
     customized_func=sharded_type_as,
 )
 
+
 def sharded_deepcopy(args, kwargs, pg):
     # NOTE: we directly implement deepcopy magic method
     # instead of using the default tensor.__deepcopy__
@@ -130,10 +123,30 @@ def sharded_deepcopy(args, kwargs, pg):
     new_metadata = copy.deepcopy(self_st.metadata())
     return new_local_shards, new_metadata
 
+
 _register_sharded_op_on_local_shards(
     torch.Tensor.__deepcopy__,
     customized_func=sharded_deepcopy,
 )
+
+
+@_sharded_op_impl(torch.Tensor.copy_)
+def sharded_inplace_copy(types, args, kwargs, pg):
+    # NOTE: inplace op don't need to rewrap
+    kwargs = {} if kwargs is None else kwargs
+    self_st = args[0]
+    new_st = args[1]
+    nonblocking = kwargs.get("non_blocking", False)
+    for local_shard, new_shard in zip(self_st.local_shards(), new_st.local_shards()):
+        if local_shard.metadata != new_shard.metadata:
+            raise RuntimeError(
+                "inplace copy can only happen between two ShardedTensor with same metadata!"
+            )
+    for local_shard, new_shard in zip(self_st.local_shards(), new_st.local_shards()):
+        local_shard.tensor.copy_(new_shard.tensor, nonblocking)
+
+    return self_st
+
 
 def sharded_clone(args, kwargs, pg):
     self_st = args[0]
@@ -150,10 +163,12 @@ def sharded_clone(args, kwargs, pg):
     new_metadata = copy.deepcopy(self_st.metadata())
     return cloned_local_shards, new_metadata
 
+
 _register_sharded_op_on_local_shards(
     torch.Tensor.clone,
     customized_func=sharded_clone,
 )
+
 
 def sharded_detach(args, kwargs, pg):
     self_st = args[0]
@@ -168,10 +183,12 @@ def sharded_detach(args, kwargs, pg):
     new_metadata.tensor_properties.requires_grad = False
     return detached_local_shards, new_metadata
 
+
 _register_sharded_op_on_local_shards(
     torch.Tensor.detach,
     customized_func=sharded_detach,
 )
+
 
 @_sharded_op_impl(torch.Tensor.requires_grad_)
 def tensor_requires_grad_set(types, args=(), kwargs=None, pg=None):

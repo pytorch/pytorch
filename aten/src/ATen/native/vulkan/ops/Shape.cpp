@@ -22,7 +22,7 @@ Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
       self.options(),
   };
 
-  api::StagingBuffer buffer(context, v_self.buffer_bytes(), true);
+  api::StorageBuffer buffer(context, at::kFloat, v_self.gpu_numel(), true);
 
   utils::pack_vtensor_to_staging(v_self, buffer.buffer());
 
@@ -42,7 +42,7 @@ Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
   return convert(v_output);
 }
 
-inline Tensor view(const Tensor& self_arg, const IntArrayRef shape) {
+inline Tensor view(const Tensor& self_arg, IntArrayRef shape) {
   return view_internal(self_arg, shape);
 }
 

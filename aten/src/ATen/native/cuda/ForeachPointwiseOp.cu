@@ -160,10 +160,45 @@ void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tenso
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalars);                                                                                       \
 }
 
+#define FOREACH_POINTWISE_OP_TENSOR(NAME, OP)                             \
+  std::vector<Tensor> foreach_tensor_##NAME##_tensor_cuda(                \
+      TensorList input,                                                   \
+      TensorList tensors1,                                                \
+      TensorList tensors2,                                                \
+      const Tensor& scalars_) {                                           \
+    auto scalars = convert_tensor_to_scalar_list(scalars_, input.size()); \
+    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);   \
+    if (!can_use_fast_route({input, tensors1, tensors2}) ||               \
+        has_integral_tensor(input, /* includeBool */ true)) {             \
+      return at::native::foreach_tensor_##NAME##_scalarlist_slow(         \
+          input, tensors1, tensors2, scalars);                            \
+    }                                                                     \
+                                                                          \
+    return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalars);  \
+  }                                                                       \
+                                                                          \
+  void foreach_tensor_##NAME##_tensor_cuda_(                              \
+      TensorList input,                                                   \
+      TensorList tensors1,                                                \
+      TensorList tensors2,                                                \
+      const Tensor& scalars_) {                                           \
+    auto scalars = convert_tensor_to_scalar_list(scalars_, input.size()); \
+    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);   \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) ||      \
+        has_integral_tensor(input, /* includeBool */ true)) {             \
+      return at::native::foreach_tensor_##NAME##_scalarlist_slow_(        \
+          input, tensors1, tensors2, scalars);                            \
+    }                                                                     \
+                                                                          \
+    foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalars);        \
+  }
+
 FOREACH_POINTWISE_OP_SCALAR(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALAR(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
+FOREACH_POINTWISE_OP_TENSOR(addcdiv, std::divides);
+FOREACH_POINTWISE_OP_TENSOR(addcmul, std::multiplies);
 
 
 // Why bool tensors are pushed to slowpath?
@@ -188,7 +223,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList
     tensor_lists.emplace_back(std::move(vec_res));                                                         \
                                                                                                            \
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, tensors1[0].scalar_type(), "foreach_maximum_minimum_op_cuda", [&]() { \
-        using opmath_t = at::opmath_type<scalar_t>;                                                 \
+        using opmath_t = at::opmath_type<scalar_t>;                                                        \
         auto op = []  GPU_LAMBDA (opmath_t a, opmath_t b) -> opmath_t {                                    \
             opmath_t c = a OP b ? a : b;                                                                   \
             if (_isnan(a)) {                                                                               \
@@ -196,11 +231,36 @@ std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList
             }                                                                                              \
             return c;};                                                                                    \
         multi_tensor_apply<3>(tensor_lists,                                                                \
-                              PointwiseOpListFunctor<scalar_t, 3>(),                                       \
-                              op);                                                                         \
+                              BinaryOpListAlphaFunctor<scalar_t, 3, 2, 2>(),                               \
+                              op,                                                                          \
+                              opmath_t(1));                                                                \
     });                                                                                                    \
                                                                                                            \
     return tensor_lists[2];                                                                                \
+}                                                                                                          \
+                                                                                                           \
+void foreach_tensor_##NAME##_cuda_(TensorList self, TensorList other) {                                    \
+  check_foreach_api_restrictions(self, other);                                                             \
+  if (!can_use_fast_route({self, other}) || has_bool_tensor(self)) {                                       \
+    return at::native::foreach_tensor_##NAME##_slow_(self, other);                                         \
+  }                                                                                                        \
+                                                                                                           \
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self[0].scalar_type(), "foreach_maximum_minimum_op_cuda_",  \
+    [&]() {                                                                                                \
+      using opmath_t = at::opmath_type<scalar_t>;                                                          \
+      std::vector<std::vector<at::Tensor>> tensor_lists{self.vec(), other.vec()};                          \
+      auto op = [] GPU_LAMBDA (opmath_t a, opmath_t b) -> opmath_t {                                       \
+        opmath_t c = a OP b ? a : b;                                                                       \
+        if (_isnan(a)) {                                                                                   \
+          c = a;                                                                                           \
+        }                                                                                                  \
+        return c;                                                                                          \
+      };                                                                                                   \
+      multi_tensor_apply<2>(tensor_lists,                                                                  \
+                            BinaryOpListAlphaFunctor<scalar_t, 2, 2, 0>(),                                 \
+                            op,                                                                            \
+                            opmath_t(1));                                                                  \
+  });                                                                                                      \
 }                                                                                                          \
 
 FOREACH_MAXIMUM_MINIMUM_OP(maximum, >)

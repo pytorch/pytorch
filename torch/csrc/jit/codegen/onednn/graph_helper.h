@@ -2,12 +2,16 @@
 
 #include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/csrc/jit/codegen/onednn/operator.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace onednn {
+
+#define STRIDED_LAYOUT 0
+#define OPAQUE_LAYOUT 1
 
 struct OpPartitionMap {
   void add(uint64_t opId, uint64_t partitionId) {
@@ -60,13 +64,20 @@ class LlgaGraphHelper {
 
   static bool isLlgaSubgraph(const Node* node);
 
+  Operator makeEltwiseOp(Node* node, dnnl::graph::op::kind kind);
+
+  Operator makeBinaryOp(Node* node, dnnl::graph::op::kind kind);
+
   std::vector<dnnl::graph::partition> getPartitions() const;
 
   std::map<size_t, Value*> getTensorIdToValue() const;
 
+  Operator createOperator(Node* node);
+
  private:
   size_t countSupportedOps(const std::shared_ptr<Graph>& graph) const;
-
+  std::unique_ptr<dnnl::graph::graph> dnnl_graph_ = nullptr;
+  std::unique_ptr<torch::jit::AliasDb> aliasDb_ = nullptr;
   OpPartitionMap opToOwningPartition_;
   std::vector<dnnl::graph::partition> partitions_;
   std::map<size_t, Value*>
@@ -84,8 +95,6 @@ class LlgaNodeWrapper {
   friend class LlgaGraphHelper;
 
  private:
-  void initOutputLayouts();
-
   Node* n;
 };
 

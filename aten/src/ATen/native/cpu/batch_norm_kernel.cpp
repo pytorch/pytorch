@@ -18,6 +18,7 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/ones.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at { namespace native {
@@ -234,7 +235,7 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
   // Normal size of C should fit in L1, otherwise consider blocking on C.
   //
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::empty({num_threads, n_channel}, input.options()).zero_();
+  Tensor buffer = at::zeros({num_threads, n_channel}, input.options());
   scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
 
   // compute mean per input
@@ -464,7 +465,7 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   // Second path: parallel along dim1 of the immediate buffer.
   //
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::empty({2, num_threads, n_channel}, input.options()).zero_();
+  Tensor buffer = at::zeros({2, num_threads, n_channel}, input.options());
   scalar_t* sum_data = buffer.data_ptr<scalar_t>();
   scalar_t* dotp_data = sum_data + num_threads * n_channel;
 
@@ -788,15 +789,6 @@ void batch_norm_cpu_collect_stats_contiguous_impl<BFloat16>(
   }
 }
 
-static inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* ptr) {
-  return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
-}
-
-static inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr) {
-  using Vec = Vectorized<float>;
-  return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size()));
-}
-
 template <typename param_t>
 inline void batch_norm_cpu_collect_stats_channels_last_internal(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
@@ -811,7 +803,7 @@ inline void batch_norm_cpu_collect_stats_channels_last_internal(
   param_t* var_sum_data = var_sum.data_ptr<param_t>();
 
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::empty({num_threads, n_channel}, input.options().dtype(kFloat)).zero_();
+  Tensor buffer = at::zeros({num_threads, n_channel}, input.options().dtype(kFloat));
   float* buffer_data = buffer.data_ptr<float>();
 
   at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
@@ -1064,7 +1056,7 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
   }
 
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::empty({2, num_threads, n_channel}, input.options().dtype(kFloat)).zero_();
+  Tensor buffer = at::zeros({2, num_threads, n_channel}, input.options().dtype(kFloat));
   float* sum_data = buffer.data_ptr<float>();
   float* dotp_data = sum_data + num_threads * n_channel;
 

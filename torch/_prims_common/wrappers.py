@@ -4,22 +4,22 @@ from torch._prims_common import (
     NumberType,
     TensorLike,
     TensorLikeType,
+    ShapeType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._prims_common as utils
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
 import inspect
-from functools import wraps, reduce
-import operator
+from functools import wraps
 import warnings
 from itertools import chain
 
 # TODO: implement ref.cast with an option to enforce safe casting
 def _maybe_convert_to_dtype(
-    a: Union[TensorLikeType, NumberType, Sequence], dtype: torch.dtype
-) -> Union[TensorLikeType, NumberType, Sequence]:
+    a: Union[TensorLikeType, NumberType, Sequence, None], dtype: torch.dtype
+) -> Union[TensorLikeType, NumberType, Sequence, None]:
     import torch._prims as prims
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
@@ -28,9 +28,13 @@ def _maybe_convert_to_dtype(
             return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
-        return utils.dtype_to_type(dtype)(a)
+        return utils.dtype_to_type_ctor(dtype)(a)
     if isinstance(a, Sequence):
         return tuple(_maybe_convert_to_dtype(x, dtype) for x in a)
+    # Passthrough None because some functions wrapped with type promotion
+    # wrapper might have optional args
+    if a is None:
+        return None
 
     raise ValueError(
         "Received type {0} that is neither a tensor or a number!".format(type(a))
@@ -114,33 +118,32 @@ class elementwise_type_promotion_wrapper(object):
 
             result = fn(**bound.arguments)
 
-            # FIXME?: assumes result is a single tensor
-            assert isinstance(result, TensorLike)
-            return _maybe_convert_to_dtype(result, result_dtype)
+            if isinstance(result, TensorLike):
+                return _maybe_convert_to_dtype(result, result_dtype)
+            if isinstance(result, Sequence):
+                return tuple(_maybe_convert_to_dtype(x, result_dtype) for x in result)
+            raise AssertionError(f"Unhandled result type: {type(result)}")
 
         _fn.__signature__ = sig  # type: ignore[attr-defined]
         return _fn
 
 
 # TODO: handle tuples of tensors
-def _maybe_resize_out(out: TensorLikeType, shape):
-    if out.numel() == 0:
-        return out.resize_(shape)
-
-    if out.numel() != reduce(operator.mul, shape, 1):
-        msg = (
-            "An output with one or more elements was resized since it had shape {0} "
-            "which does not match the required output shape {1}. "
-            "This behavior is deprecated, and in a future PyTorch release outputs will not "
-            "be resized unless they have zero elements. "
-            "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0).".format(
-                str(out.shape), str(shape)
+def _maybe_resize_out(out: TensorLikeType, shape: ShapeType):
+    # If the shapes are correct there's nothing to do
+    if utils.same_shape(out.shape, shape):
+        return out
+    else:
+        if out.numel() != 0:
+            msg = (
+                f"An output with one or more elements was resized since it had shape {str(out.shape)} "
+                "which does not match the required output shape {str(shape)}. "
+                "This behavior is deprecated, and in a future PyTorch release outputs will not "
+                "be resized unless they have zero elements. "
+                "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
             )
-        )
-        warnings.warn(msg)
+            warnings.warn(msg)
         return out.resize_(shape)
-
-    return out
 
 
 def _safe_copy_out(
@@ -158,7 +161,7 @@ def _safe_copy_out(
         utils.check(
             copy_from.dtype == copy_to.dtype,
             lambda: f"Expected out tensor to have dtype {copy_from.dtype} "
-            "but got {copy_to.dtype} instead",
+            f"but got {copy_to.dtype} instead",
         )
     else:
         utils.check(
@@ -191,8 +194,18 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             )
         )
 
+        sig = inspect.signature(fn)
+        factory_kwargs = ("device", "dtype")
+        is_factory_fn = all(p in sig.parameters for p in factory_kwargs)
+
         @wraps(fn)
         def _fn(*args, out=None, **kwargs):
+            if is_factory_fn and out is not None:
+                for k in factory_kwargs:
+                    out_attr = getattr(out, k)
+                    if k not in kwargs:
+                        kwargs[k] = out_attr
+
             result = fn(*args, **kwargs)
             assert (
                 isinstance(result, TensorLike)
@@ -238,7 +251,6 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             # mypy does not see through  the definition of out_type given that it's in a different scope
             return out if is_tensor else return_type(*out)  # type: ignore[operator]
 
-        sig = inspect.signature(fn)
         out_param = inspect.Parameter(
             "out",
             kind=inspect.Parameter.KEYWORD_ONLY,
@@ -257,6 +269,45 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         return _fn
 
     return _out_wrapper
+
+
+def backwards_not_supported(prim):
+    def redispatch_prim(args, kwargs):
+        g = torch._C._AutoDispatchBelowAutograd()
+        try:
+            return prim(*args, **kwargs)
+        finally:
+            del g
+
+    class BackwardsNotSupported(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, args_spec, *flat_args):
+            args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
+            return redispatch_prim(args, kwargs)
+
+        @staticmethod
+        def backward(ctx, *args):
+            raise RuntimeError("backwards not supported on prim")
+
+    @wraps(prim)
+    def _autograd_impl(*args, **kwargs):
+        flat_args, args_spec = tree_flatten((args, kwargs))
+        if torch.is_grad_enabled() and any(a.requires_grad for a in flat_args if isinstance(a, torch.Tensor)):
+            # TODO: There is a subtle bug here: prims like copy_to
+            # return their input argument after mutating it; and custom
+            # autograd function will incorrectly turn the result into
+            # a view which will fail test_python_ref_executor tests.
+            # At the moment, we sidestep this by observing that the
+            # unit tests don't ever try to run the executor with
+            # autograd, so we don't exercise the buggy case, but if
+            # you ever want to feed autograd through this, be aware
+            # of it!  We need a way of properly implementing autograd
+            # for mutating operations in Python to do this.
+            return BackwardsNotSupported.apply(args_spec, *flat_args)
+        else:
+            return redispatch_prim(args, kwargs)
+
+    return _autograd_impl
 
 
 # TODO: when tracing this will add torch tensors and not TensorMeta objects

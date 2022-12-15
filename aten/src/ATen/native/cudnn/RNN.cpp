@@ -1,17 +1,31 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
-#include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/native/RNN.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cudnn_init_dropout_state.h>
+#include <ATen/ops/_cudnn_init_dropout_state_native.h>
+#include <ATen/ops/_cudnn_rnn.h>
+#include <ATen/ops/_cudnn_rnn_backward_native.h>
+#include <ATen/ops/_cudnn_rnn_flatten_weight_native.h>
+#include <ATen/ops/_cudnn_rnn_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #if !AT_CUDNN_ENABLED()
 
@@ -56,7 +70,7 @@ Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_see
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
@@ -1514,14 +1528,21 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
 
   std::unique_lock<std::mutex> lock {state_cache_mut};
   auto& state = dropout_state_cache.at(device);
-  if (train && dropout_p > 0 && !state.buffer.defined()) {
-    std::unique_lock<std::mutex> lock {state.mutex};
-    int64_t seed = at::empty({}, at::kLong).random_().item<int64_t>();
-    state.buffer = at::_cudnn_init_dropout_state(
-      dropout_p, train, seed, options.dtype(at::kByte));
-    // NB: CUDA binds the event to a device at creation time, so we can initialize it
-    // only now, when we know we're on the correct device.
-    state.event.emplace();
+  if (train && dropout_p > 0) {
+    const auto &gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(device);
+    auto gen_impl = gen.get<at::CUDAGeneratorImpl>();
+    bool reset_rnn_state = gen_impl->reset_rnn_state();
+    if (!state.buffer.defined() || reset_rnn_state) {
+      std::unique_lock<std::mutex> lock {state.mutex};
+      int64_t seed = at::empty({}, options.dtype(at::kLong)).random_(gen).item<int64_t>();
+      state.buffer = at::_cudnn_init_dropout_state(
+          dropout_p, train, seed, options.dtype(at::kByte));
+      // NB: CUDA binds the event to a device at creation time, so we can initialize it
+      // only now, when we know we're on the correct device.
+      if (!state.event.has_value()) {
+        state.event.emplace();
+      }
+    }
   }
   return state;
 }

@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import contextlib
 import torch
 import numpy as np
 
@@ -463,9 +464,9 @@ class TestReductions(TestCase):
                torch.norm]
         for op in ops:
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-                op(x, 64)
+                op(x, dim=64)
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-                op(x, -1)
+                op(x, dim=-1)
 
     @onlyCPU
     @dtypes(torch.float, torch.bfloat16)
@@ -1129,6 +1130,10 @@ class TestReductions(TestCase):
             torch.bincount(torch.tensor([1, 3], device=device),
                            torch.tensor([.2, .2], device=device),
                            minlength=-1)
+        # n-d weights, with n > 1 throws
+        with self.assertRaisesRegex(RuntimeError, '1-d'):
+            torch.bincount(torch.tensor([1, 0], device=device),
+                           torch.tensor([[1., 0.3], [1., 0.3]], device=device))
         # input and weights dim mismatch
         with self.assertRaisesRegex(RuntimeError, 'same length'):
             torch.bincount(torch.tensor([1, 0], device=device),
@@ -1788,11 +1793,9 @@ class TestReductions(TestCase):
         x = torch.randn(3, 3, 3, 3, device=device)
 
         error_msg = r'appears multiple times in the list of dims'
-        norm_error_msg = r'Expected dims to be different, got'
         for op in ops:
             for dim in [(0, 0), (0, -4)]:
-                e_msg = norm_error_msg if op == torch.norm else error_msg
-                with self.assertRaisesRegex(RuntimeError, e_msg):
+                with self.assertRaisesRegex(RuntimeError, error_msg):
                     op(x, dim=dim)
 
     # TODO: update this test to comapre against NumPy
@@ -2541,11 +2544,7 @@ class TestReductions(TestCase):
             torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
         else:
             out = torch.empty(0, device=device, dtype=dtype)
-            try:
-                torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
-            except RuntimeError:
-                return
-            self.fail("Failed to hit RuntimeError!")
+            torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
 
         exact_dtype = input.dtype not in (torch.bfloat16, torch.complex32, torch.complex64, torch.complex128)
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
@@ -2799,9 +2798,14 @@ class TestReductions(TestCase):
             torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device),
                         bins=4, max=3),
             torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
-        # tensor with nan -- should throw a RuntimeError
+        # tensor with nan; min, max not provided -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
             torch.histc(torch.tensor([float("nan")], dtype=torch.float, device=device))
+        # tensor with nan; min, max provided -- nan is ignored
+        self.assertEqual(
+            torch.histc(torch.tensor([1., 2., float("nan")], dtype=torch.float, device=device),
+                        bins=4, max=3),
+            torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
         # tensors with min > max -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
             torch.histc(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
@@ -2836,6 +2840,9 @@ class TestReductions(TestCase):
 
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
+
+        linear = torch.linspace(0, 0.99 - 5.0e-7, 101).to(device)
+        test_against_np(linear, bins=20, min=0, max=0.99)
 
     @onlyCPU
     def test_histc_bfloat16(self, device):
@@ -3365,7 +3372,7 @@ as the input tensor excluding its innermost dimension'):
             expected = op.ref(to_numpy(t), *sample_input.args,
                               **dict(
                                   # `identity` is mapped to numpy reduction `initial` argument
-                                  identity=torch._masked._reduction_identity(op.name, t),
+                                  identity=torch.masked._reduction_identity(op.name, t),
                                   **sample_input.kwargs))
 
             # Workaround https://github.com/pytorch/pytorch/issues/66556
@@ -3377,6 +3384,21 @@ as the input tensor excluding its innermost dimension'):
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
+    @onlyCUDA
+    @largeTensorTest("8GB")
+    @dtypes(torch.half, torch.chalf, torch.bfloat16)
+    def test_reductions_large_half_tensors(self, device, dtype):
+        t = torch.ones(2**31, device=device, dtype=dtype)
+        t[2**30:] = -1
+        expected = torch.tensor(0, device=device, dtype=dtype)
+        self.assertEqual(torch.sum(t), expected)
+
+        # mean_cuda is not implemented for ComplexHalf
+        err_msg = "not implemented for 'ComplexHalf'"
+        ctx = self.assertRaisesRegex(
+            RuntimeError, err_msg) if dtype is torch.chalf else contextlib.nullcontext()
+        with ctx:
+            self.assertEqual(torch.mean(t), expected)
 
 instantiate_device_type_tests(TestReductions, globals())
 

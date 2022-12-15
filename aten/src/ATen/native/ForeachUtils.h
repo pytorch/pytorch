@@ -2,6 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
+#include <ATen/Dispatch.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -121,6 +122,45 @@ bool check_fast_path_restrictions(
     }
 
     return true;
+}
+
+std::vector<c10::Scalar> convert_tensor_to_scalar_list(
+    const Tensor& scalarList_,
+    int64_t expect_length) {
+  std::vector<c10::Scalar> scalarList;
+  TORCH_CHECK(
+      scalarList_.device() == c10::kCPU,
+      "Expected scalars to be on CPU, got ",
+      scalarList_.device(),
+      " instead.");
+  TORCH_CHECK(
+      scalarList_.is_contiguous(), "Expected scalars to be contiguous.");
+  TORCH_CHECK(
+      scalarList_.dim() == 1,
+      "Expected packed scalar Tensor to be of dimension 1. Got ",
+      scalarList_.dim(),
+      " instead.");
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf,
+      kHalf,
+      kBool,
+      kBFloat16,
+      scalarList_.scalar_type(),
+      "convert_tensor_to_scalar_list",
+      [&]() {
+        const scalar_t* scalar_data = scalarList_.data_ptr<scalar_t>();
+        TORCH_CHECK(
+            (expect_length == scalarList_.size(0)),
+            "Expected length of scalars to match input of length ",
+            expect_length,
+            " but got ",
+            scalarList_.size(0),
+            " instead.");
+        for (int64_t i = 0; i < scalarList_.size(0); i++) {
+          scalarList.push_back(c10::Scalar(scalar_data[i]));
+        }
+      });
+  return scalarList;
 }
 
 bool can_use_fast_route(ArrayRef<TensorList> tensorLists,

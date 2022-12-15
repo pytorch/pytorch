@@ -1,5 +1,5 @@
 #include <c10/cuda/CUDAGuard.h>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
 #include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
 #include <torch/library.h>

@@ -20,6 +20,8 @@ struct MatchedSchema {
   std::string schema_name;
 };
 
+TORCH_API bool isBlockListedSchema(const FunctionSchema& schema);
+
 TORCH_API MatchedSchema matchSchema(
     const ::c10::FunctionSchema& schema,
     const SourceRange& loc,

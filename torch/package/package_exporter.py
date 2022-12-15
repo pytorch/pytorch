@@ -8,6 +8,7 @@ import types
 from collections import defaultdict, OrderedDict
 from dataclasses import dataclass
 from enum import Enum
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import (
     Any,
@@ -202,7 +203,7 @@ class PackageExporter:
             f: The location to export to. Can be a  ``string``/``Path`` object containing a filename
                 or a binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
-                If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
+                If a sequence of importers are passed, an ``OrderedImporter`` will be constructed out of them.
         """
         torch._C._log_api_usage_once("torch.package.PackageExporter")
 
@@ -422,17 +423,20 @@ class PackageExporter:
             return False
 
     def _get_source_of_module(self, module: types.ModuleType) -> Optional[str]:
-        filename = getattr(module, "__file__", None)
-        result = (
-            None
-            if filename is None or not filename.endswith(".py")
-            else linecache.getlines(filename, module.__dict__)
-        )
-
-        if result is None:
-            return None
-
-        return "".join(result)
+        filename = None
+        spec = getattr(module, "__spec__", None)
+        if spec is not None:
+            loader = getattr(spec, "loader", None)
+            if loader is not None and isinstance(loader, SourceFileLoader):
+                try:
+                    filename = loader.get_filename(module.__name__)
+                except ImportError:
+                    pass
+        if filename is None:
+            filename = getattr(module, "__file__", None)
+        if isinstance(filename, str) and filename.endswith(".py"):
+            return "".join(linecache.getlines(filename, module.__dict__))
+        return None
 
     def add_dependency(self, module_name: str, dependencies=True):
         """Given a module, add it to the dependency graph according to patterns
@@ -574,7 +578,7 @@ class PackageExporter:
         pickle_protocol: int = 3,
     ):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
-        the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
+        the archive rather than a stand-alone file. Standard pickle does not save the code, only the objects.
         If ``dependencies`` is true, this method will also scan the pickled objects for which modules are required
         to reconstruct them and save the relevant code.
 
@@ -648,7 +652,7 @@ class PackageExporter:
                         field = arg
                         memo[memo_count] = arg
                     elif (
-                        opcode.name == "BINGET_LONG"
+                        opcode.name == "LONG_BINGET"
                         or opcode.name == "BINGET"
                         or opcode.name == "GET"
                     ):
@@ -658,6 +662,9 @@ class PackageExporter:
                     elif opcode.name == "MEMOIZE":
                         memo_count += 1
                     elif opcode.name == "STACK_GLOBAL":
+                        if module is None:
+                            # If not module was passed on in the entries preceeding this one, continue.
+                            continue
                         assert isinstance(module, str)
                         if module not in all_dependencies:
                             all_dependencies.append(module)
@@ -883,16 +890,16 @@ class PackageExporter:
         )
 
     def _persistent_id(self, obj):
-        if torch.is_storage(obj) or isinstance(obj, torch.storage._TypedStorage):
-            if isinstance(obj, torch.storage._TypedStorage):
+        if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
+            if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
-                untyped_storage = obj._storage
+                untyped_storage = obj._untyped_storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
                 storage_numel = obj.size()
 
-            elif isinstance(obj, torch._UntypedStorage):
+            elif isinstance(obj, torch.UntypedStorage):
                 untyped_storage = obj
                 storage_type = normalize_storage_type(type(storage))
                 storage_numel = storage.nbytes()

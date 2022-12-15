@@ -54,7 +54,7 @@ class _JittedFunction:
     def __call__(self, *tensors: Tensor, **kwargs):
         # Jiterator follow torch.cuda's lazy initialization behavior
         # Defer checking cuda's availability at the function invocation time
-        assert self.is_cuda_available, "Jiterator is only supported on CUDA GPUs, no CUDA GPUs are available."
+        assert self.is_cuda_available, "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
 
         assert len(tensors) <= 8, "jiterator only supports up to 8 tensor inputs."
 
@@ -86,7 +86,7 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     Jiterator-generated kernels accepts noncontiguous tensors, and supports boardcasting and type promotion.
 
     Args:
-        code_string (string): CUDA code string to be compiled by jiterator. The entry functor must return by value.
+        code_string (str): CUDA code string to be compiled by jiterator. The entry functor must return by value.
         kwargs (Dict, optional): Keyword arguments for generated function
 
     Example::
@@ -98,7 +98,7 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
         # invoke jitted function like a regular python function
         result = jitted_fn(a, b, alpha=3.14)
 
-    code_string also allows mulitple function definitions, and the last function will be treated as the entry function.
+    code_string also allows multiple function definitions, and the last function will be treated as the entry function.
 
     Example::
 
@@ -140,7 +140,7 @@ def _create_multi_output_jit_fn(code_string: str, num_outputs: int, **kwargs) ->
     Create a jiterator-generated cuda kernel for an elementwise op that supports returning one or more outputs.
 
     Args:
-        code_string (string): CUDA code string to be compiled by jiterator. The entry functor must return value by reference.
+        code_string (str): CUDA code string to be compiled by jiterator. The entry functor must return value by reference.
         num_outputs(int): number of outputs return by the kernel
         kwargs (Dict, optional): Keyword arguments for generated function
 

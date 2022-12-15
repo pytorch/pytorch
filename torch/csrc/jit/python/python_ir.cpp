@@ -203,7 +203,17 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "has_writers",
           [&](AliasDb& db, Value* v1) { return db.hasWriters(v1); })
-      .def("__str__", &AliasDb::toString);
+      .def("__str__", &AliasDb::toString)
+      .def(
+          "move_after_topologically_valid",
+          [](AliasDb& db, Node* n, Node* movePoint) {
+            return db.moveAfterTopologicallyValid(n, movePoint);
+          })
+      .def(
+          "move_before_topologically_valid",
+          [](AliasDb& db, Node* n, Node* movePoint) {
+            return db.moveBeforeTopologicallyValid(n, movePoint);
+          });
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
@@ -372,7 +382,11 @@ void initPythonIRBindings(PyObject* module_) {
           "Find all nodes",
           py::arg("kind"),
           py::arg("recurse") = true)
-      .def("addInput", [](Graph& g) { return g.addInput(); })
+      .def(
+          "addInput",
+          [](Graph& g, const std::string& name) { return g.addInput(name); },
+          "Add input to graph with optional name seed",
+          py::arg("name") = "")
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
       .GS(eraseOutput)
@@ -758,10 +772,16 @@ void initPythonIRBindings(PyObject* module_) {
             return n.ty_(Symbol::attr(name), type);
           })
       .def(
+          "ty",
+          [](Node& n, const char* name) { return n.ty(Symbol::attr(name)); })
+      .def(
           "tys_",
           [](Node& n, const char* name, const std::vector<TypePtr>& types) {
             return n.tys_(Symbol::attr(name), types);
           })
+      .def(
+          "tys",
+          [](Node& n, const char* name) { return n.tys(Symbol::attr(name)); })
       .def(
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {

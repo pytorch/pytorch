@@ -1,9 +1,18 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 #include <tuple>
 
+#include <ATen/native/AdaptivePooling.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/adaptive_max_pool3d_backward_native.h>
+#include <ATen/ops/adaptive_max_pool3d_native.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -58,6 +67,7 @@ TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_si
 
 TORCH_META_FUNC(adaptive_max_pool3d_backward)
 (const Tensor& gradOutput, const Tensor& input, const Tensor& indices) {
+    at::native::adaptive_pool_empty_output_check(gradOutput, "adaptive_max_pool3d_backward");
     set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 } // namespace meta
@@ -66,12 +76,12 @@ namespace native {
 
 namespace {
 
-inline int start_index(int a, int b, int c) {
-  return (int)std::floor((float)(a * c) / b);
+inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
-inline int end_index(int a, int b, int c) {
-  return (int)std::ceil((float)((a + 1) * c) / b);
+inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
+  return 1 + ((a + 1) * c - 1) / b;
 }
 
 // #define START_IND(a,b,c) a * c / b

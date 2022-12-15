@@ -17,7 +17,6 @@ from torch.ao.quantization import (
     default_observer,
     default_histogram_observer,
     default_per_channel_weight_observer,
-    get_observer_dict,
     prepare,
     prepare_qat,
     convert,
@@ -26,6 +25,7 @@ from torch.ao.quantization import (
     get_embedding_qat_module_mappings,
     get_embedding_static_quant_module_mappings,
 )
+from torch.ao.quantization.quantize import _get_observer_dict
 
 import torch.nn as nn
 
@@ -503,7 +503,7 @@ class _ReferenceHistogramObserver(HistogramObserver):
         bin_width = (self.max_val - self.min_val) / self.bins
 
         # cumulative sum
-        total = sum(self.histogram)
+        total = torch.sum(self.histogram).item()
         cSum = torch.cumsum(self.histogram, dim=0)
 
         stepsize = 1e-5  # granularity
@@ -566,7 +566,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
                 test_only_eval_fn(model, self.calib_data)
                 test_only_eval_fn(model, self.calib_data)
                 observer_dict = {}
-                get_observer_dict(model, observer_dict)
+                _get_observer_dict(model, observer_dict)
 
                 self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
                                 'observer is not recorded in the dict')
@@ -706,11 +706,40 @@ class TestHistogramObserver(QuantizationTestCase):
             X = torch.randn(N)
             my_obs(X)
             ref_obs(X)
+            self.assertEqual(my_obs.histogram, ref_obs.histogram)
+            self.assertEqual(my_obs.min_val, ref_obs.min_val)
+            self.assertEqual(my_obs.max_val, ref_obs.max_val)
 
         ref_qparams = ref_obs.calculate_qparams()
         my_qparams = my_obs.calculate_qparams()
 
+        for i in range(0, bins, 200):
+            for j in range(i + 5, bins, 200):
+                ref_qe = ref_obs._compute_quantization_error(i, j)
+                qe = my_obs._compute_quantization_error(i, j)
+                self.assertEqual(ref_qe, qe)
+
         self.assertEqual(ref_qparams, my_qparams)
+
+    def test_histogram_observer_extreme_inputs(self):
+        """
+        Ensures that the HistogramObserver is able to work correctly in
+        a rare case: extreme samll max values
+        """
+        obs = HistogramObserver()
+        test_input = torch.tensor(
+            [0.0, 0.0, 4.58e-41, 4.58e-41]
+        )
+        # Make sure it runs, two passes are required based on the behavior of forward func
+        # The first pass initializes min_val&max_val, and second pass calls _adjust_min_max
+        obs(test_input)
+        obs(test_input)
+
+    def test_histogram_observer_correct_numel(self):
+        for i in range(1, 10):
+            obs = HistogramObserver()
+            obs(torch.randn(i, i))
+            self.assertEqual(obs.histogram.sum().item(), i**2)
 
 
 class TestFakeQuantize(TestCase):
@@ -864,7 +893,7 @@ class TestDistributed(QuantizationTestCase):
                 if epoch >= 1:
                     model.apply(torch.ao.quantization.disable_observer)
                 if epoch >= 2:
-                    model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                    model.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
                 quant_model = copy.deepcopy(model.module)
                 quant_model = torch.ao.quantization.convert(quant_model.eval().cpu(), inplace=False)
                 with torch.no_grad():
@@ -997,11 +1026,11 @@ class TestFusedObsFakeQuantModule(TestCase):
         )
 
         # Compare params with reference
-        torch.testing.assert_allclose(out, out_ref)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(out, out_ref)
+        torch.testing.assert_close(
             running_min_op, mod.activation_post_process.min_val
         )
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             running_max_op, mod.activation_post_process.max_val
         )
 
@@ -1052,11 +1081,11 @@ class TestFusedObsFakeQuantModule(TestCase):
             )
 
             # Compare params with reference
-            torch.testing.assert_allclose(out, out_ref)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(out, out_ref)
+            torch.testing.assert_close(
                 running_min_op, mod.activation_post_process.min_val
             )
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 running_max_op, mod.activation_post_process.max_val
             )
 
@@ -1081,12 +1110,12 @@ class TestFusedObsFakeQuantModule(TestCase):
             x = torch.randn(5, 5, device=device)
             out = mod(x)
             out_ref = mod_ref(x)
-            torch.testing.assert_allclose(out, out_ref)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(out, out_ref)
+            torch.testing.assert_close(
                 mod_ref.activation_post_process.min_val,
                 mod.activation_post_process.min_val,
             )
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 mod_ref.activation_post_process.max_val,
                 mod.activation_post_process.max_val,
             )
@@ -1137,20 +1166,20 @@ class TestFusedObsFakeQuantModule(TestCase):
                     False,
                 )
                 # Compare params with reference
-                torch.testing.assert_allclose(out, out_ref)
+                torch.testing.assert_close(out, out_ref)
                 if mod.observer_enabled[0]:
-                    torch.testing.assert_allclose(
+                    torch.testing.assert_close(
                         running_min_op, mod.activation_post_process.min_val
                     )
-                    torch.testing.assert_allclose(
+                    torch.testing.assert_close(
                         running_max_op, mod.activation_post_process.max_val
                     )
                 if mod.fake_quant_enabled:
-                    torch.testing.assert_allclose(scale, mod.scale)
-                    torch.testing.assert_allclose(zero_point, mod.zero_point)
+                    torch.testing.assert_close(scale, mod.scale)
+                    torch.testing.assert_close(zero_point, mod.zero_point)
 
-            torch.testing.assert_allclose(mod.state_dict()['activation_post_process.min_val'], running_min_op)
-            torch.testing.assert_allclose(mod.state_dict()['activation_post_process.max_val'], running_max_op)
+            torch.testing.assert_close(mod.state_dict()['activation_post_process.min_val'], running_min_op)
+            torch.testing.assert_close(mod.state_dict()['activation_post_process.max_val'], running_max_op)
 
     def test_fused_mod_reduce_range(self):
         obs = FusedMovingAvgObsFakeQuantize(quant_min=0, quant_max=255, dtype=torch.quint8, reduce_range=True)
@@ -1198,8 +1227,8 @@ class TestFusedObsFakeQuantModule(TestCase):
                                    mapping=get_embedding_static_quant_module_mappings())
 
             # Ensure that EmbeddingBags are now quantized with the appropriate bitwidth.
-            self.assertEqual(type(inference_gm.emb1), torch.nn.quantized.EmbeddingBag)
-            self.assertEqual(type(inference_gm.emb2), torch.nn.quantized.EmbeddingBag)
+            self.assertEqual(type(inference_gm.emb1), torch.ao.nn.quantized.EmbeddingBag)
+            self.assertEqual(type(inference_gm.emb2), torch.ao.nn.quantized.EmbeddingBag)
             self.assertEqual(inference_gm.emb1.dtype, qconfig.weight().dtype)
             self.assertEqual(inference_gm.emb2.dtype, qconfig.weight().dtype)
 
@@ -1233,9 +1262,9 @@ class TestFusedObsFakeQuantModule(TestCase):
                 inference_gm = convert(quant_model,
                                        mapping=get_embedding_static_quant_module_mappings())
                 # Ensure that Embedding is now quantized
-                self.assertEqual(type(inference_gm.emb), torch.nn.quantized.Embedding)
+                self.assertEqual(type(inference_gm.emb), torch.ao.nn.quantized.Embedding)
                 # Ensure that Linear is now quantized
-                self.assertEqual(type(inference_gm.linear), torch.nn.quantized.Linear)
+                self.assertEqual(type(inference_gm.linear), torch.ao.nn.quantized.Linear)
 
     def test_default_fused_qat_config(self):
         class Model(nn.Module):

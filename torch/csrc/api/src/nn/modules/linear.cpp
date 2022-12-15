@@ -126,7 +126,7 @@ Tensor UnflattenImpl::forward(const Tensor& input) {
     }
     return input.unflatten(dimname, sizes, names);
   }
-  return input.unflatten(options.dim(), options.sizes(), torch::nullopt);
+  return input.unflatten(options.dim(), options.sizes());
 }
 
 // ============================================================================

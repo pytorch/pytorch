@@ -48,13 +48,5 @@ const OpKindWrapper ltc_replication_pad_backward(
     "lazy_tensors::replication_pad_backward");
 const OpKindWrapper ltc_tensor_data("lazy_tensors::tensor_data");
 
-// For view ops
-const OpKindWrapper ltc_as_strided_view_update(
-    "lazy_tensors::as_strided_view_update");
-const OpKindWrapper ltc_diagonal_view_update(
-    "lazy_tensors::diagonal_view_update");
-const OpKindWrapper ltc_narrow_view_update("lazy_tensors::narrow_view_update");
-const OpKindWrapper ltc_select_view_update("lazy_tensors::select_view_update");
-
 } // namespace lazy
 } // namespace torch

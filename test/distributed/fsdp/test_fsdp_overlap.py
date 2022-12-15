@@ -11,15 +11,12 @@ from torch import distributed as dist
 from torch.cuda import Event
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
-    FSDPTest,
-)
+from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     get_cycles_per_ms,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
-
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -108,6 +105,12 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
             # we have a fake compute in the forward pass.
             batch = torch.rand(1).cuda()
             batch.requires_grad = True
+
+            # Run one dummy iteration to trigger the execution order validation
+            # all-gathers
+            out = model(batch)
+            out.backward()
+            model.zero_grad(set_to_none=True)
 
             # We run 20 iterations but only collect timing data from the minimal 10
             # data points because nondeterministic system events can disturb the timing.

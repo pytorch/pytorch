@@ -172,7 +172,9 @@ class DispatchKeySet final {
             (1ULL
              << (num_backends + static_cast<uint8_t>(toFunctionalityKey(t)) -
                  1)) -
-            1) {}
+            1) {
+    *this = add(DispatchKey::PythonDispatcher);
+  }
 
   // Public version of DispatchKeySet(uint64_t) API; external users
   // must be explicit when they do this!
@@ -640,6 +642,7 @@ constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
+    DispatchKey::AutocastHPU,
 });
 
 // See Note [TLS Initialization]
@@ -652,6 +655,7 @@ constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
+    DispatchKey::AutocastHPU,
 });
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
@@ -753,6 +757,9 @@ constexpr auto functorch_transforms_ks = DispatchKeySet(
      DispatchKey::VmapMode,
      DispatchKey::FuncTorchGradWrapper});
 
+constexpr auto functorch_batched_ks =
+    DispatchKeySet({DispatchKey::FuncTorchBatched});
+
 // This keyset has:
 // (1) the functionality bits corresponding to backends (dense, sparse,
 // quantized) (2) all of the backend bits set
@@ -830,12 +837,15 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
 inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastCPU);
   constexpr auto autocast_xpu_ks = DispatchKeySet(DispatchKey::AutocastXPU);
+  constexpr auto autocast_hpu_ks = DispatchKeySet(DispatchKey::AutocastHPU);
   constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
   switch (t) {
     case BackendComponent::CPUBit:
       return autocast_cpu_ks;
     case BackendComponent::XPUBit:
       return autocast_xpu_ks;
+    case BackendComponent::HPUBit:
+      return autocast_hpu_ks;
     case BackendComponent::CUDABit:
     case BackendComponent::XLABit:
       return autocast_cuda_ks;
@@ -869,7 +879,10 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // treatment;
   return (s - autograd_dispatch_keyset_with_ADInplaceOrView -
           autocast_dispatch_keyset -
-          DispatchKeySet({DispatchKey::PythonTLSSnapshot, DispatchKey::Python}))
+          DispatchKeySet(
+              {DispatchKey::Functionalize,
+               DispatchKey::PythonTLSSnapshot,
+               DispatchKey::Python}))
       .highestPriorityTypeId();
 }
 

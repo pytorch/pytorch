@@ -439,6 +439,14 @@ class TORCH_API Tensor final {
     return impl_->sym_sizes();
   }
 
+  inline c10::SymInt sym_numel() const {
+    return impl_->sym_numel();
+  }
+
+  inline c10::SymIntArrayRef sym_strides() const {
+    return impl_->sym_strides();
+  }
+
   inline int64_t size_from_dim(int k) const {
     return size_from_dim_(k, impl_->sizes());
   }
@@ -654,6 +662,7 @@ void TensorPrinter::Print(const Tensor& tensor) {
   }
 }
 
+CAFFE_DECLARE_KNOWN_TYPE(Tensor)
 } // namespace caffe2
 
 C10_CLANG_DIAGNOSTIC_POP()

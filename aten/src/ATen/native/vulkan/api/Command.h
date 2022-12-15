@@ -34,7 +34,7 @@ class CommandBuffer final {
     INVALID, // Used to indicate the command buffer is moved from
     NEW, // Set during constructor
     RECORDING, // Set during call to begin(), dispatch(), and
-               // copy_texture_to_texture()
+               // copy_*_to_*()
     PIPELINE_BOUND, // Set during call to  bind_pipeline()
     DESCRIPTORS_BOUND, // Set during call to bind_descriptors()
     BARRIERS_INSERTED, // Set during call to insert_barrier()
@@ -81,8 +81,29 @@ class CommandBuffer final {
   void insert_barrier(const PipelineBarrier& pipeline_barrier);
   void dispatch(const utils::uvec3&);
 
+  void copy_buffer_to_buffer(
+      const api::VulkanBuffer&,
+      const api::VulkanBuffer&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
+
   void copy_texture_to_texture(
       const api::VulkanImage&,
+      const api::VulkanImage&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
+
+  void copy_texture_to_buffer(
+      const api::VulkanImage&,
+      const api::VulkanBuffer&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
+
+  void copy_buffer_to_texture(
+      const api::VulkanBuffer&,
       const api::VulkanImage&,
       const api::utils::uvec3&,
       const api::utils::uvec3&,

@@ -1,15 +1,23 @@
-#include <array>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <utility>
 #include <vector>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
+#include <ATen/Context.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
-#include <ATen/quantized/Quantizer.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -400,7 +408,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   ideep::tag w_tag = ideep::tag::any;
   const bool with_groups = groups > 1;
   if (transpose) {
-    w_desc = ideep::convolution_transpose_forward::expected_weights_desc(
+    // template args: <(src/dst) is_channels_last, transposed>
+    w_desc = ideep::convolution_transpose_forward::expected_weights_desc<true, false>(
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
@@ -411,7 +420,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
     dims_giohw = with_groups ? ideep::utils::group_dims(dims_iohw, groups) : dims_iohw;
     std::vector<int64_t> perms(dims_giohw.size(), 0); // for permutation of weight
     std::iota(perms.begin(), perms.end(), 0);
-    w_desc = w_desc.transpose(with_groups, with_groups + 1);
     std::swap(perms[with_groups], perms[with_groups + 1]);
     weight_copy = weight.reshape(dims_giohw).permute(c10::IntArrayRef(perms)).clone();
   } else {
@@ -419,7 +427,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
-        dnnl::memory::data_type::u8, ideep::dims(), op_attr);
+        dnnl::memory::data_type::u8, ideep::dims(), op_attr, /*is_channels_last=*/true);
     weight_copy = weight.clone();
   }
   if (with_groups) {
@@ -437,7 +445,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   exp_wgt.init(w_desc);
   exp_wgt.set_scale(wgt_scales); // Also for feed_from()
   exp_wgt.feed_from(wgt, transpose); // expect wgt to be in [OC IC KH KW] format
-  ideep::tensor * packed_weight_p = new ideep::tensor(exp_wgt);
+  ideep::tensor * packed_weight_p = new ideep::tensor(std::move(exp_wgt));
   packed_weight_p->set_scale(wgt_scales);
   packed_weight_p->set_zero_point(wgt_zero_points);
   std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
@@ -522,6 +530,21 @@ class QConvPackWeightInt8 final {
       bool transpose) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
+  if (ctx.qEngine() == at::QEngine::X86) {
+#if AT_MKLDNN_ENABLED()
+    bool use_onednn = onednn_utils::should_use_onednn_quant(
+          weight, transpose, groups, output_padding);
+    if (use_onednn) {
+      return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+          weight, bias, stride, padding, output_padding, dilation, groups, transpose);
+    }
+#endif
+      return PackedConvWeight<kSpatialDim>::prepack(
+          weight, bias, stride, padding, output_padding, dilation, groups, transpose);
+  } // x86
+#endif // defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
+
+#ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
@@ -564,7 +587,7 @@ class QConv1dPackWeightInt8 final {
       torch::List<int64_t> dilation,
       int64_t groups) {
     const torch::List<int64_t> output_padding({0});
-    return _run(weight, bias, stride, padding, output_padding, dilation, groups,
+    return _run(std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
                 /*transpose=*/false);
   }
 
@@ -576,7 +599,7 @@ class QConv1dPackWeightInt8 final {
       torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
       int64_t groups) {
-    return _run(weight, bias, stride, padding, output_padding, dilation, groups,
+    return _run(std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
                 /*transpose=*/true);
   }
 
@@ -598,10 +621,29 @@ class QConv1dPackWeightInt8 final {
     padding = quant_utils::MakeArgForConv1d(padding, 0);
     output_padding = quant_utils::MakeArgForConv1d(output_padding, 0);
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
+
+#ifdef USE_FBGEMM
+  if (ctx.qEngine() == at::QEngine::X86) {
+#if AT_MKLDNN_ENABLED()
+    bool use_onednn = onednn_utils::should_use_onednn_quant(
+        weight, transpose, groups, output_padding);
+    if (use_onednn) {
+      return PackedConvWeightsOnednn<2>::prepack(
+          weight, bias, stride, padding, output_padding, dilation, groups,
+          transpose);
+    }
+#endif
+    return PackedConvWeight<2>::prepack(
+        std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
+        transpose);
+
+  } // x86
+#endif
+
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<2>::prepack(
-          weight, bias, stride, padding, output_padding, dilation, groups,
+          std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
           transpose);
     }
 #endif
@@ -609,7 +651,7 @@ class QConv1dPackWeightInt8 final {
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return PackedConvWeightsQnnp<2>::prepack(
-          weight, bias, stride, padding, output_padding, dilation, groups,
+          std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
           transpose);
     }
 #endif

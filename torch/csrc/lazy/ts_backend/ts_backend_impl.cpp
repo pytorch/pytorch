@@ -2,6 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
@@ -60,7 +61,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   std::unique_ptr<torch::lazy::LoweringContext> CreateLoweringContext(
       const std::string& name,
       torch::lazy::BackendDevice device,
-      c10::ArrayRef<torch::lazy::Node*> post_order,
+      c10::ArrayRef<const torch::lazy::Node*> post_order,
       torch::lazy::Util::EmissionMap emit_status) const override {
     return std::make_unique<torch::lazy::TSLoweringContext>(
         name, device, post_order, emit_status);
@@ -112,8 +113,9 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     return std::make_shared<TSData>(scalar, device);
   }
 
-  torch::lazy::BackendDataPtr GetComputationDataFromNode(Node* node) const {
-    auto* device_data_node = dynamic_cast<DeviceData*>(node);
+  torch::lazy::BackendDataPtr GetComputationDataFromNode(
+      const Node* node) const {
+    auto* device_data_node = DeviceData::Cast(node);
     if (!device_data_node) {
       return nullptr;
     }
@@ -273,6 +275,9 @@ void InitTorchScriptBackend() {
   register_ts_ltc_eager_fallback();
   static std::unique_ptr<BackendRegistrar> s_registrar;
   s_registrar = std::make_unique<BackendRegistrar>(GetTSBackendImpl());
+
+  static LazyGraphExecutor* executor = new LazyGraphExecutor();
+  LazyGraphExecutor::Register(executor);
 }
 
 } // namespace lazy

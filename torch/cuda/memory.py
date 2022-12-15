@@ -1,18 +1,30 @@
 import collections
 import contextlib
+import ctypes
 import warnings
 from typing import Any, Dict, Union, Tuple
 
 import torch
 from . import is_initialized, _get_device_index, _lazy_init
+from ._utils import _dummy_type
+
+from ._memory_viz import segments as _segments, memory as _memory
+
 from torch.types import Device
+from torch import _C
 
 __all__ = ["caching_allocator_alloc", "caching_allocator_delete", "set_per_process_memory_fraction",
            "empty_cache", "memory_stats", "memory_stats_as_nested_dict", "reset_accumulated_memory_stats",
            "reset_peak_memory_stats", "reset_max_memory_allocated", "reset_max_memory_cached",
            "memory_allocated", "max_memory_allocated", "memory_reserved", "max_memory_reserved",
            "memory_cached", "max_memory_cached", "memory_snapshot", "memory_summary", "list_gpu_processes",
-           "mem_get_info"]
+           "mem_get_info", "get_allocator_backend", "CUDAPluggableAllocator", "change_current_allocator"]
+
+
+if not hasattr(torch._C, '_cuda_CUDAAllocator'):
+    # Define dummy base classes
+    torch._C.__dict__['_cuda_CUDAAllocator'] = _dummy_type('_cuda_CUDAAllocator')
+
 
 def _host_allocator():
     _lazy_init()
@@ -57,7 +69,7 @@ def caching_allocator_alloc(size, device: Union[Device, int] = None, stream=None
     if not isinstance(stream, int):
         raise TypeError('Invalid type for stream argument, must be '
                         '`torch.cuda.Stream` or `int` representing a pointer '
-                        'to a exisiting stream')
+                        'to a existing stream')
     with torch.cuda.device(device):
         return torch._C._cuda_cudaCachingAllocator_raw_alloc(size, stream)
 
@@ -173,7 +185,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
 
     The caching allocator can be configured via ENV to not split blocks larger than a
     defined size (see Memory Management section of the Cuda Semantics documentation).
-    This helps avoid memory framentation but may have a performance
+    This helps avoid memory fragmentation but may have a performance
     penalty. Additional outputs to assist with tuning and evaluating impact:
 
     - ``"max_split_size"``: blocks above this size will not be split.
@@ -190,6 +202,10 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
+
+    .. note::
+        With :ref:`backend:cudaMallocAsync<cuda-memory-envvars>`, some stats are not
+        meaningful, and are always reported as zero.
     """
     result = []
 
@@ -412,7 +428,7 @@ def memory_snapshot():
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
-    return torch._C._cuda_memorySnapshot()
+    return torch._C._cuda_memorySnapshot()['segments']
 
 
 def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False) -> str:
@@ -590,3 +606,119 @@ def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
         device = torch.cuda.current_device()
     device = _get_device_index(device)
     return torch.cuda.cudart().cudaMemGetInfo(device)
+
+def _record_memory_history(enabled: bool, record_context=True,
+                           trace_alloc_max_entries=1,
+                           trace_alloc_record_context=False, device: Union[Device, int] = None,
+                           _enable_expensive_cpp=False):
+    """Enables recording of Python stack traces to be associated with memory
+    allocations, so you can tell what allocated any piece of memory in
+    :func:`torch.memory_snapshot`.
+
+    The Python trace collection is fast (2us per trace), so you may consider
+    enabling this on production jobs if you anticipate ever having to debug
+    memory issues.
+
+    .. warning:
+        The :attr:`_enable_expensive_cpp` arguments lets you enable also
+        collecting C++ stack traces.  This collection is VERY SLOW and should
+        only be used if you are debugging framework problems on a minified
+        example.  In principle, it should be possible to implement fast C++
+        stack trace collection; file an issue with us if you need it.
+    """
+    with torch.cuda.device(device):
+        _C._cuda_recordMemoryHistory(enabled, record_context, _enable_expensive_cpp,
+                                     trace_alloc_max_entries, trace_alloc_record_context)
+
+def _snapshot(device: Union[Device, int] = None):
+    with torch.cuda.device(device):
+        return _C._cuda_memorySnapshot()
+
+def _save_segment_usage(filename='output.svg', snapshot=None):
+    if snapshot is None:
+        snapshot = _snapshot()
+    with open(filename, 'w') as f:
+        f.write(_segments(snapshot))
+
+def _save_memory_usage(filename='output.svg', snapshot=None):
+    if snapshot is None:
+        snapshot = _snapshot()
+    with open(filename, 'w') as f:
+        f.write(_memory(snapshot))
+
+def _set_allocator_settings(env: str):
+    return torch._C._cuda_cudaCachingAllocator_set_allocator_settings(env)
+
+def get_allocator_backend() -> str:
+    r"""Returns a string describing the active allocator backend as set by
+    ``PYTORCH_CUDA_ALLOC_CONF``. Currently available backends are
+    ``native`` (PyTorch's native caching allocator) and `cudaMallocAsync``
+    (CUDA's built-in asynchronous allocator).
+
+    .. note::
+        See :ref:`cuda-memory-management` for details on choosing the allocator backend.
+    """
+    return torch._C._cuda_getAllocatorBackend()
+
+class _CUDAAllocator:
+    r"""Wrapper over internal CUDA memory allocators.
+    """
+    def __init__(self, allocator: torch._C._cuda_CUDAAllocator):
+        self._allocator = allocator
+
+    def allocator(self):
+        return self._allocator
+
+
+class CUDAPluggableAllocator(_CUDAAllocator):
+    r"""CUDA memory allocator loaded from a so file.
+
+    Memory allocators are compiled in .so files and loaded dynamically using ctypes.
+    To change the active allocator use the :func:`torch.memory.cuda.change_current_allocator`
+    function.
+
+    Args:
+        path_to_so_file(str): Path in the filesystem to the `.so` file containing
+            the allocator functions
+        alloc_fn_name(str): Name of the function to perform the memory allocation
+            in the so file. The signature must be:
+            void* alloc_fn_name(ssize_t size, int device, cudaStream_t stream);
+        free_fn_name(str): Name of the function to perform the memory release
+            in the so file. The signature must be:
+            void free_fn_name(void* ptr, size_t size, cudaStream_t stream);
+
+    .. warning::
+        This is currently supported only in unix OSs
+
+    .. note::
+        See :ref:`cuda-memory-management` for details on creating and using a custom allocator
+    """
+    def __init__(self, path_to_so_file: str, alloc_fn_name: str, free_fn_name: str):
+        allocator = ctypes.CDLL(path_to_so_file)
+        alloc_fn = ctypes.cast(getattr(allocator, alloc_fn_name), ctypes.c_void_p).value
+        free_fn = ctypes.cast(getattr(allocator, free_fn_name), ctypes.c_void_p).value
+        assert alloc_fn is not None
+        assert free_fn is not None
+        self._allocator = torch._C._cuda_customAllocator(alloc_fn, free_fn)
+
+
+def change_current_allocator(allocator: _CUDAAllocator) -> None:
+    r"""Changes the currently used memory allocator to be the one provided.
+    If the current allocator has already been used/initialized, this function will error.
+
+
+    Args:
+        allocator (torch.cuda.memory._CUDAAllocator): allocator to be set as the active one.
+    .. note::
+        See :ref:`cuda-memory-management` for details on creating and using a custom allocator
+    """
+    torch._C._cuda_changeCurrentAllocator(allocator.allocator())
+
+
+def _get_current_allocator() -> _CUDAAllocator:
+    r"""Returns the allocator being currently used.
+
+    .. note::
+        See :ref:`cuda-memory-management` for details on creating and using a custom allocator
+    """
+    return _CUDAAllocator(torch._C._cuda_getAllocator())

@@ -10,23 +10,31 @@ on:
       - landchecks/*
   workflow_dispatch:
 
+# The names of steps that actually test the code should be suffixed with `(nonretryable)`.
+# When any other step fails, it's job will be retried once by retryBot.
 jobs:
   lintrunner:
     runs-on: linux.20_04.16x
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
-
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
 
-      - name: Install lintrunner
-        run: pip install lintrunner==0.9.*
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/.github/requirements-gha-cache.txt
+
+      - name: Install requirements
+        run: |
+          pip install -r .github/requirements-gha-cache.txt --user
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -40,7 +48,7 @@ jobs:
             --tags-path aten/src/ATen/native/tags.yaml \
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
-      - name: Run lintrunner on all files
+      - name: Run lintrunner on all files (nonretryable)
         run: |
           set +e
           if ! lintrunner --force-color --all-files --tee-json=lint.json; then
@@ -64,11 +72,6 @@ jobs:
     name: quick-checks
     runs-on: linux.20_04.4x
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.x
-          architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -79,60 +82,92 @@ jobs:
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
       - name: Install requirements
         id: requirements
-        run: pip3 install -r requirements.txt --user
+        run: pip install -r requirements.txt --user
       - name: Ensure no non-breaking spaces
         if: always()
         run: |
           # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
           # does not support the '\u000a' syntax (which is relevant for local linters)
           (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
-      - name: Ensure cross-OS compatible file names
+      - name: Ensure cross-OS compatible file names (nonretryable)
         if: always()
         run: |
           (! git ls-files | grep -E '([<>:"|?*]|[ .]$)' || (echo "The above file names are not valid across all operating systems. Please ensure they don't contain the characters '<>:""|?*' and don't end with a white space or a '.' "; false))
-      - name: Ensure no versionless Python shebangs
+      - name: Ensure no versionless Python shebangs (nonretryable)
         if: always()
         run: |
           (! git --no-pager grep -In '#!.*python$' -- . || (echo "The above lines have versionless Python shebangs; please specify either python2 or python3"; false))
-      - name: C++ docs check
+      - name: C++ docs check (nonretryable)
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           sudo apt-get install -y doxygen
           cd docs/cpp/source && ./check-doxygen.sh
-      - name: CUDA kernel launch check
+      - name: CUDA kernel launch check (nonretryable)
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           set -eux
           python torch/testing/_internal/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
 
+  pr-sanity-checks:
+    name: pr-sanity-checks
+    runs-on: linux.20_04.4x
+    # Only run this on pull requests
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+          fetch-depth: -1
+      - name: PR size check (nonretryable)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bash .github/scripts/pr-sanity-check.sh
+
   workflow-checks:
     name: workflow-checks
     runs-on: linux.20_04.4x
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.x
-          architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
           fetch-depth: 1
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
+            **/.github/requirements-gha-cache.txt
       - name: Install requirements
         id: requirements
         run: |
-          pip3 install -r requirements.txt --user
+          pip install -r requirements.txt --user
       - name: Install Jinja2
         run: |
-          pip3 install Jinja2==3.0.1 --user
-      - name: Regenerate workflows
+          pip install Jinja2==3.0.1 --user
+      - name: Regenerate workflows (nonretryable)
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
-      - name: Assert that regenerating the workflows didn't change them
+      - name: Assert that regenerating the workflows didn't change them (nonretryable)
         run: |
           if ! .github/scripts/report_git_status.sh .github/workflows; then
             echo
@@ -146,7 +181,7 @@ jobs:
             echo 'onto a more recent commit from the PyTorch master branch.'
             false
           fi
-      - name: Check that jobs will be cancelled
+      - name: Check that jobs will be cancelled (nonretryable)
         if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
           .github/scripts/ensure_actions_will_cancel.py
@@ -158,17 +193,18 @@ jobs:
     env:
       NPM_CONFIG_PREFIX: ~/.npm-global
     steps:
-      - name: Setup Node
-        uses: actions/setup-node@v2
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
           fetch-depth: 1
+      # This is not a node project so there is no package-lock.json to cache
+      - name: Setup Node
+        uses: actions/setup-node@v3
       - name: Install markdown-toc
         run: npm install -g markdown-toc
-      - name: Regenerate ToCs and check that they didn't change
+      - name: Regenerate ToCs and check that they didn't change (nonretryable)
         run: |
           set -eu
           export PATH=~/.npm-global/bin:"$PATH"
@@ -197,31 +233,38 @@ jobs:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: linux.20_04.4x
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
+            **/requirements-flake8.txt
+            **/.circleci/docker/requirements-ci.txt
+            **/.github/requirements-gha-cache.txt
       - name: Install dependencies
         # mypy and boto3 versions copied from
         # .circleci/docker/common/install_conda.sh
         run: |
           set -eux
-          python3 -mpip install -r requirements.txt
-          python3 -mpip install boto3==1.16.34
-          pip3 install typing-extensions==3.10 --user
-          pip3 install -r requirements-flake8.txt --user
-          python3 -mpip install rockset==0.8.10 --user
-          python3 -mpip install -r requirements.txt --user
-          python3 -mpip install mypy==0.960 --user
+          pip install -r requirements.txt
+          pip install boto3==1.19.12
+          pip install typing-extensions==3.10 --user
+          pip install -r requirements-flake8.txt --user
+          pip install rockset==0.8.10 --user
+          pip install -r requirements.txt --user
+          pip install mypy==0.960 --user
           make setup_lint
-      - name: Test tools
+      - name: Test tools (nonretryable)
         run: |
           python3 -m unittest discover -vs tools/test -p 'test_*.py'
           python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
@@ -234,18 +277,6 @@ jobs:
       matrix:
         test_type: [with_torch, without_torch, older_python_version]
     steps:
-      - name: Setup Python 3.5
-        if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.5
-          architecture: x64
-      - name: Setup Python 3.8
-        if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
@@ -253,12 +284,33 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
+      - name: Setup Python 3.5
+        if: matrix.test_type == 'older_python_version'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.5'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
+      - name: Setup Python 3.8
+        if: matrix.test_type != 'older_python_version'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
       - name: Install torch
         if: matrix.test_type == 'with_torch'
         run: |
+          pip install -r requirements.txt
           # Doesn't really matter what torch version, we just need ANY torch installed
           pip install 'torch==1.*'
-      - name: Run collect_env.py
+      - name: Run collect_env.py (nonretryable)
         run: |
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py

@@ -31,7 +31,9 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
+# From https://docs.github.com/en/actions/learn-github-actions/environment-variables
+PYTORCH_REPO = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
+PYTORCH_GITHUB_API = f"https://api.github.com/repos/{PYTORCH_REPO}"
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 REQUEST_HEADERS = {
     "Accept": "application/vnd.github.v3+json",
@@ -39,7 +41,7 @@ REQUEST_HEADERS = {
 }
 
 response = requests.get(
-    f"{PYTORCH_REPO}/actions/runs/{args.workflow_run_id}/jobs?per_page=100",
+    f"{PYTORCH_GITHUB_API}/actions/runs/{args.workflow_run_id}/jobs?per_page=100",
     headers=REQUEST_HEADERS,
 )
 

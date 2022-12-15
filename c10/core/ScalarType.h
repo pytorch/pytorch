@@ -103,7 +103,7 @@ struct ScalarTypeToCPPType;
     /* This is a workaround for the CUDA bug which prevents */               \
     /* ::detail::ScalarTypeToCType<T>::type being used directly due to */    \
     /* ambiguous reference which can't to be resolved. For some reason it */ \
-    /* cant pick between at::detail and at::cuda::detail. */                 \
+    /* can't pick between at::detail and at::cuda::detail. */                \
     /* For repro example, please see: */                                     \
     /* https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba */    \
     /* TODO: remove once the bug is fixed. */                                \
@@ -237,20 +237,18 @@ static inline size_t elementSize(ScalarType t) {
 #undef CASE_ELEMENTSIZE_CASE
 }
 
-C10_DEPRECATED_MESSAGE(
-    "isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")
-static inline bool isIntegralType(ScalarType t) {
-  return (
-      t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
-      t == ScalarType::Long || t == ScalarType::Short);
-}
-
 static inline bool isIntegralType(ScalarType t, bool includeBool) {
   bool isIntegral =
       (t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
        t == ScalarType::Long || t == ScalarType::Short);
 
-  return includeBool ? isIntegral || (t == ScalarType::Bool) : isIntegral;
+  return isIntegral || (includeBool && t == ScalarType::Bool);
+}
+
+C10_DEPRECATED_MESSAGE(
+    "isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")
+static inline bool isIntegralType(ScalarType t) {
+  return isIntegralType(t, /*includeBool=*/false);
 }
 
 static inline bool isFloatingType(ScalarType t) {

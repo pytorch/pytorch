@@ -318,6 +318,7 @@ std::ostream& Node::print(
   if (kind() == prim::PythonOp) {
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
+    printAttributes(out, /*ignore_subgraph=*/false);
     pyOp->writeScalars(out);
   } else if (hasAttribute(attr::Subgraph) && groups) {
     out << kind().toQualString() << "_" << groups->size();
@@ -1008,6 +1009,9 @@ Value* Node::namedInput(Symbol name) const {
 }
 
 bool Node::matches(const FunctionSchema& schema) const {
+  if (isBlockListedSchema(schema)) {
+    return false;
+  }
   // wrong name
   if (kind().toQualString() != schema.name()) {
     return false;

@@ -7,12 +7,7 @@
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-echo "Testing pytorch (distributed only)"
-if [ -n "${CI}" ]; then
-  # TODO move this to docker
-  # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
-  pip_install "unittest-xml-reporting<=3.2.0,>=2.0.0"
-fi
+echo "Testing pytorch"
 
 # Disabling tests to see if they solve timeout issues; see https://github.com/pytorch/pytorch/issues/70015
 # python tools/download_mnist.py --quiet -d test/cpp/api/mnist
@@ -28,8 +23,8 @@ time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_a
 # FSDP tests
 for f in test/distributed/fsdp/*.py ; do time python test/run_test.py --verbose -i "${f#*/}" ; done
 # ShardedTensor tests
-time python test/run_test.py --verbose -i distributed/_shard/checkpoint/test_checkpoint
-time python test/run_test.py --verbose -i distributed/_shard/checkpoint/test_file_system_checkpoint
+time python test/run_test.py --verbose -i distributed/checkpoint/test_checkpoint
+time python test/run_test.py --verbose -i distributed/checkpoint/test_file_system_checkpoint
 time python test/run_test.py --verbose -i distributed/_shard/sharding_spec/test_sharding_spec
 time python test/run_test.py --verbose -i distributed/_shard/sharding_plan/test_sharding_plan
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_megatron_prototype
@@ -48,4 +43,6 @@ time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/
 time python test/run_test.py --verbose -i distributed/_shard/sharded_optim/test_sharded_optim
 time python test/run_test.py --verbose -i distributed/_shard/test_partial_tensor
 time python test/run_test.py --verbose -i distributed/_shard/test_replicated_tensor
+# Other tests
+time python test/run_test.py --verbose -i test_cuda_primary_ctx
 assert_git_not_dirty

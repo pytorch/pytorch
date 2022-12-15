@@ -43,7 +43,7 @@ Tensor quantized_div(
     const double scale,
     const int64_t zero_point);
 
-Tensor conv2d(
+Tensor quantized_conv2d(
     const Tensor& input_,
     const Tensor& weight,
     const c10::optional<Tensor>& bias_opt,

@@ -300,7 +300,6 @@ operators, see :ref:`name_inference_reference-doc`.
    .. automethod:: align_as
    .. automethod:: align_to
 
-   .. automethod:: unflatten
    .. py:method:: flatten(dims, out_dim) -> Tensor
       :noindex:
 

@@ -258,7 +258,7 @@ Tensor get_offsets(
           cudaMemcpyHostToDevice,
           stream));
 
-  auto indices_accessor = indices.packed_accessor<int64_t, 2>();
+  auto indices_accessor = indices.packed_accessor64<int64_t, 2>();
 
   Tensor offsets = at::empty({nnz}, indices.options());
 
@@ -345,7 +345,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
   if (requireMxRows) {
 
     auto values_accessor =
-        values.packed_accessor<scalar_t, 2>(); // {nnz, nvalues}
+        values.packed_accessor64<scalar_t, 2>(); // {nnz, nvalues}
 
     mx_buffer = at::full({new_sz * nvalues}, Scalar(-std::numeric_limits<scalar_t>::infinity()), values.options());
 
@@ -420,10 +420,10 @@ void cuda_sparse_coo_softmax(
 
   /* Prepare accessors */
   auto values_2 = values.view({nnz, nvalues});
-  auto values_accessor = values_2.packed_accessor<scalar_t, 2>();
+  auto values_accessor = values_2.packed_accessor64<scalar_t, 2>();
 
   auto out_values_2 = out_values.view({nnz, nvalues});
-  auto out_values_accessor = out_values_2.packed_accessor<scalar_t, 2>();
+  auto out_values_accessor = out_values_2.packed_accessor64<scalar_t, 2>();
 
   Tensor sorted_indices;
   Tensor pool_offsets;
@@ -539,13 +539,13 @@ void cuda_sparse_coo_softmax_backward(
   auto nvalues = get_nvalues(sizes, sparse_dim);
 
   auto values_2 = values.view({nnz, nvalues});
-  auto values_accessor = values_2.packed_accessor<scalar_t, 2>();
+  auto values_accessor = values_2.packed_accessor64<scalar_t, 2>();
 
   auto out_values_2 = out_values.view({out_nnz, nvalues});
-  auto out_values_accessor = out_values_2.packed_accessor<scalar_t, 2>();
+  auto out_values_accessor = out_values_2.packed_accessor64<scalar_t, 2>();
 
   auto grad_values_2 = grad_values.view({grad_nnz, nvalues});
-  auto grad_values_accessor = grad_values_2.packed_accessor<scalar_t, 2>();
+  auto grad_values_accessor = grad_values_2.packed_accessor64<scalar_t, 2>();
 
   Tensor lower_bound_values =
       at::empty({out_offsets.size(0)}, indices.options());

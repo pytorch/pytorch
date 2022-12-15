@@ -670,7 +670,7 @@ class TestCase:
 class TestSuite:
     def __init__(self, name: str) -> None:
         self.name = name
-        self.test_cases: Dict[str, TestCase] = dict()
+        self.test_cases: Dict[str, TestCase] = {}
         self.failed_count = 0
         self.skipped_count = 0
         self.errored_count = 0
@@ -725,7 +725,7 @@ class TestFile:
     def __init__(self, name: str) -> None:
         self.name = name
         self.total_time = 0.0
-        self.test_suites: Dict[str, TestSuite] = dict()
+        self.test_suites: Dict[str, TestSuite] = {}
 
     def append(self, test_case: TestCase) -> None:
         suite_name = test_case.class_name
@@ -765,7 +765,7 @@ def get_recursive_files(folder: str, extension: str) -> Iterable[str]:
 
 
 def parse_reports(folder: str) -> Dict[str, TestFile]:
-    tests_by_file = dict()
+    tests_by_file = {}
     for report in get_recursive_files(folder, ".xml"):
         report_path = Path(report)
         # basename of the directory of test-report is the test filename

@@ -231,8 +231,6 @@ TypePtr DynamicType::fallback() const {
       return BoolType::get();
     case Tag::Int:
       return IntType::get();
-    case Tag::SymInt:
-      return SymIntType::get();
     case Tag::Float:
       return FloatType::get();
     case Tag::Complex:
@@ -245,11 +243,13 @@ TypePtr DynamicType::fallback() const {
       return ListType::create(arguments_.elems[0].ty->fallback());
     case Tag::Tuple: {
       std::vector<TypePtr> fallbacks;
+      fallbacks.reserve(arguments_.elems.size());
       for (const auto& elem : arguments_.elems) {
         fallbacks.push_back(elem.ty->fallback());
       }
       if (name_) {
         std::vector<c10::string_view> fields;
+        fields.reserve(arguments_.elems.size());
         for (const auto& elem : arguments_.elems) {
           fields.emplace_back(*elem.label);
         }
@@ -326,8 +326,6 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
       return DynamicTypeTrait<ComplexType>::getBaseType();
     case Tag::Int:
       return DynamicTypeTrait<IntType>::getBaseType();
-    case Tag::SymInt:
-      return DynamicTypeTrait<SymIntType>::getBaseType();
     case Tag::Bool:
       return DynamicTypeTrait<BoolType>::getBaseType();
     case Tag::String:

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
@@ -349,6 +350,7 @@ enum class DispatchKey : uint16_t {
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
   AutocastXPU,
+  AutocastHPU,
   // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
   // it probably should get its own Autocast key
   AutocastCUDA,
@@ -400,6 +402,10 @@ enum class DispatchKey : uint16_t {
   // for a usage example
   TESTING_ONLY_GenericMode,
 
+  // This is a bypass that allows you to skip running the C++ dispatcher
+  // entirely
+  PythonDispatcher,
+
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   EndOfFunctionalityKeys, // End of functionality keys.
 
@@ -438,6 +444,17 @@ enum class DispatchKey : uint16_t {
   Autograd,
   CompositeImplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+
+  // Note: The alias keyset for FuncTorchBatchedDecomposition is disjoint from
+  // all
+  // other alias keysets
+  // and so precedence order doesn't matter
+  FuncTorchBatchedDecomposition, // registered at
+  // build/aten/src/ATen/RegisterFuncTorchBatchedDecomposition.cpp
+  // Note: The alias keyset for CompositeImplicitAutogradNestedTensor is
+  // disjoint from all other alias keysets
+  CompositeImplicitAutogradNestedTensor, // registered at
+  // build/aten/src/ATen/RegisterCompositeImplicitAutogradNestedTensor.cpp
   CompositeExplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeExplicitAutograd.cpp
   // See Note [CompositeExplicitAutogradNonFunctional Key]
@@ -633,6 +650,8 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
     return DispatchKey::Undefined;
   }
 }
+
+BackendComponent toBackendComponent(DeviceType device_type);
 
 // Given (DispatchKey::Dense, BackendComponent::CUDABit), returns
 // DispatchKey::CUDA.

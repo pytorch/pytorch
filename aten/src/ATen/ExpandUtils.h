@@ -3,6 +3,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
+#include <ATen/ops/view.h>
 #include <ATen/ops/view_copy.h>
 #endif
 
@@ -20,6 +21,8 @@ namespace at {
 
 TORCH_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
 TORCH_API DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b);
+TORCH_API SymDimVector
+infer_size_symdimvector(SymIntArrayRef a, SymIntArrayRef b);
 
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
@@ -93,10 +96,11 @@ inline void check_defined(
 inline c10::MaybeOwned<Tensor> expand_inplace(
     const Tensor& tensor,
     const Tensor& to_expand) {
-  if (tensor.sizes().equals(to_expand.sizes())) {
+  if (tensor.sym_sizes().equals(to_expand.sym_sizes())) {
     return c10::MaybeOwned<Tensor>::borrowed(to_expand);
   }
-  return c10::MaybeOwned<Tensor>::owned(to_expand.expand(tensor.sizes()));
+  return c10::MaybeOwned<Tensor>::owned(
+      to_expand.expand_symint(tensor.sym_sizes()));
 }
 
 inline c10::MaybeOwned<Tensor> expand_inplace(
@@ -437,16 +441,17 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   return result;
 }
 
-static inline Tensor sum_to(
+template <typename T>
+inline Tensor _sum_to(
     Tensor tensor,
-    const c10::SymIntArrayRef shape,
+    const c10::ArrayRef<T> shape,
     bool always_return_non_view = false) {
   if (shape.size() == 0) {
     return tensor.sum();
   }
 
-  auto sizes = tensor.sym_sizes();
-  c10::SmallVector<c10::SymInt, 8> reduce_dims;
+  auto sizes = at::symint::sizes<T>(tensor);
+  c10::SmallVector<int64_t, 8> reduce_dims;
   const int64_t leading_dims = sizes.size() - shape.size();
   for (const auto i : c10::irange(leading_dims)) {
     reduce_dims.push_back(i);
@@ -458,29 +463,34 @@ static inline Tensor sum_to(
   }
 
   if (!reduce_dims.empty()) {
-    tensor = tensor.sum_symint(reduce_dims, /*keepdim=*/true);
+    tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
   }
 
   if (always_return_non_view) {
     // This is only actually used by the functionalization pass.
     // We want to be able to guarantee that this function doesn't return a view
     // of the input.
-    return leading_dims > 0 ? at::view_copy_symint(tensor, shape)
+    return leading_dims > 0 ? at::symint::view_copy<T>(tensor, shape)
                             : tensor.clone();
   } else {
-    return leading_dims > 0 ? tensor.view_symint(shape) : tensor;
+    return leading_dims > 0 ? at::symint::view<T>(tensor, shape) : tensor;
   }
+}
+
+inline Tensor sum_to(
+    Tensor tensor,
+    const c10::SymIntArrayRef shape,
+    bool always_return_non_view = false) {
+  return _sum_to(tensor, shape, always_return_non_view);
 }
 
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
 // Precondition: is_expandable_to(shape, tensor.sizes()) must be true
-static inline Tensor sum_to(
+inline Tensor sum_to(
     Tensor tensor,
     const IntArrayRef shape,
     bool always_return_non_view = false) {
-  auto sym_size = c10::SymIntArrayRef(
-      reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
-  return sum_to(tensor, sym_size, always_return_non_view);
+  return _sum_to(tensor, shape, always_return_non_view);
 }
 
 static inline bool is_expandable_to(

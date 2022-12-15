@@ -100,6 +100,22 @@ class CUDAGraph(torch._C._CUDAGraph):
         """
         return super(CUDAGraph, self).pool()
 
+    def enable_debug_mode(self):
+        r"""
+        Enables debugging mode for CUDAGraph.debug_dump.
+        """
+        return super(CUDAGraph, self).enable_debug_mode()
+
+    def debug_dump(self, debug_path):
+        r"""
+        Arguments:
+            debug_path (required): Path to dump the graph to.
+
+        Calls a debugging function to dump the graph if the debugging is
+        enabled via CUDAGraph.enable_debug_mode()
+        """
+        return super(CUDAGraph, self).debug_dump(debug_path)
+
 
 class graph(object):
     r"""
@@ -224,8 +240,15 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
         they appeared in that callable's ``sample_args``.
 
     .. warning::
+        The automatic mixed precision is supported in :func:`~torch.cuda.make_graphed_callables` only with disabled
+        caching. The context manager `torch.cuda.amp.autocast()` must have `cache_enabled=False`.
+
+    .. warning::
         All Tensor outputs of graphed callables must require grad.
     """
+    if torch.is_autocast_enabled() and torch.is_autocast_cache_enabled():
+        raise RuntimeError("make_graphed_callables does not support the autocast caching. Please set `cache_enabled=False`.")
+
     just_one_callable = False
 
     if not isinstance(callables, tuple):
