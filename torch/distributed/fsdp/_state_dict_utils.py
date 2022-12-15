@@ -237,14 +237,20 @@ def _common_unshard_post_state_dict_hook(
             # TODO: for composable FSDP, this should be clean_tensor_name(clean_key),
             buffer_clean_fqns.append(clean_key)
             buffers.append(state_dict[fqn])
-    if buffers and fsdp_state._mixed_precision_enabled_for_buffers():
-        buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
-        _cast_buffers_to_dtype_and_device(
-            buffers, buffer_dtypes, fsdp_state.compute_device
+    if buffers:
+        mixed_precision_enabled_for_buffers = (
+            fsdp_state._mixed_precision_enabled_for_buffers() if not _is_composable(fsdp_state)
+            else (fsdp_state.mixed_precision.buffer_dtype is not None)
         )
-        for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
-            fqn = f"{prefix}{clean_fqn}"
-            state_dict[fqn] = buffer.clone()
+        if mixed_precision_enabled_for_buffers:
+            buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
+            _cast_buffers_to_dtype_and_device(
+                buffers, buffer_dtypes, fsdp_state.compute_device
+            )
+            for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
+                fqn = f"{prefix}{clean_fqn}"
+                state_dict[fqn] = buffer.clone()
+                print(f"{dist.get_rank()} got buffer {fqn} with shape {state_dict[fqn].shape}")
     return state_dict
 
 
@@ -330,7 +336,9 @@ def _full_pre_load_state_dict_hook(
 ) -> None:
     _lazy_init(fsdp_state, module)
     _enter_unshard_params_ctx(module, fsdp_state, recurse=False, writeback=True)
-    _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
+    # Add FSDP_PREFIX only for wrapper-based FSDP.
+    if not _is_composable(fsdp_state):
+        _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
 
 
 def _full_post_load_state_dict_hook(
