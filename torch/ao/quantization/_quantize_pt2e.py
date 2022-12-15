@@ -1,41 +1,17 @@
 from torch.fx import GraphModule
-import torch._dynamo as torchdynamo
 
 from .qconfig_mapping import QConfigMapping
 from .backend_config import BackendConfig
 from .fx import prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 from .pt2e.utils import (
+    _infer_nn_stack_trace_and_append_on_meta,
     _get_renamed_nn_module_stack,
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_addmm,
 )
 
-import copy
 from typing import Tuple, Any, Dict
-
-# TODO: longer term, don't need to retrace or parse the string
-# we should have node.meta["nn_module_stack"] that store the dict
-def _infer_nn_stack_trace_and_append_on_meta(m, gm, args_as_list):
-    trace_func, guards = torchdynamo.export(
-        m,
-        *copy.deepcopy(args_as_list),
-        aten_graph=True,
-        tracing_mode="real"
-    )
-    reset_metadata = {}
-    for node in trace_func.graph.nodes:
-        nn_module_stack = {}
-        if (stack_trace := node.meta.get("stack_trace")) is not None:
-            for line in stack_trace.split("\n"):
-                if line.startswith("Module stack:"):
-                    mod_trace = eval(line.replace("Module stack:", ""))  # pyre-ignore
-                    nn_module_stack = {"nn_module_stack": mod_trace}
-        reset_metadata[node.name] = nn_module_stack
-
-    for n in gm.graph.nodes:
-        if (meta := reset_metadata.get(n.name)):
-            n.meta.update(meta)
 
 def prepare_pt2e(
     model: GraphModule,

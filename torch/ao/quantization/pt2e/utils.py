@@ -1,4 +1,5 @@
 import torch
+import torch._dynamo as torchdynamo
 from torch.fx import GraphModule
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 # TODO[jerryzh168]: move this to a more general util function
@@ -6,7 +7,31 @@ from torch.ao.quantization.fx.prepare import (
     is_activation_post_process_node,
 )
 from collections import OrderedDict
+import copy
 import operator
+
+# TODO[qihan]: longer term, don't need to retrace or parse the string
+# we should have node.meta["nn_module_stack"] that store the dict
+def _infer_nn_stack_trace_and_append_on_meta(m, gm, args_as_list):
+    trace_func, guards = torchdynamo.export(
+        m,
+        *copy.deepcopy(args_as_list),
+        aten_graph=True,
+        tracing_mode="real"
+    )
+    reset_metadata = {}
+    for node in trace_func.graph.nodes:
+        nn_module_stack = {}
+        if (stack_trace := node.meta.get("stack_trace")) is not None:
+            for line in stack_trace.split("\n"):
+                if line.startswith("Module stack:"):
+                    mod_trace = eval(line.replace("Module stack:", ""))  # pyre-ignore
+                    nn_module_stack = {"nn_module_stack": mod_trace}
+        reset_metadata[node.name] = nn_module_stack
+
+    for n in gm.graph.nodes:
+        if (meta := reset_metadata.get(n.name)):
+            n.meta.update(meta)
 
 # TODO[qihan]: longer term, this should happen in the dynamo stack as well
 def _get_renamed_nn_module_stack(nn_module_stack):
