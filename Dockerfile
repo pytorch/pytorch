@@ -79,7 +79,7 @@ RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then
         /opt/conda/bin/pip install "torchtriton==${TRITON_VERSION}" --extra-index-url https://download.pytorch.org/whl/nightly/cpu ; \
         apt update && apt install -y --no-install-recommends gcc; \
         CU_VER=$(echo $CUDA_VERSION | cut -d'.' -f 1-2) && \
-        mkdir -p /usr/local/triton-min-cuda-${CU_VER} &&
+        mkdir -p /usr/local/triton-min-cuda-${CU_VER} && \
         ln -s /usr/local/trition-min-cuda-${CU_VER} /usr/local/cuda; \
         mkdir -p /usr/local/cuda/bin; cp /opt/conda/bin/ptxas /usr/local/cuda/bin; \
         mkdir -p /usr/local/cuda/include; cp /opt/conda/include/cuda.h /usr/local/cuda/include; \
