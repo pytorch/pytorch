@@ -305,33 +305,33 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       );
       });
     } else {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-          at::ScalarType::Half,
-          at::ScalarType::BFloat16,
-          scalar_type,
-          "addmm_cuda",
-          [&] {
-            using opmath_t = at::opmath_type<scalar_t>;
-            opmath_t alpha_val = alpha.to<opmath_t>();
-            opmath_t beta_val = beta.to<opmath_t>();
-            scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
-            scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
-            scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-            at::cuda::blas::gemm<scalar_t>(
-                transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
-                transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
-                m,
-                n,
-                k,
-                alpha_val,
-                mat1_ptr,
-                mat1_ld,
-                mat2_ptr,
-                mat2_ld,
-                beta_val,
-                result_ptr,
-                result_ld);
-          });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        scalar_type,
+        "addmm_cuda",
+        [&] {
+          using opmath_t = at::opmath_type<scalar_t>;
+          opmath_t alpha_val = alpha.to<opmath_t>();
+          opmath_t beta_val = beta.to<opmath_t>();
+          scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
+          scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
+          scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+          at::cuda::blas::gemm<scalar_t>(
+              transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
+              transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
+              m,
+              n,
+              k,
+              alpha_val,
+              mat1_ptr,
+              mat1_ld,
+              mat2_ptr,
+              mat2_ld,
+              beta_val,
+              result_ptr,
+              result_ld);
+        });
     }
 
     switch (activation) {
