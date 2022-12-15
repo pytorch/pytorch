@@ -112,7 +112,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void set_nbytes(c10::SymInt size_bytes) {
-    size_bytes_ = size_bytes;
+    size_bytes_ = std::move(size_bytes);
   }
 
   bool resizable() const {

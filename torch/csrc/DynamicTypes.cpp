@@ -13,6 +13,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FunctionalStorageImpl.h>
 
 #include <array>
 #include <memory>
@@ -77,7 +78,11 @@ THPLayout* getTHPLayout(at::Layout layout) {
 
 PyObject* createPyObject(const at::Storage& storage) {
   if (storage.device_type() != at::DeviceType::Meta &&
-      storage.data() == nullptr && storage.nbytes() != 0) {
+      storage.data() == nullptr && storage.sym_nbytes() != 0 &&
+      // Grabbing storage() from FunctionalTensorWrapper is allowed.
+      // This is useful for checking aliasing info from python
+      dynamic_cast<at::functionalization::FunctionalStorageImpl*>(
+          storage.unsafeGetStorageImpl()) == nullptr) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
@@ -135,7 +140,7 @@ at::Storage createStorageGetType(
     TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_obj));
     scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
 
-    untyped_storage_obj = PyObject_GetAttrString(obj, "_storage");
+    untyped_storage_obj = PyObject_GetAttrString(obj, "_untyped_storage");
     TORCH_INTERNAL_ASSERT(untyped_storage_obj);
     Py_DECREF(untyped_storage_obj);
 

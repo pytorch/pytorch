@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -95,7 +96,7 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
  *         ]
  *     ]"
  *
- * @param compilation_unit Jit compilcation unit to look up function schema.
+ * @param compilation_unit Jit compilation unit to look up function schema.
  * @param type_ptr A type pointer and it can be possibly any type.
  * @param default_type_str The default string representation. The string can
  * either from type_ptr->str(), type_ptr->annotation_str(), or
@@ -874,11 +875,37 @@ void ExportModule(
       use_flatbuffer);
 }
 
-void (*_save_jit_module_to)(
+void save_jit_module(
+    const Module& module,
+    const std::string& filename,
+    const ExtraFilesMap& extra_files) {
+  auto buffer = save_jit_module_to_bytes(module, extra_files);
+  std::fstream ofile(filename, std::ios::binary | std::ios::out);
+  ofile.write(
+      reinterpret_cast<char*>(buffer->data()), buffer->size()); // NOLINT
+  ofile.close();
+}
+
+DetachedBuffer::UniqueDetachedBuffer save_jit_module_to_bytes(
+    const Module& module,
+    const ExtraFilesMap& extra_files) {
+  ExtraFilesMap jitfiles;
+  std::vector<IValue> constants;
+  jitModuleToPythonCodeAndConstants(module, &jitfiles, &constants);
+  CompilationOptions options = getOptionsFromGlobal();
+  mobile::Module mobilem = jitModuleToMobile(module, options);
+  return save_mobile_module_to_bytes(mobilem, extra_files, jitfiles, constants);
+}
+
+void save_jit_module_to_write_func(
     const Module& module,
     const ExtraFilesMap& extra_files,
     bool save_mobile_debug_info,
-    const std::function<size_t(const void*, size_t)>& writer_func) = nullptr;
+    const std::function<size_t(const void*, size_t)>& writer_func) {
+  (void)save_mobile_debug_info;
+  auto buffer = save_jit_module_to_bytes(module, extra_files);
+  writer_func(reinterpret_cast<void*>(buffer->data()), buffer->size());
+}
 
 void ExportModule(
     const Module& module,
@@ -888,14 +915,8 @@ void ExportModule(
     bool save_mobile_debug_info,
     bool use_flatbuffer) {
   if (use_flatbuffer) {
-    if (_save_jit_module_to != nullptr) {
-      _save_jit_module_to(
-          module, extra_files, save_mobile_debug_info, writer_func);
-    } else {
-      TORCH_CHECK(
-          false,
-          "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
-    }
+    save_jit_module_to_write_func(
+        module, extra_files, save_mobile_debug_info, writer_func);
   } else {
     caffe2::serialize::PyTorchStreamWriter writer(writer_func);
     ScriptModuleSerializer serializer(writer);

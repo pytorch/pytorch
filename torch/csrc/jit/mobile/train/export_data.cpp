@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/mobile/import_export_common.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
@@ -131,14 +132,7 @@ void _save_parameters(
   };
 
   if (use_flatbuffer) {
-    if (_save_mobile_module_to != nullptr) {
-      _save_mobile_module_to(mobile::tensor_dict_to_mobile(dict), write_func);
-    } else {
-      TORCH_CHECK(
-          false,
-          "Trying to export as flatbuffer file but "
-          "the build hasn't enabled flatbuffer");
-    }
+    save_mobile_module_to_func(mobile::tensor_dict_to_mobile(dict), write_func);
   } else {
     // For Pickle, we only serialize the dict itself.
     mobile::IValuePickler pickler(write_func);

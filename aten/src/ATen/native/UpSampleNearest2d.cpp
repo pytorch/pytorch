@@ -167,28 +167,6 @@ Tensor _upsample_nearest_exact2d(
   return at::_upsample_nearest_exact2d(input, osize, scale_h, scale_w);
 }
 
-Tensor upsample_nearest2d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return at::upsample_nearest2d_backward(grad_output, osize, input_size, scale_h, scale_w);
-}
-
-Tensor _upsample_nearest_exact2d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return at::_upsample_nearest_exact2d_backward(grad_output, osize, input_size, scale_h, scale_w);
-}
-
 DEFINE_DISPATCH(upsample_nearest2d_kernel);
 DEFINE_DISPATCH(_upsample_nearest_exact2d_kernel);
 DEFINE_DISPATCH(upsample_nearest2d_backward_kernel);

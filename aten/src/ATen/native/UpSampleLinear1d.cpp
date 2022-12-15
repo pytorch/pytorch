@@ -99,17 +99,6 @@ Tensor upsample_linear1d(
   return at::upsample_linear1d(input, osize, align_corners, scale_w);
 }
 
-Tensor upsample_linear1d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_w = get_scale_value(scale_factors, 0);
-  return at::upsample_linear1d_backward(grad_output, osize, input_size, align_corners, scale_w);
-}
-
 DEFINE_DISPATCH(upsample_linear1d_kernel);
 DEFINE_DISPATCH(upsample_linear1d_backward_kernel);
 

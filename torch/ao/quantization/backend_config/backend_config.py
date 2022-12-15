@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 import torch
-from torch.ao.quantization.observer import _PartialWrapper
 from torch.ao.quantization.utils import Pattern
 from enum import Enum
 
@@ -30,6 +29,7 @@ CONFIGS_DICT_KEY = "configs"
 
 # BackendPatternConfig dict keys
 PATTERN_DICT_KEY = "pattern"
+PATTERN_COMPLEX_FORMAT_DICT_KEY = "pattern_complex_format"
 OBSERVATION_TYPE_DICT_KEY = "observation_type"
 DTYPE_CONFIGS_DICT_KEY = "dtype_configs"
 ROOT_MODULE_DICT_KEY = "root_module"
@@ -42,8 +42,6 @@ EXTRA_INPUTS_GETTER_DICT_KEY = "extra_inputs_getter"
 NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY = "num_tensor_args_to_observation_type"
 INPUT_TYPE_TO_INDEX_DICT_KEY = "input_type_to_index"
 INPUT_OUTPUT_OBSERVED_DICT_KEY = "input_output_observed"
-OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY = "overwrite_output_fake_quantize"
-OVERWRITE_OUTPUT_OBSERVER_DICT_KEY = "overwrite_output_observer"
 
 
 # TODO: maybe rename this to something that's not related to observer
@@ -69,14 +67,17 @@ class ObservationType(Enum):
 @dataclass
 class DTypeWithConstraints:
     """
-    Config for specifying additional constraints for a given dtype, such as quantization value
-    ranges and scale value ranges, to be used in :class:`~torch.ao.quantization.backend_config.DTypeConfig`.
+    Config for specifying additional constraints for a given dtype, such as quantization
+    value ranges, scale value ranges, and fixed quantization params, to be used in
+    :class:`~torch.ao.quantization.backend_config.DTypeConfig`.
     """
     dtype: Optional[torch.dtype] = None
     quant_min_lower_bound: Union[int, float, None] = None
     quant_max_upper_bound: Union[int, float, None] = None
     scale_min_lower_bound: Union[int, float, None] = None
     scale_max_upper_bound: Union[int, float, None] = None
+    scale_exact_match: Optional[float] = None
+    zero_point_exact_match: Optional[int] = None
 
 
 @dataclass
@@ -228,36 +229,58 @@ class BackendConfig:
     Example usage::
 
         import torch
-        from torch.ao.quantization.backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
-        from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
+        from torch.ao.quantization.backend_config import (
+            BackendConfig,
+            BackendPatternConfig,
+            DTypeConfig,
+            ObservationType,
+        )
 
         weighted_int8_dtype_config = DTypeConfig(
             input_dtype=torch.quint8,
             output_dtype=torch.quint8,
             weight_dtype=torch.qint8,
-            bias_type=torch.float)
+            bias_dtype=torch.float)
 
+        def fuse_conv2d_relu(is_qat, conv, relu):
+            return torch.ao.nn.intrinsic.ConvReLU2d(conv, relu)
+
+        # For quantizing Linear
         linear_config = BackendPatternConfig(torch.nn.Linear) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
             .add_dtype_config(weighted_int8_dtype_config) \
             .set_root_module(torch.nn.Linear) \
-            .set_qat_module(torch.nn.qat.Linear) \
-            .set_reference_quantized_module(torch.nn.quantized._reference.Linear)
+            .set_qat_module(torch.ao.nn.qat.Linear) \
+            .set_reference_quantized_module(torch.ao.nn.quantized.reference.Linear)
 
-        conv_relu_config = BackendPatternConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
+        # For fusing Conv2d + ReLU into ConvReLU2d
+        conv_relu_config = BackendPatternConfig((torch.nn.Conv2d, torch.nn.ReLU)) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
             .add_dtype_config(weighted_int8_dtype_config) \
-            .set_fused_module(torch.nn.intrinsic.ConvReLU2d) \
-            .set_fuser_method(reverse_sequential_wrapper2(torch.nn.intrinsic.ConvReLU2d))
+            .set_fused_module(torch.ao.nn.intrinsic.ConvReLU2d) \
+            .set_fuser_method(fuse_conv2d_relu)
+
+        # For quantizing ConvReLU2d
+        fused_conv_relu_config = BackendPatternConfig(torch.ao.nn.intrinsic.ConvReLU2d) \
+            .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
+            .add_dtype_config(weighted_int8_dtype_config) \
+            .set_root_module(torch.nn.Conv2d) \
+            .set_qat_module(torch.ao.nn.intrinsic.qat.ConvReLU2d) \
+            .set_reference_quantized_module(torch.ao.nn.quantized.reference.Conv2d)
 
         backend_config = BackendConfig("my_backend") \
             .set_backend_pattern_config(linear_config) \
-            .set_backend_pattern_config(conv_relu_config)
+            .set_backend_pattern_config(conv_relu_config) \
+            .set_backend_pattern_config(fused_conv_relu_config)
 
     """
     def __init__(self, name: str = ""):
         self.name = name
-        self.configs: Dict[Pattern, BackendPatternConfig] = {}
+        # Store all BackendPatternConfigs in a map to handle duplicates
+        # Note: the key in this map uses the complex reversed tuple format.
+        # This is intended only for internal use; users who wish to access
+        # the original patterns should go through `self.configs` instead.
+        self._pattern_complex_format_to_config: Dict[Pattern, BackendPatternConfig] = {}
 
     def set_name(self, name: str) -> BackendConfig:
         """
@@ -271,7 +294,10 @@ class BackendConfig:
         Set the config for an pattern that can be run on the target backend.
         This overrides any existing config for the given pattern.
         """
-        self.configs[config.pattern] = config
+        # Avoid circular dependencies
+        pattern_complex_format = torch.ao.quantization.backend_config.utils \
+            ._get_pattern_in_reversed_nested_tuple_format(config)  # type: ignore[attr-defined]
+        self._pattern_complex_format_to_config[pattern_complex_format] = config
         return self
 
     def set_backend_pattern_configs(self, configs: List[BackendPatternConfig]) -> BackendConfig:
@@ -282,6 +308,13 @@ class BackendConfig:
         for conf in configs:
             self.set_backend_pattern_config(conf)
         return self
+
+    @property
+    def configs(self) -> List[BackendPatternConfig]:
+        """
+        Return a copy of the list of configs set in this `BackendConfig`.
+        """
+        return list(self._pattern_complex_format_to_config.values())
 
     @classmethod
     def from_dict(cls, backend_config_dict: Dict[str, Any]) -> BackendConfig:
@@ -310,7 +343,7 @@ class BackendConfig:
         """
         return {
             NAME_DICT_KEY: self.name,
-            CONFIGS_DICT_KEY: [c.to_dict() for c in self.configs.values()],
+            CONFIGS_DICT_KEY: [c.to_dict() for c in self.configs],
         }
 
 
@@ -320,8 +353,8 @@ class BackendPatternConfig:
     For a detailed example usage, see :class:`~torch.ao.quantization.backend_config.BackendConfig`.
 
     """
-    def __init__(self, pattern: Pattern):
-        self.pattern = pattern
+    def __init__(self, pattern: Optional[Pattern] = None):
+        self.pattern: Optional[Pattern] = pattern
         self.observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
         self.dtype_configs: List[DTypeConfig] = []
         self.root_module: Optional[Type[torch.nn.Module]] = None
@@ -336,8 +369,20 @@ class BackendPatternConfig:
         self._num_tensor_args_to_observation_type: Dict[int, ObservationType] = {}
         self._input_type_to_index: Dict[str, int] = {}
         self._input_output_observed: Optional[bool] = None
-        self._overwrite_output_fake_quantize: Optional[_PartialWrapper] = None
-        self._overwrite_output_observer: Optional[_PartialWrapper] = None
+        self._pattern_complex_format: Optional[Pattern] = None
+
+    def set_pattern(self, pattern: Pattern) -> BackendPatternConfig:
+        """
+        Set the pattern to configure.
+
+        The pattern can be a float module, functional operator, pytorch operator, or a tuple
+        combination of the above. Tuple patterns are treated as sequential patterns, and
+        currently only tuples of 2 or 3 elements are supported.
+        """
+        if self._pattern_complex_format is not None:
+            raise ValueError("Only one of 'pattern' or 'pattern_complex_format' can be set")
+        self.pattern = pattern
+        return self
 
     def set_observation_type(self, observation_type: ObservationType) -> BackendPatternConfig:
         """
@@ -405,9 +450,13 @@ class BackendPatternConfig:
         Set the function that specifies how to fuse the pattern for this pattern.
 
         The first argument of this function should be `is_qat`, and the rest of the arguments
-        should be the items in the tuple pattern, e.g. (`torch.nn.ReLU`, `torch.nn.Linear`)
-        will have a function with three arguments, `is_qat`, `relu`, and `linear`.
-        The return value of this function should be the resulting fused module.
+        should be the items in the tuple pattern. The return value of this function should be
+        the resulting fused module.
+
+        For example, the fuser method for the pattern `(torch.nn.Linear, torch.nn.ReLU)` can be:
+
+            def fuse_linear_relu(is_qat, linear, relu):
+                return torch.ao.nn.intrinsic.LinearReLU(linear, relu)
         """
         self.fuser_method = fuser_method
         return self
@@ -433,12 +482,16 @@ class BackendPatternConfig:
         self._input_output_observed = input_output_observed
         return self
 
-    def _set_overwrite_output_fake_quantize(self, overwrite_output_fake_quantize: _PartialWrapper) -> BackendPatternConfig:
-        self._overwrite_output_fake_quantize = overwrite_output_fake_quantize
-        return self
+    def _set_pattern_complex_format(self, pattern: Pattern) -> BackendPatternConfig:
+        """
+        Set the pattern to configure, using the reversed nested tuple format.
 
-    def _set_overwrite_output_observer(self, overwrite_output_observer: _PartialWrapper) -> BackendPatternConfig:
-        self._overwrite_output_observer = overwrite_output_observer
+        See the BackendConfig README for more detail:
+        https://github.com/pytorch/pytorch/blob/master/torch/ao/quantization/backend_config/README.md#advanced-pattern-specification
+        """
+        if self.pattern is not None:
+            raise ValueError("Only one of 'pattern' or 'pattern_complex_format' can be set")
+        self._pattern_complex_format = pattern
         return self
 
     @classmethod
@@ -456,6 +509,7 @@ class BackendPatternConfig:
             implementation for this pattern's root module.
             "fused_module": a :class:`torch.nn.Module` that represents the fused implementation for this pattern
             "fuser_method": a function that specifies how to fuse the pattern for this pattern
+            "pattern_complex_format": the pattern specified in the reversed nested tuple format (deprecated)
 
         """
         def _get_dtype_config(obj: Any) -> DTypeConfig:
@@ -469,9 +523,9 @@ class BackendPatternConfig:
             raise ValueError("Expected a list of DTypeConfigs in backend_pattern_config_dict[\"%s\"], got '%s'" %
                              (DTYPE_CONFIGS_DICT_KEY, type(obj)))
 
-        if PATTERN_DICT_KEY not in backend_pattern_config_dict:
-            raise ValueError("backend_pattern_config_dict must contain '%s'" % PATTERN_DICT_KEY)
-        conf = cls(backend_pattern_config_dict[PATTERN_DICT_KEY])
+        conf = cls()
+        if PATTERN_DICT_KEY in backend_pattern_config_dict:
+            conf.set_pattern(backend_pattern_config_dict[PATTERN_DICT_KEY])
         if OBSERVATION_TYPE_DICT_KEY in backend_pattern_config_dict:
             conf.set_observation_type(backend_pattern_config_dict[OBSERVATION_TYPE_DICT_KEY])
         for d in backend_pattern_config_dict.get(DTYPE_CONFIGS_DICT_KEY, []):
@@ -487,8 +541,8 @@ class BackendPatternConfig:
             backend_pattern_config_dict.get(NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY, {}))
         conf._set_input_type_to_index(backend_pattern_config_dict.get(INPUT_TYPE_TO_INDEX_DICT_KEY, {}))
         conf._set_input_output_observed(backend_pattern_config_dict.get(INPUT_OUTPUT_OBSERVED_DICT_KEY, None))
-        conf._set_overwrite_output_fake_quantize(backend_pattern_config_dict.get(OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY, None))
-        conf._set_overwrite_output_observer(backend_pattern_config_dict.get(OVERWRITE_OUTPUT_OBSERVER_DICT_KEY, None))
+        if PATTERN_COMPLEX_FORMAT_DICT_KEY in backend_pattern_config_dict:
+            conf._set_pattern_complex_format(backend_pattern_config_dict[PATTERN_COMPLEX_FORMAT_DICT_KEY])
         return conf
 
     def to_dict(self) -> Dict[str, Any]:
@@ -497,10 +551,11 @@ class BackendPatternConfig:
         :func:`~torch.ao.quantization.backend_config.BackendPatternConfig.from_dict`.
         """
         backend_pattern_config_dict: Dict[str, Any] = {
-            PATTERN_DICT_KEY: self.pattern,
             OBSERVATION_TYPE_DICT_KEY: self.observation_type,
             DTYPE_CONFIGS_DICT_KEY: [c.to_dict() for c in self.dtype_configs],
         }
+        if self.pattern is not None:
+            backend_pattern_config_dict[PATTERN_DICT_KEY] = self.pattern
         if self.root_module is not None:
             backend_pattern_config_dict[ROOT_MODULE_DICT_KEY] = self.root_module
         if self.qat_module is not None:
@@ -521,8 +576,6 @@ class BackendPatternConfig:
             backend_pattern_config_dict[INPUT_TYPE_TO_INDEX_DICT_KEY] = self._input_type_to_index
         if self._input_output_observed is not None:
             backend_pattern_config_dict[INPUT_OUTPUT_OBSERVED_DICT_KEY] = self._input_output_observed
-        if self._overwrite_output_fake_quantize is not None:
-            backend_pattern_config_dict[OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY] = self._overwrite_output_fake_quantize
-        if self._overwrite_output_observer is not None:
-            backend_pattern_config_dict[OVERWRITE_OUTPUT_OBSERVER_DICT_KEY] = self._overwrite_output_observer
+        if self._pattern_complex_format is not None:
+            backend_pattern_config_dict[PATTERN_COMPLEX_FORMAT_DICT_KEY] = self._pattern_complex_format
         return backend_pattern_config_dict
