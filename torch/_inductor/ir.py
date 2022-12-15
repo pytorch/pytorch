@@ -3349,6 +3349,30 @@ class Convolution(ExternKernelAlloc):
         )
 
 
+# class InplaceBernoulliFallback(ExternKernel):
+
+#         (x,) = [t.codegen_reference() for t in self.inputs]
+#         wrapper.writeline(
+#             f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
+#         )
+
+#     def should_allocate(self):
+#         return False
+
+#     def get_mutation_names(self):
+#         assert isinstance(self.layout, MutationLayout)
+#         return (self.layout.target.get_name(),)
+
+#     def __init__(self, x, *constant_args):
+#         super().__init__(
+#             None,
+#             MutationLayout(x),
+#             self.unwrap_storage([x]),
+#             constant_args,
+#         )
+#         self.name = V.graph.register_buffer(self)
+
+
 class AllReduce(ExternKernelAlloc):
     # allreduce_ can't be called from python, without fixing bindings
     #  --> try implementing traceable_allreduce and adding POD types to api for rank/size?
@@ -3378,32 +3402,15 @@ class AllReduce(ExternKernelAlloc):
         assert isinstance(self.layout, MutationLayout)
         return (self.layout.target.get_name(),)
 
-    # def codegen(self, wrapper):
-    #     wrapper.header.writeline(
-    #         f"import torch.cuda.nccl as nccl"
-    #     )
-    #     # comm_stream = wrapper.write_get_cuda_stream(10)
-    #     wrapper.writeline(
-    #         # streams=[...]
-    #         f"nccl.all_reduce([{', '.join(self.codegen_args())}], op=nccl.SUM)"
-    #     )
-    #     wrapper.writeline(
-    #         f"{self.get_name()} = {self.codegen_args()[0]}"
-    #     )
-
     def codegen(self, wrapper):
-        wrapper.header.writeline(
-            f"import torch.distributed as dist"
-        )
+        wrapper.header.writeline("import torch.distributed as dist")
+        (x,) = [t.codegen_reference() for t in self.inputs]
         wrapper.writeline(
-            f"{self.get_name()}_work = dist.all_reduce({self.codegen_args()[0]}, async_op=True)"
+            f"{self.get_name()}_work = dist.all_reduce({x}, async_op=True)"
         )
-        wrapper.writeline(
-            f"{self.get_name()}_work.wait()"
-        )
-        wrapper.writeline(
-            f"{self.get_name()} = {self.codegen_args()[0]}"
-        )
+        wrapper.writeline(f"{self.get_name()}_work.wait()")
+        wrapper.writeline(f"{self.get_name()} = {self.codegen_args()[0]}")
+
 
 def _prepare_convolution_fusion_create(
     cls,
