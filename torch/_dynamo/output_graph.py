@@ -369,7 +369,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
             def wrap_name(module_key):
                 return wrap_fx_proxy(
-                    self,
+                    self.root_tx,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=target,
                     **options,
