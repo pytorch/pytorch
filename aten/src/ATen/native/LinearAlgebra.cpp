@@ -1300,7 +1300,7 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
   check_1d(self, "self", "outer");
   check_1d(vec2, "vec2", "outer");
 
-  return self.reshape({self.size(0), 1}) * vec2;
+  return self.reshape_symint({self.sym_size(0), 1}) * vec2;
 }
 
 static void addmm_impl_cpu_(

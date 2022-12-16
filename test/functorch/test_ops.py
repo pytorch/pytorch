@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_ARM64, IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like, IS_WINDOWS
+    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like, IS_WINDOWS
 import torch
 from torch import Tensor
 import functools
@@ -36,6 +36,7 @@ from common_utils import (
     is_valid_inplace_sample_input,
     loop,
     loop2,
+    expectedFailureIf
 )
 from torch.testing._internal.autograd_function_db import (
     autograd_function_db
@@ -435,7 +436,7 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
         decorate('linalg.det', 'singular',
-                 decorator=unittest.skipIf(IS_MACOS and IS_X86, "Fails on x86 MacOS CI")),
+                 decorator=expectedFailureIf(IS_MACOS and IS_X86)),
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
@@ -931,8 +932,6 @@ class TestOperators(TestCase):
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
-        decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "Fails on M1")),
-        decorate('linalg.det', 'singular', decorator=unittest.skipIf(IS_MACOS, "Fails on x86 MacOS CI")),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
         xfail('as_strided', 'partial_views'),  # Tensor-likes are not close!
@@ -978,7 +977,9 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}),
     ))
-    @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail)
+    @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail.union({
+        decorate('linalg.det', 'singular', decorator=expectedFailureIf(IS_MACOS and IS_X86)),
+    }))
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
     # because that coresponds to "batched forward-mode AD" testing in PyTorch core

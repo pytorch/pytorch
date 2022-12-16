@@ -9,6 +9,7 @@ import functools
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional
+from torch._functorch.autograd_function import custom_function_call
 
 __all__ = ["FunctionCtx", "BackwardCFunction", "FunctionMeta", "Function", "once_differentiable", "traceable",
            "InplaceFunction", "NestedIOFunction"]
@@ -420,7 +421,7 @@ class Function(_SingleLevelFunction):
 
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
-            args = _functorch.utils.unwrap_dead_wrappers(args)  # type: ignore[attr-defined]
+            args = _functorch.utils.unwrap_dead_wrappers(args)
             return super().apply(*args, **kwargs)
 
         if not hasattr(cls, 'setup_context'):
@@ -431,7 +432,7 @@ class Function(_SingleLevelFunction):
                 '(vmap, grad, jvp, jacrev, ...), it must have a setup_context ',
                 'staticmethod.')
 
-        return torch._functorch.autograd_function.custom_function_call(  # type: ignore[attr-defined]
+        return custom_function_call(  # type: ignore[attr-defined]
             cls, getattr(cls, 'generate_vmap_rule', False), *args, **kwargs)
 
 def once_differentiable(fn):
