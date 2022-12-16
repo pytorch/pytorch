@@ -515,7 +515,6 @@ class TestFSDPMisc(FSDPTest):
         # Manually construct this list but verify against the global list of
         # homogeneous attribute names
         all_attr_name_and_values = [
-            ("process_group", self.process_group, dist.new_group(backend="nccl")),
             (
                 "backward_prefetch",
                 BackwardPrefetch.BACKWARD_PRE,
