@@ -23,7 +23,6 @@ Note:
 
 import copy
 import dataclasses
-import io
 import unittest
 from typing import (
     AbstractSet,
@@ -36,11 +35,10 @@ from typing import (
     Union,
 )
 
-import onnx
 import onnx_test_common
 
 import torch
-from torch.onnx import _constants, verification
+from torch.onnx import _constants
 from torch.testing._internal import (
     common_device_type,
     common_methods_invocations,
@@ -54,31 +52,6 @@ MIN_ONNX_OPSET_VERSION = 9
 MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
 
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
-
-SUPPORTED_DTYPES = (
-    # Boolean
-    torch.bool,
-    # Integers
-    torch.uint8,
-    torch.int8,
-    torch.int16,
-    torch.int32,
-    torch.int64,
-    # Floating types
-    torch.float16,
-    torch.float32,
-    torch.float64,
-    torch.bfloat16,
-    # QInt types
-    torch.qint8,
-    torch.quint8,
-    # Complex types
-    torch.complex32,
-    torch.complex64,
-    torch.complex128,
-)
-
-# Convenience tuples for creating dtype lists when skipping or xfailing tests
 
 BOOL_TYPES = (torch.bool,)
 
@@ -99,7 +72,6 @@ FLOAT_TYPES = (
     torch.float16,
     torch.float32,
     torch.float64,
-    torch.bfloat16,
 )
 
 COMPLEX_TYPES = (
@@ -108,12 +80,29 @@ COMPLEX_TYPES = (
     torch.complex128,
 )
 
+SUPPORTED_DTYPES = (
+    # Boolean
+    torch.bool,
+    # Integers
+    *INT_TYPES,
+    # Floating types
+    *FLOAT_TYPES,
+)
+
 
 @dataclasses.dataclass
 class DecorateMeta:
-    """A dataclass for storing information about a test case to skip or xfail.
+    """Information about a test case to skip or xfail.
 
     Adapted from functorch: functorch/test/common_utils.py
+
+    Attributes:
+        op_name: The name of the operator.
+        variant_name: The name of the OpInfo variant.
+        decorator: The decorator to apply to the test case.
+        opsets: The opsets to apply the decorator to.
+        dtypes: The dtypes to apply the decorator to.
+        reason: The reason for skipping.
     """
 
     op_name: str
@@ -136,9 +125,9 @@ def xfail(
     op_name: str,
     variant_name: str = "",
     *,
+    reason: str,
     opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
-    reason: Optional[str] = None,
 ):
     """Expects a OpInfo test to fail.
 
@@ -149,8 +138,6 @@ def xfail(
         dtypes: The dtypes to expect the failure.
         reason: The reason for the failure.
     """
-    if reason is None:
-        raise ValueError("Please specify a reason.")
     return DecorateMeta(
         op_name=op_name,
         variant_name=variant_name,
@@ -165,9 +152,9 @@ def dont_care(
     op_name: str,
     variant_name: str = "",
     *,
+    reason: str,
     opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
-    reason: Optional[str] = None,
 ):
     """Skips a test case in OpInfo that we don't care about.
 
@@ -180,8 +167,6 @@ def dont_care(
         dtypes: The dtypes to expect the failure.
         reason: The reason for the failure.
     """
-    if reason is None:
-        raise ValueError("Please specify a reason.")
     return DecorateMeta(
         op_name=op_name,
         variant_name=variant_name,
@@ -196,9 +181,9 @@ def fixme(
     op_name: str,
     variant_name: str = "",
     *,
+    reason: str,
     opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
-    reason: Optional[str] = None,
 ):
     """Skips a test case in OpInfo. It should be eventually fixed.
 
@@ -209,8 +194,6 @@ def fixme(
         dtypes: The dtypes to expect the failure.
         reason: The reason for the failure.
     """
-    if reason is None:
-        raise ValueError("Please specify a reason.")
     return DecorateMeta(
         op_name=op_name,
         variant_name=variant_name,
@@ -228,7 +211,15 @@ def add_decorate_info(
     opset: int,
     skip_or_xfails: Iterable[DecorateMeta],
 ):
-    """Decorates OpInfo tests with decorators based on the skip_or_xfails list."""
+    """Decorates OpInfo tests with decorators based on the skip_or_xfails list.
+
+    Args:
+        all_opinfos: All OpInfos.
+        test_class_name: The name of the test class.
+        base_test_name: The name of the test method.
+        opset: The opset to decorate for.
+        skip_or_xfails: DecorateMeta's.
+    """
     ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
     for decorate_meta in skip_or_xfails:
         if not decorate_meta.contains_opset(opset):
@@ -331,21 +322,13 @@ ALLOWLIST_OP: AbstractSet[str] = frozenset(
 #    Use xfail if a test fails now and we want to eventually fix the test.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     dont_care(
-        "ceil", dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
+        "ceil", dtypes=BOOL_TYPES + INT_TYPES,
         reason=reason_onnx_does_not_support("Ceil")
     ),
     fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
     xfail(
-        "div", variant_name="no_rounding_mode", dtypes=COMPLEX_TYPES,
-        reason=reason_jit_tracer_error("complex types")
-    ),
-    xfail(
-        "div", variant_name="floor_rounding", dtypes=COMPLEX_TYPES,
-        reason=reason_jit_tracer_error("complex types")
-    ),
-    xfail(
-        "div", variant_name="trunc_rounding", dtypes=(torch.float16,) + COMPLEX_TYPES,
-        reason=reason_jit_tracer_error("f16 and complex types")
+        "div", variant_name="trunc_rounding", dtypes=(torch.float16,),
+        reason=reason_jit_tracer_error("f16 types")
     ),
     fixme(
         "div", variant_name="no_rounding_mode", dtypes=[torch.uint8, torch.int8, torch.int16],
@@ -363,16 +346,13 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
         "div", variant_name="trunc_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
         reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
     ),
-    xfail("floor_divide", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
     fixme("floor_divide", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
     xfail(
         "remainder", dtypes=[torch.uint8, torch.int8, torch.int16], opsets=[opsets_before(11)],
         reason="Sub not defined for u8, i16 before opset 14. Mod is used after 11 so we support from opset 11.",
     ),
     fixme("remainder", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
-    dont_care("sqrt", dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
-    xfail("t", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
-    xfail("true_divide", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
+    dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
 )
 # fmt: on
 
@@ -431,18 +411,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                     # Run the test
                     inputs = (cpu_sample.input, *cpu_sample.args)
 
-                    if dtype == torch.bfloat16:
-                        # Only export to ONNX without running with onnxruntime because
-                        # the CPU execution path for bfloat16 is not implemented in onnxruntime.
-                        model_buffer = io.BytesIO()
-                        torch.onnx.export(
-                            model, inputs, model_buffer, opset_version=opset
-                        )
-                        model_buffer.seek(0)
-                        onnx_model = onnx.load(model_buffer)
-                        onnx.checker.check_model(onnx_model, full_check=True)
-                        continue
-
                     self.run_test(model, inputs)
 
         test_name = f"test_output_match_opset_{opset}"
@@ -451,7 +419,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
     @classmethod
     def parameterize_opsets(cls, opsets: Sequence[int]):
-        """Parameterizes the TestOnnxModelOutputConsistency class with the given opsets."""
+        """Parametrizes the TestOnnxModelOutputConsistency class with the given opsets."""
         for opset in opsets:
             # Generate a test method for each opset
             base_method = cls.create_test_base(opset)
@@ -468,17 +436,10 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
             )
 
             # Create parameterized tests for each op
-            if opset < 13:
-                # bfloat16 is not supported before opset 13
-                allowed_dtypes = tuple(
-                    [dtype for dtype in SUPPORTED_DTYPES if dtype != torch.bfloat16]
-                )
-            else:
-                allowed_dtypes = SUPPORTED_DTYPES
             filtered_ops = [op for op in OPS_DB if op.name in ALLOWLIST_OP]
             decorated = common_device_type.ops(
                 filtered_ops,
-                allowed_dtypes=allowed_dtypes,
+                allowed_dtypes=SUPPORTED_DTYPES,
             )(base_method)
 
             setattr(cls, test_name, decorated)

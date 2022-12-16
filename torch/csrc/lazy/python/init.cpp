@@ -42,9 +42,9 @@ std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
 
 std::string GetTensorsDump(
     const std::vector<at::Tensor>& tensors,
-    const std::function<std::string(c10::ArrayRef<torch::lazy::Node*>)>&
+    const std::function<std::string(c10::ArrayRef<const torch::lazy::Node*>)>&
         coverter) {
-  std::vector<torch::lazy::Node*> nodes;
+  std::vector<const torch::lazy::Node*> nodes;
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
     auto inner = at::functionalization::impl::from_functional_tensor(tensor);
@@ -126,8 +126,10 @@ void initLazyBindings(PyObject* module) {
         torch::lazy::LazyGraphExecutor::Get()->WaitDeviceOps({});
       },
       py::arg("devices"));
-  lazy.def(
-      "_reset_metrics", []() { torch::lazy::MetricsArena::Get()->Reset(); });
+  lazy.def("_reset_metrics", []() {
+    torch::lazy::MetricsArena::Get()->ResetCounters();
+    torch::lazy::MetricsArena::Get()->ResetMetrics();
+  });
   lazy.def("_counter_names", []() { return torch::lazy::GetCounterNames(); });
   lazy.def(
       "_metrics_report", []() { return torch::lazy::CreateMetricReport(); });
@@ -142,7 +144,7 @@ void initLazyBindings(PyObject* module) {
   lazy.def(
       "_get_tensors_text",
       [](const std::vector<at::Tensor>& tensors) -> std::string {
-        auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
+        auto coverter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
           return torch::lazy::DumpUtil::ToText(nodes);
         };
         return GetTensorsDump(tensors, coverter);
@@ -150,7 +152,7 @@ void initLazyBindings(PyObject* module) {
   lazy.def(
       "_get_tensors_dot",
       [](const std::vector<at::Tensor>& tensors) -> std::string {
-        auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
+        auto coverter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
           return torch::lazy::DumpUtil::ToDot(nodes);
         };
         return GetTensorsDump(tensors, coverter);
@@ -222,7 +224,7 @@ void initLazyBindings(PyObject* module) {
       [](const std::vector<at::Tensor>& tensors)
           -> std::pair<std::vector<int64_t>, std::vector<at::IValue>> {
 #if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
-        std::vector<Node*> roots;
+        std::vector<const Node*> roots;
         for (auto& tensor : tensors) {
           auto xtensor = TryGetLtcTensor(tensor);
           roots.push_back(xtensor->GetIrValue().node.get());
@@ -305,6 +307,19 @@ void initLazyBindings(PyObject* module) {
 #endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
         return result;
       });
+
+  // GetPythonFramesFunction() has not ever worked with torchdeploy/multipy
+  // possibly becuase GetPythonFrames resolves to external cpython rather
+  // than embedded cpython. So far this problem has only been observed
+  // internally, so we will just block it off there.
+
+#if !(defined(USE_DEPLOY))
+
+  // When libtorch_python is loaded, we register the python frame getter
+  // otherwise, debug util simply omits python frames
+  GetPythonFramesFunction() = GetPythonFrames;
+
+#endif // USE_DEPLOY
 }
 
 } // namespace lazy

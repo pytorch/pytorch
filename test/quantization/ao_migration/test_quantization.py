@@ -17,11 +17,11 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             '_propagate_qconfig_helper',
             '_remove_activation_post_process',
             '_remove_qconfig',
-            'add_observer_',
+            '_add_observer_',
             'add_quant_dequant',
             'convert',
-            'get_observer_dict',
-            'get_unique_devices_',
+            '_get_observer_dict',
+            '_get_unique_devices_',
             'is_activation_post_process',
             'prepare',
             'prepare_qat',
@@ -29,7 +29,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'quantize',
             'quantize_dynamic',
             'quantize_qat',
-            'register_activation_post_process_hook',
+            '_register_activation_post_process_hook',
             'swap_module',
         ]
         self._test_function_import('quantize', function_list)
@@ -118,7 +118,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
     def test_function_import_quant_type(self):
         function_list = [
             'QuantType',
-            'quant_type_to_str',
+            '_get_quant_type_to_str',
         ]
         self._test_function_import('quant_type', function_list)
 
@@ -225,7 +225,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "get_fuser_method",
         ]
         dict_list = [
-            "DEFAULT_OP_LIST_TO_FUSER_METHOD"
+            "_DEFAULT_OP_LIST_TO_FUSER_METHOD"
         ]
         self._test_function_import('fuser_method_mappings', function_list)
         self._test_dict_import('fuser_method_mappings', dict_list)

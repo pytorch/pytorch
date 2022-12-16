@@ -1,4 +1,7 @@
-// (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
 
 #include <caffe2/torch/csrc/jit/backends/xnnpack/xnnpack_graph_builder.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
@@ -21,7 +24,6 @@ namespace delegate {
 std::shared_ptr<torch::jit::Graph> XNNGraph::optimizeAndTraceGraph(
     std::shared_ptr<torch::jit::Graph> graph,
     std::vector<c10::IValue>& example_inputs) {
-  graph = tensorexpr::removeUnusedSelfArgument(graph);
   OptimizeFrozenGraph(graph, true);
   RemoveListMutation(graph);
   RemoveTensorMutation(graph);
@@ -130,16 +132,20 @@ void XNNGraph::checkOpsToDelegate(std::shared_ptr<torch::jit::Graph>& graph) {
 std::string XNNGraph::serializedXNNGraph() {
   std::vector<uint32_t> input_ids;
   std::vector<uint32_t> output_ids;
+  std::unordered_set<uint32_t> num_externs;
 
   for (auto val : _inputs) {
     input_ids.push_back(_val_to_ids[val]);
+    num_externs.emplace(_val_to_ids[val]);
   }
 
   for (auto val : _outputs) {
     output_ids.push_back(_val_to_ids[val]);
+    num_externs.emplace(_val_to_ids[val]);
   }
 
-  return _serializer.finishAndSerialize(input_ids, output_ids);
+  return _serializer.finishAndSerialize(
+      input_ids, output_ids, num_externs.size());
 }
 
 std::vector<std::vector<long>> XNNGraph::getGraphOutputShapes() {
@@ -222,6 +228,22 @@ void XNNGraph::defineAllTensorValues() {
       // update flag for if tensor is either graph input/output
       uint32_t flags = 0;
 
+      // Check if value was produced by prim::Constant
+      void* value_data = nullptr;
+      size_t buffer_idx = 0;
+      size_t num_bytes = 0;
+      if (val->node()->kind() == prim::Constant) {
+        c10::optional<IValue> constant = val->node()->t(attr::value);
+        auto const_val = constant->toIValue().toTensor();
+        // Need tensor data to be contiguous for serialization
+        auto cont_const_val = const_val.contiguous();
+        value_data = cont_const_val.data_ptr();
+
+        num_bytes = const_val.storage().nbytes();
+        buffer_idx = _serializer.serializeData(
+            static_cast<const uint8_t*>(value_data), num_bytes);
+      }
+
       if (isGraphInput(val) || isGraphOutput(val)) {
         if (isGraphInput(val)) {
           flags |= XNN_VALUE_FLAG_EXTERNAL_INPUT;
@@ -236,21 +258,21 @@ void XNNGraph::defineAllTensorValues() {
           /*datatype=*/xnn_datatype_fp32,
           /*num_dims=*/num_dims,
           /*dims=*/tensor_shape.data(),
-          /*data=*/nullptr, // currently no constant data
+          /*data=*/value_data,
           /*external_id=*/ext_id,
           /*flags=*/flags,
           /*id_out=*/&id);
+      TORCH_CHECK(
+          status == xnn_status_success,
+          "failed to define xnn_tensor_id for: " + val->debugName());
       _serializer.serializeTensorValue(
           xnn_datatype_fp32,
           num_dims,
           tensor_shape,
-          nullptr,
+          buffer_idx,
           ext_id,
           flags,
           id);
-      TORCH_CHECK(
-          status == xnn_status_success,
-          "failed to define xnn_tensor_id for: " + val->debugName());
       _val_to_ids.insert({val, id});
     }
   }

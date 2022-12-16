@@ -3436,18 +3436,7 @@ add_docstr_all(
     r"""
 narrow(dimension, start, length) -> Tensor
 
-See :func:`torch.narrow`
-
-Example::
-
-    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    >>> x.narrow(0, 0, 2)
-    tensor([[ 1,  2,  3],
-            [ 4,  5,  6]])
-    >>> x.narrow(1, 1, 2)
-    tensor([[ 2,  3],
-            [ 5,  6],
-            [ 8,  9]])
+See :func:`torch.narrow`.
 """,
 )
 
@@ -4796,12 +4785,7 @@ In-place version of :meth:`~Tensor.squeeze`
 add_docstr_all(
     "std",
     r"""
-std(dim, unbiased=True, keepdim=False) -> Tensor
-
-See :func:`torch.std`
-
-.. function:: std(unbiased=True) -> Tensor
-   :noindex:
+std(dim=None, *, correction=1, keepdim=False) -> Tensor
 
 See :func:`torch.std`
 """,
@@ -5389,6 +5373,48 @@ Example::
     tensor(indices=tensor([[1]]),
            values=tensor([[ 9,  0, 10]]),
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
+
+.. method:: to_sparse(*, layout=None, blocksize=None) -> Tensor
+   :noindex:
+
+Returns a sparse tensor with the specified layout and blocksize.
+
+.. note:: If the :attr:`self` layout and blocksize parameters match
+          with the specified layout and blocksize, return
+          :attr:`self`. Otherwise, return a sparse tensor copy of
+          :attr:`self`.
+
+Args:
+
+    layout (:class:`torch.layout`, optional): The desired sparse
+      layout. One of ``torch.sparse_coo``, ``torch.sparse_csr``,
+      ``torch.sparse_csc``, ``torch.sparse_bsr``, or
+      ``torch.sparse_bsc``. Default: if ``None``,
+      ``torch.sparse_coo``.
+
+    blocksize (list, tuple, :class:`torch.Size`, optional): Block size
+      of the resulting BSR or BSC tensor. For other layouts,
+      specifying the block size that is not ``None`` will result in a
+      RuntimeError exception.  A block size must be a tuple of length
+      two such that its items evenly divide the two sparse dimensions.
+
+Example::
+
+    >>> x = torch.tensor([[1, 0], [0, 0], [2, 3]])
+    >>> x.to_sparse(layout=torch.sparse_coo)
+    tensor(indices=tensor([[0, 2, 2],
+                           [0, 0, 1]]),
+           values=tensor([1, 2, 3]),
+           size=(3, 2), nnz=3, layout=torch.sparse_coo)
+    >>> x.to_sparse(layout=torch.sparse_bsr, blocksize=(1, 2))
+    tensor(crow_indices=tensor([0, 1, 1, 2]),
+           col_indices=tensor([0, 0]),
+           values=tensor([[[1, 0]],
+                          [[2, 3]]]), size=(3, 2), nnz=2, layout=torch.sparse_bsr)
+    >>> x.to_sparse(layout=torch.sparse_bsr, blocksize=(2, 1))
+    RuntimeError: Tensor size(-2) 3 needs to be divisible by blocksize[0] 2
+    >>> x.to_sparse(layout=torch.sparse_csr, blocksize=(3, 1))
+    RuntimeError: to_sparse for Strided to SparseCsr conversion does not use specified blocksize
 """,
 )
 
@@ -5707,12 +5733,7 @@ In-place version of :meth:`~Tensor.unsqueeze`
 add_docstr_all(
     "var",
     r"""
-var(dim, unbiased=True, keepdim=False) -> Tensor
-
-See :func:`torch.var`
-
-.. function:: var(unbiased=True) -> Tensor
-   :noindex:
+var(dim=None, *, correction=1, keepdim=False) -> Tensor
 
 See :func:`torch.var`
 """,

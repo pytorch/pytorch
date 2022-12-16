@@ -75,8 +75,7 @@ cc_library(
         ]
     ) + if_cuda(glob(["gloo/cuda*.cc"])),
     copts = [
-        "-std=gnu++11",
-        "-std=c++11",
+        "-std=c++17",
     ],
     visibility = ["//visibility:public"],
     deps = [":gloo_headers"] + if_cuda(

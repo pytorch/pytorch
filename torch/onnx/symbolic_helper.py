@@ -1308,7 +1308,7 @@ def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
         from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
 
     if self.type().dim() is None:
-        return _unimplemented("index_fill", "input rank not accesible")
+        return _unimplemented("index_fill", "input rank not accessible")
     self_dim = self.type().dim()
     dim_value = _parse_arg(dim, "i")
     unsqueezed_index = _unsqueeze_helper(
