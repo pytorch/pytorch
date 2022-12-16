@@ -69,6 +69,9 @@ def _is_composable(state: _FSDPState):
 
 @no_type_check
 def _all_handles(state: _FSDPState) -> List:
+    """
+    Returns all ``FlatParamHandle`` s managed by ``state``.
+    """
     return (
         state._handles
         if _is_composable(state)
@@ -79,8 +82,8 @@ def _all_handles(state: _FSDPState) -> List:
 @no_type_check
 def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     """
-    Given a module and returns the flat handles that map to this module. If the
-    module is FullyShardedDataParallel, the module._handles will be returned.
+    Returns the ``FlatParamHandle`` s corresponding to ``module``. These are
+    the handles that contain some parameter in ``module``.
     """
     if _is_composable(state):
         assert (
@@ -93,7 +96,7 @@ def _module_handles(state: _FSDPState, module: nn.Module) -> List:
 
 @no_type_check
 def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
-    """Given a module and returns if this module has parameters sharded by FSDP."""
+    """Returns if ``module`` has parameters managed by FSDP."""
     return len(_module_handles(state, module)) > 0
 
 
