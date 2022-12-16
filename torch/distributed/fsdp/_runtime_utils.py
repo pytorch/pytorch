@@ -49,8 +49,6 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
 
 # Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
-    "backward_prefetch",
-    "forward_prefetch",
     "_use_orig_params",
     "limit_all_gathers",
 )
@@ -183,7 +181,6 @@ def _share_state_and_init_handle_attrs(
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
-    has_hybrid_sharding_strategy = False
     for fsdp_state in _get_fsdp_states(root_module):
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             p_assert(
@@ -198,7 +195,6 @@ def _share_state_and_init_handle_attrs(
             HandleShardingStrategy.HYBRID_SHARD,
             HandleShardingStrategy._HYBRID_SHARD_ZERO2,
         ):
-            has_hybrid_sharding_strategy = True
             # Share the all-reduce state across FSDP units. This is not strictly necessary
             # as each one already uses the same process group, but can slightly save memory
             # since other FSDP units allreduce state can be garbage collected.
@@ -865,26 +861,27 @@ def _post_backward_final_callback(
         state._is_root,
         "The post-backward callback should only be called on the root FSDP instance",
     )
+    root_state = state
 
-    if state._sync_gradients:
-        torch.cuda.current_stream().wait_stream(state._streams["post_backward"])
-        if state.cpu_offload.offload_params:
+    if root_state._sync_gradients:
+        torch.cuda.current_stream().wait_stream(root_state._streams["post_backward"])
+        if root_state.cpu_offload.offload_params:
             # Wait for non-blocking GPU -> CPU sharded gradient copies from the
             # post-backward hooks to finish explicitly since CPU gradients do
             # not automatically synchronize with the GPU
             torch.cuda.current_stream().synchronize()
-    state._exec_order_data.next_iter()
+    root_state._exec_order_data.next_iter()
 
-    for state in _get_fsdp_states(module):
-        _catch_all_reshard(state)
-        _finalize_params(state)
-        state._ran_pre_backward_hook.clear()
-        state.training_state = TrainingState.IDLE
-        for handle in state._handles:
+    for fsdp_state in _get_fsdp_states(module):
+        _catch_all_reshard(fsdp_state)
+        _finalize_params(fsdp_state)
+        fsdp_state._ran_pre_backward_hook.clear()
+        fsdp_state.training_state = TrainingState.IDLE
+        for handle in fsdp_state._handles:
             handle._training_state = HandleTrainingState.IDLE
-        state._handles_prefetched.clear()
+        fsdp_state._handles_prefetched.clear()
     # Reset for cases like one forward and multiple backwards
-    state._post_backward_callback_queued = False
+    root_state._post_backward_callback_queued = False
 
 
 @no_type_check
