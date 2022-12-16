@@ -855,6 +855,21 @@ def forward(self, a_1):
     mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
     return mul""")
 
+    def test_item_to_constructor(self):
+        def f(a):
+            r = a.item()
+            r.node.shape_env.expr_subs[r.node.expr].append(((r >= 0).node.expr, True))
+            r.node.shape_env.expr_subs[r.node.expr].append(((r == 0).node.expr, False))
+            r.node.shape_env.expr_subs[r.node.expr].append(((r == 1).node.expr, False))
+            r.node.shape_env.expr_subs[r.node.expr].append(((r == -1).node.expr, False))
+            return torch.empty(r)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
+    empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return empty""")
 
     def test_neg_shape(self):
         def f(a):
