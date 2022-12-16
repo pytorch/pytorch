@@ -131,6 +131,9 @@ CI_SKIP_INDUCTOR_TRAINING = [
 CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
+    "sebotnet33ts_256",  # accuracy
+    "tf_mixnet_l",  # This model is non-deterministic with same input + weights,
+    # but without optimizing over multiple iterations, this still passes
 }
 
 
@@ -1063,6 +1066,10 @@ class BenchmarkRunner:
         2) Checks if eager itself has variations.
         """
 
+        with open("in1.txt", "w") as f:
+            print(example_inputs, file=f)
+            print(list(model.parameters()), file=f)
+
         def record_status(accuracy_status):
             """
             Records the status in the csv file
@@ -1100,6 +1107,8 @@ class BenchmarkRunner:
             )
             self.init_optimizer(name, current_device, model_fp64.parameters())
             fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
+            with open("out1.txt", "w") as f:
+                print(fp64_outputs, file=f)
         except Exception:
             log.warning(
                 f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
