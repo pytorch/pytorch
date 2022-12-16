@@ -4,7 +4,7 @@ import os
 import re
 import sys
 import time
-from typing import Dict, Set, List, Optional
+from typing import Dict, List, Optional, Set
 
 import sympy
 
