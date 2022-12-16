@@ -49,8 +49,6 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
 
 # Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
-    "backward_prefetch",
-    "forward_prefetch",
     "_use_orig_params",
     "limit_all_gathers",
 )
@@ -191,7 +189,6 @@ def _share_state_and_init_handle_attrs(
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
-    has_hybrid_sharding_strategy = False
     for fsdp_state in _get_fsdp_states(root_module):
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             p_assert(
@@ -206,7 +203,6 @@ def _share_state_and_init_handle_attrs(
             HandleShardingStrategy.HYBRID_SHARD,
             HandleShardingStrategy._HYBRID_SHARD_ZERO2,
         ):
-            has_hybrid_sharding_strategy = True
             # Share the all-reduce state across FSDP units. This is not strictly necessary
             # as each one already uses the same process group, but can slightly save memory
             # since other FSDP units allreduce state can be garbage collected.
