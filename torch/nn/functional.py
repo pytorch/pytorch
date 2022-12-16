@@ -4929,6 +4929,7 @@ def multi_head_attention_forward(
     static_k: Optional[Tensor] = None,
     static_v: Optional[Tensor] = None,
     average_attn_weights: bool = True,
+    is_causal: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -4949,6 +4950,8 @@ def multi_head_attention_forward(
         need_weights: output attn_output_weights.
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
+        is_causal: If specified, applies a causal mask as attention mask. Mutually exclusive with providing attn_mask.
+            Default: ``False``.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
@@ -5014,6 +5017,7 @@ def multi_head_attention_forward(
             key_padding_mask=key_padding_mask,
             need_weights=need_weights,
             attn_mask=attn_mask,
+            is_causal=is_causal,
             use_separate_proj_weight=use_separate_proj_weight,
             q_proj_weight=q_proj_weight,
             k_proj_weight=k_proj_weight,
@@ -5184,7 +5188,7 @@ def multi_head_attention_forward(
     v = v.view(bsz, num_heads, src_len, head_dim)
 
     attn_output, attn_output_weights = _scaled_dot_product_attention(
-        q, k, v, attn_mask, dropout_p, need_weights, False)
+        q, k, v, attn_mask, dropout_p, need_weights, is_causal)
     attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
 
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
