@@ -105,6 +105,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
@@ -124,6 +125,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
@@ -142,6 +144,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cpu-cxx11-abi
     secrets:
@@ -662,6 +665,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
@@ -681,6 +685,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
@@ -699,6 +704,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu-cxx11-abi
     secrets:
@@ -1219,6 +1225,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
@@ -1238,6 +1245,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
@@ -1256,6 +1264,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-cxx11-abi
     secrets:
@@ -1776,6 +1785,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
@@ -1795,6 +1805,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
@@ -1813,6 +1824,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-cxx11-abi
     secrets:
@@ -2333,6 +2345,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
@@ -2352,6 +2365,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
@@ -2370,6 +2384,7 @@ jobs:
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi
+      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-cxx11-abi
     secrets:

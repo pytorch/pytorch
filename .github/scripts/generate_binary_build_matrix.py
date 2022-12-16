@@ -222,6 +222,7 @@ def generate_wheels_matrix(os: str,
                         "desired_cuda": translate_desired_cuda(
                             gpu_arch_type, gpu_arch_version
                         ),
+                        "devtoolset": "",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements":
@@ -252,6 +253,7 @@ def generate_wheels_matrix(os: str,
                     "desired_cuda": translate_desired_cuda(
                         gpu_arch_type, gpu_arch_version
                     ),
+                    "devtoolset": "cxx11-abi" if arch_version == "cpu-cxx11-abi" else "",
                     "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                     "package_type": package_type,
                     "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(

@@ -26,6 +26,11 @@
 {%- if not is_windows %}
       DOCKER_IMAGE: !{{ config["container_image"] }}
 {%- endif %}
+{%- if config["package_type"] == "manywheel" %}
+  {%- if config["devtoolset"] %}
+      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
+  {%- endif %}
+{%- endif %}
 {%- if config["package_type"] == "libtorch" %}
   {%- if config["libtorch_config"] %}
       LIBTORCH_CONFIG: !{{ config["libtorch_config"] }}
