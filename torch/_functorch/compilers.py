@@ -121,8 +121,9 @@ def nop(fx_g: fx.GraphModule, _) -> Callable:
 
 class DebugInterpreter(fx.Interpreter):
     def run(self, *args):
-        self.symbol_mapping = bind_symbols(self.module, *args)
-        super().run(*args)
+        if hasattr(self.module, "shape_env"):
+            self.symbol_mapping = bind_symbols(self.module, *args)
+        return super().run(*args)
 
     def run_node(self, n):
         import sympy

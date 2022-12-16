@@ -30,7 +30,7 @@ from .normalize import normalize_ir
 log = logging.getLogger(__name__)
 
 
-def aot_autograd(**kwargs):
+def aot_autograd(*, crossref_functionalize=False, **kwargs):
     def compiler_fn(gm: torch.fx.GraphModule, example_inputs):
         import functorch.compile
 
@@ -74,7 +74,9 @@ def aot_autograd(**kwargs):
 
         try:
             # NB: NOT cloned!
-            with enable_aot_logging():
+            with enable_aot_logging(), torch._dispatch.python.enable_crossref_functionalize(
+                crossref_functionalize
+            ):
                 cg = aot_module_simplified(gm, example_inputs, **kwargs)
                 counters["aot_autograd"]["ok"] += 1
                 return eval_frame.disable(cg)
@@ -113,10 +115,10 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     return True
 
 
-DEBUG = False
-
 # Useful for debugging purpose
-aot_eager = aot_autograd(fw_compiler=debug_nop if DEBUG else nop)
+# (1) Uses the debug interpreter to test for stride mismatches in our meta kernels
+# (2) Uses functionalization cross ref testing to test for functionalization stride mismatches
+aot_eager = aot_autograd(fw_compiler=debug_nop, crossref_functionalize=True)
 
 # AOT Autograd with torchscript backend. Default partitioner.
 aot_ts = aot_autograd(fw_compiler=ts_compile)

@@ -78,7 +78,7 @@ def _fmt(a: object) -> object:
         return a
 
 def make_crossref_functionalize(op, final_key):
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
     # This case is pretty weird, suppress it for now
     if op == torch.ops.aten.lift_fresh.default:
         return final_key
@@ -99,6 +99,8 @@ def make_crossref_functionalize(op, final_key):
                 else:
                     r = t
                 # TODO: suppress guards
+                if isinstance(r, FakeTensor):
+                    return r
                 return fake_mode.from_tensor(r)
             return t
 
@@ -130,13 +132,18 @@ def make_crossref_functionalize(op, final_key):
 # NB: enabling this is slow, don't do it in a hot loop.  This is purely
 # for debugging purposes.
 @contextmanager
-def enable_crossref_functionalize():
-    for op in all_known_overloads():
-        op._uncache_dispatch(torch._C.DispatchKey.Functionalize)
-    try:
-        with enable_python_dispatcher(), unittest.mock.patch(
-                'torch._dispatch.python.CROSSREF_FUNCTIONALIZE', True):
-            yield
-    finally:
+def enable_crossref_functionalize(enable=True):
+    # Don't bother uncaching all of our functionalization kernels
+    clear_cache = enable != torch._dispatch.python.CROSSREF_FUNCTIONALIZE
+
+    if clear_cache:
         for op in all_known_overloads():
             op._uncache_dispatch(torch._C.DispatchKey.Functionalize)
+    try:
+        with enable_python_dispatcher(), unittest.mock.patch(
+                'torch._dispatch.python.CROSSREF_FUNCTIONALIZE', enable):
+            yield
+    finally:
+        if clear_cache:
+            for op in all_known_overloads():
+                op._uncache_dispatch(torch._C.DispatchKey.Functionalize)
