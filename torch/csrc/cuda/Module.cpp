@@ -23,6 +23,7 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/cuda/DeviceGuard.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/python_headers.h>
@@ -1261,6 +1262,7 @@ void initModule(PyObject* module) {
 #endif
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
+  initDeviceGuard(module);
 }
 
 } // namespace cuda

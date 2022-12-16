@@ -97,7 +97,9 @@ class EnterCudaDeviceContextManagerLine:
     device_idx: int
 
     def codegen(self, code: IndentedBuffer):
-        code.writeline(f"with torch.cuda.device({self.device_idx}):")
+        # Note _DeviceGuard has less overhead than device, but only accepts
+        # integers
+        code.writeline(f"with torch.cuda._DeviceGuard({self.device_idx}):")
 
 
 class ExitCudaDeviceContextManagerLine:

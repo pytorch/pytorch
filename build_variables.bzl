@@ -865,6 +865,7 @@ torch_cpp_srcs = [
 ]
 
 libtorch_python_cuda_core_sources = [
+    "torch/csrc/cuda/DeviceGuard.cpp",
     "torch/csrc/cuda/Event.cpp",
     "torch/csrc/cuda/Module.cpp",
     "torch/csrc/cuda/python_comm.cpp",
