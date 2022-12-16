@@ -1139,6 +1139,20 @@ from ._linalg_utils import (  # type: ignore[misc]
     lstsq,
 )
 
+class _TorchCompileInductorWrapper:
+    def __init__(self, mode, passes):
+        from torch._dynamo.eval_frame import lookup_backend
+        from torch._inductor.config import InductorConfigContext
+
+        self.compile_fn = lookup_backend("inductor")
+        self.cm = InductorConfigContext(mode if mode is not None else passes)
+        self._torchdynamo_orig_callable = self.compile_fn
+
+    def __call__(self, model_, inputs_):
+        with self.cm:
+            return self.compile_fn(model_, inputs_)
+
+
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
             dynamic: builtins.bool = False,
@@ -1189,22 +1203,12 @@ def compile(model: Optional[Callable] = None, *,
         return fn
 
     import torch._dynamo
-    from torch._dynamo.eval_frame import lookup_backend
-    from torch._inductor.config import InductorConfigContext
     if mode is not None and passes is not None:
         raise RuntimeError("Either mode or passes can be specified, but both can't be specified at the same time.")
     if mode is None and passes is None:
         mode = "default"
     if backend == "inductor":
-        compile_fn = lookup_backend(backend)
-        cm = InductorConfigContext(mode if mode is not None else passes)
-
-        def _compile_fn(model_, inputs_):
-            with cm:
-                return compile_fn(model_, inputs_)
-
-        _compile_fn._torchdynamo_orig_callable = compile_fn  # type: ignore[attr-defined]
-        backend = _compile_fn
+        backend = _TorchCompileInductorWrapper(mode, passes)
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, **kwargs)(model)
 
 
