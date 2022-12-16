@@ -20,6 +20,7 @@ if hasattr(torch._C, "_nvfuser"):
         torch.bfloat16: DataType.BFloat16,
         torch.long: DataType.Int,
         torch.int: DataType.Int32,
+        torch.uint8: DataType.Int32,
         torch.bool: DataType.Bool,
         # Python scalars
         complex: DataType.ComplexDouble,
@@ -149,8 +150,8 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             raise RuntimeError(msg)
 
 
-def check_significant_strides(
-    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
+def _check_strides_helper(
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True, significant_only=True
 ) -> Tuple[bool, Optional[int]]:
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
@@ -158,10 +159,21 @@ def check_significant_strides(
     # and for tensors with more than one element
     if (not only_cuda or a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
         for idx in range(a.ndim):
-            if a.stride()[idx] != b.stride()[idx] and a.shape[idx] > 1:
+            check = not significant_only or a.shape[idx] > 1
+            if a.stride()[idx] != b.stride()[idx] and check:
                 return False, idx
 
     return True, None
+
+def check_significant_strides(
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
+) -> Tuple[bool, Optional[int]]:
+    return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=True)
+
+def check_all_strides(
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
+) -> Tuple[bool, Optional[int]]:
+    return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=False)
 
 
 # This function is equivalent to compute_contiguous() from TensorImpl.cpp
@@ -1471,6 +1483,44 @@ def set_correction(
     return correction
 
 
+def compute_required_storage_length(
+    shape: ShapeType, strides: StrideType, storage_offset: int
+) -> int:
+    """Computes the minimum storage size to hold the given tensor geometry.
+
+    Example
+    =======
+
+    This is the size of a newly allocated tensor's storage, in units of elements
+
+    >>> t = torch.empty((10, 20))
+    >>> compute_required_storage_length(t.shape, t.stride(), t.storage_offset())
+    200
+
+    >>> t2 = torch.empty_strided((1, 2, 3), (5, 7, 11))
+    >>> size = compute_required_storage_length(t2.shape, t2.stride(), t2.storage_offset())
+    >>> size == t.storage().size()
+    True
+
+    A valid tensor may have a larger storage size, but never smaller
+
+    >>> slice = torch.empty(100)[20:40]
+    >>> slice.storage().size()
+    100
+
+    >>> compute_required_storage_length(slice.shape, slice.stride(), slice.storage_offset())
+    40
+
+    """
+    # Short-circuits if the shape has no elements
+    if reduce(operator.mul, shape, 1) == 0:
+        return 0
+
+    max_offset = sum((x - 1) * y for x, y in zip(shape, strides))
+    # +1 to account for the first element which offsets are taken from
+    return 1 + storage_offset + max_offset
+
+
 def check_in_bounds_for_storage(
     a: torch.TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
 ):
@@ -1478,17 +1528,8 @@ def check_in_bounds_for_storage(
     Determines if the given shape, strides, and offset are valid for the given storage.
     """
 
-    # Short-circuits if the shape has no elements
-    if reduce(operator.mul, shape) == 0:
-        return
-
-    length = a.size() - storage_offset
-    max_offset = 0
-    for x, y in zip(shape, strides):
-        max_offset = max_offset + (x - 1) * y
-
-    if max_offset >= length:
-        required_length = max_offset + storage_offset
+    required_length = compute_required_storage_length(shape, strides, storage_offset)
+    if a.size() < required_length:
         msg = (
             "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
             "which requires a storage of size {4}".format(

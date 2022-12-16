@@ -4,11 +4,12 @@ import types
 from typing import Dict, List
 
 import torch._C
+from torch._guards import Guard, GuardSource
 
 from .. import config, variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
-from ..guards import Guard, GuardBuilder, GuardSource
+from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..utils import identity, proxy_args_kwargs
 from .base import VariableTracker
@@ -21,10 +22,11 @@ from .functions import (
 
 
 class SuperVariable(VariableTracker):
-    def __init__(self, typevar, objvar=None, **kwargs):
+    def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
         super(SuperVariable, self).__init__(**kwargs)
         self.typevar = typevar
         self.objvar = objvar
+        self.specialized = specialized  # directly get attr from self.typevar if true
 
     def reconstruct(self, codegen):
         codegen(variables.BuiltinVariable(super))
@@ -37,6 +39,8 @@ class SuperVariable(VariableTracker):
 
     def const_getattr(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
+        if self.specialized:
+            return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
         # We default to the python type of the object. However,
@@ -281,7 +285,7 @@ class GradModeVariable(ContextWrappingVariable):
     def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
-        tx.output.graph.create_node(
+        tx.output.create_node(
             "call_function", torch._C._set_grad_enabled, (value,), {}
         ),
         torch._C._set_grad_enabled(value)
@@ -337,12 +341,12 @@ class AutocastModeVariable(ContextWrappingVariable):
         self.mode = None
 
     def exit(self, tx, *args):
-        tx.output.graph.create_node(
+        tx.output.create_node(
             "call_function", exit_functional_autocast, (self.mode,), {}
         )
 
     def enter(self, tx):
-        self.mode = tx.output.graph.create_node(
+        self.mode = tx.output.create_node(
             "call_function", enter_functional_autocast, (*self.target_values,), {}
         )
 
@@ -571,7 +575,6 @@ class GetAttrVariable(VariableTracker):
                             "call_function",
                             original_torch_or_getattr_variable.value,
                             *proxy_args_kwargs(new_args, new_kwargs),
-                            current_tx=tx,
                         ),
                         **options,
                     )
@@ -582,7 +585,6 @@ class GetAttrVariable(VariableTracker):
                             "call_method",
                             original_torch_or_getattr_variable.name,
                             *proxy_args_kwargs(new_args, new_kwargs),
-                            current_tx=tx,
                         ),
                         **options,
                     )
@@ -593,6 +595,16 @@ class GetAttrVariable(VariableTracker):
 
         if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
             return self.obj.call_apply(tx, args, kwargs).add_options(self)
+        # calling parent class‘s non classmethod from child class
+        # https://github.com/pytorch/pytorch/issues/90558
+        elif (
+            isinstance(self.obj, variables.UserDefinedClassVariable)
+            and len(args) > 0
+            and issubclass(args[0].python_type(), self.obj.value)
+        ):
+            return SuperVariable(self.obj, args[0], True).call_method(
+                tx, self.name, args[1:], kwargs
+            )
         return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
 
     def call_method(

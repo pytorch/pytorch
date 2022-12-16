@@ -48,7 +48,7 @@ class _ExecOrderData:
         self.handles_post_forward_order: List[_HandlesKey] = []
         # Maps each handles key to its index in `handles_post_forward_order`
         self.handles_to_post_forward_order_index: Dict[_HandlesKey, int] = {}
-        self.is_first_iter = True
+        self._iter = 0
 
         # Gives the max number of backward/forward prefetched all-gathers by a
         # single module
@@ -98,6 +98,10 @@ class _ExecOrderData:
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
         # https://github.com/pytorch/pytorch/issues/79620
+
+    @property
+    def is_first_iter(self) -> bool:
+        return self._iter == 0
 
     def get_handles_to_backward_prefetch(
         self,
@@ -375,7 +379,7 @@ class _ExecOrderData:
         called in the post-backward callback since that marks the true end of
         an iteration.
         """
-        self.is_first_iter = False
+        self._iter += 1
         self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
         if self._checking_order:
