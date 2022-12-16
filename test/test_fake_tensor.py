@@ -370,6 +370,36 @@ class FakeTensorTest(TestCase):
                         self.assertTrue(isinstance(ten, FakeTensor))
                     self.assertEqual(ten.device.type, 'cuda')
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_lstm(self):
+        # Ensure CUDA (non-cuDNN) impl succeeds with fake tensors.
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                proj_size = 2
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
+                H_out = proj_size if proj_size > 0 else hidden_size
+
+                lstm = torch.nn.LSTM(input_size=H_in, hidden_size=hidden_size,
+                                     num_layers=num_layers, proj_size=proj_size, batch_first=False,
+                                     bias=True, bidirectional=bidir, device='cuda')
+
+                h_0 = torch.randn((num_layers * D, N, H_out), device='cuda')
+                c_0 = torch.randn((num_layers * D, N, hidden_size), device='cuda')
+                inp = torch.randn((L, N, H_in), device='cuda')
+                (output, (h_n, c_n)) = lstm(inp, (h_0, c_0))
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * H_out))
+                self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
+                self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
+
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_fallback_memory_prop(self):
