@@ -415,40 +415,6 @@ def forward(self, primals_1):
         out_test = f_compiled(*inp)
         self.assertEqual(out_ref, out_test)
 
-    def test_input_mutation_saved_for_backward_input_invalid(self):
-        # Test: a * b requires saving a for backward when we backprop through b.
-        # mutating a afterwards is illegal, need to make sure we error properly.
-        # The way this works in AOT Autograd is that we *won't* clone a in this situation
-        def f(a, b):
-            out = a * b
-            a.mul_(2)
-            return out
-        inp = [
-            torch.ones(3, requires_grad=True),
-            torch.ones(3, requires_grad=True),
-        ]
-
-        f_compiled = aot_function(f, nop)
-        # Make sure we still error properly
-        with self.assertRaises(RuntimeError):
-            out = f_compiled(*[x.clone() for x in inp])
-
-    def test_input_mutation_saved_for_backward_input_valid(self):
-        # Test: call an op that saves a tensor for backward, and mutate that tensor (an input).
-        # AOT Autograd needs to clone the tensor before saving it, so it doesn't get mutated.
-        # This is acceptable user code, because a was mutated *before* we saved it for backward
-        def f(a, b):
-            a.mul_(2)
-            out = a * b
-            return out, b
-        inp = [
-            torch.ones(3, requires_grad=True),
-            torch.ones(3, requires_grad=True),
-        ]
-
-        self.verify_aot_autograd(f, inp, test_mutation=True)
-
-
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_is_output(self):
         def f(a):

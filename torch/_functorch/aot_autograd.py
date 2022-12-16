@@ -1663,7 +1663,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
-            fw_inps = [n for n in fw_module.graph.nodes if n.op == "placeholder"]
             fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
@@ -1672,29 +1671,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 n for n in fw_outs_saved_for_bw if is_sym_node(n)
             ]
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-            _num_saved_for_bw = len(fw_outs_saved_for_bw)
-
-            # We sometimes need to clone tensors before saving them for backwards.
-            # When should we clone? It would be a pessimisation to always clone. Instead, we clone if
-            # We are saving a graph input, that gets mutated according to our metadata.
-            #
-            # Note that if we save a graph output, and the user mutates that output later, then that's
-            # a user error (and will fail in eager mode). It's on them to manually clone first.
-            assert len(flat_args) == len(_fw_metadata.input_info)
-            mutated_inp_storages: Set[StorageWeakRef] = set()
-            for i, inpt in enumerate(flat_args):
-                if isinstance(inpt, torch.Tensor) and _fw_metadata.input_info[i].mutation_type != MutationType.none:
-                    mutated_inp_storages.add(StorageWeakRef(inpt._storage()))
-
-            _saved_for_bw_need_cloning = []
-            for i, saved_node in enumerate(fw_outs_saved_for_bw):
-                needs_cloning = False
-                saved = saved_node.meta['val']
-                if isinstance(saved, torch.Tensor):
-                    ref = StorageWeakRef(saved._storage())
-                    needs_cloning = ref in mutated_inp_storages
-                _saved_for_bw_need_cloning.append(needs_cloning)
-
 
         if config.debug_graphs:
             log.debug("====== Forward graph {aot_config.aot_id} ======")
@@ -1718,8 +1694,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
         num_mutated_metadata_only_inputs = _num_mutated_metadata_only_inputs
         synthetic_base_info = _synthetic_base_info
         fw_metadata = _fw_metadata
-        num_saved_for_bw = _num_saved_for_bw
-        saved_for_bw_need_cloning = _saved_for_bw_need_cloning
 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
@@ -1759,21 +1733,16 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 CompiledFunction.fw_metadata.requires_grad_info
             )
 
-            to_save_raw = fw_outs[num_forward_returns:]
-            assert len(to_save_raw) == CompiledFunction.num_saved_for_bw
-            to_save = [
-                x.clone() if needs_cloning else x
-                for (needs_cloning, x) in zip(CompiledFunction.saved_for_bw_need_cloning, to_save_raw)
-            ]
             # Partitioners must put symint arguments at the end separate from tensor arguments
             if num_symints_saved_for_bw > 0:
-                tensors_saved_for_backwards = to_save[:-num_symints_saved_for_bw]
-                ctx.save_for_backward(*tensors_saved_for_backwards)
-                symint_outs = to_save[-num_symints_saved_for_bw:]
+                tensors_saved_for_backwards = fw_outs[
+                    num_forward_returns:-num_symints_saved_for_bw
+                ]
                 assert all(
                     [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
                 )
                 ctx.save_for_backward(*tensors_saved_for_backwards)
+                symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
                     [
                         isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
@@ -1782,7 +1751,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 )
                 ctx.symints = symint_outs
             else:
-                ctx.save_for_backward(*to_save)
+                ctx.save_for_backward(*fw_outs[num_forward_returns:])
                 ctx.symints = []
 
             raw_returns = fw_outs[0:num_forward_returns]
