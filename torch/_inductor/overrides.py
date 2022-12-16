@@ -32,7 +32,10 @@ class AutogradMonkeypatch(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if not kwargs:
             kwargs = {}
-        if func in replacements:
+        if func in replacements and not (
+            config.fallback_random
+            and replacements[func] in replacements_using_triton_random
+        ):
             return replacements[func](*args, **kwargs)
         return func(*args, **kwargs)
 
