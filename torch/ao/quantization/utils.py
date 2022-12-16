@@ -141,6 +141,7 @@ def _getattr_from_fqn(obj: Any, fqn: str) -> Any:
 
 # TODO remove when BC no longer needed for PyPer
 getattr_from_fqn = _getattr_from_fqn
+getattr_from_fqn.__module__ = "torch.ao.quantization"
 
 def _to_underlying_dtype(qdtype):
     DTYPE_MAPPING = {
@@ -276,6 +277,7 @@ def _get_qconfig_dtypes(qconfig):
 
 # TODO remove this once BC no longer needed
 get_qconfig_dtypes = _get_qconfig_dtypes
+get_qconfig_dtypes.__module__ = "torch.ao.quantization"
 
 def _get_quant_type(qconfig):
     assert qconfig is not None
