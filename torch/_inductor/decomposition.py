@@ -440,11 +440,6 @@ def masked_fill(value, mask, other):
     return torch.where(mask, other, value)
 
 
-@register_decomposition([aten.masked_fill])
-def masked_fill_(x, mask, value):
-    return x.copy_(aten.masked_fill(x, mask, value))
-
-
 @register_decomposition([aten.nan_to_num])
 def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
@@ -484,6 +479,11 @@ def copy(self, src, non_blocking=False):
         return aten.expand_copy.default(intermediate, self.size())
     else:
         return intermediate
+
+
+@register_decomposition(aten.masked_fill_)
+def masked_fill_(x, mask, value):
+    return x.copy_(aten.masked_fill(x, mask, value))
 
 
 @register_decomposition([aten.baddbmm])
