@@ -277,7 +277,7 @@ at::Tensor LazyNativeFunctions::empty_symint(
     c10::optional<bool> pin_memory,
     c10::optional<at::MemoryFormat> memory_format) {
   // TODO: support this directly
-  auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
+  auto size = c10::asIntArrayRefSlow(sym_size);
   const auto device_type = torch::lazy::getBackend()->EagerFallbackDeviceType();
   at::TensorOptions options = at::TensorOptions()
                                   .device(c10::Device(device_type))
@@ -309,8 +309,8 @@ at::Tensor LazyNativeFunctions::empty_strided_symint(
   TORCH_LAZY_FN_COUNTER("lazy::");
   at::Tensor t =
       empty_symint(sym_size, dtype, layout, device, pin_memory, c10::nullopt);
-  auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
-  auto stride = C10_AS_INTARRAYREF_SLOW(sym_stride);
+  auto size = c10::asIntArrayRefSlow(sym_size);
+  auto stride = c10::asIntArrayRefSlow(sym_stride);
   return t.as_strided(size, stride, /*storage_offset=*/0);
 }
 

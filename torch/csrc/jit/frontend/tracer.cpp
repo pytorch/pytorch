@@ -814,7 +814,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 }
 
 void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
-  addInputs(n, name, C10_AS_INTARRAYREF_SLOW(value));
+  addInputs(n, name, asIntArrayRefSlow(value));
 }
 
 void addInputs(Node* n, const char* name, c10::optional<c10::SymInt> value) {
