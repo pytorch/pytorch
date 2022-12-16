@@ -101,22 +101,35 @@ def _init_process_group_state(
             )
         else:
             state = _init_process_group_state_for_hybrid_shard(state, process_group)
-            assert state.process_group is not None, "Expected to populate state.process_group for hybrid shard"
-            assert state._inter_node_pg is not None, "Expected to populate state._inter_node_pg for hybrid shard"
-            assert state._inter_node_state is not None, "Expected to populate state._inter_node_state for hybrid shad."
+            assert (
+                state.process_group is not None
+            ), "Expected to populate state.process_group for hybrid shard"
+            assert (
+                state._inter_node_pg is not None
+            ), "Expected to populate state._inter_node_pg for hybrid shard"
+            assert (
+                state._inter_node_state is not None
+            ), "Expected to populate state._inter_node_state for hybrid shad."
     else:
-        state.process_group = process_group if process_group is not None else _get_default_group()
+        state.process_group = (
+            process_group if process_group is not None else _get_default_group()
+        )
 
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
 
     return state
 
+
 @no_type_check
-def _init_process_group_state_for_hybrid_shard(state: _FSDPState, process_group) -> _FSDPState:
+def _init_process_group_state_for_hybrid_shard(
+    state: _FSDPState, process_group
+) -> _FSDPState:
     if process_group is None:
         default_group = _get_default_group()
-        intra_node_group, inter_node_group = _init_intra_and_inter_node_groups(default_group)
+        intra_node_group, inter_node_group = _init_intra_and_inter_node_groups(
+            default_group
+        )
         # we shard across intra-node
         state.process_group = intra_node_group
         # save _inter_node_pg to allreduce across.
@@ -138,6 +151,7 @@ def _init_process_group_state_for_hybrid_shard(state: _FSDPState, process_group)
     )
     return state
 
+
 @no_type_check
 def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
     return (
@@ -145,6 +159,7 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
         and len(process_group) == 2
         and all(isinstance(pg, dist.ProcessGroup) for pg in process_group)
     )
+
 
 @no_type_check
 def _init_intra_node_process_group() -> dist.ProcessGroup:
@@ -160,9 +175,10 @@ def _init_intra_node_process_group() -> dist.ProcessGroup:
     intra_node_subgroup, _ = dist.new_subgroups()
     return intra_node_subgroup
 
+
 @no_type_check
 def _init_inter_node_process_group(
-    global_process_group: dist.ProcessGroup
+    global_process_group: dist.ProcessGroup,
 ) -> dist.ProcessGroup:
     """
     Returns an inter-node process group where each contained rank has
@@ -186,15 +202,16 @@ def _init_inter_node_process_group(
             local_rank + (i * num_devices) for i in range(num_nodes)
         ]
         # every rank always needs to call dist.new_group
-        grp = dist.new_group(
-            ranks=ranks_for_inter_group, backend=sharding_backend
-        )
+        grp = dist.new_group(ranks=ranks_for_inter_group, backend=sharding_backend)
         if local_rank == my_local_rank:
             print(f"{local_rank} created process group for {ranks_for_inter_group}")
             inter_node_pg = grp
 
-    assert inter_node_pg is not None, f"{my_local_rank} expected to assign inter-node pg, but did not"
+    assert (
+        inter_node_pg is not None
+    ), f"{my_local_rank} expected to assign inter-node pg, but did not"
     return inter_node_pg
+
 
 def _init_intra_and_inter_node_groups(
     global_process_group: dist.ProcessGroup,
@@ -212,6 +229,7 @@ def _init_intra_and_inter_node_groups(
         _init_intra_node_process_group(),
         _init_inter_node_process_group(global_process_group),
     )
+
 
 @no_type_check
 def _init_ignored_module_states(
@@ -290,15 +308,8 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
-    # Mapping from module to every `FlatParamHandle` that the module consumes,
-    # where there is an entry for every (sub)module
-    _module_to_handles: Dict[
-        nn.Module, List[FlatParamHandle]
-    ] = collections.defaultdict(list)
-    state._module_to_handles = _module_to_handles
-    # Same as `_module_to_handle` but filtered to only include keys that are
-    # "communication modules", which are responsible for the unshard/reshard
-    # for their `FlatParamHandle`s
+    # Mapping from comm. module to the handles it is responsible to unshard and
+    # reshard (see `FlatParamHandle` for the comm. module definition)
     _comm_module_to_handles: Dict[
         nn.Module, List[FlatParamHandle]
     ] = collections.defaultdict(list)
@@ -488,8 +499,6 @@ def _init_param_handle_from_params(
     assert handle not in state._handles
     state.params.append(handle.flat_param)
     state._handles.append(handle)
-    for module in handle.flat_param._modules:
-        state._module_to_handles[module].append(handle)
     state._comm_module_to_handles[handle._comm_module].append(handle)
     num_comm_module_handles = len(state._comm_module_to_handles[handle._comm_module])
     assert num_comm_module_handles == 1, (
