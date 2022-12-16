@@ -152,7 +152,7 @@ def _get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Pat
     new path, this is not exposed to backend developers
     """
     pattern_to_quantize_handlers = {}
-    for pattern, config in backend_config._pattern_complex_format_to_config.items():
+    for pattern, config in backend_config.configs.items():
         observation_type = config.observation_type
         dtype_configs = config.dtype_configs
         num_tensor_args_to_observation_type = config._num_tensor_args_to_observation_type

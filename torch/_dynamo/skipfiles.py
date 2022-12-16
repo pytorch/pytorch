@@ -30,7 +30,6 @@ import unittest
 import weakref
 
 import torch
-import torch._inductor.test_operators
 
 
 try:
@@ -123,7 +122,6 @@ SKIP_DIRS = [
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
     torch.set_rng_state.__code__.co_filename,
-    torch._inductor.test_operators.__file__,
     external_utils.__file__,  # This is a dynamo file (!)
 }
 

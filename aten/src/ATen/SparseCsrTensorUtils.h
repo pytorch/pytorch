@@ -296,16 +296,10 @@ inline Layout flip_compressed_layout(Layout layout) {
 
 inline DimVector getBlockSize(Tensor const& self) {
   int64_t n_batch = numBatchDimensions(self);
-  return at::DimVector(self.values().sizes().slice(n_batch + 1, 2));
-}
-
-inline at::OptionalArray<at::SymInt> getSymIntBlockSize(Tensor const& self) {
-  if (self.layout() == at::kSparseBsr || self.layout() == at::kSparseBsc) {
-    int64_t n_batch = numBatchDimensions(self);
-    return self.values().sym_sizes().slice(n_batch + 1, 2).vec();
-  } else {
-    return {};
-  }
+  Tensor values = self.values();
+  return {
+      std::max<int64_t>(1, values.size(n_batch + 1)),
+      std::max<int64_t>(1, values.size(n_batch + 2))};
 }
 
 } // namespace sparse_csr

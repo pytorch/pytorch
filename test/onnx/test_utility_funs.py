@@ -130,7 +130,6 @@ class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
                 out = x
                 out += x
                 out = torch.nn.functional.relu(out, inplace=True)
-                return out
 
         module = SkipConnectionModule()
         x = torch.randn(4, 4)

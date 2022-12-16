@@ -160,7 +160,7 @@ static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {
 const std::shared_ptr<bool>& getLifeHandleForLevel(int64_t level) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(
-      (int64_t)dynamicLayerStack.size() >= level && level >= 1,
+      dynamicLayerStack.size() >= level && level >= 1,
       "If you're trying to construct a tensor with the current level (",
       level,
       ") then the interpreter for that level must be on the DynamicLayerStack ");

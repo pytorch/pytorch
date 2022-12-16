@@ -507,10 +507,6 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(FuncTorchDynamicLayerBackMode)
       DEF_ONE(PythonDispatcher)
       DEF_ONE(Functionalize)
-      DEF_ONE(AutocastCPU)
-      DEF_ONE(AutocastXPU)
-      DEF_ONE(AutocastHPU)
-      DEF_ONE(AutocastCUDA)
   // clang-format on
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)

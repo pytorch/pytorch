@@ -17,7 +17,6 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 from unittest.mock import patch
 
 import torch
-from torch._guards import Checkpointable
 
 from . import (
     allowed_functions,
@@ -370,7 +369,7 @@ def break_graph_if_unsupported(*, push):
     return decorator
 
 
-class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
+class InstructionTranslatorBase(object):
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
     symbolic_globals: Dict[str, VariableTracker]

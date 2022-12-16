@@ -5722,27 +5722,6 @@ class TestTorch(TestCase):
                                     r"the unspecified dimension size -1 can be any value and is ambiguous"):
             torch.randn(2, 0).unflatten(1, (2, -1, 0))
 
-    # Test that warnings generated from C++ are translated to the correct type
-    def test_warn_types(self):
-        test_cases = [
-            # function, warning type, message
-            (torch._C._warn, UserWarning, r"Test message for TORCH_WARN"),
-            (torch._C._warn_deprecation, DeprecationWarning, r"Test message for TORCH_WARN_DEPRECATION"),
-        ]
-
-        for fn, warning_type, message in test_cases:
-            with warnings.catch_warnings(record=True) as w:
-                warnings.resetwarnings()
-                warnings.filterwarnings('always', category=warning_type)
-                fn()
-
-                self.assertEqual(len(w), 1, msg=f'{warning_type} not raised')
-                warning = w[0].message
-                self.assertTrue(isinstance(warning, warning_type), msg=f'{warning_type} not raised')
-                self.assertTrue(re.search(
-                    message,
-                    str(warning)))
-
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
         expected = """
@@ -8329,7 +8308,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del fin_tensor
         self.assertTrue(m[0])
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tensor_weakref_dealloc(self):
 
         x = torch.empty(2)
@@ -8445,7 +8424,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_dead_weak_ref(self):
         x = torch.empty(2)
         w_x = weakref.ref(x)
@@ -8474,23 +8453,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         x._fix_weakref()
         del y
         x.sigmoid()
-
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
-    def test_fix_weakref_no_leak(self):
-        import weakref
-
-        called = False
-
-        a = torch.randn(1)
-
-        def callback(w):
-            nonlocal called
-            called = True
-        wa = weakref.ref(a, callback)
-        a._fix_weakref()
-        del a
-
-        self.assertTrue(called)
 
     # FIXME: move to test_linalg
     @torch.inference_mode()

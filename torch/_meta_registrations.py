@@ -1939,7 +1939,7 @@ def meta__scaled_dot_product_efficient(
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
-    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    logsumexp_dim = math.ceil(query.size(2) / 32) * 32 if compute_log_sumexp else 0
     logsum_exp = torch.empty(
         (B, num_heads, logsumexp_dim),
         dtype=torch.float,
@@ -1964,8 +1964,13 @@ def meta__scaled_dot_product_efficient_backward(
     out: Tensor,
     logsumexp: Tensor,
     is_causal: bool = False,
-    chunk_grad_outputs=False,
 ):
+    is_alias = (
+        query._storage().data_ptr()
+        == key._storage().data_ptr()
+        == value._storage().data_ptr()
+    )
+
     grad_out = grad_out.transpose(1, 2)
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
@@ -1978,6 +1983,13 @@ def meta__scaled_dot_product_efficient_backward(
     K = query.size(3)
 
     grad_kv_needs_init = is_causal and N > M
+
+    chunk_grad_outputs: bool = (
+        (not grad_kv_needs_init)
+        and M == N
+        and query.size(3) == value.size(3)
+        and is_alias
+    )
 
     if chunk_grad_outputs:
         chunk = torch.empty((B, M, 3, nH, K), dtype=query.dtype, device=query.device)
@@ -1996,6 +2008,7 @@ def meta__scaled_dot_product_efficient_backward(
             if grad_kv_needs_init
             else torch.empty(value.shape, dtype=value.dtype, device=value.device)
         )
+
     return grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2)
 
 

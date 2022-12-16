@@ -2134,10 +2134,8 @@ class TestCase(expecttest.TestCase):
             return
 
         if using_unittest:
-            # Keep track of the number of tests marked as failures, errors, and skipped before starting
-            failures_before = 0 if result is None else len(result.failures)
-            errors_before = 0 if result is None else len(result.errors)
-            skipped_before = 0 if result is None else len(result.skipped)
+            failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
+            errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
@@ -2191,7 +2189,7 @@ class TestCase(expecttest.TestCase):
                 result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red + 1, num_green=num_green)
-        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and skipped_before == len(result.skipped):
+        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and not result.skipped:
             # Always re-run up to MAX_NUM_RETRIES when running under rerun disabled tests modes if the test successes.
             # The parameter num_retries_left can be equal to MAX_NUM_RETRIES here because num_runs_left is initially
             # set to MAX_NUM_RETRIES + 1, i.e. the first run successes

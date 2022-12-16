@@ -228,7 +228,7 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : SharedType
 }
 
 UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
-  UnionTypePtr union_type(new UnionType(std::move(reference)));
+  auto union_type = new UnionType(std::move(reference));
 
   // Some very special-cased logic for `Optional`. This will be deleted
   // in a later PR
@@ -267,7 +267,7 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
     }
   }
 
-  return union_type;
+  return UnionTypePtr(union_type);
 }
 
 c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {

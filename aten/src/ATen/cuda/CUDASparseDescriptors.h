@@ -133,6 +133,7 @@ class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
  public:
   explicit CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
 };
+#endif //AT_USE_HIPSPARSE_GENERIC_52_API() || AT_USE_CUSPARSE_GENERIC_API()
 
 class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
     : public CuSparseDescriptor<cusparseDnVecDescr, &cusparseDestroyDnVec> {
@@ -143,7 +144,10 @@ class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
 class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
     : public CuSparseDescriptor<cusparseSpMatDescr, &cusparseDestroySpMat> {};
 
-#endif //AT_USE_HIPSPARSE_GENERIC_52_API() || (AT_USE_CUSPARSE_GENERIC_API() || AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS())
+class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
+    : public CuSparseSpMatDescriptor {
+ public:
+  explicit CuSparseSpMatCsrDescriptor(const Tensor& input, int64_t batch_offset = -1);
 
 #if AT_USE_CUSPARSE_CONST_DESCRIPTORS()
   class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
@@ -169,11 +173,6 @@ class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
             cusparseSpMatDescr,
             &cusparseDestroySpMat> {};
 #endif // AT_USE_CUSPARSE_CONST_DESCRIPTORS()
-
-class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
-    : public CuSparseSpMatDescriptor {
- public:
-  explicit CuSparseSpMatCsrDescriptor(const Tensor& input, int64_t batch_offset = -1);
 
 #if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
   std::tuple<int64_t, int64_t, int64_t> get_size() {

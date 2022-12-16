@@ -1032,11 +1032,6 @@ Tensor take_backward(
     const Tensor& self,
     const Tensor& indices);
 
-Tensor to_sparse_backward(
-    const Tensor& grad,
-    const c10::Layout self_layout,
-    const c10::OptionalArrayRef<c10::SymInt>& self_blocksize);
-
 } // namespace details
 } // namespace generated
 } // namespace autograd

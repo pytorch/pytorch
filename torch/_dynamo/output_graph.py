@@ -25,13 +25,7 @@ from typing_extensions import Protocol
 
 import torch.nn
 from torch import fx
-from torch._guards import (
-    Checkpointable,
-    Guard,
-    GuardsCheckpointState,
-    tracing,
-    TracingContext,
-)
+from torch._guards import Guard
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -76,7 +70,7 @@ CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 class OutputGraphState(NamedTuple):
     graphargs: List[GraphArg]
-    guard_state: GuardsCheckpointState
+    guards: Set[Guard]
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     side_effects: SideEffects
     timestamp: int
@@ -84,12 +78,7 @@ class OutputGraphState(NamedTuple):
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
-            if k == "guard_state":
-                r = self.guard_state.diff(other.guard_state)
-                if r is not None:
-                    return r
-                continue
-            elif k == "side_effects":
+            if k == "side_effects":
                 r = self.side_effects.diff(other.side_effects)
                 if r is not None:
                     return r
@@ -100,11 +89,6 @@ class OutputGraphState(NamedTuple):
             if sv != ov:
                 return f"{prefix}{k} mismatch: {sv} != {ov}"
         return None
-
-    # Back compat .guards api
-    @property
-    def guards(self):
-        return self.guard_state.dynamo_guards
 
 
 @functools.lru_cache(None)
@@ -180,7 +164,7 @@ class WrapperBackend:
             self.restore()
 
 
-class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
+class OutputGraph(fx.Tracer):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
@@ -194,9 +178,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         root_tx,
     ):
         super(OutputGraph, self).__init__()
+
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
-        self.tracing_context: TracingContext = TracingContext()
         # Although we prune unused graphargs before sending graphs to
         # compilers, we may have legitimately triggered shape guards
         # on "unused" inputs that we must keep track of.  So after
@@ -205,6 +189,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # graphargs, and graphargs is the pruned list.  Guard creation
         # should use original graphargs.
         self.orig_graphargs: List[GraphArg] = self.graphargs
+        self.guards: Set[Guard] = set()
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
@@ -246,10 +231,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def fake_mode(self):
         return self.root_tx.fake_mode
 
-    @property
-    def guards(self) -> Set[Guard]:
-        return self.tracing_context.guards_context.dynamo_guards
-
     def push_tx(self, tx):
         self._current_tx.append(tx)
 
@@ -263,10 +244,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
-        guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         state = OutputGraphState(
             list(self.graphargs),
-            guards_graph_state,
+            set(self.guards),
             dict(self.nn_modules),
             self.side_effects.clone(),
             self.timestamp,
@@ -279,13 +259,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             self.graphargs,
-            guards_state,
+            self.guards,
             self.nn_modules,
             self.side_effects,
             self.timestamp,
             self.name_to_input,
         ) = state
-        self.tracing_context.guards_context.restore_graphstate(guards_state)
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
@@ -362,7 +341,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
             def wrap_name(module_key):
                 return wrap_fx_proxy(
-                    self.root_tx,
+                    self,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=target,
                     **options,
@@ -579,8 +558,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         name = unique_id("__compiled_fn")
 
         assert_no_fake_params_or_buffers(gm)
-        with tracing(self.tracing_context):
-            compiled_fn = self.call_user_compiler(gm)
+        compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1

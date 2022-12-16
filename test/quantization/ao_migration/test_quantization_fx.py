@@ -46,9 +46,9 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         function_list = [
             'FusedGraphModule',
             'ObservedGraphModule',
-            '_is_observed_module',
+            'is_observed_module',
             'ObservedStandaloneGraphModule',
-            '_is_observed_standalone_module',
+            'is_observed_standalone_module',
             'QuantizedGraphModule'
         ]
         self._test_function_import('fx.graph_module', function_list)
@@ -59,9 +59,9 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
     def test_function_import_fx_pattern_utils(self):
         function_list = [
             'QuantizeHandler',
-            '_register_fusion_pattern',
+            'register_fusion_pattern',
             'get_default_fusion_patterns',
-            '_register_quant_pattern',
+            'register_quant_pattern',
             'get_default_quant_patterns',
             'get_default_output_activation_post_process_map'
         ]
