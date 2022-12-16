@@ -742,6 +742,9 @@ def wrap_fx_proxy(tx, proxy, example_value=None, **options):
 def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, ignore_subclass=False, **options
 ):
+    from ..symbolic_convert import InstructionTranslatorBase
+
+    assert isinstance(tx, InstructionTranslatorBase)
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
@@ -772,14 +775,14 @@ def wrap_fx_proxy_cls(
             pass
 
         elif isinstance(example_value, torch.Tensor):
-            # We shouldn't be doing this at all, see
-            # https://github.com/pytorch/torchdynamo/issues/1950
-            # But assuming we're doing it, the legacy behavior for
-            # subclasses was to perform a clone WITHOUT preserving
-            # the subclass.  It's not clear to me that's what you actually
-            # want, but whatever, I wouldn't have this cache at all.
-            with torch._C.DisableTorchFunction():
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+            if tx.export:
+                # The legacy behavior for real value cache with subclasses was
+                # to perform a clone WITHOUT preserving the subclass.  It's
+                # not entirely clear this is what you actually want though.
+                with torch._C.DisableTorchFunction():
+                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
+                        example_value
+                    )
             # NB: If we're ignoring subclass, then the expectation is you will
             # take the returned TensorVariable and wrap it into a more
             # accurate TensorVariable that is able to track subclass-ness;
@@ -916,7 +919,7 @@ def wrap_fx_proxy_cls(
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable(proxy, example_value, **options)
     else:
-        raise AssertionError(
+        unimplemented(
             "torch.* op returned non-Tensor "
             + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
         )
