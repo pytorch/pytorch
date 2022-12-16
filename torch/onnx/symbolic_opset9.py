@@ -657,6 +657,18 @@ def neg(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::sqrt")
 @_beartype.beartype
 def sqrt(g: jit_utils.GraphContext, self):
+    if _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    ) in {
+        _type_utils.JitScalarType.UINT8,
+        _type_utils.JitScalarType.INT8,
+        _type_utils.JitScalarType.INT16,
+        _type_utils.JitScalarType.INT,
+        _type_utils.JitScalarType.INT64,
+    }:
+        # torch converts all int inputs to sqrt to float
+        self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+
     return g.op("Sqrt", self)
 
 
@@ -756,7 +768,9 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None:
+        if dim is None or dim == tuple():
+            # Dim can be 0, which will cause (not dim) == True. So we don't want to do
+            # (not dim)
             # all-reduce path
             return symbolic_helper._handle_reduce_dim_none(g, self, onnx_op_name)
         else:
@@ -874,6 +888,12 @@ def _standard_gamma(g: jit_utils.GraphContext, self, generator):
 @_onnx_symbolic("aten::t")
 @_beartype.beartype
 def t(g: jit_utils.GraphContext, self):
+    rank = symbolic_helper._get_tensor_rank(self)
+    if rank is None or rank < 2:
+        # The transpose of a 1d or 0d tensor is itself. ONNX does not define the behavior
+        # clearly and onnxruntime fails on these cases. So we add an Identity node to
+        # mirror the behavior of eager mode.
+        return g.op("Identity", self)
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
