@@ -17,8 +17,9 @@ import sympy
 import torch
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
-from . import config
+from . import config, config as inductor_config
 from .cuda_properties import get_device_capability
+from .kernel.mm_common import log
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
@@ -439,3 +440,21 @@ class DeferredLineBase:
 
     def __len__(self):
         return len(self.line)
+
+
+@functools.lru_cache(None)
+def is_big_gpu(index):
+    cores = torch.cuda.get_device_properties(index).multi_processor_count
+    if cores < 80:  # V100
+        log.warning("not enough cuda cores to use max_autotune mode")
+        return False
+    return True
+
+
+def use_triton_template(layout):
+    return (
+        inductor_config.max_autotune
+        and layout.device.type == "cuda"
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and is_big_gpu(layout.device.index or 0)
+    )

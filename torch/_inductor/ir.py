@@ -2264,6 +2264,11 @@ class ComputedBuffer(Buffer):
 
 
 class TemplateBuffer(Buffer):
+    """
+    Represents a Triton (in the futurue other type) of template operator
+    that we can fuse an epilogue onto.
+    """
+
     def __init__(self, layout, inputs, make_kernel_render):
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
