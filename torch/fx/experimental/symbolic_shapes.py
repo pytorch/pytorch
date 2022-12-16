@@ -772,6 +772,16 @@ class ShapeEnv(object):
         return eval(code, {}, dict(zip(arg_names, args)))
 
     def bind_symbols(self, placeholders, args):
+        # Given a paired list of placeholders (fake tensors with
+        # symbolic sizes) and concrete arguments (regular tensors
+        # with real sizes), returns a dictionary mapping each
+        # symbol to its real value.  So for example, if you
+        # have a placeholder with size (s0, s1), binding
+        # (2, 4) to it will give you {s0: 2, s1: 4}.  This is
+        # not guaranteed to bind ALL symbols in the ShapeEnv;
+        # we can't bind a symbol if it doesn't occur in any placeholder,
+        # and symbols that already have replacements won't get bindings.
+
         # This is a little duplicative with evaluate_guards but
         # it's different enough that it seemed cleanest to make
         # another copy.  This assumes the guards are already checked,
