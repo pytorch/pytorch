@@ -21,6 +21,9 @@ outputs:
   is-test-matrix-empty:
     description: True if the filtered test configs matrix is empty. False otherwise.
     value: ${{ steps.filter.outputs.is-test-matrix-empty }}
+  keep-going:
+    description: True if keep-going label was on PR.
+    value: ${{ steps.filter.outputs.keep-going }}
 
 runs:
   using: composite
