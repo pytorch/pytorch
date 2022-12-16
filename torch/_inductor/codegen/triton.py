@@ -586,7 +586,6 @@ class RangeAnalysis(object):
 
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
-        # not sure if we should be truncating expression here
         return x
 
     @staticmethod
@@ -605,8 +604,8 @@ class RangeAnalysis(object):
             )
 
     @staticmethod
-    def reciprocal(val):
-        return RangeValues.checked_map(val, lambda y: 1 / y)
+    def reciprocal(x):
+        return RangeValues.checked_map(x, lambda y: 1 / y)
 
     @staticmethod
     def abs(x):

@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import re
 import textwrap
 from collections import OrderedDict
@@ -170,12 +171,6 @@ class ModularIndexing(sympy.Function):
     """
 
     nargs = (3,)
-
-    # def __new__(cls, base, divisor, modulus):
-    #     if base == 1:
-    #         return
-
-    #     return super(ModularIndexing, cls).__new__(cls, base, divisor, modulus):
 
     @classmethod
     def eval(cls, base, divisor, modulus):
@@ -351,12 +346,10 @@ class Loops(IRNode):
     @cache_on_self
     def inner_fn_str(self):
         try:
-            handler = V.MockHandler()
             with V.set_ops_handler(V.MockHandler()), patch.object(
                 FlexibleLayout, "allow_indexing", True
             ):
-                out = str(self.inner_fn(self._index(self.ranges)))
-                return out
+                return str(self.inner_fn(self._index(self.ranges)))
         except Exception as e:
             return f"inner_fn(): {e}"
 
@@ -3935,84 +3928,26 @@ class LoopBody:
         """Swap in a variable used in indirect indexing"""
         if str(old) == str(new):
             return
-        old_s = str(old)
-        new_s = str(new)
-
-        # if "RangeAnalysis" in str(torch._inductor.virtualized.V.ops):
-        #     breakpoint()
-        # breakpoint()
-        if isinstance(new, torch._inductor.codegen.triton.RangeValues):
-            if not new.lower == 0.0:
-                breakpoint()
-                assert False
-            new = new.upper
-        #     new = sympy.Interval(new.lower, new.upper)
-        #     breakpoint()
-        try:
-            self.indexing = {
-                k: sympy_subs(v, {old: new}) for k, v in self.indexing.items()
-            }
-            # breakpoint()
-        except Exception as e:
-            breakpoint()
-            raise
+        self.indexing = {k: sympy_subs(v, {old: new}) for k, v in self.indexing.items()}
 
     def replace_indirect_new(self, old, new):
         """Swap in a variable used in indirect indexing"""
         if str(old) == str(new):
             return
 
-        # breakpoint()
-        # if "RangeAnalysis" in str(torch._inductor.virtualized.V.ops):
-        #     breakpoint()
-
-        # if the lower bound is 0, can just the upper boud
-        if not hasattr(self, "replacement_vals"):
-            self.replacement_vals = {}
-
+        assert isinstance(new, torch._inductor.codegen.triton.RangeValues)
         self.replacement_vals[old] = new
         return
-        # return
-
-        if isinstance(new, torch._inductor.codegen.triton.RangeValues):
-            indexing = {}
-            for key, expr in self.indexing.items():
-                if old in expr.free_symbols:
-                    breakpoint()
-                    print(new)
-
-            if not new.lower == 0.0:
-                breakpoint()
-                return
-                assert False
-            new = new.upper
-        #     new = sympy.Interval(new.lower, new.upper)
-        #     breakpoint()
-        try:
-            self.indexing = {
-                k: sympy_subs(v, {old: new}) for k, v in self.indexing.items()
-            }
-            # breakpoint()
-        except Exception as e:
-            breakpoint()
-            raise
-
+        
     def get_index(self, name):
-        # at this point in computation, we should have all of the stuff relevant to plugin values
-        # if "RangeAnalysis" in str(V.ops):
-        #     breakpoint()
         return self.indexing[name]
 
     def get_index_new(self, name):
         if name in self.replacement_vals:
             return self.replacement_vals[name]
 
-        # if name == "index4":
-        #     breakpoint()
         out = self._get_index_new(name)
-        # if name == "index2":
-        #     breakpoint()
-        print(name)
+        # cache computation
         self.replacement_vals[name] = out
         return out
 
@@ -4024,25 +3959,15 @@ class LoopBody:
         if len(free_symbols) == 0:
             return torch._inductor.codegen.triton.RangeValues(expr, expr)
 
-        # make it easier to find maximum and minimum values
-        def simplify_expression_for_derivative(expr):
-            args = [simplify_expression_for_derivative(e) for e in expr.args]
-            if isinstance(expr, ModularIndexing):
-                return (expr.args[0] // args[1]) % expr.args[2]
-            if isinstance(expr, IndexingDiv):
-                return expr.args[0] // args[1]
-            try:
-                return type(expr)(*args)
-            except Exception as e:
-                breakpoint()
-                raise
+        if expr in self.replacement_vals:
+            return self.replacement_vals[expr]
 
         def replace_symbols_for_deriv(expr, ignore_mod=False):
             # for the purposes of finding local, minimum, maximum, assume smoothness
-
             def mod_indexing(x, y, z):
                 if z.is_constant():
                     return x / y
+                
                 # never really happens, we'll bail on optimizing
                 return (x / y) % z
 
@@ -4051,84 +3976,41 @@ class LoopBody:
                 IndexingDiv, indexing_div
             )
 
-        if len(free_symbols) > 1:
-            symbols = expr.free_symbols
-            monotonic_increasing = []
-            monotonic_decreasing = []
-            other_symbols = []
+        symbols = expr.free_symbols
+        monotonic_increasing = []
+        monotonic_decreasing = []
+        other_symbols = []
 
-            expr_deriv = replace_symbols_for_deriv(expr, True)
-            for symbol in symbols:
-                diff = sympy.diff(expr_deriv, symbol)
-                if isinstance(diff, sympy.Number) and diff >= 0:
-                    monotonic_increasing.append(symbol)
-                elif isinstance(diff, sympy.Number):
-                    monotonic_decreasing.append(symbol)
-                else:
-                    other_symbols.append(symbol)
+        expr_for_deriv = replace_symbols_for_deriv(expr, True)
+        for symbol in symbols:
+            diff = sympy.diff(expr_for_deriv, symbol)
+            if diff.is_positive:
+                monotonic_increasing.append(symbol)
+            elif diff.is_positive == False: # can return None
+                monotonic_decreasing.append(symbol)
+            else:
+                other_symbols.append(symbol)
 
-            if not other_symbols:
-                max_val = sympy_subs(
-                    expr,
-                    {
-                        k: (v.upper if k in monotonic_increasing else v.lower)
-                        for k, v in self.replacement_vals.items()
-                    },
-                )
-                min_val = sympy_subs(
-                    expr,
-                    {
-                        k: (v.lower if k in monotonic_increasing else v.upper)
-                        for k, v in self.replacement_vals.items()
-                    },
-                )
-                return torch._inductor.codegen.triton.RangeValues(min_val, max_val)
-
-            # if monotonic_decreasing:
-            #     breakpoint()
-            # if other_symbols:
-            #     breakpoint()
-            # breakpoint()
-            breakpoint()
-            with open("/scratch/eellison/work/torchdynamo/elias_compute.txt", "a") as f:
-                f.write(str(expr))
-
-        # single free variable i can use sympy.calculus
-        try:
-            replacements = {k: v.upper for k, v in self.replacement_vals.items()}
-        except Exception as e:
-            breakpoint()
-            raise
-        if expr in self.replacement_vals:
-            return self.replacement_vals[expr]
-
-        free_symbol = free_symbols[0]
-        diff = sympy.diff(replace_symbols_for_deriv(expr, ignore_mod=True), free_symbol)
-        if diff.is_constant():
-            max_v = sympy_subs(
-                expr, {free_symbols[0]: self.replacement_vals[free_symbol].upper}
+        if not other_symbols:
+            max_val = sympy_subs(
+                expr,
+                {
+                    k: (v.upper if k in monotonic_increasing else v.lower)
+                    for k, v in self.replacement_vals.items()
+                },
             )
-            min_v = sympy_subs(
-                expr, {free_symbols[0]: self.replacement_vals[free_symbol].lower}
+            min_val = sympy_subs(
+                expr,
+                {
+                    k: (v.lower if k in monotonic_increasing else v.upper)
+                    for k, v in self.replacement_vals.items()
+                },
             )
-            return torch._inductor.codegen.triton.RangeValues(
-                min(max_v, min_v), max(max_v, min_v)
-            )
+            return torch._inductor.codegen.triton.RangeValues(min_val, max_val)
+        else:
+            # bail on optimizing, have not run into this yet
+            return torch._inductor.codegen.triton.RangeValues(-math.inf, math.inf)
 
-        # if expr.has(ModularIndexing):
-        #     replace_symbols_for_deriv(expr, ignore_mod)
-
-        breakpoint()
-
-        if isinstance(expr, ModularIndexing):
-            return torch._inductor.codegen.triton.RangeValues(0, expr.args[2])
-
-        breakpoint()
-        return sympy_subs(expr, replacements)
-        # at this point in computation, we should have all of the stuff relevant to plugin values
-        # if "RangeAnalysis" in str(V.ops):
-        #     breakpoint()
-        return self.indexing[name]
 
     def __call__(self, *indices):
         index = list(itertools.chain(*indices))
