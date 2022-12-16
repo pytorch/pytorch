@@ -143,11 +143,12 @@ jobs:
           mkdir "${GITHUB_WORKSPACE}"
 
       - name: Checkout PyTorch to pytorch dir
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
+          quiet-checkout: true
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -155,12 +156,13 @@ jobs:
         working-directory: pytorch
 
       - name: Checkout pytorch/builder to builder dir
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: malfet/checkout@silent-checkout
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
+          quiet-checkout: true
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts

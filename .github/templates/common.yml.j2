@@ -109,7 +109,7 @@ concurrency:
 
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: malfet/checkout@silent-checkout
         with:
       {%- if branch %}
           ref: !{{ branch }}
@@ -127,6 +127,7 @@ concurrency:
       {%- if directory %}
           path: !{{ directory }}
       {%- endif %}
+          quiet-checkout: true
       - name: Clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }} checkout
         run: |
           # Remove any artifacts from the previous checkouts
