@@ -482,7 +482,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """
         return [
             handle
-            for fsdp_module in FullyShardedDataParallel.fsdp_modules(module)
+            for fsdp_module in _get_fsdp_states(module)
             for handle in fsdp_module._handles
         ]
 
@@ -509,7 +509,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # Reset lazy init that might be called by _summon_full_params, since
         # it could have set is_root incorrectly for non-root FSDP instances.
         if uninitialized and self._is_root:
-            for module in self.fsdp_modules(self):
+            for module in _get_fsdp_states(self):
                 module._reset_lazy_init()
 
         return ret
@@ -589,7 +589,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # Use the default config if a state_dict config is not set.
         if state_dict_config is None:
             state_dict_config = _state_dict_type_to_config[state_dict_type]()
-        for submodule in FullyShardedDataParallel.fsdp_modules(module):
+        for submodule in _get_fsdp_states(module):
             if prev_state_dict_type is None:
                 prev_state_dict_type = submodule._state_dict_type
             if prev_state_dict_config is None:
@@ -817,7 +817,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
         if recurse:
             with contextlib.ExitStack() as stack:
-                for module in self.fsdp_modules(self):
+                for module in _get_fsdp_states(self):
                     stack.enter_context(
                         module._summon_full_params(
                             recurse=False,
@@ -858,12 +858,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             "`_deregister_orig_params_ctx()` should only be called when "
             "`_use_orig_params=True`",
         )
-        for fsdp_module in self.fsdp_modules(self):
+        for fsdp_module in _get_fsdp_states(self):
             _deregister_orig_params(fsdp_module, fsdp_module)
         try:
             yield
         finally:
-            for fsdp_module in self.fsdp_modules(self):
+            for fsdp_module in _get_fsdp_states(self):
                 _register_orig_params(fsdp_module, fsdp_module)
 
     def _apply(self, *args, **kwargs):
@@ -1129,10 +1129,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ):
         if full_optim and not rank0_only:
             return
-        if any(
-            fsdp_module._use_orig_params
-            for fsdp_module in FullyShardedDataParallel.fsdp_modules(model)
-        ):
+        if any(fsdp_module._use_orig_params for fsdp_module in _get_fsdp_states(model)):
             raise NotImplementedError(
                 "Optimizer state checkpointing is not supported yet for `use_orig_params=True`"
             )
@@ -1205,7 +1202,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim,
         )
         use_orig_params: bool = False
-        for module in FullyShardedDataParallel.fsdp_modules(model):
+        for module in _get_fsdp_states(model):
             use_orig_params = module._use_orig_params
             break
         return _optim_state_dict(
@@ -1324,7 +1321,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim,
         )
         use_orig_params: bool = False
-        for module in FullyShardedDataParallel.fsdp_modules(model):
+        for module in _get_fsdp_states(model):
             use_orig_params = module._use_orig_params
             break
         sharded_osd = _flatten_optim_state_dict(
@@ -1746,7 +1743,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             raise AssertionError(
                 "register_comm_hook can only be called on a root instance."
             )
-        for submodule in self.fsdp_modules(self):
+        for submodule in _get_fsdp_states(self):
             assert (
                 not submodule._hook_registered
             ), "communication hook can be only registered once"
