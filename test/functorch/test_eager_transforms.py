@@ -2468,11 +2468,18 @@ class TestHelpers(TestCase):
             @staticmethod
             def backward(ctx, gy):
                 ctx_y = CtxWithSavedTensors(ctx, (y,))
-                self.assertEqual(ctx_y.saved_tensors, (y,))
+                # Can't use self.assertEqual because that relies on TLS
+                # that is not available in multithread autograd
+                assert len(ctx_y.saved_tensors) == 1
+                assert torch.allclose(ctx_y.saved_tensors[0], y)
 
                 wrapped = CtxWithSavedTensors(ctx_y, (z,))
-                self.assertEqual(wrapped.saved_tensors, (z,))
-                self.assertEqual(ctx_y.saved_tensors, (y,))
+
+                assert len(wrapped.saved_tensors) == 1
+                assert torch.allclose(wrapped.saved_tensors[0], z)
+
+                assert len(ctx_y.saved_tensors) == 1
+                assert torch.allclose(ctx_y.saved_tensors[0], y)
 
                 return gy * wrapped.saved_tensors[0]
 
@@ -2494,7 +2501,7 @@ class TestHelpers(TestCase):
                 # The override can be literally anything
                 override = (1, 2, 3)
                 wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, override)
-                self.assertEqual(wrapped.saved_tensors, override)
+                assert wrapped.saved_tensors == override
                 return gy
 
         out = A.apply(x)
@@ -2516,11 +2523,11 @@ class TestHelpers(TestCase):
                 override = (1, 2, 3)
                 wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, override)
 
-                self.assertEqual(wrapped.needs_input_grad[0], ctx.needs_input_grad[0])
-                self.assertEqual(wrapped.needs_input_grad[1], ctx.needs_input_grad[1])
+                assert wrapped.needs_input_grad[0] == ctx.needs_input_grad[0]
+                assert wrapped.needs_input_grad[1] == ctx.needs_input_grad[1]
                 wrapped.foo = 'bar'
-                self.assertEqual(wrapped.foo, 'bar')
-                self.assertEqual(ctx.foo, 'bar')
+                assert wrapped.foo == 'bar'
+                assert ctx.foo == 'bar'
                 return gz, gz
 
         out = A.apply(x, y)
