@@ -301,6 +301,9 @@ def _get_quant_type(qconfig):
     raise Exception("Unrecognized dtype combination in _get_quant_type: activation({}),"
                     "weight({})".format(activation.dtype, weight.dtype))
 
+get_quant_type = _get_quant_type
+get_quant_type.__module__ = "torch.ao"
+
 def _check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
     """ Checks if the given minimum and maximum values are valid, meaning that
     they exist and the min value is less than the max value.
@@ -632,9 +635,11 @@ def _get_lstm_with_individually_observed_parts(
                     cell.initial_hidden_state_qparams = (obs.scale, obs.zero_point)
                 cell.hidden_state_dtype = obs.dtype
 
+    # need to do this here to avoid circular dependency
+    from torch.ao.quantization.quantize import _add_observer_
     # Insert the observers based on the previously attached QConfigs
     # Pass in non_leaf_module_list to prevent the observers for sigmoid/tanh from being overridden
-    torch.ao.quantization.add_observer_(
+    _add_observer_(  # type: ignore[attr-defined]
         observed_lstm,
         non_leaf_module_list=[torch.nn.Sigmoid, torch.nn.Tanh]
     )

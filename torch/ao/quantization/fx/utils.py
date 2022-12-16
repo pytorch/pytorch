@@ -72,8 +72,9 @@ NON_QUANTIZABLE_WEIGHT_OPS = {torch.nn.functional.layer_norm, torch.nn.functiona
 
 def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
     """Returns if node arg is weight"""
-    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config.configs:
-        weight_index = backend_config.configs[node.target]._input_type_to_index.get("weight")
+    if isinstance(node, Node) and node.op == "call_function" and \
+            node.target in backend_config._pattern_complex_format_to_config:
+        weight_index = backend_config._pattern_complex_format_to_config[node.target]._input_type_to_index.get("weight")
         if weight_index is not None and weight_index < len(node.args) and node.args[weight_index] is arg:
             return True
         return node.kwargs.get("weight") is arg
@@ -81,8 +82,9 @@ def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> b
 
 def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
     """Returns if node arg is bias"""
-    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config.configs:
-        bias_index = backend_config.configs[node.target]._input_type_to_index.get("bias")
+    if isinstance(node, Node) and node.op == "call_function" and \
+            node.target in backend_config._pattern_complex_format_to_config:
+        bias_index = backend_config._pattern_complex_format_to_config[node.target]._input_type_to_index.get("bias")
         if bias_index is not None and bias_index < len(node.args) and node.args[bias_index] is arg:
             return True
         return node.kwargs.get("bias") is arg
