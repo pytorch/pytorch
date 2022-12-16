@@ -16,7 +16,7 @@ from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, fx_placeholder_vals
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule, has_proxy
+from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
 from torch import nn
 import re
@@ -368,6 +368,12 @@ def forward(self, x_1):
         for f in [f_grad, f_backward]:
             self._test(f, [torch.randn(3, requires_grad=True)])
 
+    def test_pickle_issue89626(self):
+        import pickle
+        x = torch.randn(2)
+        make_fx(lambda x: x * 2, tracing_mode=self.tracing_mode)(x)
+        pickle.dumps(x)
+
     def test_inplace_metadata(self):
         def f(x):
             x = x.clone()
@@ -659,19 +665,6 @@ def forward(self, x_1):
         for a, b in zip(out_graph.nodes, out_graph2.nodes):
             self.assertEqual(a.op, b.op)
 
-    def test_has_proxy(self):
-        foo = torch.randn(5)
-
-        def f(x):
-            self.assertFalse(has_proxy(foo))
-            self.assertTrue(has_proxy(x))
-            y = x.cos()
-            self.assertTrue(has_proxy(y))
-            return y
-
-        self.assertFalse(has_proxy(torch.randn(5)))
-        make_fx(f)(torch.randn(5))
-
     def test_strides(self):
         def f(x):
             self.assertTrue(x.is_contiguous())
@@ -728,7 +721,7 @@ class TestFakeProxyTensor(TestCase):
 
         def f():
             return torch.ops.aten.t.default(x)
-        self.assertRaisesRegex(Exception, "non-Fake Tensor", lambda: make_fx(f, tracing_mode="fake")())
+        self.assertRaisesRegex(Exception, "Please convert all Tensors", lambda: make_fx(f, tracing_mode="fake")())
 
         class A(torch.Tensor):
             pass
