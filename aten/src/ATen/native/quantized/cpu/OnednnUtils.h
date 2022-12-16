@@ -91,40 +91,26 @@ struct LinearPrimitiveCache : PrimitiveCache {
 struct ConvPrimitiveCache : PrimitiveCache {
   ConvPrimitiveCache() {}
 
-  ConvPrimitiveCache(const PrimitiveCacheKey& key,
-                     const ConvDesc& conv_desc,
-                     const ideep::tensor& bias,
-                     const ideep::attr_t bias_attr) {
+  ConvPrimitiveCache(
+      const PrimitiveCacheKey& key,
+      const ConvParams& params,
+      const ideep::tensor& bias) {
     this->key = key;
-    this->primitive_desc = conv_desc;
-    this->primitive = Conv(this->primitive_desc);
-    // Construct tensor of input zero point
-    ideep::tensor::desc input_zp_desc = {{1}, ideep::data_type::s32, {1}};
-    this->input_zp_tensor.init(input_zp_desc, ideep::engine::cpu_engine());
-    auto zp_data_ptr = reinterpret_cast<int32_t *>(this->input_zp_tensor.get_data_handle());
-    zp_data_ptr[0] = std::get<InputZeroPoint>(key);
-    // Construct expected bias
-    this->expected_bias = bias.reorder_if_differ_in(conv_desc.bias_desc(), bias_attr);
+    this->params = params;
+    if (!bias.is_empty()) {
+      this->expected_bias =
+          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
+    }
   }
 
-  ConvDesc primitive_desc;
-  Conv primitive;
-  ideep::tensor input_zp_tensor;
   ideep::tensor expected_bias;
+  ConvParams params;
 
-  inline ConvDesc& get_primitive_desc() {
-    return primitive_desc;
+  ConvParams& get_params() {
+    return params;
   }
 
-  inline Conv& get_primitive() {
-    return primitive;
-  }
-
-  inline ideep::tensor& get_src_zp_tensor() {
-    return input_zp_tensor;
-  }
-
-  inline ideep::tensor& get_bias() {
+  ideep::tensor& get_bias() {
     return expected_bias;
   }
 };
@@ -132,37 +118,26 @@ struct ConvPrimitiveCache : PrimitiveCache {
 struct DeconvPrimitiveCache : PrimitiveCache {
   DeconvPrimitiveCache() {}
 
-  DeconvPrimitiveCache(const PrimitiveCacheKey& key,
-                       const DeconvDesc& deconv_desc,
-                       const ideep::tensor& bias,
-                       const ideep::attr_t bias_attr,
-                       const ideep::tensor& input_zero_point) {
+  DeconvPrimitiveCache(
+      const PrimitiveCacheKey& key,
+      const DeconvParams& params,
+      const ideep::tensor& bias) {
     this->key = key;
-    this->primitive_desc = deconv_desc;
-    this->primitive = Deconv(this->primitive_desc);
-    this->input_zp_tensor = std::move(input_zero_point);
-    // Construct expected bias
-    this->expected_bias = bias.reorder_if_differ_in(deconv_desc.bias_desc(), bias_attr);
+    this->params = params;
+    if (!bias.is_empty()) {
+      this->expected_bias =
+          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
+    }
   }
 
-  DeconvDesc primitive_desc;
-  Deconv primitive;
-  ideep::tensor input_zp_tensor;
+  DeconvParams params;
   ideep::tensor expected_bias;
 
-  inline DeconvDesc& get_primitive_desc() {
-    return primitive_desc;
+  DeconvParams& get_params() {
+    return params;
   }
 
-  inline Deconv& get_primitive() {
-    return primitive;
-  }
-
-  inline ideep::tensor& get_src_zp_tensor() {
-    return input_zp_tensor;
-  }
-
-  inline ideep::tensor& get_bias() {
+  ideep::tensor& get_bias() {
     return expected_bias;
   }
 };
