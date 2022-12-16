@@ -1325,7 +1325,7 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
     Example::
 
         >>> import torch
-        >>> from torch.func import make_fx
+        >>> from torch.fx.experimental.proxy_tensor import make_fx
         >>> from torch.func import functionalize
         >>>
         >>> A function that uses mutations and views, but only on intermediate tensors.
