@@ -3421,7 +3421,7 @@ class Wait(ExternKernelAlloc):
     def codegen(self, wrapper):
         (x, work) = [t.codegen_reference() for t in self.inputs]
         wrapper.writeline(f"{work}.wait()")
-        wrapper.writeline(f"{self.get_name()} = {x}")
+        # wrapper.writeline(f"{self.get_name()} = {x}")
 
     def get_mutation_names(self):
         assert isinstance(self.layout, MutationLayout)
@@ -3457,8 +3457,11 @@ class AllReduce(ExternKernelAlloc):
 
         # Return a 'Wait' to the user that called 'all_reduce' in the first place.  It consumes the 'work'
         # and waits on it, also producing a buffer which is really the input buffer to AllReduce.
+
         # Nit: currently the codegen for Wait produces an unnecessary but harmless line such as
         #      buf4 = buf2, where buf2 was the input to AllReduce, and buf4 will be used by any consumers
+        # Update: i think 'Wait' still has a new name (E.g. buf4) but downstream ops still refer to 'buf2',
+        #      meaning I can just delete the codegen for `buf4=buf2` -- not sure i'm totally in the clear here.
         return Wait(
             layout=MutationLayout(x),
             inputs=[x, all_reduce],
