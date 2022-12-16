@@ -468,15 +468,9 @@ def _cast_fp_inputs_to_dtype(
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
         if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
-        y = x.to(dtype)
-        # Explicitly copy over `requires_grad` since this runs inside
-        # `torch.no_grad()`
-        if x.is_leaf:
-            y.requires_grad = x.requires_grad
-        return y
+        return x.to(dtype)
 
-    with torch.no_grad():
-        return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
+    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
 
 @no_type_check
