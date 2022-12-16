@@ -728,7 +728,6 @@
     "get_observer_state_dict",
     "get_quantized_operator",
     "get_static_quant_module_class",
-    "is_activation_post_process",
     "load_observer_state_dict",
     "no_observer_set",
     "prepare",
@@ -832,7 +831,6 @@
   "torch.quantization.quantize": [
     "add_quant_dequant",
     "convert",
-    "is_activation_post_process",
     "prepare",
     "prepare_qat",
     "propagate_qconfig_",

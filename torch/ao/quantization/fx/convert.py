@@ -40,6 +40,7 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     get_native_backend_config,
 )
+from torch.ao.quantization.observer import _is_activation_post_process
 from .graph_module import (
     QuantizedGraphModule,
     _is_observed_module,
@@ -62,7 +63,6 @@ from torch.ao.quantization.utils import (
 )
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
-    is_activation_post_process,
 )
 from torch.ao.quantization.stubs import DeQuantStub
 from .custom_config import (
@@ -574,7 +574,7 @@ def _maybe_get_observer_for_node(
     for maybe_obs_node, _ in node.users.items():
         if maybe_obs_node.op == 'call_module':
             maybe_obs = modules[str(maybe_obs_node.target)]
-            if is_activation_post_process(maybe_obs):
+            if _is_activation_post_process(maybe_obs):
                 return maybe_obs
     return None
 
@@ -1002,7 +1002,7 @@ def convert(
         elif node.op == "call_module":
             mod = _get_module(node, modules)
             assert mod is not None
-            if is_activation_post_process(mod):
+            if _is_activation_post_process(mod):
                 observed_node = node.args[0]
                 if observed_node in statically_quantized_custom_module_nodes:
                     _replace_observer_or_dequant_stub_with_dequantize_node(node, model.graph)
