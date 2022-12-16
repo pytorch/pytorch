@@ -366,6 +366,24 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 1, requires_grad=True)]
         self.verify_aot_autograd(f, inp)
 
+    @patch("torch._functorch.config.use_dynamic_shapes", True)
+    @patch("torch._functorch.config.use_fake_tensor", True)
+    def test_embedding_bag_view(self):
+        # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
+        # test that this works even though the sparse tensor has no storage.
+
+        class F(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.EmbeddingBag(100, 8, sparse=True)
+
+            def forward(self, x, y):
+                return self.emb(x, y).view(-1)
+
+        x = torch.arange(3)
+        y = torch.arange(3)
+        self.verify_aot_autograd(F(), [x, y])
+
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_simple(self):
         def f(a):
