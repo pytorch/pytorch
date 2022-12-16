@@ -164,6 +164,7 @@ def main() -> None:
     # workflow dispatcher
     tag_regex = re.compile(r"^ciflow/\w+/(?P<pr_number>\d+)$")
 
+    labels = set()
     if pr_number:
         # If a PR number is set, query all the labels from that PR
         labels = get_labels(int(pr_number))
@@ -201,6 +202,8 @@ def main() -> None:
     # and also put a flag if the test matrix is empty, so subsequent jobs can
     # quickly check it without the need to parse the JSON string
     set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
+
+    set_output("keep-going", "keep-going" in labels)
 
 
 if __name__ == "__main__":
