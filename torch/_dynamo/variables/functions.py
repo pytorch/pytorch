@@ -25,7 +25,10 @@ def wrap_bound_arg(tx, val, options, source=None):
     elif variables.ConstantVariable.is_literal(val):
         return variables.ConstantVariable(val, **options)
     elif isinstance(val, types.FunctionType):
-        return variables.UserFunctionVariable(val, **options)
+        assert (
+            source
+        ), "Must provide a source if wrapping a tensor arg, otherwise can't guard"
+        return variables.UserFunctionVariable(val, source=source, **options)
     elif isinstance(val, enum.Enum):
         return variables.EnumVariable(val, **options)
     elif isinstance(val, (type, abc.ABCMeta)):

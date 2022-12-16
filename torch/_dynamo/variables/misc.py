@@ -76,7 +76,7 @@ class SuperVariable(VariableTracker):
             ).call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=self.source, **options
+                inner_fn.__func__, self.objvar, source=source, **options
             ).call_function(tx, args, kwargs)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
@@ -442,6 +442,7 @@ class AutogradFunctionVariable(VariableTracker):
     def __init__(self, fn_cls, **kwargs):
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
+        assert self.source, "No source!"
 
     def call_apply(self, tx, args, kwargs):
         requires_grad = False
@@ -484,7 +485,7 @@ class AutogradFunctionVariable(VariableTracker):
 
     def call_function(self, tx, args, kwargs):
         options = VariableTracker.propagate(self, args, kwargs.values())
-        return AutogradFunctionVariable(self.fn_cls, **options)
+        return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
 
 
 class BlackHoleVariable(VariableTracker):
