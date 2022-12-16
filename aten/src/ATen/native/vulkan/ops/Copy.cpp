@@ -114,8 +114,7 @@ void transfer_vulkan_to_cpu(vTensor& v_src, Tensor& dst) {
 
   context->fences().return_fence(fence);
 
-  dst =
-      utils::nc4hw_to_nchw(dst_tmp, v_src.sizes()).to(v_src.options().dtype());
+  dst = utils::nc4hw_to_nchw(dst_tmp, v_src.sizes()).to(v_src.dtype());
 }
 
 void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
@@ -271,8 +270,10 @@ ops::vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
   ops::vTensor v_ret{
       api::context(),
       src.sizes(),
-      src.options().memory_format(src.suggest_memory_format()),
-      storage_type};
+      src.scalar_type(),
+      storage_type,
+      src.suggest_memory_format(),
+  };
 
   ops::pack_cpu_to_vulkan(src, v_ret);
 
@@ -280,7 +281,10 @@ ops::vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
 }
 
 at::Tensor from_vulkan(ops::vTensor& v_src) {
-  at::Tensor ret = at::empty(v_src.sizes(), v_src.options().device(at::kCPU));
+  at::TensorOptions opt(at::kCPU);
+  opt = opt.dtype(v_src.dtype());
+
+  at::Tensor ret = at::empty(v_src.sizes(), opt).to(v_src.memory_format());
   ops::pack_vulkan_to_cpu(v_src, ret);
   return ret;
 }

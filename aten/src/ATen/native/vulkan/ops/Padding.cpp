@@ -52,7 +52,7 @@ Tensor pad2d(
   vTensor v_output{
       context,
       output_size,
-      v_self.options(),
+      self_arg.scalar_type(),
   };
 
   const struct Block final {

@@ -96,7 +96,7 @@ Tensor layer_norm(
   vTensor v_output{
       context,
       v_input_sizes,
-      v_input.options(),
+      input_arg.scalar_type(),
   };
 
   const struct Block final {
