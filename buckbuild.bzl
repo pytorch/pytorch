@@ -859,7 +859,6 @@ def define_buck_targets(
         header_namespace = "",
         exported_headers = subdir_glob([
             ("aten/src", "ATen/native/vulkan/*.h"),
-            ("aten/src", "ATen/native/vulkan/api/*.h"),
             ("aten/src", "ATen/native/vulkan/ops/*.h"),
             ("aten/src", "ATen/vulkan/*.h"),
         ]),

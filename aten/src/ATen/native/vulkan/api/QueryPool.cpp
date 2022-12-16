@@ -1,6 +1,5 @@
 #include <ATen/native/vulkan/api/QueryPool.h>
 #include <ATen/native/vulkan/api/Utils.h>
-#include <ATen/native/vulkan/ops/Tensor.h>
 
 #include <cmath>
 #include <iostream>

@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Utils.h>
+#include <ATen/vulkan/Context.h>
 
 namespace at {
 namespace native {
@@ -283,6 +284,21 @@ at::Tensor from_vulkan(ops::vTensor& v_src) {
   ops::pack_vulkan_to_cpu(v_src, ret);
   return ret;
 }
+
+//
+// VulkanImpl
+//
+
+struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
+  bool is_vulkan_available() const override {
+    return api::available();
+  }
+
+  Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
+    return vulkan::ops::copy_(self, src);
+  }
+};
+static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
 
 } // namespace ops
 } // namespace vulkan
