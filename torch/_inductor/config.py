@@ -134,6 +134,12 @@ class triton:
     # Use cudagraphs on output code
     cudagraphs = True
 
+    # Synchronize before and after every compiled graph.
+    debug_sync_graph = False
+
+    # Synchronize after every kernel launch, to help pinpoint bugs
+    debug_sync_kernel = False
+
     # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"
 
@@ -285,3 +291,8 @@ class InductorConfigContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._prev._apply()
+
+
+from .._dynamo.config_utils import get_config_serialization_fns
+
+save_config, load_config = get_config_serialization_fns(sys.modules[__name__])
