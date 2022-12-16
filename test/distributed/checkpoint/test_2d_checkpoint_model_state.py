@@ -157,6 +157,7 @@ class Test2dModelStateCheckpoint(DTensorTestBase):
             )
             model_2.load_state_dict(state_dict["model"])
 
+        # Ensure the parameters are the same after loading
         with FSDP.summon_full_params(model):
             with FSDP.summon_full_params(model_2):
                 for n_p1, n_p2 in zip(
