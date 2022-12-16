@@ -262,7 +262,7 @@ jobs:
           pip install -r requirements-flake8.txt --user
           pip install rockset==0.8.10 --user
           pip install -r requirements.txt --user
-          pip install mypy==0.960 --user
+          pip install mypy==0.991 --user
           make setup_lint
       - name: Test tools (nonretryable)
         run: |
