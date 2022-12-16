@@ -2673,7 +2673,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 b_float32 = torch.rand((8, 8), device="cuda")
                 d_float32 = torch.rand((8, 8), device="cuda")
 
-                with torch.autocast(device_type="cuda"):
+                with torch.autocast("cuda"):
                     e_float64 = torch.mm(a_float32, b_float32)
                     f_float64 = torch.mm(d_float32, e_float64)
                 return f_float64
