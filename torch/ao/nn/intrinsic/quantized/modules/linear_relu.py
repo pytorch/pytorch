@@ -5,7 +5,7 @@ from torch.ao.nn.quantized.modules.utils import _quantize_weight
 
 __all__ = [
     "LinearReLU",
-
+    "LinearLeakyReLU",
 ]
 
 class LinearReLU(nnq.Linear):
