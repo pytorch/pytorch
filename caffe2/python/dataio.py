@@ -52,8 +52,8 @@ class Reader(object):
         """Setup nets to run at task initialization and cleanup time.
 
         Args:
-            global_init_net: A net invoked at task init time.
-            global_finish_net: A net invoked at task cleanup time.
+            init_net: A net invoked at task init time.
+            finish_net: A net invoked at task cleanup time.
         """
         pass
 

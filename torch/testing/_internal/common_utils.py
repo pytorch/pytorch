@@ -942,6 +942,9 @@ if TEST_WITH_TORCHDYNAMO:
     # TODO: Remove this; this is grandfathered in because we suppressed errors
     # on test suite previously
     torch._dynamo.config.suppress_errors = True
+    if TEST_WITH_TORCHINDUCTOR:
+        import torch._inductor.config
+        torch._inductor.config.fallback_random = True
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
@@ -1879,6 +1882,28 @@ class TensorOrArrayPair(TensorLikePair):
         return actual, expected
 
 
+class TypedStoragePair(TensorLikePair):
+    """Pair for :class:`torch.storage.TypedStorage` inputs."""
+    def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters):
+        self._check_inputs_isinstance(actual, expected, cls=torch.storage.TypedStorage)
+        super().__init__(actual, expected, **other_parameters)
+        self.rtol = max(self.rtol, rtol_override)
+        self.atol = max(self.atol, atol_override)
+
+    def _to_tensor(self, typed_storage):
+        return torch.tensor(
+            typed_storage._untyped_storage,
+            dtype={
+                torch.quint8: torch.uint8,
+                torch.quint4x2: torch.uint8,
+                torch.quint2x4: torch.uint8,
+                torch.qint32: torch.int32,
+                torch.qint8: torch.int8
+            }.get(typed_storage.dtype, typed_storage.dtype),
+            device=typed_storage.device,
+        )
+
+
 class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
 
@@ -2109,8 +2134,10 @@ class TestCase(expecttest.TestCase):
             return
 
         if using_unittest:
-            failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
-            errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
+            # Keep track of the number of tests marked as failures, errors, and skipped before starting
+            failures_before = 0 if result is None else len(result.failures)
+            errors_before = 0 if result is None else len(result.errors)
+            skipped_before = 0 if result is None else len(result.skipped)
 
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
@@ -2164,7 +2191,7 @@ class TestCase(expecttest.TestCase):
                 result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red + 1, num_green=num_green)
-        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and not result.skipped:
+        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and skipped_before == len(result.skipped):
             # Always re-run up to MAX_NUM_RETRIES when running under rerun disabled tests modes if the test successes.
             # The parameter num_retries_left can be equal to MAX_NUM_RETRIES here because num_runs_left is initially
             # set to MAX_NUM_RETRIES + 1, i.e. the first run successes
@@ -2864,6 +2891,7 @@ class TestCase(expecttest.TestCase):
                 RelaxedBooleanPair,
                 RelaxedNumberPair,
                 TensorOrArrayPair,
+                TypedStoragePair,
                 StringPair,
                 SetPair,
                 TypePair,
@@ -2871,7 +2899,6 @@ class TestCase(expecttest.TestCase):
             ),
             sequence_types=(
                 Sequence,
-                torch.storage.TypedStorage,
                 Sequential,
                 ModuleList,
                 ParameterList,
