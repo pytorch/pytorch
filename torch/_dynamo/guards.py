@@ -430,11 +430,11 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        guards: Optional[Set[Guard]] = None,
         f_locals: Optional[Dict[str, object]] = None,
         f_globals: Optional[Dict[str, object]] = None,
         guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
     ):
+        guards = output_graph.guards if output_graph else None
         self.valid = True
         self._weakrefs: List["ReferenceType[object]"] = []
         self._seen_ids: Set[int] = set()
@@ -507,11 +507,11 @@ class CheckFunctionManager:
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
         # Let's handle ShapeEnv guards.  To do this, we will resolve
-        # shape variables to sources from fake_sources.  This must happen after
+        # shape variables to sources from tracked_fakes.  This must happen after
         # tensor checks.
         # NB: self.output_graph can be None in the debug_nops tests
         if self.output_graph and self.output_graph.shape_env:
-            fs = self.output_graph.fake_sources
+            fs = self.output_graph.tracked_fakes
             expr_as_str = self.output_graph.shape_env.codegen_guards(
                 [a.fake for a in fs],
                 [a.sname for a in fs],
