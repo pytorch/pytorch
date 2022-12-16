@@ -4989,7 +4989,7 @@ class CommonTemplate:
             func()
 
 
-if HAS_CPU and False:
+if HAS_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -5924,21 +5924,17 @@ if HAS_CUDA:
                 return lambda x: example_inputs_
 
         def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
-            cxt = TritonCodeGenTests.NoOpCompilerBackend()
-            torch._dynamo.optimize(backend=cxt.noop_backend)(fn)(*args)
-            return self.get_kernels_from_graph(cxt.model, cxt.example_args)
-
-        def get_kernels_from_graph(self, fn_compiled, example_args):
             from torch._inductor.debug import DebugContext
             from torch._inductor.graph import GraphLowering
             from torch._inductor.virtualized import V
 
-            graph = GraphLowering(fn_compiled)
+            cxt = TritonCodeGenTests.NoOpCompilerBackend()
+            torch._dynamo.optimize(backend=cxt.noop_backend)(fn)(*args)
+            graph = GraphLowering(cxt.model)
             graph.num_static_inputs = 0
-
             kernels = []
             with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
-                graph.run(*example_args)
+                graph.run(*(cxt.example_args))
                 mod = graph.compile_to_module()
 
                 for val in mod.__dict__.values():
