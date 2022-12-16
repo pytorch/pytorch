@@ -53,7 +53,7 @@ class ImplementedPruner(BaseStructuredSparsifier):
         module.parametrizations[tensor_name][0].mask[prune] = False
 
 
-class BottomHalfPruner(BaseStructuredSparsifier):
+class BottomHalfLSTMPruner(BaseStructuredSparsifier):
     """
     Pruner that will remove the bottom half of the rows.
     This is primarily meant for testing purposes
@@ -64,15 +64,11 @@ class BottomHalfPruner(BaseStructuredSparsifier):
             if isinstance(p, FakeStructuredSparsity):
                 mask = p.mask
                 masks = torch.split(mask, len(mask) // 4)
-
                 for small in masks:
                     num = len(small)
                     small[num // 2 :] = False
-
                 new_mask = torch.cat(masks)
-
                 mask.data = new_mask.data
-                break
 
 
 class TestBaseStructuredSparsifier(TestCase):
@@ -687,7 +683,7 @@ class TestBaseStructuredSparsifier(TestCase):
         ]
 
         rnn_input = torch.ones((1, 8))
-        fx_pruner = BottomHalfPruner({"sparsity_level": 0.5})
+        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
         fx_pruner.prepare(model, config)
 
         fx_pruner.enable_mask_update = True
@@ -730,7 +726,7 @@ class TestBaseStructuredSparsifier(TestCase):
         ]
 
         rnn_input = torch.ones((1, 8))
-        fx_pruner = BottomHalfPruner({"sparsity_level": 0.5})
+        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
         fx_pruner.prepare(model, config)
         fx_pruner.enable_mask_update = True
         fx_pruner.step()
@@ -745,7 +741,7 @@ class TestBaseStructuredSparsifier(TestCase):
         # We cannot check that y_expected == y_pruned as usual because
         # zeros vs. missing elements yield different numerical results.
         # Instead that we check that the pruned elements are the first half of the results
-        # since we are using a BottomHalf Pruner
+        # since we are using a BottomHalfLSTMPruner
         assert torch.isclose(
             lstm_out_expected[:, : c // 2], lstm_out_pruned, rtol=1e-05, atol=1e-07
         ).all()
