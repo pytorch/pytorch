@@ -31,10 +31,7 @@ def arch_type(arch_version: str) -> str:
 WHEEL_CONTAINER_IMAGES = {
     **{
         gpu_arch: f"pytorch/manylinux-builder:cuda{gpu_arch}"
-        for gpu_arch in CUDA_ARCHES if gpu_arch == "11.6"
-    },
-    **{
-        "11.7": "tousif111/manylinux-builder:cuda11.7"
+        for gpu_arch in CUDA_ARCHES
     },
     **{
         gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}"
