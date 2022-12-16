@@ -1094,7 +1094,7 @@ static TensorView* newForReduction(
 
   TORCH_INTERNAL_ASSERT(
       !axes_set.empty(),
-      "Asked for ouput of reduction, but no reduction axis provided.");
+      "Asked for output of reduction, but no reduction axis provided.");
 
   TORCH_INTERNAL_ASSERT(
       (*(axes_set.rbegin())) < orig_domain.size(),
@@ -1183,7 +1183,7 @@ TensorView* reductionOp(
 
     TORCH_CHECK(
         axis >= 0 && axis < ndims,
-        "Reduction on invalid axis, recieved: ",
+        "Reduction on invalid axis, received: ",
         axis,
         " however tensor view only has ",
         ndims,
@@ -1518,7 +1518,7 @@ WelfordResult Welford(
 
     TORCH_CHECK(
         axis >= 0 && axis < ndims,
-        "Reduction on invalid axis, recieved: ",
+        "Reduction on invalid axis, received: ",
         axis,
         " however tensor view only has ",
         ndims,
@@ -2228,7 +2228,7 @@ static TensorView* newForMma(
 
   TORCH_INTERNAL_ASSERT(
       !axes_set.empty(),
-      "Asked for ouput of reduction, but no reduction axis provided.");
+      "Asked for output of reduction, but no reduction axis provided.");
 
   TORCH_INTERNAL_ASSERT(
       (*(axes_set.rbegin())) < orig_domain_a.size(),
@@ -2319,7 +2319,7 @@ TensorView* fusedMultiplySum(
 
     TORCH_CHECK(
         axis >= 0 && axis < ndims,
-        "Reduction on invalid axis, recieved: ",
+        "Reduction on invalid axis, received: ",
         axis,
         " however tensor view only has ",
         ndims,

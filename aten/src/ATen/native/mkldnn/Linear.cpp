@@ -10,6 +10,7 @@
 #else
 #include <ATen/ops/_to_dense_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/linear.h>
 #include <ATen/ops/mkldnn_linear_backward_input.h>
 #include <ATen/ops/mkldnn_linear_backward_input_native.h>
 #include <ATen/ops/mkldnn_linear_backward_native.h>
@@ -215,8 +216,9 @@ Tensor mkldnn_linear_pointwise(
   }
   const ideep::tensor w = itensor_from_tensor(weight_t);
 
-  auto it = fx_fusion_attr_map().find(attr);
-  TORCH_CHECK(it != fx_fusion_attr_map().end(), "Fusion behavior undefined.");
+  auto it = fusion_unary_attr_map().find(attr);
+  TORCH_CHECK(
+      it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
   ideep::attr_t op_attr = it->second(scalars, algorithm);
 
   if (mkldnn_bias.has_value()) {
@@ -335,3 +337,100 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
+
+#if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
+#include <mkl.h>
+
+namespace at {
+namespace native {
+
+Tensor mkl_linear(
+    const Tensor& self,
+    const Tensor& mkl_weight_t,
+    const Tensor& origin_weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    const int64_t prepack_batch_size) {
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+  TORCH_CHECK(
+      self.options().type_equal(origin_weight_t.options()),
+      "Input type (",
+      self.toString(),
+      ") and weight type (",
+      origin_weight_t.toString(),
+      ") should be the same");
+  TORCH_CHECK(
+      !bias.defined() || (self.options().type_equal(bias.options())),
+      "Input type (",
+      self.toString(),
+      ") and bias type (",
+      bias.toString(),
+      ") should be the same");
+  TORCH_CHECK(
+      mkl_weight_t.scalar_type() == origin_weight_t.scalar_type() &&
+          origin_weight_t.scalar_type() == kFloat,
+      "mkl_linear: weight dtype should be float");
+
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  auto input_size = self.sizes();
+  std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
+  output_size.push_back(origin_weight_t.size(0));
+  auto output = at::empty(output_size, self.options());
+  int64_t M = self.numel() / self.size(self.dim() - 1);
+  if (M == prepack_batch_size && mkl_weight_t.is_mkldnn()) {
+    auto self_ = self.is_contiguous() ? self : self.contiguous();
+    auto K = origin_weight_t.size(1);
+    auto N = origin_weight_t.size(0);
+    const ideep::tensor& w = itensor_from_mkldnn(mkl_weight_t);
+    auto in_ptr = self_.data_ptr<float>();
+    auto weight_ptr = (float*)(w.get_data_handle());
+    auto out_ptr = output.data_ptr<float>();
+    if (bias.defined()) {
+      auto bias_ = bias.is_contiguous() ? bias : bias.contiguous();
+      auto bias_ptr = bias_.data_ptr<float>();
+#ifdef _OPENMP
+#if (_OPENMP >= 201307)
+#pragma omp parallel for simd schedule( \
+    static) if (omp_get_max_threads() > 1 && !omp_in_parallel())
+#else
+#pragma omp parallel for schedule( \
+    static) if (omp_get_max_threads() > 1 && !omp_in_parallel())
+#endif
+#endif
+      for (int64_t i = 0; i < M; ++i) {
+        memcpy(out_ptr + i * N, bias_ptr, sizeof(float) * N);
+      }
+    }
+    cblas_sgemm_compute(
+        CblasRowMajor,
+        CblasNoTrans,
+        CblasPacked,
+        M,
+        N,
+        K,
+        in_ptr,
+        K,
+        weight_ptr,
+        K,
+        bias.defined() ? 1.f : 0.f,
+        out_ptr,
+        N);
+  } else {
+    output = at::linear_out(output, self, origin_weight_t, bias_opt);
+  }
+  return output;
+}
+
+TORCH_LIBRARY_IMPL(mkl, CPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
+}
+
+TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
+}
+
+} // namespace native
+} // namespace at
+
+#endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED

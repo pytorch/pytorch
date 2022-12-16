@@ -3,7 +3,8 @@ from torch import Tensor
 from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
-__all__ = ['Rprop', 'rprop']
+__all__ = ["Rprop", "rprop"]
+
 
 class Rprop(Optimizer):
     r"""Implements the resilient backpropagation algorithm.
@@ -56,23 +57,74 @@ class Rprop(Optimizer):
             minimizing (default: False)
     """
 
-    def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50),
-                 *, foreach: Optional[bool] = None, maximize: bool = False,
-                 differentiable: bool = False):
+    def __init__(
+        self,
+        params,
+        lr=1e-2,
+        etas=(0.5, 1.2),
+        step_sizes=(1e-6, 50),
+        *,
+        foreach: Optional[bool] = None,
+        maximize: bool = False,
+        differentiable: bool = False,
+    ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
 
-        defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes, foreach=foreach, maximize=maximize, differentiable=differentiable)
+        defaults = dict(
+            lr=lr,
+            etas=etas,
+            step_sizes=step_sizes,
+            foreach=foreach,
+            maximize=maximize,
+            differentiable=differentiable,
+        )
         super(Rprop, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
-            group.setdefault('foreach', None)
-            group.setdefault('maximize', False)
-            group.setdefault('differentiable', False)
+            group.setdefault("foreach", None)
+            group.setdefault("maximize", False)
+            group.setdefault("differentiable", False)
+
+    def _init_group(self, group, params, grads, prevs, step_sizes):
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            params.append(p)
+            grad = p.grad
+            if grad.is_sparse:
+                raise RuntimeError("Rprop does not support sparse gradients")
+
+            grads.append(grad)
+            state = self.state[p]
+
+            # State initialization
+            if len(state) == 0:
+                state["step"] = 0
+                state["prev"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+                if p.dtype.is_complex:
+                    # Complex Number should be as if they are two independent real numbers.
+                    # Hence the step_size shouldn't be zero for imaginary part.
+                    state["step_size"] = (
+                        grad.new()
+                        .resize_as_(grad)
+                        .fill_(complex(group["lr"], group["lr"]))
+                    )
+                else:
+                    state["step_size"] = (
+                        grad.new().resize_as_(grad).fill_(group["lr"])
+                    )
+
+            prevs.append(state["prev"])
+            step_sizes.append(state["step_size"])
+
+            state["step"] += 1
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -92,67 +144,46 @@ class Rprop(Optimizer):
             grads = []
             prevs = []
             step_sizes = []
-            etaminus, etaplus = group['etas']
-            step_size_min, step_size_max = group['step_sizes']
-            foreach = group['foreach']
-            maximize = group['maximize']
+            etaminus, etaplus = group["etas"]
+            step_size_min, step_size_max = group["step_sizes"]
+            foreach = group["foreach"]
+            maximize = group["maximize"]
 
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                params.append(p)
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('Rprop does not support sparse gradients')
+            self._init_group(group, params, grads, prevs, step_sizes)
 
-                grads.append(grad)
-                state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    if p.dtype.is_complex:
-                        # Complex Number should be as if they are two independent real numbers.
-                        # Hence the step_size shouldn't be zero for imaginary part.
-                        state['step_size'] = grad.new().resize_as_(grad).fill_(complex(group['lr'], group['lr']))
-                    else:
-                        state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
-
-                prevs.append(state['prev'])
-                step_sizes.append(state['step_size'])
-
-                state['step'] += 1
-
-            rprop(params,
-                  grads,
-                  prevs,
-                  step_sizes,
-                  step_size_min=step_size_min,
-                  step_size_max=step_size_max,
-                  etaminus=etaminus,
-                  etaplus=etaplus,
-                  foreach=foreach,
-                  maximize=maximize,
-                  differentiable=group['differentiable'])
+            rprop(
+                params,
+                grads,
+                prevs,
+                step_sizes,
+                step_size_min=step_size_min,
+                step_size_max=step_size_max,
+                etaminus=etaminus,
+                etaplus=etaplus,
+                foreach=foreach,
+                maximize=maximize,
+                differentiable=group["differentiable"],
+            )
 
         return loss
 
 
-def rprop(params: List[Tensor],
-          grads: List[Tensor],
-          prevs: List[Tensor],
-          step_sizes: List[Tensor],
-          # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-          # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-          foreach: bool = None,
-          maximize: bool = False,
-          differentiable: bool = False,
-          *,
-          step_size_min: float,
-          step_size_max: float,
-          etaminus: float,
-          etaplus: float):
+def rprop(
+    params: List[Tensor],
+    grads: List[Tensor],
+    prevs: List[Tensor],
+    step_sizes: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    foreach: bool = None,
+    maximize: bool = False,
+    differentiable: bool = False,
+    *,
+    step_size_min: float,
+    step_size_max: float,
+    etaminus: float,
+    etaplus: float,
+):
     r"""Functional API that performs rprop algorithm computation.
 
     See :class:`~torch.optim.Rprop` for details.
@@ -163,36 +194,40 @@ def rprop(params: List[Tensor],
         foreach = False
 
     if foreach and torch.jit.is_scripting():
-        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_rprop
     else:
         func = _single_tensor_rprop
 
-    func(params,
-         grads,
-         prevs,
-         step_sizes,
-         step_size_min=step_size_min,
-         step_size_max=step_size_max,
-         etaminus=etaminus,
-         etaplus=etaplus,
-         maximize=maximize,
-         differentiable=differentiable)
+    func(
+        params,
+        grads,
+        prevs,
+        step_sizes,
+        step_size_min=step_size_min,
+        step_size_max=step_size_max,
+        etaminus=etaminus,
+        etaplus=etaplus,
+        maximize=maximize,
+        differentiable=differentiable,
+    )
 
 
-def _single_tensor_rprop(params: List[Tensor],
-                         grads: List[Tensor],
-                         prevs: List[Tensor],
-                         step_sizes: List[Tensor],
-                         *,
-                         step_size_min: float,
-                         step_size_max: float,
-                         etaminus: float,
-                         etaplus: float,
-                         maximize: bool,
-                         differentiable: bool):
+def _single_tensor_rprop(
+    params: List[Tensor],
+    grads: List[Tensor],
+    prevs: List[Tensor],
+    step_sizes: List[Tensor],
+    *,
+    step_size_min: float,
+    step_size_max: float,
+    etaminus: float,
+    etaplus: float,
+    maximize: bool,
+    differentiable: bool,
+):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -226,17 +261,19 @@ def _single_tensor_rprop(params: List[Tensor],
         prev.copy_(grad)
 
 
-def _multi_tensor_rprop(params: List[Tensor],
-                        grads: List[Tensor],
-                        prevs: List[Tensor],
-                        step_sizes: List[Tensor],
-                        *,
-                        step_size_min: float,
-                        step_size_max: float,
-                        etaminus: float,
-                        etaplus: float,
-                        maximize: bool,
-                        differentiable: bool):
+def _multi_tensor_rprop(
+    params: List[Tensor],
+    grads: List[Tensor],
+    prevs: List[Tensor],
+    step_sizes: List[Tensor],
+    *,
+    step_size_min: float,
+    step_size_max: float,
+    etaminus: float,
+    etaplus: float,
+    maximize: bool,
+    differentiable: bool,
+):
 
     if len(params) == 0:
         return
@@ -245,7 +282,9 @@ def _multi_tensor_rprop(params: List[Tensor],
 
     # Handle complex params
     def _view_complex_as_real(tensor_list):
-        return [torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list]
+        return [
+            torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
+        ]
 
     grads = _view_complex_as_real(grads)
     prevs = _view_complex_as_real(prevs)
