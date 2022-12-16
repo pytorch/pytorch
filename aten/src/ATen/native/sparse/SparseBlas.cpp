@@ -5,6 +5,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/sparse/SparseBlas.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
+#include <ATen/native/cpu/SampledAddmmKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -132,8 +133,20 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cpu(
     result_sizes.push_back(self.size(-2));
     result_sizes.push_back(self.size(-1));
     at::sparse_csr::get_sparse_csr_impl(result)->resize_(self._nnz(), result_sizes);
+    result.copy_(self);
   }
-  result.copy_((self.to_dense().mul(beta).add(mat1.matmul(mat2), alpha)).sparse_mask(self));
+
+  if (mat1.numel() == 0 || mat2.numel() == 0 || result._nnz() == 0) {
+    result.mul_(beta);
+    return result;
+  }
+
+  // transpose mat2 to [b, n, k] from performance perspective.
+  // for gnn classic usage, mat2 is already stored in [b, n, k] physically,
+  // so no extra memcpy is needed.
+  auto mat2_t = mat2.transpose(-1, -2).contiguous();
+  sampled_addmm_sparse_csr_stub(kCPU, mat1.contiguous(), mat2_t, beta, alpha, result);
+
   return result;
 }
 
@@ -246,6 +259,8 @@ void sparse_sampled_addmm_check_inputs(
 }
 
 } // namespace sparse
+
+DEFINE_DISPATCH(sampled_addmm_sparse_csr_stub);
 
 } // namespace native
 } // namespace at

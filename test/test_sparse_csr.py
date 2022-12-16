@@ -2200,7 +2200,7 @@ class TestSparseCSR(TestCase):
         # Add a test case for size 0 a and b tensors
         mnk = mnk + [(5, 5, 0)]
 
-        batch_shapes = [(), (2,), (2, 3)] if self.device_type == 'cuda' else [(), ]
+        batch_shapes = [(), (2,), (2, 3)]
         tf = [True, False]
         for index_dtype in [torch.int32, torch.int64]:
             for (m, n, k), b, noncontiguous, bcast_c in itertools.product(mnk, batch_shapes, tf, tf):
