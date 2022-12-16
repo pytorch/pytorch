@@ -73,7 +73,7 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
-torch._inductor.config.triton.autotune = False  # too slow
+torch._inductor.config.triton.autotune_pointwise = False  # too slow
 
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,

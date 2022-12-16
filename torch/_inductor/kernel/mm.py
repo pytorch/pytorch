@@ -7,14 +7,8 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from .mm_common import (
-    addmm_epilogue,
-    mm_args,
-    mm_configs,
-    mm_grid,
-    mm_options,
-    use_triton_template,
-)
+from ..utils import use_triton_template
+from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_grid, mm_options
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten

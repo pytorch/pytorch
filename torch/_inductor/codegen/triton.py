@@ -1198,7 +1198,7 @@ class TritonScheduling:
                 return False
 
             if node1.is_template():
-                return True
+                return True  # skip checks for compatible tiling
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
