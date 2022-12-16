@@ -160,14 +160,13 @@ class FlatParameter(nn.Parameter):
             same as the unsharded sizes. (We omit "padded" because there is no
             analogous unpadded one.)
 
-        _fully_sharded_module (nn.Module): See [Note: Fully Sharded Module].
         _param_infos (Tuple[ParamInfo, ...]): Each parameter's parameter info
             entry; see :class:`ParamInfo`.
         _numels (Tuple[int, ...]): Each parameter's numel.
         _shapes (Tuple[torch.Size, ...]): Each parameter's shape.
         _fqns (Tuple[str, ...]): The original parameters' FQNs prefixed from
-            ``self._fully_sharded_module``. The names are guaranteed to be
-            unique within the subtree rooted at that module.
+            the owning handle's ``_fully_sharded_module``. The names are
+            guaranteed to be unique within the subtree rooted at that module.
         _num_params (int): Number of original parameters flattened into this
             flattened parameter; this is the length of ``_param_infos``,
             ``_numels``, ``_shapes``, and ``_fqns``.
