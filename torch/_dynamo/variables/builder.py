@@ -751,11 +751,6 @@ def wrap_fx_proxy_cls(
         tx.output.guards.update(options["guards"])
 
     assert "example_value" not in proxy.node.meta
-    if not config.dynamic_propagation:
-        # TODO: This probably doesn't handle subclass correctly
-        if isinstance(example_value, torch.Tensor):
-            options.update(target_cls.specialize(example_value))
-        return target_cls(proxy, **options)
 
     initial_example_value = example_value
 
