@@ -364,7 +364,6 @@ def prune_lstm_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: nn.
 
 def prune_lstm_linear(lstm: nn.LSTM, getitem: Callable, linear: nn.Linear) -> None:
     for i in range(lstm.num_layers):
-        # TODO for n_layers > 1, I need to resize the input layer of the upper hidden size too if I choose to prune
         if parametrize.is_parametrized(lstm, f"weight_ih_l{i}"):
             mask = lstm.parametrizations[f"weight_ih_l{i}"][0].mask
 
@@ -391,17 +390,14 @@ def prune_lstm_linear(lstm: nn.LSTM, getitem: Callable, linear: nn.Linear) -> No
                 W_hg = W_hg[M_hg][:, M_hg]
                 W_ho = W_ho[M_ho][:, M_ho]
 
-                # TODO apply M_ho to all outputs
-
                 # concat, use this as new weight
                 new_weight = torch.cat((W_hi, W_hf, W_hg, W_ho))
                 setattr(lstm, f"weight_hh_l{i}", nn.Parameter(new_weight))
                 setattr(lstm, f"bias_hh_l{i}", nn.Parameter(getattr(lstm, f"bias_hh_l{i}")[mask]))
 
-            # only need to do this for last layer that output is connected to
+            # If this is the final layer, then we need to prune linear layer columns
             if i+1 == lstm.num_layers:
                 lstm.hidden_size = M_hi.sum()
-
                 with torch.no_grad():
                     if parametrize.is_parametrized(linear):
                         parametrization_dict = cast(nn.ModuleDict, linear.parametrizations)
@@ -416,3 +412,20 @@ def prune_lstm_linear(lstm: nn.LSTM, getitem: Callable, linear: nn.Linear) -> No
                     else:
                         linear.weight = nn.Parameter(linear.weight[:, M_ho])
                         linear.in_features = linear.weight.shape[1]
+
+            # otherwise need to prune the columns of the input of the next LSTM layer
+            else:
+                with torch.no_grad():
+                    if parametrize.is_parametrized(lstm, f"weight_ih_l{i+1}"):
+                        parametrization_dict = cast(nn.ModuleDict, lstm.parametrizations)
+                        weight_parameterizations = cast(
+                            ParametrizationList, getattr(parametrization_dict, f"weight_ih_l{i+1}")
+                        )
+
+                        weight_parameterizations.original = nn.Parameter(
+                            weight_parameterizations.original[:, M_ho]
+                        )
+                    else:
+                        next_layer_weight = getattr(lstm, f"weight_ih_l{i+1}")
+                        setattr(lstm, f"weight_ih_l{i+1}", nn.Parameter(next_layer_weight[:, M_ho]))
+
