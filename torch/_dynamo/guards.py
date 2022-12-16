@@ -534,13 +534,14 @@ class CheckFunctionManager:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
         # Let's handle ShapeEnv guards.  To do this, we will resolve
-        # shape variables to sources from GraphArgs.  This must happen after
+        # shape variables to sources from tracked_fakes.  This must happen after
         # tensor checks.
         # NB: self.output_graph can be None in the debug_nops tests
         if self.output_graph and self.output_graph.shape_env:
+            fs = self.output_graph.tracked_fakes
             expr_as_str = self.output_graph.shape_env.codegen_guards(
-                [a.fake_tensor for a in graphargs if a.is_tensor],
-                [a.source.name() for a in graphargs if a.is_tensor],
+                [a.fake for a in fs],
+                [a.sname for a in fs],
             )
             if expr_as_str != "True":
                 code_parts.append(expr_as_str)
