@@ -973,6 +973,7 @@ def parse_args():
     # )
     parser.add_argument(
         "--continue-through-error",
+        "--keep-going",
         action="store_true",
         help="Runs the full test suite despite one of the tests failing",
         default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")),
@@ -1298,7 +1299,13 @@ def main():
         del os.environ['PARALLEL_TESTING']
 
         if not options.continue_through_error and len(failure_messages) != 0:
-            raise RuntimeError("\n".join(failure_messages))
+            raise RuntimeError(
+                "\n".join(failure_messages) +
+                "\n\nTip: You can keep running tests even on failure by "
+                "passing --keep-going to run_test.py.\n"
+                "If running on CI, add the 'keep-going' label to "
+                "your PR and rerun your jobs."
+            )
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
