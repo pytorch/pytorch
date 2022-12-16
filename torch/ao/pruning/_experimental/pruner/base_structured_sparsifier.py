@@ -29,7 +29,7 @@ def _get_supported_structured_pruning_modules():
     SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
         nn.Linear,
         nn.Conv2d,
-        nn.LSTM
+        nn.LSTM,
     }
     return SUPPORTED_STRUCTURED_PRUNING_MODULES
 
@@ -250,14 +250,15 @@ class BaseStructuredSparsifier(BaseSparsifier):
                 print(module)
                 prune_bias = config.get("prune_bias", True)
                 if module.bias is not None:
-                    module.register_parameter("_bias", nn.Parameter(module.bias.detach()))
+                    module.register_parameter(
+                        "_bias", nn.Parameter(module.bias.detach())
+                    )
                     module.bias = None
                     module.prune_bias = prune_bias
 
                 module.register_forward_hook(
                     BiasHook(module.parametrizations.weight[0], prune_bias)
                 )
-
 
     def prune(self) -> None:
         r"""
@@ -296,7 +297,9 @@ class BaseStructuredSparsifier(BaseSparsifier):
 
         for module in self.traced.modules():
             if module_contains_param(module, FakeStructuredSparsity):
-                raise Exception(f"Error: {module} still contains FakeStructuredSparsity parametrizations!")
+                raise Exception(
+                    f"Error: {module} still contains FakeStructuredSparsity parametrizations!"
+                )
 
         self.traced.graph.lint()
         self.traced.recompile()

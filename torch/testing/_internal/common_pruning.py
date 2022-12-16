@@ -321,7 +321,7 @@ class LSTMLinearModel(nn.Module):
     def __init__(self, ntoken, ninp, nhid, nlayers, dropout=0.5):
         super().__init__()
         self.rnn = nn.LSTM(ninp, nhid, nlayers)
-        self.linear= nn.Linear(nhid, ntoken)
+        self.linear = nn.Linear(nhid, ntoken)
         self.init_weights()
         self.nhid = nhid
         self.nlayers = nlayers

@@ -3,7 +3,6 @@
 import copy
 import logging
 import random
-from pprint import pprint
 
 import torch
 from torch import nn
@@ -54,7 +53,6 @@ class ImplementedPruner(BaseStructuredSparsifier):
         module.parametrizations[tensor_name][0].mask[prune] = False
 
 
-
 class BottomHalfPruner(BaseStructuredSparsifier):
     """
     Pruner that will remove the bottom half of the rows.
@@ -69,7 +67,7 @@ class BottomHalfPruner(BaseStructuredSparsifier):
 
                 for small in masks:
                     num = len(small)
-                    small[num//2:] = False
+                    small[num // 2 :] = False
 
                 new_mask = torch.cat(masks)
 
@@ -705,15 +703,13 @@ class TestBaseStructuredSparsifier(TestCase):
         for name, param in model.named_parameters():
             assert name in expected_params
             # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
-            # Instead we check that the weights of the new LSTM are a subset of the weights of 
+            # Instead we check that the weights of the new LSTM are a subset of the weights of
             # the old LSTM
             assert elements_are_subset(param, expected_params[name])
             del expected_params[name]
 
         # assert we haven't deleted any keys
         assert len(expected_params) == 0
-
-
 
     def test_prune_lstm_linear_single_layer(self):
         """
@@ -750,7 +746,9 @@ class TestBaseStructuredSparsifier(TestCase):
         # zeros vs. missing elements yield different numerical results.
         # Instead that we check that the pruned elements are the first half of the results
         # since we are using a BottomHalf Pruner
-        assert torch.isclose(lstm_out_expected[:, :c//2], lstm_out_pruned, rtol=1e-05, atol=1e-07).all()
+        assert torch.isclose(
+            lstm_out_expected[:, : c // 2], lstm_out_pruned, rtol=1e-05, atol=1e-07
+        ).all()
         # also check that output of linear is the same shape, this means we've resized
         # linear columns correctly.
-        assert(out_expected.shape == out_pruned.shape)
+        assert out_expected.shape == out_pruned.shape
