@@ -129,16 +129,24 @@ def _get_submodule_to_states(
     wrapped_modules.reverse()
     wrapped_modules_set = set(wrapped_modules)
     for submodule in wrapped_modules:
-        # Perform a BFS from `submodule` and record all unvisited state that is
-        # not already associated with another module in `wrapped_modules`.
-        queue: Deque[Tuple[nn.Module, str]] = collections.deque()
-        queue.append((submodule, ""))
+        # Perform a DFS from `submodule` and record all unvisited state that is
+        # not already associated with another module in `wrapped_modules`. We
+        # use DFS to follow the `.modules()` order.
+        deque: Deque[Tuple[nn.Module, str]] = collections.deque()
+        deque.append((submodule, ""))
         params: List[nn.Parameter] = []
         param_names: List[str] = []
         buffers: List[torch.Tensor] = []
         buffer_names: List[str] = []
-        while len(queue) > 0:
-            module, prefix = queue.popleft()
+        while len(deque) > 0:
+            module, prefix = deque.popleft()
+            # Reverse `named_children()`, use `appendleft()`, and add to the
+            # deque before processing to perform DFS
+            for child_module_name, child_module in reversed(
+                list(module.named_children())
+            ):
+                if child_module not in wrapped_modules_set:
+                    deque.appendleft((child_module, prefix + child_module_name + "."))
             for param_name, param in module.named_parameters(recurse=False):
                 if param not in visited_params and not _is_fsdp_flattened(param):
                     params.append(param)
@@ -149,9 +157,6 @@ def _get_submodule_to_states(
                     buffers.append(buffer)
                     visited_buffers.add(buffer)
                     buffer_names.append(prefix + buffer_name)
-            for child_module_name, child_module in module.named_children():
-                if child_module not in wrapped_modules_set:
-                    queue.append((child_module, prefix + child_module_name + "."))
         submodule_to_states[submodule] = SubmoduleState(
             params, buffers, param_names, buffer_names
         )

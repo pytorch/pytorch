@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 
@@ -58,3 +60,45 @@ class CompositeParamModel(nn.Module):
         a = self.u2(self.u1(self.l(x)))
         b = self.p
         return torch.mm(a, b)
+
+
+class FakeSequential(nn.Module):
+    # Define this class to achieve a desired nested wrapping using the module
+    # wrap policy with `nn.Sequential`
+    def __init__(self, *modules: Tuple[nn.Module, ...]) -> None:
+        super().__init__()
+        self._module_sequence = list(modules)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for module in self._module_sequence:
+            x = module(x)
+        return x
+
+
+class NestedSequentialModel(nn.Module):
+    def __init__(self, device: torch.device) -> None:
+        super().__init__()
+        self.seq1 = nn.Sequential(
+            nn.Linear(1, 1, device=device),
+            FakeSequential(
+                nn.Linear(1, 1, device=device),
+                nn.ReLU(),
+                FakeSequential(
+                    nn.Linear(1, 1, device=device),
+                ),
+                nn.ReLU(),
+            ),
+            nn.Linear(1, 2, device=device),
+        )
+        self.lin = nn.Linear(2, 2, device=device)
+        self.seq2 = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(2, 3, device=device),
+            FakeSequential(
+                nn.Linear(3, 2, bias=False, device=device),
+                nn.Linear(2, 4, bias=False, device=device),
+            ),
+        )
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return self.seq2(self.lin(self.seq1(x)))

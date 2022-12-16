@@ -2,10 +2,12 @@
 This file includes private common utilities for FSDP.
 """
 
+import collections
 import traceback
 from enum import auto, Enum
 from typing import (
     Callable,
+    Deque,
     Dict,
     Generator,
     Iterable,
@@ -22,6 +24,7 @@ from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+from torch.distributed._composable.contract import _get_registry
 
 from .api import FullStateDictConfig, StateDictConfig, StateDictType
 
@@ -68,11 +71,21 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
     return state
 
 
+def _composable(module: nn.Module) -> bool:
+    """
+    Returns if ``module`` can compose with ``fully_shard``.
+    """
+    # TODO: Add any other composable APIs that are mutually exclusive.
+    return "replicate" not in _get_registry(module)
+
+
 def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
     """
     Returns all ``_FSDPState`` instances in the module tree rooted at
     ``module`` without any duplicates and following the ``module.modules()``
-    traversal order.
+    traversal order (which is assumed to remain as depth-first). However, the
+    traversal does not proceed into any module annotated by an incompatible
+    API (e.g. ``replicate``).
 
     For the wrapper code path, this returns all ``FullyShardedDataParallel``
     instances. For the non-wrapper code path, this returns composable state
@@ -82,8 +95,26 @@ def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
     ``_FSDPState`` does not support graph traversal.
     """
     fsdp_states: List[_FSDPState] = []
+    # Track the visited FSDP states since multiple modules may share the same
+    # one and we want to return a de-duplicated list
     visited_fsdp_states: Set[_FSDPState] = set()
-    for submodule in module.modules():
+    # Track the visited modules in case of shared modules, which implies the
+    # module graph is no longer a tree
+    visited_modules: Set[nn.Module] = set()
+
+    # Perform depth-first search from `module` to ensure that we do not
+    # traverse into an incompatible API's subtree (use DFS instead of BFS to
+    # match `.modules()` order)
+    deque: Deque[nn.Module] = collections.deque()
+    deque.append(module)
+    while deque:
+        submodule = deque.popleft()
+        visited_modules.add(submodule)
+        if not _composable(submodule):
+            continue
+        for child_module in submodule.children():
+            if child_module not in visited_modules:
+                deque.appendleft(child_module)
         optional_state = _get_module_fsdp_state(submodule)
         if optional_state is not None and optional_state not in visited_fsdp_states:
             visited_fsdp_states.add(optional_state)
@@ -93,7 +124,8 @@ def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
 
 def _get_fsdp_handles(module: nn.Module) -> List:
     """
-    Returns all ``FlatParamHandle`` s in the module tree rooted at ``module``.
+    Returns all ``FlatParamHandle`` s in the module tree rooted at ``module``
+    following the rules in :func:`_get_fsdp_state`.
     """
     return [
         handle

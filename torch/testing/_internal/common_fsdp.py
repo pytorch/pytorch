@@ -768,7 +768,11 @@ class FSDPTest(MultiProcessTestCase):
                 kwarg: value for kwarg, value in zip(subtest_config_keys, values)
             }
             with self.subTest(**subtest_kwargs):
-                test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+                try:
+                    test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+                except Exception as e:
+                    print(f"Subtest failed with kwargs: {str(subtest_kwargs)}")
+                    raise e
             dist.barrier()
 
     @classmethod

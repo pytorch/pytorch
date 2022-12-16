@@ -23,6 +23,7 @@ from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
     UnitModule,
+    NestedSequentialModel,
 )
 from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
@@ -59,12 +60,25 @@ class TestFSDPInitialization(FSDPTest):
     def test_policy(self):
         """Tests passing a ``policy`` for pseudo-auto-wrapping."""
         self.run_subtests(
-            {"policy": [None, ModuleWrapPolicy({UnitModule})]},
+            {
+                "policy": [
+                    None,
+                    ModuleWrapPolicy({UnitModule}),
+                    ModuleWrapPolicy({nn.Sequential}),
+                ],
+            },
             self._test_policy,
         )
 
     def _test_policy(self, policy: Optional[_FSDPPolicy]):
-        local_model = CompositeParamModel(torch.device("cuda"))
+        use_nested_sequential_model = (
+            "Sequential" in getattr(policy, "_module_classes_str", "")
+        )
+        local_model = (
+            NestedSequentialModel(torch.device("cuda"))
+            if use_nested_sequential_model
+            else CompositeParamModel(torch.device("cuda"))
+        )
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
             auto_wrap_policy=policy,
@@ -128,6 +142,17 @@ class TestFSDPInitialization(FSDPTest):
             self.assertEqual(
                 composable_handle.flat_param.shape, fsdp_wrapped_handle.flat_param.shape
             )
+            # TODO (awgu): Change this to an `assertEqual(fqns, fqns)` after
+            # rebasing to get the fully sharded module PR.
+            self.assertEqual(
+                len(composable_handle.flat_param._fqns),
+                len(fsdp_wrapped_handle.flat_param._fqns),
+            )
+            for fqn1, fqn2 in zip(
+                composable_handle.flat_param._fqns,
+                fsdp_wrapped_handle.flat_param._fqns,
+            ):
+                self.assertTrue(fqn1.endswith(fqn2))
 
         # Check that the composable module does not add any wrapper class
         local_module_classes = set()
