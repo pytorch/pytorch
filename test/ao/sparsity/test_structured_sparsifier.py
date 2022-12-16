@@ -398,7 +398,7 @@ class TestBaseStructuredSparsifier(TestCase):
         if y_pruned.shape == y_expected.shape:
             # TODO This rtol is a little high, need to double check if something specific is causing this to fail
             assert torch.isclose(
-                y_expected, y_pruned, rtol=1e-1
+                y_expected, y_pruned, rtol=1e-3, atol=1e-3,
             ).all(), f"fail for {type(model)}"
             # only time this should be equal is when all layers have padding and we can't prune
             assert num_pruned_params <= num_original_params

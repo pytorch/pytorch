@@ -32,7 +32,10 @@ class AutogradMonkeypatch(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if not kwargs:
             kwargs = {}
-        if func is replacements:
+        if func in replacements and not (
+            config.fallback_random
+            and replacements[func] in replacements_using_triton_random
+        ):
             return replacements[func](*args, **kwargs)
         return func(*args, **kwargs)
 
@@ -406,6 +409,69 @@ class LinearBinary(nn.Linear):
         return y
 
 
+class ConvTransposeUnary2d(nn.ConvTranspose2d):
+    def __init__(
+        self,
+        conv_transpose: nn.Module,
+        unary: nn.Module,
+    ):
+        super(ConvTransposeUnary2d, self).__init__(
+            conv_transpose.in_channels,
+            conv_transpose.out_channels,
+            conv_transpose.kernel_size,
+            conv_transpose.stride,
+            conv_transpose.padding,
+            conv_transpose.output_padding,
+            conv_transpose.groups,
+            conv_transpose.bias is not None,
+            conv_transpose.dilation,
+            conv_transpose.padding_mode,
+            conv_transpose.weight.device,
+            conv_transpose.weight.dtype,
+        )
+        self._update_module_params(conv_transpose, unary)
+
+    def _update_module_params(self, conv_transpose, unary):
+        self.__dict__ = copy.deepcopy(conv_transpose.__dict__)
+        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
+            unary
+        )
+
+    def _conv_transpose_forward(self, input, weight, bias):
+        if self.padding_mode != "zeros":
+            return torch.ops.mkldnn._convolution_transpose_pointwise(
+                F.pad(
+                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
+                ),
+                weight,
+                bias,
+                _pair(0),
+                self.output_padding,
+                self.stride,
+                self.dilation,
+                self.groups,
+                self.attr,
+                self.scalars,
+                self.algorithm,
+            )
+        return torch.ops.mkldnn._convolution_transpose_pointwise(
+            input,
+            weight,
+            bias,
+            self.padding,
+            self.output_padding,
+            self.stride,
+            self.dilation,
+            self.groups,
+            self.attr,
+            self.scalars,
+            self.algorithm,
+        )
+
+    def forward(self, input):
+        return self._conv_transpose_forward(input, self.weight, self.bias)
+
+
 def packed_conv_eval(conv: nn.Module, input_size: list):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
@@ -481,6 +547,16 @@ def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
     return linear_binary
 
 
+def fused_conv_transpose_unary_eval(
+    conv_transpose: nn.Module, unary: nn.Module, input_size: list
+):
+    assert not (conv_transpose.training), "Fusion only for eval!"
+    return ConvTransposeUnary2d(
+        conv_transpose,
+        unary,
+    )
+
+
 def check_node_kind(current_node, modules, node_kind):
     if not isinstance(current_node, torch.fx.Node):
         return False
@@ -533,6 +609,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
 
     fake_mode = fake_mode_from_tensors(example_inputs)
 
+    gm = sink_cat_after_pointwise(gm)
     if config.permute_fusion and not is_cpu:
         # For linear permute fusion, we need to check input info to identify
         # and perform proper permutation/transpose
@@ -813,6 +890,49 @@ def check_permute(node: torch.fx.Node):
     allowed_permutation[-1] = ranks - 2
     allowed_permutation[-2] = ranks - 1
     return permutation == allowed_permutation
+
+
+def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    def one_user(node):
+        users = list(node.users)
+        return users[0] if len(users) == 1 else None
+
+    def is_view(node):
+        view = {"view"}
+        return node.op == "call_method" and node.target in view
+
+    def is_pointwise_unary(node):
+        pointwise = {torch.relu, torch.tanh, "relu", "tanh"}
+        return node.op in {"call_function", "call_method"} and node.target in pointwise
+
+    g = module.graph
+    for node in g.nodes:
+        if node.op != "call_function" or node.target != torch.cat:
+            continue
+
+        cat_or_view = node
+        while True:
+            user = one_user(cat_or_view)
+            if not user or not is_view(user):
+                break
+            cat_or_view = user
+
+        if user and is_pointwise_unary(user):
+            with g.inserting_before(node):
+                new_args = (
+                    [
+                        g.create_node(
+                            user.op, user.target, args=(arg,), kwargs=user.kwargs
+                        )
+                        for arg in node.args[0]
+                    ],
+                )
+                node.args = new_args
+                user.replace_all_uses_with(cat_or_view)
+                g.erase_node(user)
+    g.lint()
+    module.recompile()
+    return module
 
 
 def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
@@ -1218,6 +1338,7 @@ computation_op_unary_op_fusion_map = {
     nn.Linear: fused_linear_unary_eval,
     ConvBinary2d: fused_conv_binary_unary_eval,
     ConvBinaryInplace2d: fused_conv_binary_unary_eval,
+    nn.ConvTranspose2d: fused_conv_transpose_unary_eval,
 }
 
 
