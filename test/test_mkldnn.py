@@ -19,7 +19,8 @@ import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
-    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS
+    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
+    skipIfTorchDynamo
 
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
@@ -1213,6 +1214,7 @@ class TestMkldnn(TestCase):
         self.assertTrue(x.to_mkldnn().is_mkldnn)
 
     # legacy constructor/new doesn't support mkldnn tensors
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1992")
     def test_legacy_new_failure(self):
         x = torch.randn(1, dtype=torch.float32)
         x_mkldnn = x.to_mkldnn()
