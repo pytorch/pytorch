@@ -1877,12 +1877,19 @@ class TestJac(TestCase):
         def f(x, y):
             return (x.sin(), x + y), (x + 2, x.sum())
 
-        for chunk_size in [1, 2, 3, 4, 7, 10]:
+        for chunk_size in (1, 2, 3, 4, 7, 10, 1000):
             expected = jacrev(f, argnums=(0, 1))(x, y)
             actual = jacrev(f, argnums=(0, 1),
                             chunk_size=chunk_size,
                             _preallocate_and_copy=_preallocate_and_copy)(x, y)
             self.assertEqual(actual, expected)
+        
+        err_msg = "jacrev: `chunk_size` should be greater than 0."
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
+        
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
 
     @parametrize('_preallocate_and_copy', (True, False))
     def test_chunk_jacrev_composition(self, device, _preallocate_and_copy):
