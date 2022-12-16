@@ -607,7 +607,7 @@ def emit_inplace_functionalization_body(
 
     return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-      if ({not any_storage_args and str(f.func.kind() == SchemaKind.inplace).lower()}) {{
+      if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()}) {{
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).
