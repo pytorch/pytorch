@@ -205,7 +205,8 @@ class TransformerEncoder(Module):
         Args:
             src: the sequence to the encoder (required).
             mask: the mask for the src sequence (optional).
-            is_causal: If specified, applies a causal mask as mask (optional). Mutually exclusive with providing mask. Default: ``False``.
+            is_causal: If specified, applies a causal mask as mask (optional). Mutually exclusive with providing mask.
+                Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
@@ -665,8 +666,10 @@ class TransformerDecoderLayer(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-            tgt_is_causal: If specified, applies a causal mask as tgt mask. Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as tgt mask. Mutually exclusive with providing memory_mask. Default: ``False``.
+            tgt_is_causal: If specified, applies a causal mask as tgt mask.
+                Mutually exclusive with providing tgt_mask. Default: ``False``.
+            memory_is_causal: If specified, applies a causal mask as tgt mask.
+                Mutually exclusive with providing memory_mask. Default: ``False``.
         Shape:
             see the docs in Transformer class.
         """
