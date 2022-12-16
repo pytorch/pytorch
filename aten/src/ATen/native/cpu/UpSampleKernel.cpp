@@ -1260,7 +1260,7 @@ void _upsample_nearest_exact1d_kernel_impl(
     output, input, false, {scales_w});
 }
 
-int _use_vectorized_kernel_cond_2d(
+int _use_vectorized_kernel_cond(
     const Tensor& output,
     const Tensor& input) {
       // This condition is used to know whether we should dispatch to a vectorized
@@ -1268,28 +1268,18 @@ int _use_vectorized_kernel_cond_2d(
       // the vectorized kernels are only optimized for channels_last and when C >= 4
       // (shape = NCHW). For a very wide range of use-cases (typically image or mask
       // resizing where we have C < 4), using upsample_generic_Nd_kernel_impl() is
-      // actually faster. On top of that, benchmarks showed that this also depends on
-      // the *output* size (output_H + output_W), for both upsampling and
+      // actually faster. On top of that, bencharmks showed that this also depends on
+      // the *output* size (output_H + output_W) , for both upsampling and
       // downsampling. The current 128 threshold was determined through benchmarks.
-      return ((input.is_contiguous(at::MemoryFormat::ChannelsLast)) && (input.size(1) > 3)) || ((output.size(-2) + output.size(-1)) <= 128);
+      return ((input.is_contiguous(at::MemoryFormat::ChannelsLast)) && (input.size(-3) > 3)) || ((output.size(-2) + output.size(-1)) <= 128);
 }
-
-int _use_vectorized_kernel_cond_3d(
-    // Similar to _use_vectorized_kernel_cond_2d() but for 3d resampling (e.g. videos)
-    // Note that unlike the 2d case, this is not subject to small output size
-    // overhead - hence the absence of the 128 threshold in the condition.
-    const Tensor& output,
-    const Tensor& input) {
-      return ((input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) && (input.size(1) > 3));
-}
-
 
 void upsample_nearest2d_kernel_impl(
     const Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  if (_use_vectorized_kernel_cond_2d(output, input)) {
+  if (_use_vectorized_kernel_cond(output, input)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Byte, at::ScalarType::BFloat16,
         input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_idx>(output, input, {scales_h, scales_w});
@@ -1305,7 +1295,7 @@ void _upsample_nearest_exact2d_kernel_impl(
     const Tensor& input,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  if (_use_vectorized_kernel_cond_2d(output, input)) {
+  if (_use_vectorized_kernel_cond(output, input)) {
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_exact_idx>(output, input, {scales_h, scales_w});
     });
@@ -1321,7 +1311,7 @@ void upsample_nearest3d_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  if (_use_vectorized_kernel_cond_3d(output, input)) {
+  if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Byte, at::ScalarType::BFloat16,
         input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_idx>(output, input, {scales_d, scales_h, scales_w});
@@ -1338,7 +1328,7 @@ void _upsample_nearest_exact3d_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  if (_use_vectorized_kernel_cond_3d(output, input)) {
+  if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_exact_idx>(output, input, {scales_d, scales_h, scales_w});
     });
@@ -1364,12 +1354,12 @@ void upsample_bilinear2d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 
-  // See note above about _use_vectorized_kernel_cond_2d(output, input). The extra cond is present
+  // See note above about _use_vectorized_kernel_cond(output, input). The extra cond is present
   // because benchmarks showed that with only 1 thread, images (C == 3) were
   // slightly faster with the vectorized kernel than with the generic one.
   // That's not the case for masks though (C == 1), which strongly benefit from
   // using the generic kernel.
-  if ((_use_vectorized_kernel_cond_2d(output, input)) || (at::get_num_threads() == 1 && input.size(1) == 3)) {
+  if ((_use_vectorized_kernel_cond(output, input)) || (at::get_num_threads() == 1 && input.size(-3) == 3)) {
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, input.scalar_type(), "upsample_bilinear2d_channels_last", [&] {
       cpu_upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_h, scales_w});
     });
@@ -1397,7 +1387,7 @@ void upsample_trilinear3d_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  if ((_use_vectorized_kernel_cond_3d(output, input))) {
+  if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, input.scalar_type(), "upsample_trilinear3d_channels_last", [&] {
       cpu_upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_d, scales_h, scales_w});
     });

@@ -80,11 +80,8 @@ What we did in this example are:
 `backend_config` configurations relevant to this step are:
 
 ```
-def fuse_linear_relu(is_qat, linear, relu):
-    return nni.LinearReLU(linear, relu)
-
-BackendPatternConfig((torch.nn.Linear, torch.nn.ReLU))
-    .set_fuser_method(fuse_linear_relu)
+BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear))
+    .set_fuser_method(_reverse_sequential_wrapper2(nni.LinearReLU))
     ._set_root_node_getter(my_root_node_getter)
     ._set_extra_inputs_getter(my_extra_inputs_getter)
 ```

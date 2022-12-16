@@ -1233,8 +1233,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     self.assertEqual(y, z)
 
         # Added to address https://github.com/pytorch/pytorch/issues/65231
-        # In the failed tests, all assertEqual are passed on all processes.
-        # However, one of the processes didn't call ProcessGroupGloo
+        # In the failed tests, all assertEqualIgnoreType are passed on all
+        # processes. However, one of the process didn't call ProcessGroupGloo
         # destructor before exiting program. This is not surprising as the only
         # guarantee that Python makes is that garbage collection MAY happen
         # before the program exits. If GC didn't happen, the two threads in

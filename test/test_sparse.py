@@ -4181,8 +4181,7 @@ class TestSparseAny(TestCase):
                         RuntimeError, "Only tensors with two sparse dimensions can be converted to the Sparse(Csr|Csc) layout"):
                     explicit_to_sparse(t)
                 continue
-            elif from_layout in {torch.sparse_csr, torch.sparse_csc,
-                                 torch.sparse_bsr, torch.sparse_bsc} and to_layout is torch.sparse_coo and is_batch:
+            elif from_layout in {torch.sparse_csr, torch.sparse_csc} and to_layout is torch.sparse_coo and is_batch:
                 with self.assertRaisesRegex(RuntimeError,
                                             "crow_indices is supposed to be a vector, but got \\d+ dimensional tensor"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
@@ -4190,6 +4189,16 @@ class TestSparseAny(TestCase):
                                             "crow_indices is supposed to be a vector, but got \\d+ dimensional tensor"):
                     explicit_to_sparse(t)
                 continue
+            elif from_layout in {torch.sparse_bsr, torch.sparse_bsc} and to_layout is torch.sparse_coo:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "sparse_compressed_to_sparse expected SparseCsr or SparseCsc layout but got Sparse(Bsr|Bsc)"):
+                    t.to_sparse(layout=to_layout, blocksize=blocksize)
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "sparse_compressed_to_sparse expected SparseCsr or SparseCsc layout but got Sparse(Bsr|Bsc)"):
+                    explicit_to_sparse(t)
+                self.skipTest('NOT IMPL')
             elif (from_layout, to_layout) in {(torch.sparse_bsc, torch.sparse_csr), (torch.sparse_bsc, torch.sparse_csc),
                                               (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc),
                                               (torch.sparse_csc, torch.sparse_bsr), (torch.sparse_csc, torch.sparse_bsc),

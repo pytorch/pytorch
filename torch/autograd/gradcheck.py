@@ -109,24 +109,6 @@ def _iter_tensor(x_tensor):
         elif x_tensor.layout is torch.sparse_csc:
             x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True).t()
             x_values = x_tensor.values()
-        elif x_tensor.layout is torch.sparse_bsr:
-            x_block_values = x_tensor.values()
-            x_blocksize = x_block_values.size()[1:3]
-            x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.crow_indices(), x_tensor.col_indices()) \
-                             .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1) \
-                             .mul_(torch.tensor(x_blocksize).reshape(2, 1)) \
-                             .add_(torch.stack(torch.where(torch.ones(x_blocksize))).repeat(1, x_nnz)).t()
-            x_values = x_block_values.flatten(0, 2)
-            x_nnz = x_values.size(0)
-        elif x_tensor.layout is torch.sparse_bsc:
-            x_block_values = x_tensor.values()
-            x_blocksize = x_block_values.size()[1:3]
-            x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True) \
-                             .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1) \
-                             .mul_(torch.tensor(x_blocksize).reshape(2, 1)) \
-                             .add_(torch.stack(torch.where(torch.ones(x_blocksize))).repeat(1, x_nnz)).t()
-            x_values = x_block_values.flatten(0, 2)
-            x_nnz = x_values.size(0)
         else:
             raise NotImplementedError(f'_iter_tensor for {x_tensor.layout} input')
         x_stride = get_stride(x_size)

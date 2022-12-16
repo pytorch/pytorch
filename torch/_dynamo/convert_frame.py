@@ -363,13 +363,11 @@ def _compile(
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
-
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
 
     # from .utils import print_once;  print_once(code.co_filename)
-
     def transform(instructions, code_options):
         nonlocal output
         tracer = InstructionTranslator(
@@ -439,6 +437,7 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
             output,
+            output.guards,
             locals,
             globals,
             hooks.guard_fail_fn if hooks else None,

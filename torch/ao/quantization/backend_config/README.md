@@ -22,19 +22,7 @@ Instead of hardcoding the fusion mappings, float to reference quantized module m
 
 ## Pattern Specification
 
-The operator patterns used in BackendConfig are float modules, functional operators, pytorch operators, or a tuple combination of the above. For example:
-* torch.nn.Linear
-* torch.nn.functional.linear
-* torch.add
-* operator.add
-* (torch.nn.functional.linear, torch.nn.functional.relu)
-* (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU)
-
-Tuple patterns are treated as sequential patterns, and currently only tuples of 2 or 3 elements are supported.
-
-### Advanced Pattern Specification
-
-The above format should satisfy the vast majority of use cases. However, it does not handle more complex scenarios such as graph patterns. For these use cases, the BackendConfig API offers an alternative "reverse nested tuple" pattern format, enabled through `BackendPatternConfig()._set_pattern_complex_format(...)`. Note that this format is deprecated and will be replaced in a future version of PyTorch.
+The operator patterns used in BackendConfig are float modules, functional operators and pytorch operators specified in reverse order:
 ```
 operator = module_type | functional | torch op | native op | MatchAllNode
 Pattern = (operator, Pattern, Pattern, ...) | operator
@@ -74,7 +62,7 @@ weighted_int8_dtype_config = DTypeConfig(
     weight_dtype=torch.qint8,
     bias_dtype=torch.float)
 
-def fuse_conv2d_relu(is_qat, conv, relu):
+def fuse_conv2d_relu(is_qat, relu, conv):
     """Return a fused ConvReLU2d from individual conv and relu modules."""
     return torch.ao.nn.intrinsic.ConvReLU2d(conv, relu)
 
@@ -87,7 +75,7 @@ linear_config = BackendPatternConfig(torch.nn.Linear) \
     .set_reference_quantized_module(torch.ao.nn.quantized.reference.Linear)
 
 # For fusing Conv2d + ReLU into ConvReLU2d
-conv_relu_config = BackendPatternConfig((torch.nn.Conv2d, torch.nn.ReLU)) \
+conv_relu_config = BackendPatternConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
     .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
     .add_dtype_config(weighted_int8_dtype_config) \
     .set_fused_module(torch.ao.nn.intrinsic.ConvReLU2d) \
@@ -130,7 +118,7 @@ Relevant APIs:
 * `_set_root_node_getter`
 * `_set_extra_inputs_getter`
 
-As an optimization, operator patterns such as (`torch.nn.Linear`, `torch.nn.ReLU`) may be fused into `nni.LinearReLU`. This is performed during the prepare phase according to the function specified in `set_fuser_method`, which replaces the pattern with the fused module. During the convert phase, these fused modules (identified by `set_fused_module`) will then be converted to the reference quantized versions of the modules.
+As an optimization, operator patterns such as (`torch.nn.ReLU`, `torch.nn.Linear`) may be fused into `nni.LinearReLU`. This is performed during the prepare phase according to the function specified in `set_fuser_method`, which replaces the pattern with the fused module. During the convert phase, these fused modules (identified by `set_fused_module`) will then be converted to the reference quantized versions of the modules.
 
 In FX graph mode quantization, we replace the corresponding nodes in the graph using two helper functions set by the user: `root_node_getter`, which returns the root node (typically the weighted module in the pattern like `torch.nn.Linear`) to replace the matched pattern in the graph, and `extra_inputs_getter`, which returns a list of extra input arguments that will be appended to the existing arguments of the fused module (copied over from the root node). See [this snippet](https://gist.github.com/jerryzh168/8bea7180a8ba3c279f2c9b050f2a69a6) for an example usage.
 

@@ -24,8 +24,8 @@ from ..qconfig_mapping import (
     QConfigMapping,
 )
 from .qconfig_mapping_utils import (
-    _generate_node_name_to_qconfig,
-    _update_qconfig_for_fusion,
+    generate_node_name_to_qconfig,
+    update_qconfig_for_fusion,
     _get_flattened_qconfig_dict,
     _update_qconfig_for_qat,
 )
@@ -52,7 +52,7 @@ from .graph_module import (
 )
 
 from .pattern_utils import (
-    _sorted_patterns_dict,
+    sorted_patterns_dict,
 )
 
 from .match_utils import (
@@ -1492,13 +1492,13 @@ def prepare(
     if backend_config is None:
         backend_config = get_native_backend_config()
     pattern_to_quantize_handler = _get_pattern_to_quantize_handlers(backend_config)
-    pattern_to_quantize_handler = _sorted_patterns_dict(pattern_to_quantize_handler)
+    pattern_to_quantize_handler = sorted_patterns_dict(pattern_to_quantize_handler)
 
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config)
 
-    _update_qconfig_for_fusion(model, qconfig_mapping)
-    _update_qconfig_for_fusion(model, _equalization_config)
+    update_qconfig_for_fusion(model, qconfig_mapping)
+    update_qconfig_for_fusion(model, _equalization_config)
     flattened_qconfig_dict = _get_flattened_qconfig_dict(qconfig_mapping)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config.to_dict())
@@ -1517,10 +1517,10 @@ def prepare(
     # }
     modules = dict(model.named_modules(remove_duplicate=False))
 
-    # fill node_name_to_qconfig, a map from node name to qconfig, used in _find_matches
-    equalization_node_name_to_qconfig = _generate_node_name_to_qconfig(
+    # fill node_name_to_qconfig, a map from node name to qconfig, used in find_matches
+    equalization_node_name_to_qconfig = generate_node_name_to_qconfig(
         model, modules, model.graph, _equalization_config, node_name_to_scope)
-    node_name_to_qconfig = _generate_node_name_to_qconfig(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
+    node_name_to_qconfig = generate_node_name_to_qconfig(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
 
     # match the patterns that will get quantized
     standalone_module_names = list(prepare_custom_config.standalone_module_names.keys())

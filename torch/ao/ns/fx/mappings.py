@@ -13,18 +13,18 @@ import torch.ao.nn.intrinsic.qat as nniqat
 import torch.nn.intrinsic as nni
 import torch.ao.nn.qat as nnqat
 import torch.ao.nn.qat.dynamic as nnqatd
-from torch.ao.quantization.backend_config import get_native_backend_config
+from torch.ao.quantization.backend_config import get_native_backend_config_dict
 import torch.ao.quantization.fx._lower_to_native_backend as \
     _lower_to_native_backend
 import torch.ao.quantization.quantization_mappings as quantization_mappings
 
 from .ns_types import NSNodeTargetType
 
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Set, Dict, List, Optional
 
 
 def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
-    # note: this set is modified below by items from backend_config
+    # note: this set is modified below by items from backend_config_dict
     sets_of_related_ops: List[Set[NSNodeTargetType]] = [
         # conv modules
         set([
@@ -327,36 +327,42 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     ]
 
     # for each floating point op, add versions of the op added by
-    # backend_config
-    backend_config = get_native_backend_config()
+    # backend_config_dict
+    backend_config_dict = get_native_backend_config_dict()
 
-    new_connections: List[Tuple[Callable, Callable]] = [
+    new_connections = [
         # technical debt edge case
         (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear),
     ]
 
-    for pattern, config in backend_config._pattern_complex_format_to_config.items():
+    for config in backend_config_dict['configs']:
 
-        # pattern format: (c, (b, a))
+        if 'pattern' not in config:
+            continue
+
+        # format: (c, (b, a))
+        pattern = config['pattern']
         first_element = pattern
         # look from the end, because pattern is in reverse order
         while isinstance(first_element, (list, tuple)):
             first_element = first_element[-1]
 
-        if config.fused_module is not None:
+        if 'fused_module' in config:
             # case 1: pattern fuses a pattern of ops into an op
             # example: nn.Conv1d, nn.ReLU fused into nni.ConvReLU1d
-            new_connections.append((first_element, config.fused_module))
+            new_connections.append((first_element, config['fused_module']))
 
-        if config.qat_module is not None:
+        if 'qat_module' in config:
             # case 2: pattern swaps a module into a QAT module
             # example: nni.ConvReLU1d swapped into nniqat.ConvReLU1d
-            new_connections.append((first_element, config.qat_module))
+            new_connections.append((first_element, config['qat_module']))
 
-        if config.reference_quantized_module is not None:
+        if 'reference_quantized_module_for_root' in config:
             # case 3: reference version of floating point module, such as
             # nn.Conv2d and nnqr.Conv2d
-            new_connections.append((first_element, config.reference_quantized_module))
+            new_connections.append(
+                (first_element, config['reference_quantized_module_for_root'])
+            )
 
     #
     # Add reference module swaps from default lowering path
@@ -407,7 +413,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             new_connections.append((source, target))
 
 
-    # add the new connections from backend_config
+    # add the new connections from backend_config_dict
     for item1, item2 in new_connections:
         for set_of_related_ops in sets_of_related_ops:
             if item1 in set_of_related_ops or item2 in set_of_related_ops:

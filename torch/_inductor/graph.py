@@ -36,22 +36,6 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
-def supported_dtype_of_cpp_wrapper(dtype):
-    supported_dtype = {
-        torch.float32,
-        torch.float64,
-        torch.int64,
-        torch.int32,
-        torch.int16,
-        torch.int8,
-        torch.uint8,
-        torch.bool,
-        # torch.float16, # TODO: implement this
-        # torch.bfloat16, # TODO: implement this
-    }
-    return dtype in supported_dtype
-
-
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
         """
@@ -85,13 +69,8 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
-        fake_mode=None,
     ):
         super().__init__(gm)
-        if fake_mode is None:
-            self.fake_mode = torch._subclasses.FakeTensorMode()
-        else:
-            self.fake_mode = fake_mode
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -173,11 +152,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
-            if not isinstance(
-                buffer,
-                (ir.MatrixMultiply, ir.BatchMatrixMultiply, ir.MatrixMultiplyAdd),
-            ):
-                self.disable_cpp_wrapper("ExternKernel")
+            self.disable_cpp_wrapper("ExternKernel")
+        if isinstance(buffer, ir.ComputedBuffer):
+            if buffer.data.get_reduction_type():
+                self.disable_cpp_wrapper("Reduction")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
         if config.cpp_wrapper:
@@ -423,8 +401,13 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
-            if not supported_dtype_of_cpp_wrapper(value.get_dtype()):
-                self.disable_cpp_wrapper("unsupported inputs dtype")
+            if value.get_dtype() != torch.float32:
+                self.disable_cpp_wrapper("inputs not FP32")
+
+    def check_output_for_cpp_buffer(self):
+        for item in self.graph_outputs:
+            if isinstance(item, ir.NoneAsConstantBuffer):
+                self.disable_cpp_wrapper("NoneAsConstantBuffer")
 
     def check_constant_for_cpp_buffer(self):
         if self.constants:
@@ -435,6 +418,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.check_profiler_mark_wrapper_call()
         self.check_device_for_cpp_buffer()
         self.check_input_for_cpp_buffer()
+        self.check_output_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
