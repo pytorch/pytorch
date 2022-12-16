@@ -16,6 +16,7 @@ from functorch.experimental.ops import PyOperator
 
 import torch
 
+from torch import SymInt
 from torch._guards import GuardSource
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
@@ -52,7 +53,7 @@ from ..utils import (
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
-    wrap_to_fake_tensor_and_record,
+    wrap_fake_exception,
 )
 
 from .base import MutableLocal, typestr
@@ -653,11 +654,12 @@ class VariableBuilder:
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
             ):
-                # NB: we MUST register this as a GraphArg
                 shape_env = self.tx.output.shape_env
+                sname = self.source.name()
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, sname=self.source.name())
+                    shape_env.create_symbol(value, sname=sname)
                 )
+                self.tx.output.tracked_fakes.append(TrackedFake(wrapped_value, sname))
                 # TODO: Do float
             else:
                 # TODO: Eliminate this case entirely
@@ -787,7 +789,10 @@ def wrap_fx_proxy_cls(
             # take the returned TensorVariable and wrap it into a more
             # accurate TensorVariable that is able to track subclass-ness;
             # otherwise this is wrong!
-            kwargs = {"ignore_subclass": ignore_subclass}
+            kwargs = {
+                "ignore_subclass": ignore_subclass,
+                "is_tensor": target_cls is TensorVariable,
+            }
             assert "source" in options
             if options["source"] is None:
                 kwargs["static_shapes"] = True
@@ -923,3 +928,36 @@ def wrap_fx_proxy_cls(
             "torch.* op returned non-Tensor "
             + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
         )
+
+
+# Tracks the sources of all fake tensors we wrap in Dynamo.
+# Used by shape guard computation.
+@dataclasses.dataclass
+class TrackedFake:
+    fake: Union[FakeTensor, SymInt]
+    sname: str
+
+
+def wrap_to_fake_tensor_and_record(
+    e, tx, ignore_subclass=False, *, sname: str, static_shapes=False, is_tensor: bool
+):
+    if type(e) in (torch.Tensor, torch.nn.Parameter) or (
+        ignore_subclass and isinstance(e, torch.Tensor)
+    ):
+        static_shapes = static_shapes or config.dynamic_shapes is False
+        if type(e) is torch.nn.Parameter:
+            # Always static for params
+            static_shapes = True
+        fake_e = wrap_fake_exception(
+            lambda: tx.fake_mode.from_tensor(
+                e,
+                static_shapes=static_shapes,
+                ignore_subclass=ignore_subclass,
+                sname=sname,
+            )
+        )
+        if is_tensor:
+            tx.output.tracked_fakes.append(TrackedFake(fake_e, sname))
+        return fake_e
+    else:
+        return e
