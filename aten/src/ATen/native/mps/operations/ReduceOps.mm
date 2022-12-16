@@ -1809,11 +1809,11 @@ void median_out_mps
     auto stream = at::mps::getCurrentMPSStream();
 
     @autoreleasepool {
-        string key = func_name + ":" + to_string(dim_) + ":" + native_mps::getMPSTypeString(input_t.scalar_type());
-        CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+        string key = func_name + ":" + to_string(dim_) + ":" + native_mps::getTensorsStringKey(input_t);
+        CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
         if(!cachedGraph) {
-          native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+          cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
             CachedGraph *newCachedGraph = nil;
 
@@ -1849,7 +1849,6 @@ void median_out_mps
             }
             return newCachedGraph;
           });
-          cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
         }
 
         auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);

@@ -7,6 +7,7 @@ from itertools import product
 from typing import Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
+import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
@@ -276,10 +277,13 @@ def prelu_backward(
         cur_weight = cur_weight.unsqueeze(-1)
     input_grad = torch.where(self > 0, grad_output, cur_weight * grad_output)
     weight_grad_collector = torch.where(self > 0, 0.0, self * grad_output)
-    out = weight_grad_collector.sum_to_size(cur_weight.shape)
+    if len(self.shape) == 0:
+        out = weight_grad_collector.view(cur_weight.shape)
+    else:
+        out = weight_grad_collector.sum_to_size(cur_weight.shape)
     while out.dim() > weight.dim():
         out = out.squeeze(-1)
-    return (input_grad, out)
+    return (input_grad.view_as(self), out)
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)
@@ -1522,9 +1526,10 @@ def _to_copy(
 ):
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
-    assert device is not None or dtype is not None or memory_format is not None
+    if device is None and dtype is None and memory_format is None:
+        return x.clone()
     dtype_converted = False
-    if device is not None and device != x.get_device():
+    if device is not None and device != x.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
             x = torch._prims.convert_element_type(x, dtype)
@@ -1556,7 +1561,7 @@ def xlogy(self: Tensor, other: Tensor) -> Tensor:
 @reduction_complex_to_real
 def std_decomposition(
     x: Tensor,
-    dim: Optional[List[int]],
+    dim: Optional[List[int]] = None,
     correction: Optional[int] = None,
     keepdim: bool = False,
 ):
@@ -1571,6 +1576,9 @@ def nop_decomposition(x):
     return aten.alias(x)
 
 
+# Also register to the Autograd dispatch key, so this decomp can run above autograd.
+# native_batch_norm needs to decompose into other ops before autograd.
+@torch.ops.aten.cudnn_batch_norm.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.cudnn_batch_norm)
 def cudnn_batch_norm(
     input: Tensor,
@@ -1624,6 +1632,10 @@ def native_batch_norm_backward(
     output_mask: List[bool],
 ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     input_dtype = input.dtype
+    if weight is not None:
+        weight_dtype = weight.dtype
+    else:
+        weight_dtype = input_dtype
     computation_dtype = utils.get_computation_dtype(input.dtype)
     (
         grad_out_cast,
@@ -1701,8 +1713,8 @@ def native_batch_norm_backward(
 
     return (
         grad_input.to(input_dtype),
-        _maybe_cast(grad_weight, input_dtype),
-        _maybe_cast(grad_bias, input_dtype),
+        _maybe_cast(grad_weight, weight_dtype),
+        _maybe_cast(grad_bias, weight_dtype),
     )
 
 
@@ -1920,6 +1932,21 @@ def norm(
     return torch.linalg.vector_norm(
         self.to(computation_dtype), p, dim, keepdim, dtype=dtype
     ).to(result_dtype)
+
+
+@register_decomposition(aten.uniform)
+def uniform(
+    x: Tensor,
+    low: Union[bool, int, float] = 0.0,
+    high: Union[bool, int, float] = 1.0,
+):
+    return prims._uniform_helper(
+        x.shape,
+        low=sym_float(low),
+        high=sym_float(high),
+        dtype=x.dtype,
+        device=x.device,
+    )
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size

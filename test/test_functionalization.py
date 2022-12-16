@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import (
     xfail_inherited_tests
 )
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_map_only, tree_flatten
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch._dispatch.python import enable_crossref_functionalize, enable_python_dispatcher
@@ -25,27 +25,34 @@ def are_aliased(x, y):
 
 # We can unify testing and use functionalize() here instead
 # if/when functorch moves into core.
-# This is basically a crappy version of `functionalize()` for single-tensor-arg inputs.
+# This is basically a crappy version of `functionalize()`.
 def _functionalize(f, *, reapply_views: bool, crossref: bool):
-    def wrapped(a):
+    def to_fun(t: torch.Tensor):
+        func_t = torch._to_functional_tensor(t)
+        func_t.requires_grad = t.requires_grad
+        return func_t
+
+    def wrapped(*inputs):
         ctx = nullcontext()
         if crossref:
             ctx = enable_crossref_functionalize()
         with ctx:
-            input_functional = torch._to_functional_tensor(a)
-            input_functional.requires_grad = a.requires_grad
+            inputs_functional = tree_map_only(torch.Tensor, to_fun, inputs)
             torch._enable_functionalization(reapply_views=reapply_views)
             try:
-                out = f(input_functional)
+                out = f(*inputs_functional)
             finally:
                 torch._disable_functionalization()
-            torch._sync(input_functional)
-            inpt_new = torch._from_functional_tensor(input_functional)
-            if inpt_new is not a:
-                # Existing deficiency in functionalize():
-                # we don't correctly mutate input metadata (yet?)
-                if inpt_new.shape == a.shape:
-                    a.copy_(inpt_new)
+            flat_inputs, _ = tree_flatten(inputs)
+            flat_inputs_functional, _ = tree_flatten(inputs_functional)
+            for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
+                torch._sync(input_functional)
+                inpt_new = torch._from_functional_tensor(input_functional)
+                if inpt_new is not inpt:
+                    # Existing deficiency in functionalize():
+                    # we don't correctly mutate input metadata (yet?)
+                    if inpt_new.shape == inpt.shape:
+                        inpt.copy_(inpt_new)
             tree_map(torch._sync, out)
             out_unwrapped = tree_map(torch._from_functional_tensor, out)
             return out_unwrapped
@@ -57,40 +64,40 @@ class TestFunctionalization(TestCase):
 
     crossref = False
 
-    def get_logs(self, func, inpt, *, reapply_views=False, run_reinplace=False):
-        inpt_clone = inpt.clone()
-        traced_f = make_fx(_functionalize(func, reapply_views=reapply_views, crossref=self.crossref))(inpt)
+    def get_logs(self, func, *inpts, reapply_views=False, run_reinplace=False):
+        inpts_clone = tree_map_only(torch.Tensor, torch.clone, inpts)
+        traced_f = make_fx(_functionalize(func, reapply_views=reapply_views, crossref=self.crossref))(*inpts)
         if run_reinplace:
-            traced_f = reinplace(traced_f, inpt_clone)
+            traced_f = reinplace(traced_f, *inpts_clone)
         return traced_f.code
 
-    def assert_functionalization(self, func, inpt, *, reapply_views=False, mutated_input_metadata=False):
-        input_clone = inpt.clone()
-        input_clone2 = inpt.clone()
-        input_clone3 = inpt.clone()
+    def assert_functionalization(self, func, *inpts, reapply_views=False, mutated_input_metadata=False):
+        clones1 = tree_map_only(torch.Tensor, torch.clone, inpts)
+        clones2 = tree_map_only(torch.Tensor, torch.clone, inpts)
+        clones3 = tree_map_only(torch.Tensor, torch.clone, inpts)
 
         # Compare outputs (and mutated inputs), with and without functionalization.
-        out_ref = func(inpt)
-        out_functional = _functionalize(func, reapply_views=reapply_views, crossref=self.crossref)(input_clone)
+        out_ref = func(*inpts)
+        out_functional = _functionalize(func, reapply_views=reapply_views, crossref=self.crossref)(*clones1)
+
         # The reinplacing pass is only valid to run with reapply_views=True.
-        functional_func = make_fx(_functionalize(func, reapply_views=True, crossref=self.crossref))(input_clone2)
-        reinplace_func = reinplace(
-            make_fx(
-                _functionalize(func, reapply_views=True, crossref=self.crossref)
-            )(input_clone2),
-            input_clone2
-        )
+        functional_func = make_fx(_functionalize(func, reapply_views=True, crossref=self.crossref))(*clones2)
+        reinplace_func = reinplace(functional_func, *clones2)
 
         # NOTE: for now, need to pass in fresh inputs here, because make_fx
         # will directly mutate the inputs that you trace with.
         # Once this is fixed we can clean this up.
-        out_reinplace = reinplace_func(input_clone3)
+        out_reinplace = reinplace_func(*clones3)
 
         # functionalize() deficiency: input metadata mutations aren't propagated properly,
         # so we just need to skip checks here for the tests that exercise that.
         if not mutated_input_metadata:
-            self.assertEqual(inpt, input_clone)  # input mutations should still occur
-            self.assertEqual(inpt, input_clone3)
+            flat_inpts, _ = tree_flatten(inpts)
+            flat_clones1, _ = tree_flatten(clones1)
+            flat_clones3, _ = tree_flatten(clones3)
+            for inpt, input_clone, input_clone3 in zip(flat_inpts, flat_clones1, flat_clones3):
+                self.assertEqual(inpt, input_clone)  # input mutations should still occur
+                self.assertEqual(inpt, input_clone3)
 
         # Handle tests with multi-tensor outputs
         if isinstance(out_ref, tuple):
@@ -150,7 +157,7 @@ class TestFunctionalization(TestCase):
 
         def g(x):
             loss = f(x).sum()
-            from functorch._src.aot_autograd import setup_stacktrace_preservation_hooks
+            from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
             import torch.fx.traceback as fx_traceback
             setup_stacktrace_preservation_hooks([loss.grad_fn])
             with fx_traceback.override_stack_trace():
@@ -163,8 +170,8 @@ class TestFunctionalization(TestCase):
 
 
 
-def forward(self, a_1):
-    view_copy = torch.ops.aten.view_copy.default(a_1, [1, 1024, 128, 128]);  a_1 = None
+def forward(self, arg0_1):
+    view_copy = torch.ops.aten.view_copy.default(arg0_1, [1, 1024, 128, 128]);  arg0_1 = None
     clone = torch.ops.aten.clone.default(view_copy);  view_copy = None
     view_copy_1 = torch.ops.aten.view_copy.default(clone, [16, 64, 128, 128])
     relu = torch.ops.aten.relu.default(view_copy_1);  view_copy_1 = None
@@ -202,13 +209,13 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
-    view_copy = torch.ops.aten.view_copy.default(a_1, [4, 2])
+    view_copy = torch.ops.aten.view_copy.default(arg0_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view_copy, ones);  view_copy = ones = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4, 2])
     mul = torch.ops.aten.mul.Tensor(view_copy_1, view_copy_1)
-    copy_ = torch.ops.aten.copy_.default(a_1, view_copy_1);  a_1 = view_copy_1 = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, view_copy_1);  arg0_1 = view_copy_1 = None
     return add
     """)
 
@@ -217,13 +224,13 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
-    view = torch.ops.aten.view.default(a_1, [4, 2])
+    view = torch.ops.aten.view.default(arg0_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
     view_1 = torch.ops.aten.view.default(add, [4, 2])
     mul = torch.ops.aten.mul.Tensor(view_1, view_1)
-    copy_ = torch.ops.aten.copy_.default(a_1, view_1);  a_1 = view_1 = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, view_1);  arg0_1 = view_1 = None
     return add
     """)
 
@@ -242,9 +249,9 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
-    view_copy = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
+    view_copy = torch.ops.aten.view_copy.default(arg0_1, [4, 2]);  arg0_1 = None
     empty = torch.ops.aten.empty.memory_format([], device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(view_copy, ones);  view_copy = ones = None
     mul = torch.ops.aten.mul.Tensor(add, add);  add = None
@@ -256,9 +263,9 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
-    view = torch.ops.aten.view.default(a_1, [4, 2]);  a_1 = None
+    view = torch.ops.aten.view.default(arg0_1, [4, 2]);  arg0_1 = None
     empty = torch.ops.aten.empty.memory_format([], device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
     mul = torch.ops.aten.mul.Tensor(add, add);  add = None
@@ -279,10 +286,10 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     empty = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
     empty_1 = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
-    aminmax = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
+    aminmax = torch.ops.aten.aminmax.default(arg0_1, dim = 0);  arg0_1 = None
     getitem = aminmax[0]
     getitem_1 = aminmax[1];  aminmax = None
     return getitem
@@ -293,10 +300,10 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     empty = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
     empty_1 = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False)
-    aminmax = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
+    aminmax = torch.ops.aten.aminmax.default(arg0_1, dim = 0);  arg0_1 = None
     getitem = aminmax[0]
     getitem_1 = aminmax[1];  aminmax = None
     return getitem
@@ -317,7 +324,7 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     _tensor_constant0 = self._tensor_constant0
     lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
     view_copy = torch.ops.aten.view_copy.default(lift_fresh_copy, [-1]);  lift_fresh_copy = None
@@ -331,7 +338,7 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     _tensor_constant0 = self._tensor_constant0
     lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
     view = torch.ops.aten.view.default(lift_fresh_copy, [-1]);  lift_fresh_copy = None
@@ -367,11 +374,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
-    view_copy = torch.ops.aten.view_copy.default(a_1, [4, 2])
-    add = torch.ops.aten.add.Tensor(a_1, ones);  ones = None
-    copy_ = torch.ops.aten.copy_.default(a_1, add);  a_1 = None
+    view_copy = torch.ops.aten.view_copy.default(arg0_1, [4, 2])
+    add = torch.ops.aten.add.Tensor(arg0_1, ones);  ones = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4, 2]);  add = None
     return view_copy_1
     """)
@@ -381,11 +388,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
-    view = torch.ops.aten.view.default(a_1, [4, 2])
-    add = torch.ops.aten.add.Tensor(a_1, ones);  ones = None
-    copy_ = torch.ops.aten.copy_.default(a_1, add);  a_1 = None
+    view = torch.ops.aten.view.default(arg0_1, [4, 2])
+    add = torch.ops.aten.add.Tensor(arg0_1, ones);  ones = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = None
     view_1 = torch.ops.aten.view.default(add, [4, 2]);  add = None
     return view_1
     """)
@@ -401,15 +408,15 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    _fused_moving_avg_obs_fq_helper_functional = torch.ops.aten._fused_moving_avg_obs_fq_helper_functional.default(a_1, a_1, a_1, a_1, a_1, a_1, a_1, 1.0, 0, 1, 0)
+def forward(self, arg0_1):
+    _fused_moving_avg_obs_fq_helper_functional = torch.ops.aten._fused_moving_avg_obs_fq_helper_functional.default(arg0_1, arg0_1, arg0_1, arg0_1, arg0_1, arg0_1, arg0_1, 1.0, 0, 1, 0)
     getitem = _fused_moving_avg_obs_fq_helper_functional[0]
     getitem_1 = _fused_moving_avg_obs_fq_helper_functional[1]
     getitem_2 = _fused_moving_avg_obs_fq_helper_functional[2]
     getitem_3 = _fused_moving_avg_obs_fq_helper_functional[3]
     getitem_4 = _fused_moving_avg_obs_fq_helper_functional[4]
     getitem_5 = _fused_moving_avg_obs_fq_helper_functional[5];  _fused_moving_avg_obs_fq_helper_functional = None
-    copy_ = torch.ops.aten.copy_.default(a_1, getitem_5);  a_1 = getitem_5 = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_5);  arg0_1 = getitem_5 = None
     return (getitem, getitem_1)
     """)  # noqa: B950
 
@@ -424,11 +431,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    as_strided_copy = torch.ops.aten.as_strided_copy.default(a_1, [2], [2], 1)
+def forward(self, arg0_1):
+    as_strided_copy = torch.ops.aten.as_strided_copy.default(arg0_1, [2], [2], 1)
     add = torch.ops.aten.add.Tensor(as_strided_copy, 1);  as_strided_copy = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(a_1, add, [2], [2], 1);  add = None
-    copy_ = torch.ops.aten.copy_.default(a_1, as_strided_scatter);  a_1 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(arg0_1, add, [2], [2], 1);  add = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, as_strided_scatter);  arg0_1 = None
     return as_strided_scatter
     """)
 
@@ -443,8 +450,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    block_diag = torch.ops.aten.block_diag.default([a_1, a_1]);  a_1 = None
+def forward(self, arg0_1):
+    block_diag = torch.ops.aten.block_diag.default([arg0_1, arg0_1]);  arg0_1 = None
     return block_diag
     """)
 
@@ -459,9 +466,9 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     empty = torch.ops.aten.empty.memory_format([0], device = device(type='cpu'), pin_memory = False)
-    cat = torch.ops.aten.cat.default([a_1]);  a_1 = None
+    cat = torch.ops.aten.cat.default([arg0_1]);  arg0_1 = None
     return cat
     """)
 
@@ -470,9 +477,9 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     empty = torch.ops.aten.empty.memory_format([0], device = device(type='cpu'), pin_memory = False)
-    cat = torch.ops.aten.cat.default([a_1]);  a_1 = None
+    cat = torch.ops.aten.cat.default([arg0_1]);  arg0_1 = None
     return cat
     """)
 
@@ -491,12 +498,12 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
-    clone = torch.ops.aten.clone.default(a_1)
+    clone = torch.ops.aten.clone.default(arg0_1)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(clone);  clone = None
     add = torch.ops.aten.add.Tensor(diagonal_copy, ones);  diagonal_copy = ones = None
-    mul = torch.ops.aten.mul.Tensor(a_1, a_1);  a_1 = None
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
     return mul
     """)
 
@@ -505,12 +512,12 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
-    clone = torch.ops.aten.clone.default(a_1)
+    clone = torch.ops.aten.clone.default(arg0_1)
     diagonal = torch.ops.aten.diagonal.default(clone);  clone = None
     add = torch.ops.aten.add_.Tensor(diagonal, ones);  diagonal = ones = None
-    mul = torch.ops.aten.mul.Tensor(a_1, a_1);  a_1 = None
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
     return mul
     """)
 
@@ -528,12 +535,12 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
-    diagonal_copy = torch.ops.aten.diagonal_copy.default(a_1)
+    diagonal_copy = torch.ops.aten.diagonal_copy.default(arg0_1)
     add = torch.ops.aten.add.Tensor(diagonal_copy, ones);  diagonal_copy = ones = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(a_1, add);  add = None
-    copy_ = torch.ops.aten.copy_.default(a_1, diagonal_scatter);  a_1 = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(arg0_1, add);  add = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, diagonal_scatter);  arg0_1 = None
     return diagonal_scatter
     """)
 
@@ -552,20 +559,20 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
-    split_copy = torch.ops.aten.split_copy.Tensor(a_1, 2)
+    split_copy = torch.ops.aten.split_copy.Tensor(arg0_1, 2)
     getitem = split_copy[0]
     getitem_1 = split_copy[1];  split_copy = None
     diagonal_copy = torch.ops.aten.diagonal_copy.default(getitem_1);  getitem_1 = None
     add = torch.ops.aten.add.Tensor(diagonal_copy, ones);  diagonal_copy = ones = None
-    split_copy_1 = torch.ops.aten.split_copy.Tensor(a_1, 2)
+    split_copy_1 = torch.ops.aten.split_copy.Tensor(arg0_1, 2)
     getitem_2 = split_copy_1[0]
     getitem_3 = split_copy_1[1];  split_copy_1 = None
     diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_3, add);  getitem_3 = None
-    slice_scatter = torch.ops.aten.slice_scatter.default(a_1, diagonal_scatter, 0, 2, 4);  diagonal_scatter = None
+    slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 2, 4);  diagonal_scatter = None
     mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter)
-    copy_ = torch.ops.aten.copy_.default(a_1, slice_scatter);  a_1 = slice_scatter = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = None
     return add
     """)  # noqa: B950
 
@@ -583,12 +590,12 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
-    transpose_copy = torch.ops.aten.transpose_copy.int(a_1, 1, 0)
+    transpose_copy = torch.ops.aten.transpose_copy.int(arg0_1, 1, 0)
     select_copy = torch.ops.aten.select_copy.int(transpose_copy, 0, 0);  transpose_copy = None
     add = torch.ops.aten.add.Tensor(select_copy, ones);  select_copy = ones = None
-    transpose_copy_1 = torch.ops.aten.transpose_copy.int(a_1, 1, 0);  a_1 = None
+    transpose_copy_1 = torch.ops.aten.transpose_copy.int(arg0_1, 1, 0);  arg0_1 = None
     select_scatter = torch.ops.aten.select_scatter.default(transpose_copy_1, add, 0, 0);  transpose_copy_1 = add = None
     transpose_copy_2 = torch.ops.aten.transpose_copy.int(select_scatter, 1, 0);  select_scatter = None
     transpose_copy_3 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
@@ -610,13 +617,13 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    view_copy = torch.ops.aten.view_copy.default(a_1, [8])
+def forward(self, arg0_1):
+    view_copy = torch.ops.aten.view_copy.default(arg0_1, [8])
     arange = torch.ops.aten.arange.default(4, device = device(type='cpu'), pin_memory = False)
     arange_1 = torch.ops.aten.arange.default(4, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     index_put = torch.ops.aten.index_put.default(view_copy, [arange], arange_1);  view_copy = arange = arange_1 = None
     view_copy_1 = torch.ops.aten.view_copy.default(index_put, [4, 2])
-    copy_ = torch.ops.aten.copy_.default(a_1, view_copy_1);  a_1 = view_copy_1 = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, view_copy_1);  arg0_1 = view_copy_1 = None
     return index_put
     """)  # noqa: B950
 
@@ -635,14 +642,14 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
-    view_copy = torch.ops.aten.view_copy.default(a_1, [4, 2])
+    view_copy = torch.ops.aten.view_copy.default(arg0_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view_copy, 1);  view_copy = None
     mul = torch.ops.aten.mul.Tensor(add, 2)
     div = torch.ops.aten.div.Tensor(mul, 1);  mul = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4, 2]);  add = None
-    copy_ = torch.ops.aten.copy_.default(a_1, view_copy_1);  a_1 = view_copy_1 = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, view_copy_1);  arg0_1 = view_copy_1 = None
     return div
     """)
 
@@ -660,8 +667,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    clone = torch.ops.aten.clone.default(a_1);  a_1 = None
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     ge = torch.ops.aten.ge.Scalar(clone, 0);  clone = None
     _to_copy = torch.ops.aten._to_copy.default(ge, dtype = torch.float32, layout = torch.strided);  ge = None
     return _to_copy
@@ -672,8 +679,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    clone = torch.ops.aten.clone.default(a_1);  a_1 = None
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     ge = torch.ops.aten.ge.Scalar(clone, 0);  clone = None
     _to_copy = torch.ops.aten._to_copy.default(ge, dtype = torch.float32, layout = torch.strided);  ge = None
     return _to_copy
@@ -708,8 +715,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    view_copy = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
+def forward(self, arg0_1):
+    view_copy = torch.ops.aten.view_copy.default(arg0_1, [4, 2]);  arg0_1 = None
     return view_copy
     """)
 
@@ -733,9 +740,9 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    add = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
     view_copy = torch.ops.aten.view_copy.default(add, [8])
     view_copy_1 = torch.ops.aten.view_copy.default(view_copy, [2, 4]);  view_copy = None
     transpose_copy = torch.ops.aten.transpose_copy.int(view_copy_1, 1, 0)
@@ -779,9 +786,9 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    add = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
     view = torch.ops.aten.view.default(add, [8])
     view_1 = torch.ops.aten.view.default(view, [2, 4]);  view = None
     transpose = torch.ops.aten.transpose.int(view_1, 1, 0)
@@ -824,13 +831,13 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
-    view = torch.ops.aten.view.default(a_1, [4, 2])
+    view = torch.ops.aten.view.default(arg0_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
     view_1 = torch.ops.aten.view.default(add, [4, 2])
     mul = torch.ops.aten.mul.Tensor(view_1, view_1)
-    copy_ = torch.ops.aten.copy_.default(a_1, view_1);  a_1 = view_1 = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, view_1);  arg0_1 = view_1 = None
     return add
     """)
 
@@ -874,11 +881,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    copy = torch.ops.aten.copy.default(diagonal_copy, a_1);  diagonal_copy = None
-    add = torch.ops.aten.add.Tensor(copy, a_1);  copy = a_1 = None
+    copy = torch.ops.aten.copy.default(diagonal_copy, arg0_1);  diagonal_copy = None
+    add = torch.ops.aten.add.Tensor(copy, arg0_1);  copy = arg0_1 = None
     return add
     """)
 
@@ -887,11 +894,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    copy = torch.ops.aten.copy_.default(diagonal, a_1)
-    add = torch.ops.aten.add_.Tensor(diagonal, a_1);  a_1 = None
+    copy = torch.ops.aten.copy_.default(diagonal, arg0_1)
+    add = torch.ops.aten.add_.Tensor(diagonal, arg0_1);  arg0_1 = None
     return diagonal
     """)
 
@@ -902,11 +909,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    copy = torch.ops.aten.copy.default(diagonal_copy, a_1);  diagonal_copy = None
-    add = torch.ops.aten.add.Tensor(copy, a_1);  copy = a_1 = None
+    copy = torch.ops.aten.copy.default(diagonal_copy, arg0_1);  diagonal_copy = None
+    add = torch.ops.aten.add.Tensor(copy, arg0_1);  copy = arg0_1 = None
     return add
     """)
 
@@ -915,11 +922,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    copy = torch.ops.aten.copy_.default(diagonal, a_1)
-    add = torch.ops.aten.add_.Tensor(diagonal, a_1);  a_1 = None
+    copy = torch.ops.aten.copy_.default(diagonal, arg0_1)
+    add = torch.ops.aten.add_.Tensor(diagonal, arg0_1);  arg0_1 = None
     return diagonal
     """)
 
@@ -930,11 +937,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    copy = torch.ops.aten.copy.default(diagonal_copy, a_1);  diagonal_copy = None
-    add = torch.ops.aten.add.Tensor(copy, a_1);  copy = a_1 = None
+    copy = torch.ops.aten.copy.default(diagonal_copy, arg0_1);  diagonal_copy = None
+    add = torch.ops.aten.add.Tensor(copy, arg0_1);  copy = arg0_1 = None
     return add
     """)  # noqa: B950
 
@@ -943,11 +950,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    copy = torch.ops.aten.copy_.default(diagonal, a_1)
-    add = torch.ops.aten.add_.Tensor(diagonal, a_1);  a_1 = None
+    copy = torch.ops.aten.copy_.default(diagonal, arg0_1)
+    add = torch.ops.aten.add_.Tensor(diagonal, arg0_1);  arg0_1 = None
     return diagonal
     """)  # noqa: B950
 
@@ -958,11 +965,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    copy = torch.ops.aten.copy.default(diagonal_copy, a_1);  diagonal_copy = None
-    add = torch.ops.aten.add.Tensor(copy, a_1);  copy = a_1 = None
+    copy = torch.ops.aten.copy.default(diagonal_copy, arg0_1);  diagonal_copy = None
+    add = torch.ops.aten.add.Tensor(copy, arg0_1);  copy = arg0_1 = None
     return add
     """)  # noqa: B950
 
@@ -971,11 +978,11 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    copy = torch.ops.aten.copy_.default(diagonal, a_1)
-    add = torch.ops.aten.add_.Tensor(diagonal, a_1);  a_1 = None
+    copy = torch.ops.aten.copy_.default(diagonal, arg0_1)
+    add = torch.ops.aten.add_.Tensor(diagonal, arg0_1);  arg0_1 = None
     return diagonal
     """)  # noqa: B950
 
@@ -991,8 +998,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    expand_copy = torch.ops.aten.expand_copy.default(a_1, [2, 2]);  a_1 = None
+def forward(self, arg0_1):
+    expand_copy = torch.ops.aten.expand_copy.default(arg0_1, [2, 2]);  arg0_1 = None
     return expand_copy
     """)
 
@@ -1009,8 +1016,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    add = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
     diagonal_copy = torch.ops.aten.diagonal_copy.default(add)
     fill = torch.ops.aten.fill.Scalar(diagonal_copy, 0);  diagonal_copy = None
     diagonal_scatter = torch.ops.aten.diagonal_scatter.default(add, fill);  add = fill = None
@@ -1022,8 +1029,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    add = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
     diagonal = torch.ops.aten.diagonal.default(add)
     fill = torch.ops.aten.fill_.Scalar(diagonal, 0);  diagonal = None
     return add
@@ -1046,8 +1053,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    add = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
     view_copy = torch.ops.aten.view_copy.default(add, [4, 4])
     resize = torch.ops.aten.resize.default(view_copy, [3, 3])
     as_strided_copy = torch.ops.aten.as_strided_copy.default(view_copy, [3, 3], [3, 1]);  view_copy = None
@@ -1069,8 +1076,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    add = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
     view = torch.ops.aten.view.default(add, [4, 4])
     resize = torch.ops.aten.resize.default(view, [3, 3])
     as_strided = torch.ops.aten.as_strided.default(view, [3, 3], [3, 1]);  view = None
@@ -1109,8 +1116,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    add = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
     resize = torch.ops.aten.resize.default(add, [5, 5]);  add = None
     view_copy = torch.ops.aten.view_copy.default(resize, [25]);  resize = None
     fill = torch.ops.aten.fill.Scalar(view_copy, 1);  view_copy = None
@@ -1124,8 +1131,8 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
-    add = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
     resize = torch.ops.aten.resize_.default(add, [5, 5])
     view = torch.ops.aten.view.default(add, [25]);  add = None
     fill = torch.ops.aten.fill_.Scalar(view, 1)
@@ -1208,7 +1215,7 @@ $3 = torch._ops.aten.add.Tensor($2, 1)""")
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([10], device = device(type='cpu'), pin_memory = False)
     select_copy = torch.ops.aten.select_copy.int(zeros, 0, 5)
     fill = torch.ops.aten.fill.Scalar(select_copy, 1);  select_copy = None
@@ -1221,7 +1228,7 @@ def forward(self, a_1):
 
 
 
-def forward(self, a_1):
+def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([10], device = device(type='cpu'), pin_memory = False)
     select = torch.ops.aten.select.int(zeros, 0, 5)
     fill = torch.ops.aten.fill_.Scalar(select, 1);  select = None
@@ -1230,26 +1237,26 @@ def forward(self, a_1):
 
 
     def test_instance_norm(self):
-        def f(x):
+        size = 100
+
+        def f(x, running_mean, running_var):
             with enable_python_dispatcher():
-                return torch.instance_norm(x, None, None, running_mean=torch.zeros(100), running_var=torch.ones(100),
+                return torch.instance_norm(x, None, None, running_mean, running_var,
                                            use_input_stats=True, momentum=0.1, eps=1e-5, cudnn_enabled=False)
-        self.assert_functionalization(f, torch.randn(20, 100, 35, 45))
+        self.assert_functionalization(f, torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size))
         # On Windows, for instance_norm, the alias_copy's are reordered to come right before they need to be used
         # whereas on other platforms, the alias_copy's are before the view_copy's.
         # e.g., the alias_copy after the getitem_4 assignment would be moved to be right before the copy assignment.
         if not IS_WINDOWS:
-            logs = self.get_logs(f, torch.randn(20, 100, 35, 45))
+            logs = self.get_logs(f, torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size))
             self.assertExpectedInline(logs, """\
 
 
 
-def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([100], device = device(type='cpu'), pin_memory = False)
-    ones = torch.ops.aten.ones.default([100], device = device(type='cpu'), pin_memory = False)
-    repeat = torch.ops.aten.repeat.default(zeros, [20])
-    repeat_1 = torch.ops.aten.repeat.default(ones, [20])
-    view_copy = torch.ops.aten.view_copy.default(a_1, [1, 2000, 35, 45]);  a_1 = None
+def forward(self, arg0_1, arg1_1, arg2_1):
+    repeat = torch.ops.aten.repeat.default(arg1_1, [20])
+    repeat_1 = torch.ops.aten.repeat.default(arg2_1, [20])
+    view_copy = torch.ops.aten.view_copy.default(arg0_1, [1, 2000, 35, 45]);  arg0_1 = None
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
     _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(view_copy, None, None, repeat, repeat_1, True, 0.1, 1e-05);  view_copy = repeat = repeat_1 = None
     getitem = _native_batch_norm_legit_functional[0]
@@ -1257,109 +1264,36 @@ def forward(self, a_1):
     getitem_2 = _native_batch_norm_legit_functional[2]
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    alias_copy = torch.ops.aten.alias_copy.default(zeros);  zeros = None
+    alias_copy = torch.ops.aten.alias_copy.default(arg1_1)
     view_copy_1 = torch.ops.aten.view_copy.default(getitem_3, [20, 100])
     view_copy_2 = torch.ops.aten.view_copy.default(getitem_3, [20, 100]);  getitem_3 = None
     mean = torch.ops.aten.mean.dim(view_copy_2, [0]);  view_copy_2 = None
     copy = torch.ops.aten.copy.default(alias_copy, mean);  alias_copy = mean = None
-    alias_copy_1 = torch.ops.aten.alias_copy.default(ones);  ones = None
-    view_copy_3 = torch.ops.aten.view_copy.default(getitem_4, [20, 100])
-    view_copy_4 = torch.ops.aten.view_copy.default(getitem_4, [20, 100]);  getitem_4 = None
-    mean_1 = torch.ops.aten.mean.dim(view_copy_4, [0]);  view_copy_4 = None
-    copy_1 = torch.ops.aten.copy.default(alias_copy_1, mean_1);  alias_copy_1 = mean_1 = None
-    view_copy_5 = torch.ops.aten.view_copy.default(getitem, [20, 100, 35, 45]);  getitem = None
-    return view_copy_5
-    """)  # noqa: B950
-
-            reinplaced_logs = self.get_logs(f, torch.randn(20, 100, 35, 45), reapply_views=True, run_reinplace=True)
-            self.assertExpectedInline(reinplaced_logs, """\
-
-
-
-def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([100], device = device(type='cpu'), pin_memory = False)
-    ones = torch.ops.aten.ones.default([100], device = device(type='cpu'), pin_memory = False)
-    repeat = torch.ops.aten.repeat.default(zeros, [20])
-    repeat_1 = torch.ops.aten.repeat.default(ones, [20])
-    view = torch.ops.aten.view.default(a_1, [1, 2000, 35, 45]);  a_1 = None
-    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(view, None, None, repeat, repeat_1, True, 0.1, 1e-05);  view = repeat = repeat_1 = None
-    getitem = _native_batch_norm_legit_functional[0]
-    getitem_1 = _native_batch_norm_legit_functional[1]
-    getitem_2 = _native_batch_norm_legit_functional[2]
-    getitem_3 = _native_batch_norm_legit_functional[3]
-    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    alias = torch.ops.aten.alias.default(zeros);  zeros = None
-    view_1 = torch.ops.aten.view.default(getitem_3, [20, 100])
-    view_2 = torch.ops.aten.view.default(getitem_3, [20, 100]);  getitem_3 = None
-    mean = torch.ops.aten.mean.dim(view_2, [0]);  view_2 = None
-    copy = torch.ops.aten.copy_.default(alias, mean);  alias = mean = None
-    alias_1 = torch.ops.aten.alias.default(ones);  ones = None
-    view_3 = torch.ops.aten.view.default(getitem_4, [20, 100])
-    view_4 = torch.ops.aten.view.default(getitem_4, [20, 100]);  getitem_4 = None
-    mean_1 = torch.ops.aten.mean.dim(view_4, [0]);  view_4 = None
-    copy_1 = torch.ops.aten.copy_.default(alias_1, mean_1);  alias_1 = mean_1 = None
-    view_5 = torch.ops.aten.view.default(getitem, [20, 100, 35, 45]);  getitem = None
-    return view_5
-    """)  # noqa: B950
-
-
-    def test_instance_norm_running_mean_is_x(self):
-        def f(x):
-            with enable_python_dispatcher():
-                return torch.instance_norm(torch.randn(20, 100, 35, 45), None, None, running_mean=x, running_var=torch.ones(100),
-                                           use_input_stats=True, momentum=0.1, eps=1e-5, cudnn_enabled=False)
-        # TODO: uncomment following line after functionalization can handle input mutations
-        # self.assert_functionalization(f, torch.zeros(100))
-        logs = self.get_logs(f, torch.zeros(100))
-        # On Windows, for instance_norm, the alias_copy's are reordered to come right before they need to be used
-        # whereas on other platforms, the alias_copy's are before the view_copy's.
-        # e.g., the alias_copy after the getitem_4 assignment would be moved to be right before the copy assignment.
-        if not IS_WINDOWS:
-            self.assertExpectedInline(logs, """\
-
-
-
-def forward(self, a_1):
-    randn = torch.ops.aten.randn.default([20, 100, 35, 45], device = device(type='cpu'), pin_memory = False)
-    ones = torch.ops.aten.ones.default([100], device = device(type='cpu'), pin_memory = False)
-    repeat = torch.ops.aten.repeat.default(a_1, [20])
-    repeat_1 = torch.ops.aten.repeat.default(ones, [20])
-    view_copy = torch.ops.aten.view_copy.default(randn, [1, 2000, 35, 45]);  randn = None
-    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(view_copy, None, None, repeat, repeat_1, True, 0.1, 1e-05);  view_copy = repeat = repeat_1 = None
-    getitem = _native_batch_norm_legit_functional[0]
-    getitem_1 = _native_batch_norm_legit_functional[1]
-    getitem_2 = _native_batch_norm_legit_functional[2]
-    getitem_3 = _native_batch_norm_legit_functional[3]
-    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    alias_copy = torch.ops.aten.alias_copy.default(a_1)
-    view_copy_1 = torch.ops.aten.view_copy.default(getitem_3, [20, 100])
-    view_copy_2 = torch.ops.aten.view_copy.default(getitem_3, [20, 100]);  getitem_3 = None
-    mean = torch.ops.aten.mean.dim(view_copy_2, [0]);  view_copy_2 = None
-    copy = torch.ops.aten.copy.default(alias_copy, mean);  alias_copy = mean = None
-    alias_copy_1 = torch.ops.aten.alias_copy.default(ones);  ones = None
+    alias_copy_1 = torch.ops.aten.alias_copy.default(arg2_1)
     view_copy_3 = torch.ops.aten.view_copy.default(getitem_4, [20, 100])
     view_copy_4 = torch.ops.aten.view_copy.default(getitem_4, [20, 100]);  getitem_4 = None
     mean_1 = torch.ops.aten.mean.dim(view_copy_4, [0]);  view_copy_4 = None
     copy_1 = torch.ops.aten.copy.default(alias_copy_1, mean_1);  alias_copy_1 = mean_1 = None
     view_copy_5 = torch.ops.aten.view_copy.default(getitem, [20, 100, 35, 45]);  getitem = None
     alias_copy_2 = torch.ops.aten.alias_copy.default(copy);  copy = None
-    copy_ = torch.ops.aten.copy_.default(a_1, alias_copy_2);  a_1 = alias_copy_2 = None
+    copy_ = torch.ops.aten.copy_.default(arg1_1, alias_copy_2);  arg1_1 = alias_copy_2 = None
+    alias_copy_3 = torch.ops.aten.alias_copy.default(copy_1);  copy_1 = None
+    copy__1 = torch.ops.aten.copy_.default(arg2_1, alias_copy_3);  arg2_1 = alias_copy_3 = None
     return view_copy_5
     """)  # noqa: B950
 
-            reinplaced_logs = self.get_logs(f, torch.zeros(100), reapply_views=True, run_reinplace=True)
+            reinplaced_logs = self.get_logs(
+                f, torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size),
+                reapply_views=True, run_reinplace=True
+            )
             self.assertExpectedInline(reinplaced_logs, """\
 
 
 
-def forward(self, a_1):
-    randn = torch.ops.aten.randn.default([20, 100, 35, 45], device = device(type='cpu'), pin_memory = False)
-    ones = torch.ops.aten.ones.default([100], device = device(type='cpu'), pin_memory = False)
-    repeat = torch.ops.aten.repeat.default(a_1, [20])
-    repeat_1 = torch.ops.aten.repeat.default(ones, [20])
-    view = torch.ops.aten.view.default(randn, [1, 2000, 35, 45]);  randn = None
+def forward(self, arg0_1, arg1_1, arg2_1):
+    repeat = torch.ops.aten.repeat.default(arg1_1, [20])
+    repeat_1 = torch.ops.aten.repeat.default(arg2_1, [20])
+    view = torch.ops.aten.view.default(arg0_1, [1, 2000, 35, 45]);  arg0_1 = None
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
     _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(view, None, None, repeat, repeat_1, True, 0.1, 1e-05);  view = repeat = repeat_1 = None
     getitem = _native_batch_norm_legit_functional[0]
@@ -1367,62 +1301,66 @@ def forward(self, a_1):
     getitem_2 = _native_batch_norm_legit_functional[2]
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    alias = torch.ops.aten.alias.default(a_1)
+    alias = torch.ops.aten.alias.default(arg1_1)
     view_1 = torch.ops.aten.view.default(getitem_3, [20, 100])
     view_2 = torch.ops.aten.view.default(getitem_3, [20, 100]);  getitem_3 = None
     mean = torch.ops.aten.mean.dim(view_2, [0]);  view_2 = None
     copy = torch.ops.aten.copy.default(alias, mean);  alias = mean = None
-    alias_1 = torch.ops.aten.alias.default(ones);  ones = None
+    alias_1 = torch.ops.aten.alias.default(arg2_1)
     view_3 = torch.ops.aten.view.default(getitem_4, [20, 100])
     view_4 = torch.ops.aten.view.default(getitem_4, [20, 100]);  getitem_4 = None
     mean_1 = torch.ops.aten.mean.dim(view_4, [0]);  view_4 = None
-    copy_1 = torch.ops.aten.copy_.default(alias_1, mean_1);  alias_1 = mean_1 = None
+    copy_1 = torch.ops.aten.copy.default(alias_1, mean_1);  alias_1 = mean_1 = None
     view_5 = torch.ops.aten.view.default(getitem, [20, 100, 35, 45]);  getitem = None
     alias_2 = torch.ops.aten.alias.default(copy);  copy = None
-    copy_ = torch.ops.aten.copy_.default(a_1, alias_2);  a_1 = alias_2 = None
+    copy_ = torch.ops.aten.copy_.default(arg1_1, alias_2);  arg1_1 = alias_2 = None
+    alias_3 = torch.ops.aten.alias.default(copy_1);  copy_1 = None
+    copy__1 = torch.ops.aten.copy_.default(arg2_1, alias_3);  arg2_1 = alias_3 = None
     return view_5
     """)  # noqa: B950
 
 
     def test_batch_norm(self):
-        def f(x):
+        def f(x, running_mean, running_var):
             with enable_python_dispatcher():
-                return torch.batch_norm(x, None, None, torch.zeros(100), torch.ones(100), False, 0.1, 1e-5, False)
+                return torch.batch_norm(x, None, None, running_mean, running_var, False, 0.1, 1e-5, False)
 
-        self.assert_functionalization(f, torch.randn(20, 100, 35, 45))
-        logs = self.get_logs(f, torch.randn(20, 100, 35, 45))
+        self.assert_functionalization(f, torch.randn(20, 100, 35, 45), torch.zeros(100), torch.ones(100))
+        logs = self.get_logs(f, torch.randn(20, 100, 35, 45), torch.zeros(100), torch.ones(100))
         self.assertExpectedInline(logs, """\
 
 
 
-def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([100], device = device(type='cpu'), pin_memory = False)
-    ones = torch.ops.aten.ones.default([100], device = device(type='cpu'), pin_memory = False)
+def forward(self, arg0_1, arg1_1, arg2_1):
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(a_1, None, None, zeros, ones, False, 0.1, 1e-05);  a_1 = zeros = ones = None
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, False, 0.1, 1e-05);  arg0_1 = None
     getitem = _native_batch_norm_legit_functional[0]
     getitem_1 = _native_batch_norm_legit_functional[1]
     getitem_2 = _native_batch_norm_legit_functional[2]
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+    copy_ = torch.ops.aten.copy_.default(arg1_1, getitem_3);  arg1_1 = getitem_3 = None
+    copy__1 = torch.ops.aten.copy_.default(arg2_1, getitem_4);  arg2_1 = getitem_4 = None
     return getitem
     """)  # noqa: B950
 
-        reinplaced_logs = self.get_logs(f, torch.randn(20, 100, 35, 45), reapply_views=True, run_reinplace=True)
+        reinplaced_logs = self.get_logs(
+            f, torch.randn(20, 100, 35, 45), torch.zeros(100), torch.ones(100), reapply_views=True, run_reinplace=True
+        )
         self.assertExpectedInline(reinplaced_logs, """\
 
 
 
-def forward(self, a_1):
-    zeros = torch.ops.aten.zeros.default([100], device = device(type='cpu'), pin_memory = False)
-    ones = torch.ops.aten.ones.default([100], device = device(type='cpu'), pin_memory = False)
+def forward(self, arg0_1, arg1_1, arg2_1):
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(a_1, None, None, zeros, ones, False, 0.1, 1e-05);  a_1 = zeros = ones = None
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, False, 0.1, 1e-05);  arg0_1 = None
     getitem = _native_batch_norm_legit_functional[0]
     getitem_1 = _native_batch_norm_legit_functional[1]
     getitem_2 = _native_batch_norm_legit_functional[2]
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+    copy_ = torch.ops.aten.copy_.default(arg1_1, getitem_3);  arg1_1 = getitem_3 = None
+    copy__1 = torch.ops.aten.copy_.default(arg2_1, getitem_4);  arg2_1 = getitem_4 = None
     return getitem
     """)  # noqa: B950
 

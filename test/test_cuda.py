@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import warnings
 from random import randint
 
 import torch
@@ -2929,10 +2930,10 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
-                should_error_from_cudnn = 'cudnn' in op and not\
-                    ('TORCH_CUDNN_V8_API_ENABLED' in os.environ and
-                     int(os.environ['TORCH_CUDNN_V8_API_ENABLED']) and
-                     torch.cuda.get_device_capability() >= (8, 0))
+                should_error_from_cudnn = 'cudnn' in op and \
+                    ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
+                     int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
+                     torch.cuda.get_device_capability() < (8, 0))
                 should_error_from_not_implemented = should_error_from_cudnn or 'prelu' in op or 'thnn' in op \
                     or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
                 if not skip_test:
@@ -3290,6 +3291,18 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertTrue(b.sum().item() == 11000.)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_warn_if_has_zero_nodes(self):
+        with warnings.catch_warnings(record=True) as caught:
+            g = torch.cuda.CUDAGraph()
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                g.capture_begin()
+                g.capture_end()
+        self.assertTrue(any("The CUDA Graph is empty" in str(w.message) for w in caught))
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
@@ -3972,25 +3985,63 @@ torch.cuda.synchronize()
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
 
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    @parametrize('with_amp,cache_enabled', [(False, False), (True, False), subtest((True, True),
-                 decorators=[unittest.expectedFailure])],
-                 name_fn=lambda x, y: '{}{}'.format({True: "with_amp", False: "without_amp"}[x],
-                                                    {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else ''))
-    def test_graph_make_graphed_callables(self, with_amp, cache_enabled):
+    @unittest.skipIf(
+        (not TEST_CUDA) or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
+        "CUDA >= 11.0 required for graphs",
+    )
+    @parametrize(
+        "with_amp,cache_enabled,allow_unused_input",
+        [
+            (False, False, True),
+            (True, False, True),
+            subtest((True, True, True), decorators=[unittest.expectedFailure]),
+            subtest((False, False, False), decorators=[unittest.expectedFailure]),
+        ],
+        name_fn=lambda x, y, z: "{}{}{}".format(
+            {True: "with_amp", False: "without_amp"}[x],
+            {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else "",
+            {True: "_allow_unused_input", False: "_not_allow_unused_input"}[z],
+        ),
+    )
+    def test_graph_make_graphed_callables(
+        self, with_amp, cache_enabled, allow_unused_input
+    ):
         torch.manual_seed(5)
         torch.cuda.manual_seed(5)
 
         N, D_in, H, D_out = 640, 4096, 2048, 1024
 
+        class MLP1(torch.nn.Module):
+            def __init__(self, D_in: int, H: int, D_out: int):
+                super().__init__()
+                self.net_1 = torch.nn.Sequential(
+                    torch.nn.Linear(D_in, H), torch.nn.Dropout(p=0.1)
+                ).cuda()
+                self.net_2 = torch.nn.Sequential(
+                    torch.nn.Linear(H, D_out), torch.nn.Dropout(p=0.2)
+                ).cuda()
+
+            def forward(self, input_dict: dict):
+                x = input_dict["x"]
+                return self.net_2(self.net_1(x))
+
+        class MLP2(torch.nn.Module):
+            def __init__(self, D_in: int, H: int, D_out: int):
+                super().__init__()
+                self.net_1 = torch.nn.Sequential(
+                    torch.nn.Linear(D_in, H), torch.nn.Dropout(p=0.1)
+                ).cuda()
+                self.net_2 = torch.nn.Sequential(
+                    torch.nn.Linear(H, D_out), torch.nn.Dropout(p=0.2)
+                ).cuda()
+
+            def forward(self, x):
+                return {"output": self.net_2(self.net_1(x))}
+
         models = []
         for _ in range(2):
-            model_section1 = torch.nn.Sequential(torch.nn.Linear(D_in, H),
-                                                 torch.nn.Dropout(p=0.1)).cuda()
-            model_section2 = torch.nn.Sequential(torch.nn.Linear(H, D_out),
-                                                 torch.nn.Dropout(p=0.2)).cuda()
+            model_section1 = MLP1(D_in, H, H).cuda()
+            model_section2 = MLP2(H, H, D_out).cuda()
             models.append(torch.nn.Sequential(model_section1, model_section2))
 
         model_graphed = models[0]
@@ -4001,27 +4052,42 @@ torch.cuda.synchronize()
         opt_graphed = torch.optim.SGD(model_graphed.parameters(), lr=0.1)
         opt_control = torch.optim.SGD(model_control.parameters(), lr=0.1)
 
-        x = torch.randn(N, D_in, device='cuda')
-        h = torch.randn(N, H, device='cuda', requires_grad=True)
-        y_pred = torch.randn(N, D_out, device='cuda', requires_grad=True)
-        y = torch.randn(N, D_out, device='cuda')
+        x = torch.randn(N, D_in, device="cuda")
+        h = torch.randn(N, H, device="cuda", requires_grad=True)
+        unused_input = torch.randn(N, H, device="cuda", requires_grad=True)
+        y_pred = torch.randn(N, D_out, device="cuda", requires_grad=True)
+        y = torch.randn(N, D_out, device="cuda")
 
         loss_fn_control = torch.nn.functional.mse_loss
         relu_control = torch.nn.functional.relu
 
         # This is a good stress test. It graphs four callables: two Modules and two python functions.
         with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
-            model_graphed[0], model_graphed[1], relu_graphed, loss_fn_graphed = \
-                torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
-                                                  ((x,), (h,), (y_pred,), (y_pred, y)))
+            (
+                model_graphed[0],
+                model_graphed[1],
+                relu_graphed,
+                loss_fn_graphed,
+            ) = torch.cuda.make_graphed_callables(
+                (model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
+                (
+                    ({"x": x, "unused_input": unused_input},),
+                    (h,),
+                    (y_pred,),
+                    (y_pred, y),
+                ),
+                allow_unused_input=allow_unused_input,
+            )
 
         real_inputs = [torch.rand_like(x) for _ in range(10)]
         real_targets = [torch.rand_like(y) for _ in range(10)]
 
-        for m, opt, relu, loss_fn in zip((model_graphed, model_control),
-                                         (opt_graphed, opt_control),
-                                         (relu_graphed, relu_control),
-                                         (loss_fn_graphed, loss_fn_control)):
+        for m, opt, relu, loss_fn in zip(
+            (model_graphed, model_control),
+            (opt_graphed, opt_control),
+            (relu_graphed, relu_control),
+            (loss_fn_graphed, loss_fn_control),
+        ):
             # Resets RNC states before iterations for graphed and ungraphed models,
             # so dropout math should be bitwise identical for both.
             torch.manual_seed(5)
@@ -4029,7 +4095,7 @@ torch.cuda.synchronize()
             for data, target in zip(real_inputs, real_targets):
                 opt.zero_grad(set_to_none=True)
                 with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
-                    y_pred = m(data)
+                    y_pred = m({"x": data, "unused_input": unused_input})["output"]
                     y_pred = relu(y_pred)
                     loss = loss_fn(y_pred, target)
                     loss.backward()
@@ -4041,7 +4107,9 @@ torch.cuda.synchronize()
         # We graphed the models in training mode. Eval should still run ungraphed.
         model_graphed.eval()
         model_control.eval()
-        self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]))
+        self.assertEqual(
+            model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
+        )
 
     def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
         for actually_do_graphs in (True, False):

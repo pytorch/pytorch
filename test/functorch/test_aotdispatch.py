@@ -6,7 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Union, Callable, List, Any
+from typing import Union, Callable, List, Any, Optional, Dict
 from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64, IS_WINDOWS
 import torch
@@ -22,7 +22,7 @@ from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
 )
-from functorch._src.aot_autograd import aot_module_simplified
+from torch._functorch.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
@@ -38,8 +38,9 @@ from common_utils import (
     skip,
     skipOps,
 )
-from torch._subclasses.fake_tensor import DynamicOutputShapeException
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 USE_TORCHVISION = False
 try:
@@ -254,6 +255,7 @@ class TestAOTAutograd(AOTTestCase):
         *,
         test_mutation: bool = False,
         return_fw_graph: bool = False,
+        decompositions: Optional[Dict] = None,
     ):
         # Some tests pass in a callable for inp, to generate the inputs
         # (useful if we want to generate complicated aliasing inputs)
@@ -291,9 +293,11 @@ class TestAOTAutograd(AOTTestCase):
 
         fw_graph_cell = [None]
         if isinstance(f, nn.Module):
-            compiled_f = aot_module(f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop)
+            compiled_f = aot_module(
+                f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop, decompositions=decompositions)
         else:
-            compiled_f = aot_function(f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop)
+            compiled_f = aot_function(
+                f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop, decompositions=decompositions)
         ref_out, ref_grad = _outs_and_grads(f, graph_inps, inp)
         test_out, test_grad = _outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
         self.assertEqual(ref_grad, test_grad)
@@ -305,7 +309,10 @@ class TestAOTAutograd(AOTTestCase):
             if isinstance(ref_o, torch.Tensor):
                 self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
                 self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
-                self.assertEqual(ref_o._is_view(), test_o._is_view())
+                if ref_o.requires_grad:
+                    # _is_view() should probably unconditionally be the same,
+                    # but in practice I don't think this matters for tensors that don't require grad
+                    self.assertEqual(ref_o._is_view(), test_o._is_view())
                 self.assertEqual(ref_o, test_o)
                 if test_mutation:
                     # This tests that autograd meta is set properly on the output we can
@@ -338,6 +345,36 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         self.verify_aot_autograd(f, inp)
 
+    # Test for bug occurring at the intersection of fake tensors & functionalization.
+    @patch("torch._functorch.config.use_dynamic_shapes", True)
+    @patch("torch._functorch.config.use_fake_tensor", True)
+    def test_squeeze_mutation(self):
+        def f(a):
+            b = a.clone().squeeze(-1)
+            b.add_(1.)
+            return a + b
+
+        inp = [torch.randn(3, 1, requires_grad=True)]
+        self.verify_aot_autograd(f, inp)
+
+    @patch("torch._functorch.config.use_dynamic_shapes", True)
+    @patch("torch._functorch.config.use_fake_tensor", True)
+    def test_embedding_bag_view(self):
+        # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
+        # test that this works even though the sparse tensor has no storage.
+
+        class F(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.EmbeddingBag(100, 8, sparse=True)
+
+            def forward(self, x, y):
+                return self.emb(x, y).view(-1)
+
+        x = torch.arange(3)
+        y = torch.arange(3)
+        self.verify_aot_autograd(F(), [x, y])
+
     def test_input_mutation_simple(self):
         def f(a):
             a.mul_(2)
@@ -356,6 +393,17 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
     mul_1 = torch.ops.aten.mul.Tensor(mul, 3)
     return [mul, mul_1]""")
+
+    def test_input_mutation_simple_with_none_and_nontensor(self):
+        # Tensor, None, int
+        def f(a, b, c):
+            return a * c
+        inp = [torch.ones(3, 3, requires_grad=True), None, 3]
+
+        f_compiled = aot_function(f, nop)
+        out_ref = f(*inp)
+        out_test = f_compiled(*inp)
+        self.assertEqual(out_ref, out_test)
 
     def test_input_mutation_is_output(self):
         def f(a):
@@ -424,6 +472,29 @@ def forward(self, primals_1, primals_2, primals_3):
         ]
 
         self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+
+    def test_input_mutation_batchnorm(self):
+        def f(inpt, weight, bias, running_mean, running_var):
+            # This is additionally a good test, because the input tensors that we mutate
+            # are *also* saved for backwards.
+            # This tests that what we save for the backward is actually cloned inputs,
+            # and not the original inputs that got mutated.
+            return torch._native_batch_norm_legit(inpt, weight, bias, running_mean, running_var, True, 0.5, 1e-5)
+        inp = [
+            torch.ones(2, 5, 5, 5, requires_grad=True),
+            torch.ones(5, requires_grad=True),
+            torch.ones(5, requires_grad=True),
+            torch.ones(5),
+            torch.ones(5),
+        ]
+
+        from torch._decomp import get_decompositions
+        # This simulates what inductor does (running the fw + bw decompositions)
+        decompositions = get_decompositions([
+            torch.ops.aten._native_batch_norm_legit_functional,
+            torch.ops.aten.native_batch_norm_backward,
+        ])
+        self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True, decompositions=decompositions)
 
     def test_input_output_view_simple(self):
         def f(a):
@@ -524,6 +595,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     add_1 = torch.ops.aten.add.Tensor(primals_4, 1);  primals_4 = None
     add_2 = torch.ops.aten.add.Tensor(primals_1, add);  primals_1 = None
     return [add, add_1, add_2, 2, 2, 1, 2, 0, 2, 3, 0]""")
+
 
     def test_input_data_and_metadata_mutation(self):
         def f(a):
@@ -960,7 +1032,8 @@ def forward(self, primals_1, primals_2):
         inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
         f(*inp).sum().backward()
 
-    def test_compilation_context(self):
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    def test_compilation_context(self, counter):
         def f(x):
             return x.sin().sin()
         count = []
@@ -975,7 +1048,7 @@ def forward(self, primals_1, primals_2):
         f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
-        self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
+        self.assertEqual(count, [(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)])
 
     def test_dupe_arg(self):
         def f(x, y):
@@ -983,6 +1056,89 @@ def forward(self, primals_1, primals_2):
 
         x = torch.randn(3, 3, requires_grad=True)
         self.verify_aot_autograd(f, [x, x])
+
+    def test_dupe_arg_torture(self):
+        def f(x, y):
+            x.t_()
+            y.t_()
+            return x + y
+
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        self.verify_aot_autograd(f, [x, x])
+
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_invalid_dupe_left_bias(self, counter):
+        # This test checks that, just because only the first
+        # argument did a metadata mutation, we still correctly
+        # switch to strategy 2 (deduplicate)
+        # See: https://github.com/pytorch/pytorch/pull/89896#discussion_r1036224447
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                x.t_()
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True)
+        self.verify_aot_autograd(F(), [x, x])
+
+        fxx = aot_module_simplified(F(), (x, x), nop)
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxx(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
+
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_invalid_dupe(self, counter):
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                x.t_()
+                y.t_()
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
+
+        fxy = aot_module_simplified(F(), (x, y), nop)
+        fxy(x, y)
+        fxy(x, x)  # is ok!
+
+        fxx = aot_module_simplified(F(), (x, x), nop)
+        fxx(x, x)
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxx(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
+
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_invalid_requires_grad(self, counter):
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        z = torch.randn(3, 3, requires_grad=False)
+
+        # Non-mutating please!
+        def compare(m1, m2, inps):
+            r1, g1 = _outs_and_grads(m1, inps, inps)
+            r2, g2 = _outs_and_grads(m2, inps, inps)
+            self.assertEqual(r1, r2)
+            self.assertEqual(g1, g2)
+
+        fxy = aot_module_simplified(F(), (x, y), nop)
+        compare(F(), fxy, (x, y))
+        compare(F(), fxy, (x, z))
+
+        fxz = aot_module_simplified(F(), (x, z), nop)
+        compare(F(), fxz, (x, z))
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxz(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
 
     def test_resize_input(self):
         def f(x, y):
@@ -1099,6 +1255,66 @@ def forward(self, primals_1, primals_2):
         af = aot_function(f, nop, partition_fn=partial(min_cut_rematerialization_partition, compiler="inductor"))
         out = af(inp)
         self.assertEqual(out, f(inp))
+
+    def test_real_weights_in_symbolic_mode(self):
+        from functorch.experimental import functionalize
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        m = M().eval()
+
+        inp = torch.randn(2, 5)
+
+        gm = make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
+        self.assertEqual(gm(torch.ones(2, 5)), m(torch.ones(2, 5)))
+
+        gm_functionalized = make_fx(functionalize(gm,), tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
+        self.assertEqual(gm_functionalized(torch.ones(2, 5)), m(torch.ones(2, 5)))
+
+        inp_count = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                inp_count += 1
+
+        # No more param lifting
+        self.assertEqual(inp_count, 1)
+
+        inp_count = 0
+        for node in gm_functionalized.graph.nodes:
+            if node.op == "placeholder":
+                inp_count += 1
+
+        # No more param lifting
+        self.assertEqual(inp_count, 1)
+
+        with self.assertRaisesRegex(Exception, "Please convert all Tensors to FakeTensors"):
+            make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=False)(torch.randn(2, 5))
+
+    def test_real_weights_in_symbolic_mode_with_inplace_ops(self):
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 5))
+
+            def forward(self, x):
+                y = self.buffer.add_(3)
+                y.resize_([20])
+                assert(y.shape == self.buffer.shape)
+                return x.sum() + self.buffer.sum()
+
+        m = M().eval()
+        inp = torch.randn(2, 5)
+        # inplace mutation on attr is not allowed
+        with self.assertRaisesRegex(Exception, "Can't call metadata"):
+            make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -1494,14 +1710,51 @@ class TestAOTModuleSimplified(AOTTestCase):
         ref = mod(*inputs)
         ref[0].sum().backward()
 
-        aot_mod = aot_module_simplified(mod, nop)
-        aot_mod.zero_grad()
-        res = aot_mod(*cloned_inputs)
+        compiled_f = aot_module_simplified(mod, cloned_inputs, nop)
+        mod.zero_grad()
+        res = compiled_f(*cloned_inputs)
         res[0].sum().backward()
 
         assert torch.allclose(ref[0], res[0])
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+
+    def test_aot_module_simplified_dynamic(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(20, 30)
+
+            def forward(self, x, y):
+                return (self.linear(x) + y, )
+
+        mod = MockModule()
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        x = torch.randn(128, 20, requires_grad=True)
+        y = torch.randn(128, 30, requires_grad=True)
+
+        inputs = [x, y]
+        fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
+        compiled_f = aot_module_simplified(mod, fake_inputs, nop)
+
+        ref = mod(*inputs)
+        ref[0].sum().backward()
+
+        cloned_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+        res = compiled_f(*cloned_inputs)
+        res[0].sum().backward()
+
+        self.assertExpectedInline(shape_env.format_guards(), """\
+ - Eq(s1, 20)
+ - Eq(s2, 30)""")
+
+        assert torch.allclose(ref[0], res[0])
+        assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
+        assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+
 
     def test_aot_module_simplified_preserves_stack_trace(self):
         class MockModule(torch.nn.Module):
@@ -1534,13 +1787,94 @@ class TestAOTModuleSimplified(AOTTestCase):
                 assert 'test_aotdispatch.py' in node.stack_trace
             return gm.forward  # return a python callable
 
-        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
-
         x = torch.randn(128, 20, requires_grad=True)
         y = torch.randn(128, 30, requires_grad=True)
         inputs = [x, y]
-        res = aot_mod(*inputs)
+
+        compiled_f = aot_module_simplified(mod, inputs, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
+        res = compiled_f(*inputs)
         res[0].sum().backward()
+
+    def _test_aot_module_simplified_fake_tensor_gm_raises(self, debug):
+        class MockModule(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.y = y
+
+            def forward(self, x):
+                z = self.linear(x)
+                z = z + self.y
+                z = z.relu()
+                return (z, )
+
+
+        real_x = torch.randn(4)
+        real_y = torch.randn(4)
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake_y = fake_mode.from_tensor(real_y)
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        # This test uses tracing to lift the fake_y into a constant buffer,
+        # so we have a contrived trace example.
+        # For a traceless example closer to how dynamo would call us, see
+        # test_aot_module_deepcopy_fake_tensor_gm_raises below.
+        graph = tracer.trace(MockModule(fake_y))
+        mod_fake = torch.fx.GraphModule(tracer.root, graph)
+
+        if debug:
+            inner_message = "FAKE TENSOR CREATION TRACEBACK:"
+        else:
+            inner_message = "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
+
+        message = f"""Unexpected fake buffer y {inner_message}"""
+
+        with self.assertRaisesRegex(
+            AssertionError, message
+        ):
+            aot_module_simplified(mod_fake, (real_x,), nop)
+
+        # Counterfactual to ensure that the raise is only due to real vs fake
+        # Run the same exact thing except with a real buffer.
+        graph = tracer.trace(MockModule(real_y))
+        mod_real = torch.fx.GraphModule(tracer.root, graph)
+        aot_module_simplified(MockModule(real_y), (real_x,), nop)
+
+    @patch("torch._subclasses.fake_tensor.FakeTensorConfig.debug", True)
+    def test_aot_module_simplified_fake_tensor_gm_raises_debug_enabled(self):
+        self._test_aot_module_simplified_fake_tensor_gm_raises(debug=True)
+
+    @patch("torch._subclasses.fake_tensor.FakeTensorConfig.debug", False)
+    def test_aot_module_simplified_fake_tensor_gm_raises_no_debug_enabled(self):
+        self._test_aot_module_simplified_fake_tensor_gm_raises(debug=False)
+
+    def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.linear.bias = torch.nn.Parameter(torch.ones(4))
+
+            def forward(self, x):
+                z = self.linear(x)
+                z = z.relu()
+                return (z, )
+
+
+        real_x = torch.randn(4)
+        real_y = torch.randn(4)
+
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            """Unexpected fake param linear.weight"""
+        ):
+            aot_module_simplified(mod_fake, (real_x,), nop)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
@@ -1560,6 +1894,7 @@ aot_autograd_failures = {
     xfail('scatter_reduce', 'prod'),
 
     skip('as_strided_scatter'),
+    skip('as_strided', 'partial_views'),  # flaky
 
     # Too annoying to generate random inputs
     xfail('cholesky'),
@@ -1583,9 +1918,7 @@ aot_autograd_failures = {
 }
 
 symbolic_aot_autograd_failures = {
-    xfail('__rmatmul__', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
-    xfail('addr', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
@@ -1685,14 +2018,12 @@ symbolic_aot_autograd_failures = {
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
-    xfail('matmul', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decompo...
     xfail('median', ''),  # could not find kernel
     xfail('meshgrid', 'list_of_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('meshgrid', 'variadic_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('mv', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1741,7 +2072,6 @@ symbolic_aot_autograd_failures = {
     xfail('normal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
-    xfail('outer', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('pca_lowrank', ''),  # could not find kernel
     xfail('pinverse', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomp...
     xfail('polar', ''),  # could not find kernel
@@ -1763,7 +2093,9 @@ symbolic_aot_autograd_failures = {
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
     xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('std', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('std_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('std_mean', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('sum_to_size', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd', ''),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
@@ -1778,7 +2110,9 @@ symbolic_aot_autograd_failures = {
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('unflatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('var', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('var', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('var_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('var_mean', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('view_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }

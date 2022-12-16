@@ -98,7 +98,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
-  pip install "\$pkg"
+  pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
   retry pip install -q future numpy protobuf typing-extensions six
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then

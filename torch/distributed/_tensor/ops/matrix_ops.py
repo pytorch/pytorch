@@ -66,9 +66,7 @@ def addmm_rules(op_schema: OpSchema) -> OutputSharding:
 
     # run point wise rule on input + (mm_out) with linearity
     output_sharding = pointwise_rule(
-        OpSchema(
-            op_schema.func_schema, (input_spec, mm_out_sharding.output_spec), {}
-        ),
+        OpSchema(op_schema.func_schema, (input_spec, mm_out_sharding.output_spec), {}),
         linearity=True,
     )
     # if propagation failed, edit the schema suggestion from pointwise rules
