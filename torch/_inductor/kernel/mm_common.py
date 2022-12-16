@@ -8,7 +8,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
-from ..utils import cdiv
+from ..utils import ceildiv as cdiv
 
 
 log = logging.getLogger(__name__)

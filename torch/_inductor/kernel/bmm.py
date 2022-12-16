@@ -6,7 +6,7 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import cdiv
+from ..utils import ceildiv as cdiv
 
 from .mm_common import (
     addmm_epilogue,
