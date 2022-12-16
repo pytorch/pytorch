@@ -494,6 +494,10 @@ void initFuncTorchBindings(PyObject* module) {
       .value("Jvp", TransformType::Jvp)
       .value("Functionalize", TransformType::Functionalize)
       .value("Vmap", TransformType::Vmap);
+  py::enum_<RandomnessType>(m, "RandomnessType")
+      .value("Error", RandomnessType::Error)
+      .value("Same", RandomnessType::Same)
+      .value("Different", RandomnessType::Different);
   py::class_<Interpreter>(m, "CInterpreter")
       .def("key", &Interpreter::key)
       .def("level", &Interpreter::level);
@@ -513,7 +517,8 @@ void initFuncTorchBindings(PyObject* module) {
       .def(py::init<const Interpreter*>())
       .def("key", &VmapInterpreterPtr::key)
       .def("level", &VmapInterpreterPtr::level)
-      .def("batchSize", &VmapInterpreterPtr::batchSize);
+      .def("batchSize", &VmapInterpreterPtr::batchSize)
+      .def("randomness", &VmapInterpreterPtr::randomness);
 }
 
 } // namespace impl

@@ -5,6 +5,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
     TransformType,
+    RandomnessType,
     CInterpreter,
     CGradInterpreterPtr,
     CVmapInterpreterPtr,
@@ -93,6 +94,16 @@ class VmapInterpreter(FuncTorchInterpreter):
 
     def batch_size(self):
         return self._cptr.batchSize()
+
+    def randomness(self):
+        typ = self._cptr.randomness()
+        if typ == RandomnessType.Error:
+            return "error"
+        elif typ == RandomnessType.Same:
+            return "same"
+        elif typ == RandomnessType.Different:
+            return "different"
+        raise RuntimeError(f"Unknown RandomnessType: {typ}")
 
 
 @contextlib.contextmanager
