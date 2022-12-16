@@ -1,5 +1,5 @@
+#include <ATen/native/vulkan/api/Tensor.h>
 #include <ATen/native/vulkan/api/Utils.h>
-#include <ATen/native/vulkan/ops/Tensor.h>
 #include <c10/util/accumulate.h>
 
 namespace at {
