@@ -9408,7 +9408,8 @@ class TestNNDeviceType(NNTestCase):
         if mode == "bicubic":
             # for bicubic we can't guarantee total consistency between float dtype resize and uint8 dtype resize
             # Major difference is that uint8 dtype uses separable approach and intermediate storage has also uint8 dtype
-            # If data has large difference between nearest pixels then negative or >255 intermediate values will be clamped between 0 and 255
+            # If data has large difference between nearest pixels then negative or >255 intermediate values will
+            # be clamped between 0 and 255.
             # This can lead to a large max abs error between compared here 2 methods.
             # Here in the test we pick smaller data distribution to make tests pass
             input_ui8 = torch.randint(80, 180, size=(1, num_channels, 400, 400), dtype=torch.uint8, device=device)
