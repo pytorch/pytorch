@@ -7896,6 +7896,14 @@ class TestConsistency(TestCase):
         'take_along_dim': None,
     }
 
+    # Those ops worked on MacOS12, but broken on MacOS13
+    VENTURA_BLOCKLIST = {
+        'masked.softmax': [torch.float32],
+        'masked.softmin': [torch.float32],
+        'masked.log_softmax': [torch.float32],
+        'dot': [torch.int64],
+    }
+
     # Used for accept mode only
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
@@ -7907,6 +7915,10 @@ class TestConsistency(TestCase):
             self.skipTest("MPS is not available")
 
         key = op.name + op.variant_test_name
+
+        if key in self.VENTURA_BLOCKLIST and torch.backends.mps.is_macos13_or_newer():
+            if dtype in self.VENTURA_BLOCKLIST[key]:
+                self.skipTest(f"{key}_{dtype} fails on Ventura, see https://github.com/pytorch/pytorch/issues/85758")
         if key in self.BLOCKLIST:
             if self.BLOCKLIST[key] is None or dtype in self.BLOCKLIST[key]:
                 self.skipTest(f"Running test with {op.name} hangs so skipping")

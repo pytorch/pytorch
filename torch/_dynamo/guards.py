@@ -24,7 +24,9 @@ from .utils import (
     dict_const_keys,
     dict_param_key_ids,
     guard_failures,
+    HAS_NUMPY,
     istype,
+    np,
     orig_code_map,
     rename_implicit,
     tuple_iterator_getitem,
@@ -167,6 +169,20 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
+        np_types = (
+            (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            )
+            if HAS_NUMPY
+            else ()
+        )
         assert istype(
             val,
             (
@@ -185,7 +201,8 @@ class GuardBuilder(GuardBuilderBase):
                 torch.Size,
                 torch.device,
                 torch.dtype,
-            ),
+            )
+            + np_types,
         ), t.__name__
 
         if istype(val, (torch.device, torch.dtype)):
@@ -498,19 +515,14 @@ class CheckFunctionManager:
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
         # Let's handle ShapeEnv guards.  To do this, we will resolve
-        # shape variables to sources from GraphArgs.  This must happen after
+        # shape variables to sources from tracked_fakes.  This must happen after
         # tensor checks.
         # NB: self.output_graph can be None in the debug_nops tests
         if self.output_graph and self.output_graph.shape_env:
-            # NB: use orig_graphargs, as we can have created guards for
-            # inputs that are ultimately unused in the graph, but we
-            # are still on the hook for guarding on them (because, e.g.,
-            # Dynamo may have gone down a different conditional branch
-            # because of it.)
-            graphargs = self.output_graph.orig_graphargs
+            fs = self.output_graph.tracked_fakes
             expr_as_str = self.output_graph.shape_env.codegen_guards(
-                [a.fake_tensor for a in graphargs if a.is_tensor],
-                [a.source.name() for a in graphargs if a.is_tensor],
+                [a.fake for a in fs],
+                [a.sname for a in fs],
             )
             if expr_as_str != "True":
                 code_parts.append(expr_as_str)
