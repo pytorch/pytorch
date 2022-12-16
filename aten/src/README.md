@@ -69,8 +69,8 @@ will `retain` it itself.
 ```
 
 Sometimes, you have a tensor in hand which you'd like to use directly, but
-under some conditions you have to have to call, e.g., `newContiguous`, to get
-it into the correct form:
+under some conditions you have to call, e.g., `newContiguous`, to get it into
+the correct form:
 
 ```
   if (!(k_->stride(3) == 1) || !(k_->stride[2] == k_->size(3))) {

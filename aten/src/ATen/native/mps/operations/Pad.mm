@@ -13,7 +13,7 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
                          MPSGraphPaddingMode mode, double constantValue, const string op_name)
 {
   const int padding_size = (int) padding.size();
-  const int padding_dim = padding_size / 2; // either 1D, 2D, or 3D
+  int padding_dim = padding_size / 2; // either 1D, 2D, or 3D
 
   TORCH_CHECK(padding_size == 2 || padding_size == 4 || padding_size == 6,
               "invalid padding argument of size ", padding_size);
@@ -23,33 +23,44 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
 
   int64_t nbatch = 1;
   int64_t ndims = input_.ndimension();
+
+  TORCH_CHECK(ndims >= (int64_t)padding_dim, "Length of pad should be no more than twice the number of "
+              "dimensions of the input. Pad length is ", padding_size, "while the input has ", ndims, "dimensions.");
+
   // number of input dims with ConstantPad could be less than 2
-  int dim_w = ndims > 1 ? padding_dim : 0;
+  int dim_w = padding_dim;
   int dim_h = padding_dim - 1;
   int dim_d = padding_dim - 2;
   int dim_slices = 0;
 
-  if (!is_backward_pass && ndims > 1) {
+  if (!is_backward_pass && mode != MPSGraphPaddingModeConstant && ndims > padding_dim) {
     bool valid_dims = input_.size(1) != 0 && input_.size(padding_dim) != 0;
     TORCH_CHECK((ndims == 1 + padding_dim && valid_dims) ||
                 (ndims == 2 + padding_dim && valid_dims && input_.size(1 + padding_dim) != 0),
                 "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
   }
 
-  if (ndims == 2 + padding_dim) {
-    nbatch = input_.size(0);
-    dim_w++;
-    dim_h++;
-    dim_d++;
+  if (ndims == padding_dim) {
+    dim_w--;
+    dim_h--;
+    dim_d--;
+  } else if (ndims > padding_dim + 1) {
+    const int dim_diff = (int)ndims - padding_dim - 1;
+    // this virtually inflates the padding with zeros if ndims > padding_dim + 2
+    padding_dim += dim_diff - 1;
+    dim_w += dim_diff;
+    dim_h += dim_diff;
+    dim_d += dim_diff;
     dim_slices++;
+    nbatch = input_.size(0);
   }
 
   int64_t pad_l = padding[0];
   int64_t pad_r = padding[1];
-  int64_t pad_t = padding_dim > 1 ? padding[2] : 0;
-  int64_t pad_b = padding_dim > 1 ? padding[3] : 0;
-  int64_t pad_front = padding_dim > 2 ? padding[4] : 0;
-  int64_t pad_back  = padding_dim > 2 ? padding[5] : 0;
+  int64_t pad_t = padding_size > 2 ? padding[2] : 0;
+  int64_t pad_b = padding_size > 2 ? padding[3] : 0;
+  int64_t pad_front = padding_size > 4 ? padding[4] : 0;
+  int64_t pad_back  = padding_size > 4 ? padding[5] : 0;
 
   int64_t nplane = input_.size(dim_slices);
   int64_t input_w = input_.size(dim_w);
@@ -62,40 +73,64 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
   Tensor grad_output, input = input_;
 
   if (!is_backward_pass) {
-    TORCH_CHECK(pad_l < input_w && pad_r < input_w,
-      "Argument #4: Padding size should be less than the corresponding "
-      "input dimension, but got: padding (", pad_l, ", ", pad_r,
-      ") at dimension ", dim_w, " of input ", ndims);
-
-    if (padding_dim > 1) {
-      TORCH_CHECK(pad_t < input_h && pad_b < input_h,
-        "Argument #6: Padding size should be less than the corresponding "
-        "input dimension, but got: padding (", pad_t, ", ", pad_b,
-        ") at dimension ", dim_h, " of input ", ndims);
-    }
     TORCH_CHECK(output_w >= 1 || output_h >= padding_dim - 1,
       "input (H: ", input_h, ", W: ", input_w, ") is too small. Calculated "
       "output H: ", output_h, " W: ", output_w);
 
-    if (ndims == 1 + padding_dim) {
-      if (padding_dim == 3)
-        output.resize_({nplane, output_d, output_h, output_w});
-      else if (padding_dim == 2)
-        output.resize_({nplane, output_h, output_w});
-      else
-        output.resize_({nplane, output_w});
+    std::vector<int64_t> outputSizes;
+    if (mode == MPSGraphPaddingModeConstant) {
+      // support arbitrary input dimensions for constant pad.
+      auto input_sizes = input_.sizes();
+      auto ori_padding_dim = padding_size / 2;
+      auto l_diff = ndims - ori_padding_dim;
+
+      for (size_t i = 0; i < (size_t)l_diff; i ++) {
+        outputSizes.emplace_back(input_sizes[i]);
+      }
+      for (const auto i : c10::irange((size_t)ori_padding_dim)) {
+        auto pad_idx = padding.size() - ((i + 1) * 2);
+        auto new_dim = input_sizes[l_diff + i] + padding[pad_idx] + padding[pad_idx + 1];
+        outputSizes.emplace_back(new_dim);
+      }
     } else {
-      if (padding_dim == 3)
-        output.resize_({nbatch, nplane, output_d, output_h, output_w});
-      else if (padding_dim == 2)
-        output.resize_({nbatch, nplane, output_h, output_w});
-      else if (ndims > 1)
-        output.resize_({nbatch, nplane, output_w});
-      else
-        output.resize_({output_w});
+      // these checks aren't relevant for constant pad
+      TORCH_CHECK(pad_l < input_w && pad_r < input_w,
+        "Argument #4: Padding size should be less than the corresponding "
+        "input dimension, but got: padding (", pad_l, ", ", pad_r,
+        ") at dimension ", dim_w, " of input ", ndims);
+
+      if (padding_dim > 1) {
+        TORCH_CHECK(pad_t < input_h && pad_b < input_h,
+          "Argument #6: Padding size should be less than the corresponding "
+          "input dimension, but got: padding (", pad_t, ", ", pad_b,
+          ") at dimension ", dim_h, " of input ", ndims);
+      }
+      if (padding_dim > 2) {
+        TORCH_CHECK(pad_front < input_d && pad_back < input_d,
+          "Argument #8: Padding size should be less than the corresponding "
+          "input dimension, but got: padding (", pad_front, ", ", pad_back,
+          ") at dimension ", dim_d, " of input ", ndims);
+      }
+      outputSizes.insert(outputSizes.begin(), output_w);
+      if (padding_dim >= 2)
+        outputSizes.insert(outputSizes.begin(), output_h);
+      if (padding_dim >= 3)
+        outputSizes.insert(outputSizes.begin(), output_d);
+      if (ndims >= 1 + padding_dim)
+        outputSizes.insert(outputSizes.begin(), nplane);
+      if (ndims >= 2 + padding_dim)
+        outputSizes.insert(outputSizes.begin(), nbatch);
     }
-    if (output.numel() == 0 || input_.numel() == 0)
+
+    output.resize_(outputSizes);
+
+    if (output.numel() == 0) {
       return output;
+    }
+    if (input_.numel() == 0) {
+      output.fill_(constantValue);
+      return output;
+    }
     input = input_.contiguous();
   } else {
     TORCH_CHECK(output_w == grad_output_.size(dim_w),
@@ -104,20 +139,40 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
       TORCH_CHECK(output_h == grad_output_.size(dim_h),
         "gradOutput height unexpected. Expected: ", output_h, ", Got: ", grad_output_.size(dim_h));
     }
+    output.resize_as_(input);
+    if (output.numel() == 0 || grad_output_.numel() == 0)
+      return output;
     grad_output = grad_output_.contiguous();
   }
 
+  const uint32_t dims_mask = (1U << ndims) - 1;
+  uint32_t startMask = dims_mask, endMask = dims_mask;
   std::vector<NSNumber*> leftPadVec(ndims, @(0));
   std::vector<NSNumber*> rightPadVec(ndims, @(0));
-  leftPadVec [ndims - 1] = @(pad_l);
-  rightPadVec[ndims - 1] = @(pad_r);
-  if (padding_dim >= 2) {
-    leftPadVec [ndims - 2] = @(pad_t);
-    rightPadVec[ndims - 2] = @(pad_b);
-  }
-  if (padding_dim >= 3) {
-    leftPadVec [ndims - 3] = @(pad_front);
-    rightPadVec[ndims - 3] = @(pad_back);
+  std::vector<NSNumber*> startsVec(ndims, @(0));
+  std::vector<NSNumber*> endsVec(ndims, @(0));
+  std::vector<NSNumber*> stridesVec(ndims, @(1));
+
+  for (int64_t pdim = 0; pdim < padding_size / 2; pdim++) {
+    const int64_t leftIdx  = pdim * 2;
+    const int64_t rightIdx = pdim * 2 + 1;
+    const int64_t padIdx = ndims - pdim - 1;
+
+    leftPadVec [padIdx] = @(padding[leftIdx]);
+    rightPadVec[padIdx] = @(padding[rightIdx]);
+    // workaround for negative padding issue in backward pass
+    if (is_backward_pass) {
+      if (padding[leftIdx] < 0) {
+        leftPadVec[padIdx] = @(0);
+        startsVec[padIdx] = @(-padding[leftIdx]);
+        startMask &= ~(1U << padIdx);
+      }
+      if (padding[rightIdx] < 0) {
+        rightPadVec[padIdx] = @(0);
+        endsVec[padIdx] = @(input.size(padIdx) + padding[rightIdx]);
+        endMask &= ~(1U << padIdx);
+      }
+    }
   }
   MPSShape *leftPadding  = [NSArray arrayWithObjects:leftPadVec.data() count:ndims];
   MPSShape *rightPadding = [NSArray arrayWithObjects:rightPadVec.data() count:ndims];
@@ -130,38 +185,58 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({input, grad_output}) +
-                           ":L" + to_string(pad_l)     + ":R" + to_string(pad_r) +
-                           ":T" + to_string(pad_t)     + ":B" + to_string(pad_b) +
-                           ":F" + to_string(pad_front) + ":K" + to_string(pad_back);
+    string key = op_name + getTensorsStringKey({input, grad_output, output}) + ":[" +
+                           getArrayRefString(padding) + "]:" + std::to_string(constantValue);
 
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     if(!cachedGraph) {
-      cachedGraph = static_cast<CachedGraph*>(cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
         CachedGraph *newCachedGraph = nil;
         @autoreleasepool {
-            MPSGraph* mpsGraph = make_mps_graph();
-            newCachedGraph = new CachedGraph(mpsGraph);
-            newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-            if (!is_backward_pass) {
-              newCachedGraph->outputTensor = [mpsGraph padTensor:newCachedGraph->inputTensor
-                                                 withPaddingMode:mode
-                                                     leftPadding:leftPadding
-                                                    rightPadding:rightPadding
-                                                   constantValue:constantValue
-                                                            name:nil];
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+          newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
+
+          if (!is_backward_pass) {
+            // workaround for Bool type assert with Constant padding (only needed for forward pass)
+            const bool needsBoolCast = mode == MPSGraphPaddingModeConstant && input.scalar_type() == ScalarType::Bool;
+            MPSGraphTensor *inputTensorCast = !needsBoolCast ? newCachedGraph->inputTensor :
+                                              castMPSTensor(mpsGraph, newCachedGraph->inputTensor, ScalarType::Byte);
+            MPSGraphTensor *outputTensor = [mpsGraph padTensor:inputTensorCast
+                                               withPaddingMode:mode
+                                                   leftPadding:leftPadding
+                                                  rightPadding:rightPadding
+                                                 constantValue:constantValue
+                                                          name:nil];
+            newCachedGraph->outputTensor = needsBoolCast ? castMPSTensor(mpsGraph, outputTensor, ScalarType::Bool) : outputTensor;
+          } else {
+            newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
+            MPSGraphTensor *padGradTensor = [mpsGraph padGradientWithIncomingGradientTensor:newCachedGraph->gradOutputTensor
+                                                                               sourceTensor:newCachedGraph->inputTensor
+                                                                                paddingMode:mode
+                                                                                leftPadding:leftPadding
+                                                                               rightPadding:rightPadding
+                                                                                       name:nil];
+
+            // workaround for negative padding issue with padGradientWithIncomingGradientTensor()
+            const bool needsSliceGradient = startMask != dims_mask || endMask != dims_mask;
+            if (needsSliceGradient) {
+              newCachedGraph->outputTensor = [mpsGraph sliceGradientTensor:padGradTensor
+                                                          fwdInShapeTensor:[mpsGraph shapeOfTensor:newCachedGraph->inputTensor name:nil]
+                                                                    starts:[NSArray arrayWithObjects:startsVec.data()  count:ndims]
+                                                                      ends:[NSArray arrayWithObjects:endsVec.data()    count:ndims]
+                                                                   strides:[NSArray arrayWithObjects:stridesVec.data() count:ndims]
+                                                                 startMask:startMask
+                                                                   endMask:endMask
+                                                               squeezeMask:0
+                                                                      name:nil];
             } else {
-              newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-              newCachedGraph->outputTensor = [mpsGraph padGradientWithIncomingGradientTensor:newCachedGraph->gradOutputTensor
-                                                                                sourceTensor:newCachedGraph->inputTensor
-                                                                                 paddingMode:mode
-                                                                                 leftPadding:leftPadding
-                                                                                rightPadding:rightPadding
-                                                                                        name:nil];
+              newCachedGraph->outputTensor = padGradTensor;
             }
+          }
         }
         return newCachedGraph;
-      }));
+      });
     }
     Placeholder inputPlaceholder  = Placeholder(cachedGraph->inputTensor, input);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);

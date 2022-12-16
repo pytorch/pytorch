@@ -2,12 +2,17 @@
 
 import functools
 import os
+import random
 import sys
 import unittest
 from typing import Optional
 
+import numpy as np
+
 import torch
 from torch.autograd import function
+from torch.onnx._internal import diagnostics
+from torch.testing._internal import common_utils
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(-1, pytorch_test_dir)
@@ -188,3 +193,24 @@ def skipDtypeChecking(func):
 
 def flatten(x):
     return tuple(function._iter_filter(lambda o: isinstance(o, torch.Tensor))(x))
+
+
+def set_rng_seed(seed):
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
+
+class ExportTestCase(common_utils.TestCase):
+    """Test case for ONNX export.
+
+    Any test case that tests functionalities under torch.onnx should inherit from this class.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # TODO(#88264): Flaky test failures after changing seed.
+        set_rng_seed(0)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(0)
+        diagnostics.engine.clear()
