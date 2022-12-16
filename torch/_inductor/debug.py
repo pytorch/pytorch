@@ -182,7 +182,6 @@ def enable_aot_logging():
     # and the log level of the file logger to DEBUG
 
     stack = contextlib.ExitStack()
-    stack.enter_context(patch("functorch.compile.config.debug_fake_cross_ref", True))
     stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
     stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
     stack.enter_context(patch("functorch.compile.config.debug_joint", True))
