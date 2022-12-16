@@ -97,8 +97,10 @@ The following table compares the differences between Eager Mode Quantization and
 There are three types of quantization supported:
 
 1. dynamic quantization (weights quantized with activations read/stored in
-   floating point and quantized for compute). Note: weight only quantization (weights quantized, no activations) for ops like embeddings, uses the
-   dynamic quantization APIs
+   floating point and quantized for compute)
+
+    * quantization for embeddings, often called weight only quantization (weights quantized, no activations) uses the
+    dynamic quantization APIs though its technically different
 2. static quantization (weights quantized, activations quantized, calibration
    required post training)
 3. static quantization aware training (weights quantized, activations quantized,
