@@ -174,7 +174,20 @@ def default_partition(
             for user in users:
                 saved_values.append(user)
         else:
-            saved_values.append(node)
+            backward_usages = [n for n in node.users if n.name not in forward_node_names]
+            if 'tensor_meta' in node.meta and all(is_sym_node(n) for n in backward_usages):
+                # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
+                # and not the actual tensor data,
+                # then it will be a lot cheaper to save only the sizes/strides, and not the actual tensor.
+                #
+                # Note that saving the tensor could also cause compilation problems:
+                # If the user mutated an input in the forward and uses its sizes/strides in the backward,
+                # then we would be obligated to clone the input before saving it to appease autograd.
+                # (This is how we originally found this bug).
+                for user in backward_usages:
+                    saved_sym_nodes.append(user)
+            else:
+                saved_values.append(node)
     saved_values = list(set(saved_values))
     saved_sym_nodes = list(set(saved_sym_nodes))
 
