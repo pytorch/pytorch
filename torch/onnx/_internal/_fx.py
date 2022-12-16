@@ -4,7 +4,6 @@ import itertools
 import operator
 from typing import Callable, Dict, Tuple, Union
 
-import functorch
 import onnx
 
 import torch
@@ -377,7 +376,7 @@ def _export(
         # Use default decomposition table.
         decomposition_table = torch._decomp.decomposition_table
     # Apply decomposition table to the input graph.
-    decomposed_module = functorch.make_fx(module, decomposition_table)(*args)
+    decomposed_module = make_fx(module, decomposition_table)(*args)
 
     # Use this mode to
     # 1. convert nn.Parameter's in nn.Module to FakeTensor
@@ -393,7 +392,7 @@ def _export(
     # in model must be converted to FakeTensor as well.
     fake_parameters_and_buffers = {
         k: to_fake_tensor(v)
-        for k, v in itertools.chain(module.named_parameters(), module.named_buffers())
+        for k, v in itertools.chain(decomposed_module.named_parameters(), decomposed_module.named_buffers())
     }
 
     # Shape inference via FakeTensorProp
@@ -470,19 +469,29 @@ def export_without_kwargs(
             return result
 
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
-    args = copy.deepcopy(bound.args)
+    bound_args = copy.deepcopy(bound.args)
     # Translate callable to FX graph.
     #
     # TODO(wechi): There are several symbolic tracing mechanisms to convert
     # nn.Module to FX graph. We should choose the right one after they are
     # matured.
-    graph_module = make_fx(Wrapper(fn), decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE)(
-        *args
-    )
+    class GraphCaptureCompiler:
+        def __init__(self):
+            self.captured_graph = None
+            self.captured_graph_count =  0
+        def compile(self, gm, _):
+            assert self.captured_graph_count == 0
+            self.captured_graph = gm
+            self.captured_graph_count += 1
+            return gm
+    compiler = GraphCaptureCompiler()
+    torch._dynamo.optimize(compiler.compile, nopython=True)(Wrapper(fn))(*bound_args)
+    torch._dynamo.reset()
     # Export FX graph to ONNX ModelProto.
     return _export(
-        graph_module,
-        *args,
+        compiler.captured_graphs[0],
+        # Function optimized by _dynamo doesn't have None in args.
+        *tuple(arg for arg in bound_args if arg is not None),
         decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
     )
