@@ -130,10 +130,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
 
 CI_SKIP_OPTIMIZER = {
     # TIMM
-    "hrnet_w18",  # accuracy
-    "gernet_l",  # accuracy
-    "nfnet_l0",  # eager variation
-    "sebotnet33ts_256",  # accuracy
+    "convmixer_768_32",  # accuracy
 }
 
 
