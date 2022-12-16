@@ -178,6 +178,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e PR_BODY \
             -e COMMIT_MESSAGES \
+            -e CONTINUE_THROUGH_ERROR \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e PR_LABELS \
