@@ -57,8 +57,8 @@ from .utils import (
     node_arg_is_weight,
 )
 from torch.ao.quantization.utils import (
-    is_per_channel,
-    to_underlying_dtype,
+    _is_per_channel,
+    _to_underlying_dtype,
 )
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
@@ -137,13 +137,13 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         node_type = "call_function"
         quantize_op : Optional[Callable] = None
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
-        if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
+        if _is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
             quantize_op = torch.ops.quantized_decomposed.quantize_per_channel
             dequantize_op = torch.ops.quantized_decomposed.dequantize_per_channel
             quant_min = activation_post_process.quant_min
             quant_max = activation_post_process.quant_max
-            dtype_ = to_underlying_dtype(dtype)
+            dtype_ = _to_underlying_dtype(dtype)
             qparams = {
                 "_scale_": scale,
                 "_zero_point_": zero_point,
@@ -159,7 +159,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             zero_point = int(zero_point)
             quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
             quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
-            dtype_ = to_underlying_dtype(dtype)
+            dtype_ = _to_underlying_dtype(dtype)
             qparams = {
                 "_scale_": scale,
                 "_zero_point_": zero_point,
@@ -206,7 +206,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         # but we should probably align the non-decomposed path with this as well,
         # and that can be done after we remove reduce_range flag
         # 1. extract qparams from activation_post_process module
-        dtype_ = to_underlying_dtype(dtype)
+        dtype_ = _to_underlying_dtype(dtype)
         assert dtype_ in [torch.uint8, torch.int8], \
             "only uint8 and int8 are supported in reference flow for " \
             "dynamic quantization right now"
@@ -347,7 +347,7 @@ def _replace_observer_with_quantize_dequantize_node(
         node_type = "call_function"
         quantize_op : Optional[Callable] = None
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
-        if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
+        if _is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             quantize_op = torch.quantize_per_channel
