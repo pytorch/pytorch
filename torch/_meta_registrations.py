@@ -1939,7 +1939,7 @@ def meta__scaled_dot_product_efficient(
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
-    logsumexp_dim = math.ceil(query.size(2) / 32) * 32 if compute_log_sumexp else 0
+    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
     logsum_exp = torch.empty(
         (B, num_heads, logsumexp_dim),
         dtype=torch.float,
@@ -1964,13 +1964,8 @@ def meta__scaled_dot_product_efficient_backward(
     out: Tensor,
     logsumexp: Tensor,
     is_causal: bool = False,
+    chunk_grad_outputs=False,
 ):
-    is_alias = (
-        query._storage().data_ptr()
-        == key._storage().data_ptr()
-        == value._storage().data_ptr()
-    )
-
     grad_out = grad_out.transpose(1, 2)
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
@@ -1983,13 +1978,6 @@ def meta__scaled_dot_product_efficient_backward(
     K = query.size(3)
 
     grad_kv_needs_init = is_causal and N > M
-
-    chunk_grad_outputs: bool = (
-        (not grad_kv_needs_init)
-        and M == N
-        and query.size(3) == value.size(3)
-        and is_alias
-    )
 
     if chunk_grad_outputs:
         chunk = torch.empty((B, M, 3, nH, K), dtype=query.dtype, device=query.device)
@@ -2008,7 +1996,6 @@ def meta__scaled_dot_product_efficient_backward(
             if grad_kv_needs_init
             else torch.empty(value.shape, dtype=value.dtype, device=value.device)
         )
-
     return grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2)
 
 
@@ -2028,6 +2015,51 @@ def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
 @register_meta([aten.sort.default, aten.sort.stable])
 def meta_sort(self, stable=None, dim=-1, descending=False):
     return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+
+
+def rnn_cell_checkSizes(
+    input_gates, hidden_gates, input_bias, hidden_bias, factor, prev_hidden
+):
+    check(input_gates.ndim == 2, lambda: f"{input_gates.ndim} != 2")
+    check(
+        input_gates.shape == hidden_gates.shape,
+        lambda: f"{input_gates.shape} != {hidden_gates.shape}",
+    )
+    gates_size = input_gates.size(1)
+    if input_bias is not None:
+        check(input_bias.ndim == 1, lambda: f"{input_bias.ndim} != 1")
+        check(
+            input_bias.numel() == gates_size,
+            lambda: f"{input_bias.numel()} != {gates_size}",
+        )
+        check(
+            input_bias.shape == hidden_bias.shape,
+            lambda: f"{input_bias.shape} != {hidden_bias.shape}",
+        )
+    check(prev_hidden.ndim == 2, lambda: f"{prev_hidden.ndim} != 2")
+    expected_prev_hidden_numel = input_gates.size(0) * gates_size // factor
+    check(
+        prev_hidden.numel() == expected_prev_hidden_numel,
+        lambda: f"{prev_hidden.numel()} != {input_gates.size(0)} * {gates_size} // {factor} (aka {expected_prev_hidden_numel})",
+    )
+    check(
+        all(
+            x.device == input_gates.device
+            for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
+        ),
+        lambda: "expected all inputs to be same device",
+    )
+
+
+@register_meta(aten._thnn_fused_lstm_cell.default)
+def _thnn_fused_lstm_cell_meta(
+    input_gates, hidden_gates, cx, input_bias=None, hidden_bias=None
+):
+    rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, 4, cx)
+    workspace = torch.empty_like(input_gates, memory_format=torch.contiguous_format)
+    hy = torch.empty_like(cx, memory_format=torch.contiguous_format)
+    cy = torch.empty_like(cx, memory_format=torch.contiguous_format)
+    return (hy, cy, workspace)
 
 
 def zero_numel_check_dims(self, dim, fn_name):
@@ -2087,6 +2119,38 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     if len(topKSize) > 0:
         topKSize[dim] = k
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
+
+
+legacy_contiguous_memory_format = torch.contiguous_format
+
+
+# From aten/src/ATen/native/cuda/RNN.cu
+def checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace):
+    defined_grad = grad_hy if grad_hy is not None else grad_cy
+    check(defined_grad.dim() == 2, lambda: "")
+    exp_size = defined_grad.size()
+    if grad_hy is not None:
+        check(grad_hy.size() == exp_size, lambda: "")
+    if grad_cy is not None:
+        check(grad_cy.size() == exp_size, lambda: "")
+    check(cx.size() == exp_size, lambda: "")
+    check(cy.size() == exp_size, lambda: "")
+    check(workspace.dim() == 2, lambda: "")
+    check(workspace.numel() == exp_size[0] * exp_size[1] * 4, lambda: "")
+
+
+# From aten/src/ATen/native/cuda/RNN.cu
+@register_meta(aten._thnn_fused_lstm_cell_backward_impl.default)
+def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has_bias):
+    if grad_hy is None and grad_cy is None:
+        return None, None, None
+    checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace)
+    grad_gates = torch.empty_like(
+        workspace, memory_format=legacy_contiguous_memory_format
+    )
+    grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
+    grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
+    return grad_gates, grad_cx, grad_bias
 
 
 # We must also trigger meta registrations from PrimTorch ref
