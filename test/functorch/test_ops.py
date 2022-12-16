@@ -358,12 +358,14 @@ class TestOperators(TestCase):
         xfail('_softmax_backward_data', device_type='cpu'),
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
+
         # RuntimeError: !self.requires_grad() || self.is_contiguous() 
         xfail('as_strided_scatter'),
+
         # RuntimeError: Tensor must have a last dimension with stride 1
         xfail('view_as_complex'),
         decorate('nn.functional._scaled_dot_product_attention',
-                 decorator=expectedFailureIf(not IS_WINDOWS, "expects contiguous inputs")),
+                 decorator=expectedFailureIf(not IS_WINDOWS), device_type='cuda'),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
