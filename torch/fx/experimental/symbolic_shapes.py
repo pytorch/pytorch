@@ -753,7 +753,7 @@ class ShapeEnv(object):
             try:
                 exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
             except Exception:
-                log.warning(f"Failing guard allocated at:\n{tb}")
+                log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
 
         # 3. Every symbol must not be equal to 0/1
@@ -821,7 +821,7 @@ class ShapeEnv(object):
         return bindings
 
     def get_nontrivial_guards(self):
-        return [self.simplify(guard) for guard, _ in self.guards if self._maybe_evaluate_static(guard) is None]
+        return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard.expr) is None]
 
     def format_guards(self, verbose=False):
         def format_tb(tb):
@@ -829,7 +829,7 @@ class ShapeEnv(object):
                 return ""
             return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
 
-        return '\n'.join(f" - {guard}{format_tb(tb)}" for guard, tb in self.guards)
+        return '\n'.join(f" - {guard.expr}{format_tb(guard.stack)}" for guard in self.guards)
 
     def get_shape_groups(self):
         shape_groups = collections.defaultdict(list)
