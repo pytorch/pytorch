@@ -67,6 +67,12 @@ def collect_results(model, prediction, loss, example_inputs):
         params[name] = param_copy
     results.append(grads)
     results.append(params)
+    buffers = dict()
+    for name, buffer in model.named_buffers():
+        if isinstance(model, eval_frame.OptimizedModule):
+            name = remove_optimized_module_prefix(name)
+        buffers[name] = buffer
+    results.append(buffers)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
             for inp in example:
