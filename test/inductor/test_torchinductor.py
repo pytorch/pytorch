@@ -41,7 +41,7 @@ try:
     import torch._inductor.config
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
-    from torch._inductor import codecache, config, metrics
+    from torch._inductor import codecache, config, metrics, test_operators
     from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
     from torch._inductor.codegen.triton import texpr
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
@@ -767,14 +767,14 @@ class CommonTemplate:
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
-            b = torch._test_inductor_realize(a * 2)
+            b = test_operators.realize(a * 2)
             return (b * 2,)
 
         self.common(fn, (torch.randn(10),))
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
 
     def test_scheduler_vertical_fusion1(self):
-        realize = torch._test_inductor_realize
+        realize = test_operators.realize
 
         def fn(sa, ct, p):
             # From torchbench.pyhpc_equation_of_state
@@ -1855,6 +1855,53 @@ class CommonTemplate:
                 other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
                 with torch.no_grad():
                     self.common(mod, (v, other), atol=2e-3, rtol=0.016)
+
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv_transpose2d unary test")
+    def test_conv_transpose2d_unary(self):
+        test_memory_format = [torch.contiguous_format, torch.channels_last]
+        options = itertools.product(
+            unary_list,
+            [True, False],
+            [1, 3],
+            [1, 2],
+            [1, 4],
+            [0, 1],
+            test_memory_format,
+        )
+
+        for (
+            unary_fn,
+            bias,
+            kernel_size,
+            dilation,
+            groups,
+            padding,
+            memory_format,
+        ) in options:
+            oC = 32 * groups
+            iC = 3 * groups
+            x_shape = (1, iC, 28, 28)
+            mod = torch.nn.Sequential(
+                torch.nn.ConvTranspose2d(
+                    iC,
+                    oC,
+                    kernel_size=kernel_size,
+                    padding=padding,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                ),
+                unary_fn,
+            ).eval()
+
+            v = torch.randn(x_shape, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     def test_gather1(self):
         def fn(a, b):
@@ -4919,11 +4966,20 @@ class CommonTemplate:
         device = "cpu"
         for name in [
             "test_as_strided",  # buffer reuse
+            "test_bitwise",  # int32
+            "test_bmm1",
+            "test_bmm2",
             "test_cat",  # alias
+            "test_linear1",
+            "test_linear2",
             "test_lowmem_dropout1",  # None as output
+            "test_mm_views",
             "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
+            "test_reduction1",  # Reduction
             "test_relu",  # multiple inputs
             "test_silu",  # single input, single output
+            "test_sum_dtype",  # float64
+            "test_sum_int",  # bool, int64, int8, uint8
             "test_transpose",  # multiple outputs, buffer clear
         ]:
             test_name = f"{name}_{device}"
@@ -5298,7 +5354,7 @@ if HAS_CPU:
                 traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 1
+                assert metrics.generated_cpp_vec_kernel_count == 0
 
                 torch._dynamo.reset()
                 metrics.reset()
