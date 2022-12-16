@@ -1739,8 +1739,18 @@ class TestSparseCSR(TestCase):
                 res_dense = ld @ rd
                 self.assertEqual(res_sparse.to_dense(), res_dense)
 
+        def test_orthogonal_inputs(lhs_layout, rhs_layout):
+            ones = torch.ones(2, 2, device=device, dtype=dtype)
+            zeros = torch.zeros(2, 2, device=device, dtype=dtype)
+            x = torch.cat((ones, zeros), -1).to_sparse(layout=lhs_layout)
+            y = torch.cat((zeros, ones), -2).to_sparse(layout=rhs_layout)
+            res = x @ y
+            res_expected = torch.zeros(*res.shape, device=device, dtype=dtype, layout=res.layout)
+            self.assertEqual(res, res_expected)
+
         for lhs_layout, rhs_layout in itertools.product([torch.sparse_csr, torch.sparse_csc], repeat=2):
             test_empty_inputs(lhs_layout, rhs_layout)
+            test_orthogonal_inputs(lhs_layout, rhs_layout)
 
         for i in [2, 4]:
             for j in [2, 4, 7]:
