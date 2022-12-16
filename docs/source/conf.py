@@ -60,6 +60,7 @@ extensions = [
     'sphinx_copybutton',
     'sphinx_panels',
     'myst_parser',
+    'myst_nb',
 ]
 
 # build the templated autosummary files
