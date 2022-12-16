@@ -4,7 +4,6 @@ import logging
 import sympy
 
 import torch
-from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
 from ..utils import ceildiv as cdiv
@@ -100,6 +99,8 @@ def mm_args(mat1, mat2, *others, layout=None):
     b = [V.graph.sizevars.guard_equals(a, b) for a, b in zip(b1, b2)]
     k = V.graph.sizevars.guard_equals(k1, k2)
     if layout is None:
+        from torch._inductor.ir import FixedLayout
+
         layout = FixedLayout(
             mat1.get_device(),
             mat1.get_dtype(),
