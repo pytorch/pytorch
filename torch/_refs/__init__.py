@@ -4739,6 +4739,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             # RuntimeError: Cannot cast FakeTensor(cpu) to number
             value = prims.device_put(value, a.device)
 
+        assert isinstance(value, TensorLikeType)
         check(
             value.device == a.device,
             lambda: "Expected `value` to be on same device as `a`",
@@ -4772,7 +4773,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
 def masked_fill_(
     a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType
 ) -> TensorLikeType:
-    b = torch.masked_fill(a, mask, value)
+    b = torch.masked_fill(a, mask, value)  # type: ignore[arg-type]
     a.copy_(b)
     return a
 
