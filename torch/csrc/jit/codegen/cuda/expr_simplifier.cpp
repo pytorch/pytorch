@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 
 #include <memory>
+#include <regex>
 #include <sstream>
 #include <unordered_set>
 #include <vector>
@@ -31,7 +32,7 @@ namespace debug_print {
 //   PYTORCH_NVFUSER_DUMP="expr_simplify(eliminateTrivialComputation)"
 
 constexpr const char* kFlattenName = "assoc_comm::flatten";
-constexpr const char* kUnflattenName = "assoc_comm::flatten";
+constexpr const char* kUnflattenName = "assoc_comm::unflatten";
 
 struct Record {
   const char* name;
@@ -50,7 +51,13 @@ class Logger : public NoOpLogger {
     if (current_val_->sameAs(init_val_)) {
       return false;
     }
-    auto triggers = getDebugDumpArguments(DebugDumpOption::ExprSimplification);
+    const auto& triggers_arg =
+        getDebugDumpArguments(DebugDumpOption::ExprSimplification);
+    std::vector<std::regex> triggers;
+    triggers.reserve(triggers_arg.size());
+    for (const auto& t : triggers_arg) {
+      triggers.emplace_back(t);
+    }
     if (triggers.empty()) {
       for (auto r : record_) {
         if (r.name != kFlattenName && r.name != kUnflattenName) {
@@ -60,7 +67,10 @@ class Logger : public NoOpLogger {
       return false;
     }
     for (auto r : record_) {
-      if (std::find(triggers.begin(), triggers.end(), r.name) !=
+      auto match = [r](const std::regex& trigger) -> bool {
+        return std::regex_match(r.name, trigger);
+      };
+      if (std::find_if(triggers.begin(), triggers.end(), match) !=
           triggers.end()) {
         return true;
       }
@@ -138,6 +148,9 @@ bool hasSimilarType(DataType t1, DataType t2) {
 // If `value` is a constant scalar, then evaluate the value of that constant and
 // return the evaluated value. Otherwise, returns `value` itself.
 Val* foldConstants(Val* value) {
+  if (value->isConst()) {
+    return value;
+  }
   if (value->isConstScalar()) {
     if (value->isIntegralScalar() && value->isA<Int>()) {
       return IrBuilder::newConstant(
@@ -193,11 +206,14 @@ bool hasTensor(const std::unordered_set<Val*>& variables) {
 // Apply `rule` to `value`, if `rule` returns a new `Val*` to replace `value`,
 // then return that new `Val*`, otherwise recursively goes down to its inputs.
 Val* recurseDown(Val* value, std::function<Val*(Val*)> rule) {
+  auto def = value->definition();
+  if (def == nullptr) {
+    return value;
+  }
   auto transformed = rule(value);
   if (transformed != value) {
     return transformed;
   }
-  auto def = value->definition();
   if (def != nullptr) {
     bool changed = false;
     std::vector<Val*> new_inputs;
@@ -312,13 +328,9 @@ bool isBlackhole(Val* v, BinaryOpType type) {
 // The expression type that represents the flattened ops. For example, if I have
 // out = a + b + 3 + c + 5, then I will have:
 //   FlattenedAssocCommOp {
-//     inputs: [a, b, c]
+//     inputs: [a, b, 3, c, 5]
 //     outputs: [out]
-//     constant term: 8
 //   }
-//
-// TODO: refactor IR printing so that private exprs like this can be printed.
-// This will be very helpful for debugging.
 class FlattenedAssocCommOp : public Expr {
  public:
   using Expr::Expr;
@@ -336,7 +348,12 @@ class FlattenedAssocCommOp : public Expr {
         IrBuilder::create<Attribute<BinaryOpType>>(passkey.ir_container_, op));
     addOutput(out);
     for (auto v : terms) {
-      // Note that `addInput` is overriden in this class.
+      TORCH_CHECK(
+          hasSimilarType(dtype(), *v->getDataType()),
+          "Input types should be similar, but got: ",
+          dtype(),
+          ", and ",
+          *v->getDataType());
       addInput(v);
     }
   }
@@ -364,11 +381,41 @@ class FlattenedAssocCommOp : public Expr {
     }
   }
 
+  // FlattenedAssocCommOp is unordered, so we should have
+  // FlattenedAdd(a, b)->sameAs(FlattenedAdd(b, a))
+  bool sameAs(const Statement* other) const override {
+    if (this == other) {
+      return true;
+    }
+    if (!other->isA<FlattenedAssocCommOp>()) {
+      return false;
+    }
+    auto other_fop = other->as<FlattenedAssocCommOp>();
+    if (getOpType() != other_fop->getOpType()) {
+      return false;
+    }
+    // check if we can establish a 1:1 mapping between inputs() and
+    // other_fop->inputs()
+    std::list<Val*> other_inputs(
+        other_fop->inputs().begin(), other_fop->inputs().end());
+    for (const auto inp : inputs()) {
+      auto it =
+          std::find_if(other_inputs.begin(), other_inputs.end(), [inp](Val* v) {
+            return v->sameAs(inp);
+          });
+      if (it == other_inputs.end()) {
+        return false;
+      }
+      other_inputs.erase(it);
+    }
+    return other_inputs.empty();
+  }
+
   std::string toString(int indent_size = 0) const override {
     std::stringstream ss;
     indent(ss, indent_size) << getOpString() << "(";
     bool needs_comma = false;
-    for (auto v : inputsAndConstTerm()) {
+    for (auto v : inputs()) {
       if (needs_comma) {
         ss << ", ";
       }
@@ -383,7 +430,7 @@ class FlattenedAssocCommOp : public Expr {
     std::stringstream ss;
     ss << getOpString() << "(";
     bool needs_comma = false;
-    for (auto v : inputsAndConstTerm()) {
+    for (auto v : inputs()) {
       if (needs_comma) {
         ss << ", ";
       }
@@ -400,22 +447,6 @@ class FlattenedAssocCommOp : public Expr {
 
   BinaryOpType getOpType() const {
     return attribute(0)->as<Attribute<BinaryOpType>>()->value;
-  }
-
-  // Constant terms are stored and handled separately from other inputs. For
-  // example, if I have a + b + 3 + c + 5, then the constant term will be 8, and
-  // a, b, c are all inputs.
-  bool hasConstantTerm() const {
-    return attributes().size() == 2;
-  }
-
-  Val* getConstantTerm() const {
-    return attributeVal(1);
-  }
-
-  template <typename T>
-  T getConstantTermValue() const {
-    return *getConstantTerm()->as<Scalar<T>>()->value();
   }
 
   // Get a vector of inputs, sorted as the order given by `variables`. Note that
@@ -468,7 +499,7 @@ class FlattenedAssocCommOp : public Expr {
   }
 
   bool isTrivial() const {
-    return (inputs().size() == 1 && !hasConstantTerm());
+    return inputs().size() == 1;
   }
 
   std::vector<EvaluatorValue> evaluate(
@@ -476,23 +507,8 @@ class FlattenedAssocCommOp : public Expr {
     using namespace EvaluatorValue_functions;
     std::vector<EvaluatorValue> inputs_ = inputs;
     EvaluatorValue result;
-    if (hasConstantTerm()) {
-      if (isIntegralType(dtype())) {
-        result = EvaluatorValue(*getConstantTerm()->getInt());
-      } else if (isBooleanType(dtype())) {
-        result = EvaluatorValue(*getConstantTerm()->getBool());
-      } else if (isFloatingPointType(dtype())) {
-        result = EvaluatorValue(*getConstantTerm()->getDouble());
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            "Unexpected dtype encountered"
-            "in EvaluatorValue::evaluate: ",
-            dtype());
-      }
-    } else {
-      result = inputs_.back();
-      inputs_.pop_back();
-    }
+    result = inputs_.back();
+    inputs_.pop_back();
     switch (getOpType()) {
       case BinaryOpType::Add:
         for (auto i : inputs_) {
@@ -537,53 +553,6 @@ class FlattenedAssocCommOp : public Expr {
     }
     return {result};
   }
-
-  std::vector<Val*> inputsAndConstTerm() const {
-    if (!hasConstantTerm()) {
-      return inputs();
-    }
-    std::vector<Val*> result = inputs();
-    result.emplace_back(getConstantTerm());
-    return result;
-  }
-
- protected:
-  // Add a new value as an input of this expression. If `value` is a constant
-  // scalar, then evalate this constant and merge it with the constant term.
-  // Otherwise, add it as an input.
-  void addInput(Val* value) {
-    TORCH_CHECK(
-        hasSimilarType(dtype(), *value->getDataType()),
-        "Input types should be similar, but got: ",
-        dtype(),
-        ", and ",
-        *value->getDataType());
-    value = foldConstants(value);
-    if (value->isConst()) {
-      updateConstantTermWith(value);
-    } else {
-      Expr::addInput(value);
-    }
-  }
-
-  // Update the constant term. For example, if getOpType() == "+", and the
-  // current constant term is 8, then updateConstantTermWith(7) will change
-  // the constant term to 15.
-  void updateConstantTermWith(Val* value) {
-    if (isIdentity(value, getOpType())) {
-      return;
-    }
-    if (!hasConstantTerm()) {
-      addAttribute(value);
-      return;
-    }
-    auto new_constant_term = IrBuilder::newScalar(dtype());
-    IrBuilder::create<BinaryOp>(
-        getOpType(), new_constant_term, getConstantTerm(), value);
-    new_constant_term = foldConstants(new_constant_term);
-    TORCH_INTERNAL_ASSERT(new_constant_term->isConst());
-    attributes_.at(1) = new_constant_term;
-  }
 };
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(FlattenedAssocCommOp)
@@ -624,9 +593,6 @@ Val* flattenRule(Val* value) {
       if (op != nullptr && op->getOpType() == bop->getBinaryOpType() &&
           hasSimilarType(op->dtype(), *value->getDataType())) {
         inputs.insert(inputs.end(), op->inputs().begin(), op->inputs().end());
-        if (op->hasConstantTerm()) {
-          inputs.emplace_back(op->getConstantTerm());
-        }
       } else {
         inputs.emplace_back(operand);
       }
@@ -673,20 +639,13 @@ Val* unflattenRule(Val* value, const std::list<ValInfo>& variables) {
   if (fop != nullptr) {
     // Handle flattened op:
     // Convert flattened op into original binary ops
-    TORCH_INTERNAL_ASSERT(fop->hasConstantTerm() + fop->inputs().size() >= 2);
+    TORCH_INTERNAL_ASSERT(fop->inputs().size() >= 2);
     auto sorted_inputs = fop->sortedInputs(variables);
-    Val* lhs;
-    int64_t next;
-    if (fop->hasConstantTerm()) {
-      lhs = fop->getConstantTerm();
-      next = 0;
-    } else {
-      // We need to recursively unflatten all inputs, because we might have
-      // nested flattened expressions like
-      // FlattenedAdd(a, b, FlattenedMul(c, d, e))
-      lhs = unflatten(sorted_inputs.at(0), variables);
-      next = 1;
-    }
+    // We need to recursively unflatten all inputs, because we might have
+    // nested flattened expressions like
+    // FlattenedAdd(a, b, FlattenedMul(c, d, e))
+    Val* lhs = unflatten(sorted_inputs.at(0), variables);
+    int64_t next = 1;
     while (next < sorted_inputs.size()) {
       auto rhs = unflatten(sorted_inputs.at(next), variables);
       auto output = IrBuilder::newScalar(*value->getDataType());
@@ -766,7 +725,7 @@ bool isNonZero(Val* value) {
     }
   }
   if (auto fop = toFlattenedMul(value->definition())) {
-    for (auto inp : fop->inputsAndConstTerm()) {
+    for (auto inp : fop->inputs()) {
       if (!isNonZero(inp)) {
         return false;
       }
@@ -789,28 +748,61 @@ namespace rules {
 // false || a -> a
 // a % 1 -> 0
 // a / 1 -> a
+// x - x -> 0
 // ...
 Val* eliminateTrivialComputation(Val* value) {
+  auto folded = foldConstants(value);
+  if (folded != value) {
+    return folded;
+  }
   if (auto fop = dynamic_cast<FOp*>(value->definition())) {
     if (fop->isTrivial()) {
       return fop->input(0);
     }
-    if (fop->hasConstantTerm()) {
-      auto const_term = fop->getConstantTerm();
-      auto op = fop->getOpType();
-      if (assoc_comm::isIdentity(const_term, op)) {
-        // 1 * a -> a
-        if (fop->inputs().size() == 1) {
-          return fop->input(0);
+    auto op = fop->getOpType();
+    std::vector<Val*> new_inputs;
+    Val* const_term = nullptr;
+    bool changed = false;
+    for (auto inp : fop->inputs()) {
+      if (inp->isConstScalar()) {
+        if (const_term == nullptr) {
+          const_term = inp;
         } else {
-          auto output = IrBuilder::newScalar(*value->getDataType());
-          IrBuilder::create<FOp>(op, output, fop->inputs());
-          return output;
+          auto out = IrBuilder::newScalar(*const_term->getDataType());
+          IrBuilder::create<BinaryOp>(op, out, const_term, inp);
+          const_term = out;
+          changed = true;
         }
-      } else if (assoc_comm::isBlackhole(const_term, op)) {
+      } else {
+        new_inputs.emplace_back(inp);
+      }
+    }
+    if (const_term != nullptr) {
+      auto folded_const = foldConstants(const_term);
+      if (folded_const != const_term) {
+        changed = true;
+        const_term = folded_const;
+      }
+      if (assoc_comm::isBlackhole(const_term, op)) {
         // 0 * a -> 0
         return const_term;
       }
+      if (assoc_comm::isIdentity(const_term, op)) {
+        // 1 * a -> a
+        const_term = nullptr;
+        changed = true;
+      }
+    }
+    if (changed) {
+      if (const_term != nullptr) {
+        new_inputs.emplace_back(const_term);
+      }
+      if (new_inputs.size() == 1) {
+        return new_inputs.at(0);
+      }
+      auto output = IrBuilder::newScalar(*value->getDataType());
+      IrBuilder::create<FOp>(op, output, std::move(new_inputs));
+      return output;
     }
   } else if (auto bop = dynamic_cast<BinaryOp*>(value->definition())) {
     if (bop->getBinaryOpType() == BinaryOpType::Mod) {
@@ -829,6 +821,12 @@ Val* eliminateTrivialComputation(Val* value) {
       bool divisor_is_1 = (rhs->getInt() == 1 || rhs->getDouble() == 1.0);
       if (divisor_is_1 || (prove::isNonZero(rhs) && lhs->getInt() == 0)) {
         return lhs;
+      }
+    } else if (bop->getBinaryOpType() == BinaryOpType::Sub) {
+      auto lhs = foldConstants(bop->lhs());
+      auto rhs = foldConstants(bop->rhs());
+      if (lhs->sameAs(rhs)) {
+        return IrBuilder::newConstant(0, *value->getDataType());
       }
     }
   }

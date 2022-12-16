@@ -66,8 +66,10 @@ TEST_F(NVFuserTest, FusionEliminateTrivialComputation_CUDA) {
   auto b = IrBuilder::create<NamedScalar>("b", DataType::Bool);
   auto i0 = IrBuilder::create<Int>(0);
   auto i1 = IrBuilder::create<Int>(1);
+  auto i2 = IrBuilder::create<Int>(2);
   auto d0 = IrBuilder::create<Double>(0);
   auto d1 = IrBuilder::create<Double>(1);
+  auto d2 = IrBuilder::create<Double>(2);
   auto t = IrBuilder::create<Bool>(true);
   auto f = IrBuilder::create<Bool>(false);
 
@@ -115,6 +117,15 @@ TEST_F(NVFuserTest, FusionEliminateTrivialComputation_CUDA) {
   TORCH_CHECK(simplifyExpr(cpp_div(i0, tdimx))->sameAs(i0));
   // a % 1 -> 0
   TORCH_CHECK(simplifyExpr(mod(i, i1))->sameAs(i0));
+
+  // Test constant folding
+  TORCH_CHECK(simplifyExpr(add(add(i1, i), i1))->sameAs(add(i, i2)));
+  TORCH_CHECK(simplifyExpr(add(add(d1, d), d1))->sameAs(add(d, d2)));
+
+  // Test that FlattenedAssocCommOp::sameAs ignores order
+  auto x = IrBuilder::create<NamedScalar>("x", DataType::Int);
+  auto y = IrBuilder::create<NamedScalar>("y", DataType::Int);
+  TORCH_CHECK(simplifyExpr(sub(mul(x, y), mul(y, x)))->isZeroInt());
 }
 
 } // namespace jit
