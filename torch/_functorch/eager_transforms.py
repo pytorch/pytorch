@@ -1189,8 +1189,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     When composed with ``vmap``, ``grad`` can be used to compute per-sample-gradients:
 
-        >>> from torch.func import grad
-        >>> from torch.func import vmap
+        >>> from torch.func import grad, vmap
         >>> batch_size, feature_size = 3, 5
         >>>
         >>> def model(weights, feature_vec):
