@@ -293,14 +293,14 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, input_shape_without_
     # However, when input_bdim is not None, we have problems.
     #
     # [example 1]
-    # grad_input: Tensor[3, 4], input: Tensor[B, 3]
+    # grad_input: Tensor[3, 4], input: Tensor[B, 4]
     # We can expand grad_input to Tensor[B, 3, 4], but that isn't broadcastable
-    # from [B, 3].
+    # from [B, 4].
     #
     # [example 2]
-    # grad_input: Tensor[3, B, 4], input: Tensor[B, 3]
+    # grad_input: Tensor[3, B, 4], input: Tensor[B, 4]
     # We can swizzle grad_input to Tensor[B, 3, 4], but that isn't broadcastable
-    # from [B, 3].
+    # from [B, 4].
     #
     # This means that we need to also reduce the grad_input to the shape of the
     # input.
