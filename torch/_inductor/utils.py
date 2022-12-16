@@ -38,10 +38,6 @@ except ImportError:
         raise NotImplementedError("requires Triton")
 
 
-def cdiv(x, y):
-    return (x + y - 1) // y
-
-
 @functools.lru_cache(None)
 def has_triton():
     if not torch.cuda.is_available():
