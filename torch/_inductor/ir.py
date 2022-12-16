@@ -25,7 +25,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch._subclasses.fake_tensor import FakeTensorMode
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -358,13 +357,12 @@ class Loops(IRNode):
 
     @cache_on_self
     def inner_fn_str(self):
-        try:
-            with V.set_ops_handler(V.MockHandler()), patch.object(
-                FlexibleLayout, "allow_indexing", True
-            ):
-                return str(self.inner_fn(self._index(self.ranges)))
-        except Exception as e:
-            return f"inner_fn(): {e}"
+        formatter = V.KernelFormatterHandler(V.MockHandler())
+        with V.set_ops_handler(formatter), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = self.inner_fn(self._index(self.ranges))
+            return formatter.getvalue(result)
 
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
@@ -480,18 +478,15 @@ class Reduction(Loops):
 
     @cache_on_self
     def inner_fn_str(self):
-        try:
-            with V.set_ops_handler(V.MockHandler()), patch.object(
-                FlexibleLayout, "allow_indexing", True
-            ):
-                return str(
-                    self.inner_fn(
-                        self._index(self.ranges),
-                        self._index(self.reduction_ranges, "r"),
-                    )
-                )
-        except Exception as e:
-            return f"inner_fn(): {e}"
+        formatter = V.KernelFormatterHandler(MockHandler())
+        with V.set_ops_handler(formatter), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = self.inner_fn(
+                self._index(self.ranges),
+                self._index(self.reduction_ranges, "r"),
+            )
+            return formatter.getvalue(result)
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -1493,9 +1488,10 @@ class ReinterpretView(BaseView):
         size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
         stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
+        as_strided = V.graph.sizevars.as_strided
         if offset != "0":
-            return f"as_strided({self.get_name()}, {size}, {stride}, {offset})"
-        return f"as_strided({self.get_name()}, {size}, {stride})"
+            return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
+        return f"{as_strided}({self.get_name()}, {size}, {stride})"
 
 
 class SliceView(View):
@@ -1997,6 +1993,9 @@ class RandSeedBuffer(ConstantBuffer):
 class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
+
+    def cpp_wrapper_codegen_reference(self):
+        return "at::Tensor()"
 
 
 class ShapeAsConstantBuffer(IRNode):
@@ -2577,6 +2576,17 @@ class ExternKernel(InputsKernel):
             kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
         return kwargs
 
+    def cpp_wrapper_codegen_kwargs(self):
+        kwargs = []
+        if self.kwargs:
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                assert arg_name in self.kwargs, (
+                    "arg %s not found in self.kwargs" % arg_name
+                )
+                v = self.kwargs.get(arg_name)
+                kwargs.append(repr(v))
+        return kwargs
+
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts:
             size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
@@ -2639,15 +2649,22 @@ class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         args = self.codegen_args()
 
-        kwargs = self.codegen_kwargs()
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            kwargs = self.cpp_wrapper_codegen_kwargs()
+        else:
+            kwargs = self.codegen_kwargs()
         if kwargs:
             args.extend(kwargs)
 
-        if self.output_view:
-            args.append(f"out={self.output_view.codegen_reference()}")
-        else:
-            args.append(f"out={self.codegen_reference()}")
-        wrapper.writeline(f"{self.kernel}({', '.join(args)})")
+        wrapper.generate_extern_kernel_out(
+            self.output_view,
+            self.codegen_reference(),
+            args,
+            self.kernel,
+            self.cpp_kernel,
+        )
 
     def __init__(self, layout, inputs, constant_args=(), kwargs=None, output_view=None):
         super().__init__(
@@ -2747,6 +2764,7 @@ class IndexPutFallback(ExternKernel):
 
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
+    cpp_kernel = "at::mm_out"
 
     def __init__(
         self, layout, inputs, constant_args=(), output_view=None, kernel="aten.mm.out"
@@ -2862,6 +2880,8 @@ class MatrixMultiplyAdd(ExternKernelOut):
     def __init__(self, layout, inputs, constant_args=(), kwargs=None, output_view=None):
         super().__init__(layout, inputs, constant_args, kwargs or {}, output_view)
         self.kernel = "aten.addmm.out"
+        self.cpp_kernel = "at::addmm_out"
+        self.ordered_kwargs_for_cpp_kernel = ["beta", "alpha"]
 
     @classmethod
     def create(cls, inp, a, b, beta, alpha):
@@ -2886,6 +2906,7 @@ class MatrixMultiplyAdd(ExternKernelOut):
 
 class BatchMatrixMultiply(ExternKernelOut):
     kernel = "aten.bmm.out"
+    cpp_kernel = "at::bmm_out"
 
     def __init__(self, layout, inputs, constant_args=(), output_view=None):
         super().__init__(layout, inputs, constant_args, output_view)
@@ -3034,9 +3055,9 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fused_moving_avg_obs_fq_helper_functional,
         )
         context = (
-            FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
+            V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )
-        with context():
+        with context:
             (
                 example_output,
                 tensor_args,
@@ -3145,7 +3166,7 @@ class Convolution(ExternKernelAlloc):
         output_padding_: List[int],
         groups: int,
     ):
-        with torch._subclasses.FakeTensorMode():
+        with V.graph.fake_mode:
             x_fake = ir_node_to_tensor(x, guard_shape=True)
             weight_fake = ir_node_to_tensor(weight, guard_shape=True)
             bias_fake = (
@@ -3392,6 +3413,8 @@ def _prepare_convolution_fusion_create(
     stride_: List[int],
     dilation_: List[int],
     groups: int,
+    transposed: bool = False,
+    output_padding_: List[int] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -3404,7 +3427,9 @@ def _prepare_convolution_fusion_create(
     padding = tuple(padding_)
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
-    with torch._subclasses.FakeTensorMode():
+    output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
+
+    with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
         bias_fake = (
@@ -3417,8 +3442,8 @@ def _prepare_convolution_fusion_create(
             stride,
             padding,
             dilation,
-            False,
-            [0, 0],
+            transposed,
+            output_padding,
             groups,
         )
         output_size = output.size()
@@ -3437,6 +3462,8 @@ def _prepare_convolution_fusion_create(
         output_stride,
     )
     constant_args = [padding, stride, dilation, groups]
+    if transposed:
+        constant_args.insert(1, output_padding)
 
     if bias is not None:
         inputs.append(bias)
@@ -3638,7 +3665,7 @@ class MKLPackedLinear(ExternKernelAlloc):
     def create(cls, x, packed_w, orig_w, bias, batch_size):
         kernel = "torch.ops.mkl._mkl_linear"
 
-        with torch._subclasses.FakeTensorMode():
+        with V.graph.fake_mode:
             x_fake = ir_node_to_tensor(x, guard_shape=True)
             weight_fake = ir_node_to_tensor(orig_w, guard_shape=True)
             bias_fake = (
@@ -3771,6 +3798,62 @@ class LinearBinary(ExternKernelAlloc):
         pass
 
 
+class ConvolutionTransposeUnary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._convolution_transpose_pointwise",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        output_padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups_: int,
+        attr,
+        scalars,
+        algorithm,
+    ):
+        kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
+        transposed = True
+        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
+            cls,
+            x,
+            weight,
+            bias,
+            padding_,
+            stride_,
+            dilation_,
+            groups_,
+            transposed,
+            output_padding_,
+        )
+        constant_args = constant_args + [attr, scalars, algorithm]
+        return ConvolutionTransposeUnary(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+
 @dataclasses.dataclass
 class MutableBox(IRNode):
     """
@@ -3861,7 +3944,7 @@ class StorageBox(MutableBox):
             """
             heavy_ops = ["exp"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
-            return any([fn_str.startswith(op + "(") for op in heavy_ops])
+            return any([(op + "(") in fn_str for op in heavy_ops])
 
         if (
             users > 1
