@@ -430,11 +430,11 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        guards: Optional[Set[Guard]] = None,
         f_locals: Optional[Dict[str, object]] = None,
         f_globals: Optional[Dict[str, object]] = None,
         guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
     ):
+        guards = output_graph.guards if output_graph else None
         self.valid = True
         self._weakrefs: List["ReferenceType[object]"] = []
         self._seen_ids: Set[int] = set()
@@ -507,19 +507,14 @@ class CheckFunctionManager:
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
         # Let's handle ShapeEnv guards.  To do this, we will resolve
-        # shape variables to sources from GraphArgs.  This must happen after
+        # shape variables to sources from tracked_fakes.  This must happen after
         # tensor checks.
         # NB: self.output_graph can be None in the debug_nops tests
         if self.output_graph and self.output_graph.shape_env:
-            # NB: use orig_graphargs, as we can have created guards for
-            # inputs that are ultimately unused in the graph, but we
-            # are still on the hook for guarding on them (because, e.g.,
-            # Dynamo may have gone down a different conditional branch
-            # because of it.)
-            graphargs = self.output_graph.orig_graphargs
+            fs = self.output_graph.tracked_fakes
             expr_as_str = self.output_graph.shape_env.codegen_guards(
-                [a.fake_tensor for a in graphargs if a.is_tensor],
-                [a.source.name() for a in graphargs if a.is_tensor],
+                [a.fake for a in fs],
+                [a.sname for a in fs],
             )
             if expr_as_str != "True":
                 code_parts.append(expr_as_str)
