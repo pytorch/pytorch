@@ -9,7 +9,9 @@ Function Transforms
 -------------------
 .. autosummary::
     :toctree: generated
+    :nosignatures:
 
+     vmap
      grad
      grad_and_value
      vjp
