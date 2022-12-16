@@ -1334,7 +1334,9 @@ def native_batch_norm_helper(
     if training:
         computation_dtype = utils.get_computation_dtype(input.dtype)
         input_acc = input.to(dtype=computation_dtype)
-        biased_var = torch.var(input_acc, dim=reduction_dims, unbiased=False, keepdim=True)
+        biased_var = torch.var(
+            input_acc, dim=reduction_dims, unbiased=False, keepdim=True
+        )
         mean = torch.mean(input_acc, dim=reduction_dims, keepdim=True)
         rstd = torch.rsqrt(biased_var + eps)
 
@@ -1352,7 +1354,7 @@ def native_batch_norm_helper(
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
             squeezed_var = _squeeze_multiple(biased_var, reduction_dims)
-            unbiased_var = squeezed_var * n / (n - 1)
+            unbiased_var = squeezed_var * (n / (n - 1))
             new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
             if not functional:
                 running_var.copy_(new_running_var)
