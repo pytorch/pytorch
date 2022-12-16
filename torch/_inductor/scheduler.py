@@ -1120,7 +1120,6 @@ class Scheduler:
                 ):
                     self.flush()
                     self.current_device = device
-
             self.buffer_names_to_free.update(node.last_usage)
 
             if node.is_template():

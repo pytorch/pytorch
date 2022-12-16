@@ -3404,36 +3404,31 @@ class Convolution(ExternKernelAlloc):
         )
 
 
-# class InplaceBernoulliFallback(ExternKernel):
+class Wait(ExternKernelAlloc):
+    """
+    Wait should not be used by itself.  It should always be constructed in tandem
+    with a collective op that produces a work to wait on.
+    """
 
-#         (x,) = [t.codegen_reference() for t in self.inputs]
-#         wrapper.writeline(
-#             f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
-#         )
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
 
-#     def should_allocate(self):
-#         return False
+    def codegen(self, wrapper):
+        (x, work) = [t.codegen_reference() for t in self.inputs]
+        wrapper.writeline(f"{work}.wait()")
+        wrapper.writeline(f"{self.get_name()} = {x}")
 
-#     def get_mutation_names(self):
-#         assert isinstance(self.layout, MutationLayout)
-#         return (self.layout.target.get_name(),)
-
-#     def __init__(self, x, *constant_args):
-#         super().__init__(
-#             None,
-#             MutationLayout(x),
-#             self.unwrap_storage([x]),
-#             constant_args,
-#         )
-#         self.name = V.graph.register_buffer(self)
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
 
 
 class AllReduce(ExternKernelAlloc):
-    # allreduce_ can't be called from python, without fixing bindings
-    #  --> try implementing traceable_allreduce and adding POD types to api for rank/size?
-    # constant_args show up in codegen, use those if needed
-    # think about what to do for cpu
-    # also how to handle comm stream
     def __init__(
         self,
         layout,
@@ -3447,24 +3442,32 @@ class AllReduce(ExternKernelAlloc):
         cls,
         x: "TensorBox",
     ):
+        # Force input to become a materialized buffer (compile a kernel if needed)
         x = cls.realize_input(x)
-        return AllReduce(
-            layout=MutationLayout(x),
+
+        # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
+        # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
+        # Nobody should consume the output of AllReduce except 'Wait', which we control here.
+        all_reduce = AllReduce(
+            layout=FixedLayout(
+                device=x.get_device(), dtype=x.get_dtype(), size=[1], stride=[1]
+            ),
             inputs=[x],
         )
 
-    def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
+        # Return a 'Wait' to the user that called 'all_reduce' in the first place.  It consumes the 'work'
+        # and waits on it, also producing a buffer which is really the input buffer to AllReduce.
+        # Nit: currently the codegen for Wait produces an unnecessary but harmless line such as
+        #      buf4 = buf2, where buf2 was the input to AllReduce, and buf4 will be used by any consumers
+        return Wait(
+            layout=MutationLayout(x),
+            inputs=[x, all_reduce],
+        )
 
     def codegen(self, wrapper):
         wrapper.header.writeline("import torch.distributed as dist")
         (x,) = [t.codegen_reference() for t in self.inputs]
-        wrapper.writeline(
-            f"{self.get_name()}_work = dist.all_reduce({x}, async_op=True)"
-        )
-        wrapper.writeline(f"{self.get_name()}_work.wait()")
-        wrapper.writeline(f"{self.get_name()} = {self.codegen_args()[0]}")
+        wrapper.writeline(f"{self.get_name()} = dist.all_reduce({x}, async_op=True)")
 
 
 def _prepare_convolution_fusion_create(

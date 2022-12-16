@@ -260,6 +260,11 @@ class WrapperCodeGen(CodeGen):
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
 
+                # multiprocess triton crashes without setting default device
+                import os
+                rank = int(os.getenv("RANK", 0))
+                torch.cuda.set_device(rank)
+
                 aten = torch.ops.aten
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 async_compile = AsyncCompile()
