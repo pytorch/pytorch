@@ -271,6 +271,7 @@ prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
+        self.aotautograd_guards: List[GuardEnvExpr] = []
 
     def copy_graphstate(self):
         return GuardsCheckpointState(set(self.dynamo_guards))
