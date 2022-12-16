@@ -53,7 +53,7 @@ from .utils import (
     same,
 )
 from .variables.base import VariableTracker
-from .variables.builder import GraphArg, VariableBuilder, wrap_fx_proxy
+from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     DynamicShapeVariable,
@@ -197,13 +197,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
         self.tracing_context: TracingContext = TracingContext()
-        # Although we prune unused graphargs before sending graphs to
-        # compilers, we may have legitimately triggered shape guards
-        # on "unused" inputs that we must keep track of.  So after
-        # remove_unused_graphargs is called, orig_graphargs and
-        # graphargs no longer alias; orig_graphargs is the original
-        # graphargs, and graphargs is the pruned list.  Guard creation
-        # should use original graphargs.
+        # tracked_fakes says where any tensor that was wrapped to fake came
+        # from.  It is similar to GraphArg, in that all GraphArgs will get
+        # will get added to TrackedFakes, but TrackedFakes also contains
+        # GraphArgs that got pruned, and things like Tensor attributes which
+        # aren't explicit graph inputs.  Used by shape guard
+        self.tracked_fakes: List[TrackedFake] = []
         self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
@@ -708,7 +707,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.real_value_cache.pop(node, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
-        # NB: self.orig_graphargs is the original graphargs
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
