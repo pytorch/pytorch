@@ -4,11 +4,16 @@ import onnx
 import onnxruntime
 import torch
 import transformers
-from onnxruntime.capi import _pybind_state as ORTC
-from onnxruntime.training.torchdynamo.ort_backend import _get_onnx_devices
 from torch import _dynamo as torchdynamo
 from torch.utils._pytree import tree_flatten
 from transformers import AutoModel, AutoTokenizer
+
+try:
+    from onnxruntime.capi import _pybind_state as ORTC
+    from onnxruntime.training.torchdynamo.ort_backend import _get_onnx_devices
+    HAS_ORT_TRAINING = True
+except ImportError:
+    HAS_ORT_TRAINING = False
 
 # Define the model repo
 model_name = "sshleifer/tiny-gpt2"
@@ -49,21 +54,26 @@ def create_ort_devices(pytorch_outputs):
 
 
 def run_ort(onnx_model, onnx_model_text, pytorch_inputs, pytorch_outputs):
-    input_names = [v.name for v in onnx_model_text.graph.input]
-    ort_inputs = create_ort_tensors(pytorch_inputs)
+    if HAS_ORT_TRAINING:
+        input_names = [v.name for v in onnx_model_text.graph.input]
+        ort_inputs = create_ort_tensors(pytorch_inputs)
 
-    run_options = onnxruntime.RunOptions()
-    run_options.synchronize_execution_providers = True
+        run_options = onnxruntime.RunOptions()
+        run_options.synchronize_execution_providers = True
 
-    output_names = [v.name for v in onnx_model_text.graph.output]
-    ort_outputs = ORTC.OrtValueVector()
-    output_devices = create_ort_devices(pytorch_outputs)
+        output_names = [v.name for v in onnx_model_text.graph.output]
+        ort_outputs = ORTC.OrtValueVector()
+        output_devices = create_ort_devices(pytorch_outputs)
 
-    sess = onnxruntime.InferenceSession(onnx_model, providers=["CPUExecutionProvider"])
-    sess.run_with_ortvaluevector(
-        run_options, input_names, ort_inputs, output_names, ort_outputs, output_devices
-    )
-    return onnxruntime.training.ortmodule._utils._ortvalues_to_torch_tensor(ort_outputs)
+        sess = onnxruntime.InferenceSession(onnx_model, providers=["CPUExecutionProvider"])
+        sess.run_with_ortvaluevector(
+            run_options, input_names, ort_inputs, output_names, ort_outputs, output_devices
+        )
+        return onnxruntime.training.ortmodule._utils._ortvalues_to_torch_tensor(ort_outputs)
+    else:
+        sess = onnxruntime.InferenceSession(onnx_model, providers=["CPUExecutionProvider"])
+        input_names = [v.name for v in onnx_model_text.graph.input]
+        return sess.run(None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)})
 
 
 def test_gpt2_one_shot(model_name):
