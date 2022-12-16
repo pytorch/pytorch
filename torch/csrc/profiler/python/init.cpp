@@ -163,6 +163,7 @@ void initPythonBindings(PyObject* module) {
 
   using torch_op_t = ExtraFields<EventType::TorchOp>;
   py::class_<torch_op_t>(m, "_ExtraFields_TorchOp")
+      .def_readonly("name", &torch_op_t::name_)
       .def_property_readonly(
           "inputs",
           [](const torch_op_t& op) {

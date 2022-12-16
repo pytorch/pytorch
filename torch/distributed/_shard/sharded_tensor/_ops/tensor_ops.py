@@ -42,9 +42,14 @@ def tensor_device(types, args=(), kwargs=None, pg=None):
     # Validate types
     if not isinstance(self_st, ShardedTensor):
         raise TypeError("input needs to be a ShardedTensor")
-
-    return self_st.local_shards()[0].tensor.device
-
+    dev: torch.device
+    if self_st._local_shards:
+        dev = self_st._local_shards[0].tensor.device
+    elif pg and pg._get_backend_name() == "gloo":
+        dev = torch.device("cpu")
+    else:
+        dev = torch.device(torch.cuda.current_device())
+    return dev
 
 @_sharded_op_impl(torch.Tensor.is_meta.__get__)  # type: ignore[attr-defined]
 def st_is_meta(types, args=(), kwargs=None, pg=None):

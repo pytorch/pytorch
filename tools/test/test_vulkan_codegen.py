@@ -71,7 +71,7 @@ conv2d_pw:
       TILE_SIZE_X: 1
       TILE_SIZE_Y: 1
   parameter_values:
-    - TILE_SIZE_X: 2
+    - TILE_SIZE_Y: 2
 """
         file_content = """
 x = $TILE_SIZE_X + $TILE_SIZE_Y
@@ -89,7 +89,7 @@ x = $TILE_SIZE_X + $TILE_SIZE_Y
                     template_file.flush()
                     generator.generate(template_file.name, tmp_dir)  # type: ignore[no-untyped-call]
                     file_name_1 = os.path.join(tmp_dir, "conv2d_pw_1x1.glsl")
-                    file_name_2 = os.path.join(tmp_dir, "conv2d_pw_2x1.glsl")
+                    file_name_2 = os.path.join(tmp_dir, "conv2d_pw_1x2.glsl")
                     self.assertTrue(os.path.exists(file_name_1))
                     self.assertTrue(os.path.exists(file_name_2))
                     with open(file_name_1, "r") as f:
@@ -97,4 +97,4 @@ x = $TILE_SIZE_X + $TILE_SIZE_Y
                         self.assertTrue("1 + 1" in contents)
                     with open(file_name_2, "r") as f:
                         contents = f.read()
-                        self.assertTrue("2 + 1" in contents)
+                        self.assertTrue("1 + 2" in contents)

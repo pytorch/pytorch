@@ -121,7 +121,8 @@ namespace meta {
 
 TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
 (const Tensor& self, const int64_t size, const bool out_int32) {
-  TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector");
+  TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector, but got ",
+              self.dim(), " dimensional tensor.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
@@ -134,8 +135,10 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
  const bool out_int32,
  const bool transpose) {
   TORCH_CHECK(
-      crow_indices.dim() == 1, "crow_indices is supposed to be a vector");
-  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
+    crow_indices.dim() == 1, "crow_indices is supposed to be a vector, but got ",
+    crow_indices.dim(), " dimensional tensor.");
+  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector, but got ",
+              col_indices.dim(), " dimensional tensor.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
   set_output_raw_strided(0, {2, col_indices.numel()}, {}, options, {});

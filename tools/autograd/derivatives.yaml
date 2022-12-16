@@ -1144,6 +1144,14 @@
   input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
   result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, eps)
 
+- name: _native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+  result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, eps)
+
+- name: _native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, Tensor(), Tensor(), result1, result2, training, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+  result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, Tensor(), Tensor(), result1, result2, training, eps)
+
 - name: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   input, weight, grad_out: batchnorm_double_backward(input, weight, grads[0], grads[1], grads[2], grad_out, running_mean, running_var, train, eps, save_mean, save_invstd, grad_input_mask)
   save_mean: not_implemented("native_batch_norm_backward save_mean")
@@ -1379,16 +1387,16 @@
   src: grad.gather(dim, index)
   result: scatter_add(self_t, dim, index, src_t)
 
-- name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
+- name: select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
   dispatch:
     Default:
       self: select_backward_symint(grad, self.sym_sizes(), dim, index)
       result: auto_linear
     AutogradNestedTensor:
-      self: _nested_select_backward(grad, self, dim, index)
+      self: _nested_select_backward_symint(grad, self, dim, index)
 
-- name: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, int index) -> Tensor
-  grad_output: grad.select(dim, index)
+- name: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt index) -> Tensor
+  grad_output: grad.select_symint(dim, index)
   result: auto_linear
 
 - name: sigmoid(Tensor self) -> Tensor
@@ -1435,9 +1443,9 @@
   src: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
-- name: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
-  self: select_scatter(grad, zeros_like(src), dim, index)
-  src: grad.select(dim, index)
+- name: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
+  self: select_scatter_symint(grad, zeros_like(src), dim, index)
+  src: grad.select_symint(dim, index)
   result: auto_linear
 
 - name: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
@@ -1506,12 +1514,12 @@
   self: unsqueeze_to(grad, dim, self.sym_sizes())
   result: auto_linear
 
-- name: std.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
+- name: std.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
   self: std_backward(result, grad, self, dim, correction, keepdim)
   # pointwise (variance) + sum + sqrt
   result: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result)).masked_fill_(result == 0, 0)
 
-- name: std_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
+- name: std_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   self: std_mean_backward(grads[0], grads[1], self, result0, dim, correction, keepdim)
   result0: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result0)).masked_fill_(result0 == 0, 0)
   # linear
@@ -1654,11 +1662,23 @@
 - name: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_dense_backward(grad, self)
 
-- name: to_sparse(Tensor self) -> Tensor
-  self: grad.to_dense()
+- name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
-  self: grad.to_dense()
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_csr(Tensor self) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_csc(Tensor self) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_bsc(Tensor self, int[2] blocksize) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_mkldnn_backward(grad, self)
@@ -1715,12 +1735,12 @@
   self: grad.squeeze(dim)
   result: auto_linear
 
-- name: var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
+- name: var.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
   self: var_backward(grad, self, dim, correction, keepdim)
   # pointwise + sum
   result: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
 
-- name: var_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
+- name: var_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   self: var_mean_backward(grads[0], grads[1], self, dim, correction, keepdim)
   result0: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
   # linear
@@ -1825,13 +1845,13 @@
              + binary_cross_entropy_with_logits_target_backward(target_t, self_p, target_p, weight, pos_weight, at::Reduction::None),
            reduction)"
 
-- name: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
+- name: embedding(Tensor weight, Tensor indices, SymInt padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   indices: non_differentiable
   weight: embedding_backward_symint(grad, indices, weight.sym_size(0), padding_idx, scale_grad_by_freq, sparse)
   result: auto_linear
 
-- name: embedding_dense_backward(Tensor grad_output, Tensor indices, SymInt num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
-  grad_output: embedding_dense_double_backward(grad, indices, padding_idx)
+- name: embedding_dense_backward(Tensor grad_output, Tensor indices, SymInt num_weights, SymInt padding_idx, bool scale_grad_by_freq) -> Tensor
+  grad_output: embedding_dense_double_backward_symint(grad, indices, padding_idx)
   indices: non_differentiable
   result: auto_linear
 
@@ -2591,7 +2611,7 @@
 - name: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   self: grad.reshape_symint(self.sym_sizes())
 
-# Nested Tensor
+# NestedTensor
 - name: _nested_tensor_from_tensor_list(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   list: "grad.defined()? at::unbind(grad) : std::vector<Tensor>(list.size())"
 
@@ -2611,6 +2631,15 @@
   self: grad.values()
   nested_size: non_differentiable
   nested_strides: non_differentiable
+
+# Transformers
+- name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
+  query, key, value: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, result0, result1, is_causal, at::_chunk_grad_outputs_efficient_attention(query, key, value, is_causal))
+
+- name:  _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
+  query, key, value: _efficient_attention_backward(grad, query, key, value, result0, result1, causal, at::_chunk_grad_outputs_efficient_attention(query, key, value, causal))
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor

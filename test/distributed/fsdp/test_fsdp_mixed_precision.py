@@ -22,7 +22,10 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.testing._internal.common_cuda import CUDA11OrLater
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    SaveForwardInputsModel,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
     FSDPInitMode,
@@ -208,7 +211,7 @@ class LinearMixedPrecision(nn.Module):
                     # Shard is never allocated if param_dtype mixed precision is not
                     # enabled.
                     if mp_config.param_dtype is not None:
-                        cls.assertEqual(0, param._mp_shard.storage().size())
+                        cls.assertEqual(0, param._mp_shard._storage().size())
                     else:
                         cls.assertFalse(hasattr(param, "_mp_shard"))
                 elif param_is_sharded:
@@ -271,7 +274,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         fsdp_units = FSDP.fsdp_modules(fsdp_model)
         for fsdp in fsdp_units:
             for param in fsdp.params:
-                self.assertEqual(0, param._mp_shard.storage().size())
+                self.assertEqual(0, param._mp_shard._storage().size())
 
     def _reduce_scatter_validate_mp(
         self, orig_reduce_scatter, mp_config, *args, **kwargs
@@ -311,7 +314,9 @@ class TestFSDPMixedPrecision(FSDPTest):
 
         return orig_reduce_scatter(*args, **kwargs)
 
-    def _test_grads_reduced_precision(self, offload_params: bool):
+    def _test_grads_reduced_precision(
+        self, offload_params: bool, use_orig_params: bool
+    ):
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -331,6 +336,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         fsdp_kwargs = {
             "mixed_precision": mp,
             "cpu_offload": CPUOffload(offload_params=offload_params),
+            "use_orig_params": use_orig_params,
         }
         m.lin1 = FSDP(m.lin1, **fsdp_kwargs)
         m = FSDP(m, **fsdp_kwargs)
@@ -338,7 +344,8 @@ class TestFSDPMixedPrecision(FSDPTest):
             inp = torch.ones(1, 10)
             m(inp).sum().backward()
             for param in m.parameters():
-                self.assertEqual(torch.float16, param.grad.dtype)
+                if param.grad is not None:
+                    self.assertEqual(torch.float16, param.grad.dtype)
 
         dist.barrier()
 
@@ -648,7 +655,10 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     @skip_if_lt_x_gpu(2)
     def test_grads_reduced_precision(self):
         self.run_subtests(
-            {"offload_params": [False, True]},
+            {
+                "offload_params": [False, True],
+                "use_orig_params": [False, True],
+            },
             self._test_grads_reduced_precision,
         )
 
@@ -708,6 +718,57 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # for syncBN
         model(inp).sum().backward()
 
+    @skip_if_lt_x_gpu(2)
+    def test_input_grads_with_param_mixed_precision(self):
+        """
+        Tests that input tensors that require gradients do get their gradients
+        even after being cast to a low precision (when parameter mixed
+        precision is enabled).
+        """
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ],
+                "use_orig_params": [False, True],
+            },
+            self._test_input_grads_with_param_mixed_precision,
+        )
+
+    def _test_input_grads_with_param_mixed_precision(
+        self,
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+    ):
+        model = nn.Linear(1024, 1024, bias=False)
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float32,
+            buffer_dtype=torch.float32,
+        )
+        fsdp_model = FSDP(
+            model,
+            sharding_strategy=sharding_strategy,
+            mixed_precision=mixed_precision,
+            device_id=torch.cuda.current_device(),
+            use_orig_params=use_orig_params,
+        )
+        # Use an input with dtype not equal to the mixed precision
+        # `param_dtype` so that it gets cast
+        x_float = torch.randn(
+            (32, 1024),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        fsdp_model(x_float).sum().backward()
+        self.assertTrue(x_float.grad is not None)
+        # Check that `x_float` preserves its dtype, meaning that the gradient
+        # propagated via `ToCopyBackward0`
+        self.assertEqual(x_float.grad.dtype, torch.float32)
+
 
 class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     """
@@ -721,7 +782,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     @skip_if_lt_x_gpu(1)
     def test_grads_reduced_precision(self):
         self.run_subtests(
-            {"offload_params": [False, True]},
+            {"offload_params": [False, True], "use_orig_params": [False, True]},
             self._test_grads_reduced_precision,
         )
 
@@ -755,6 +816,117 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
 
 
 instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)
+
+
+class IgnoredModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l = nn.Linear(100, 100)
+
+    def forward(self, x):
+        return self.l(x)
+
+
+class ModelWithIgnoredModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = nn.Linear(100, 100)
+        self.ignored = IgnoredModule()
+        self.l2 = nn.Linear(100, 100)
+
+    def forward(self, x):
+        return self.l2(self.ignored(self.l1(x)))
+
+
+class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
+    @property
+    def world_size(self):
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_mixed_precision_with_ignored_module(self):
+        model = ModelWithIgnoredModule().cuda()
+        float16 = MixedPrecision(param_dtype=torch.float16)
+        model = FSDP(
+            model,
+            ignored_modules=[model.ignored],
+            mixed_precision=float16,
+        )
+
+        x = torch.ones(2, 100, device=torch.cuda.current_device())
+
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
+            model(x).sum().backward()
+
+
+class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+    @property
+    def world_size(self):
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_float16_on_one_submodule(self):
+        forward_inputs: Dict[str, nn.Module] = {}
+        float16 = MixedPrecision(param_dtype=torch.float16)
+
+        model = SaveForwardInputsModel(
+            forward_inputs,
+            cast_forward_inputs=False,
+        ).cuda()
+        c1, c2 = model.c1, model.c2
+        x = torch.zeros(2, 100, device="cuda")
+
+        # float16 on one submodule and float32 on everything else
+        model.c2 = FSDP(model.c2, mixed_precision=float16)
+        fsdp = FSDP(model)
+
+        fsdp(x).sum().backward()
+
+        self.assertEqual(forward_inputs[model].dtype, torch.float32)
+        self.assertEqual(forward_inputs[c1].dtype, torch.float32)
+        self.assertEqual(forward_inputs[c2].dtype, torch.float16)
+
+    @skip_if_lt_x_gpu(2)
+    def test_float16_on_one_submodule_skip_inputs(self):
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        float16 = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=False)
+
+        model = SaveForwardInputsModel(
+            forward_inputs=forward_inputs, cast_forward_inputs=True
+        ).cuda()
+        c1, c2 = model.c1, model.c2
+        x = torch.zeros(2, 100, device="cuda")
+
+        # float16 on one submodule and float32 on everything else
+        model.c2 = FSDP(model.c2, mixed_precision=float16)
+        fsdp = FSDP(model)
+
+        fsdp(x).sum().backward()
+
+        self.assertEqual(forward_inputs[model].dtype, torch.float32)
+        self.assertEqual(forward_inputs[c1].dtype, torch.float32)
+        self.assertEqual(forward_inputs[c2].dtype, torch.float32)
+
+    @skip_if_lt_x_gpu(2)
+    def test_float16_on_one_submodule_skip_inputs_error(self):
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        float16 = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=False)
+
+        model = SaveForwardInputsModel(
+            forward_inputs=forward_inputs, cast_forward_inputs=False
+        ).cuda()
+        c1, c2 = model.c1, model.c2
+        x = torch.zeros(2, 100, device="cuda")
+
+        # float16 on one submodule and float32 on everything else
+        model.c2 = FSDP(model.c2, mixed_precision=float16)
+        fsdp = FSDP(model)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "mat1 and mat2 must have the same dtype"
+        ):
+            fsdp(x).sum().backward()
+
 
 if __name__ == "__main__":
     run_tests()

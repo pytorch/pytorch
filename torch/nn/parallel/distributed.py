@@ -553,11 +553,15 @@ class DistributedDataParallel(Module, Joinable):
         gradient_as_bucket_view=False,
         static_graph=False,
     ):
-
         super(DistributedDataParallel, self).__init__()
         Joinable.__init__(self)
         self.logger = None
-        if not any((p.requires_grad for p in module.parameters())):
+        if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
+            self.parameters_to_ignore = set(module._ddp_params_and_buffers_to_ignore)
+        else:
+            self.parameters_to_ignore = set()
+        self._module_parameters = [p for n, p in module.named_parameters() if n not in self.parameters_to_ignore]
+        if not any((p.requires_grad for p in self._module_parameters)):
             self._log_and_throw(
                 RuntimeError,
                 "DistributedDataParallel is not needed when a module "
@@ -570,10 +574,8 @@ class DistributedDataParallel(Module, Joinable):
                 "device_ids can only be None or contain a single element.",
             )
 
-        self.is_multi_device_module = (
-            len({p.device for p in module.parameters()}) > 1
-        )
-        distinct_device_types = {p.device.type for p in module.parameters()}
+        self.is_multi_device_module = len({p.device for p in self._module_parameters}) > 1
+        distinct_device_types = {p.device.type for p in self._module_parameters if p.device is not None}
         if len(distinct_device_types) != 1:
             self._log_and_throw(
                 ValueError,
@@ -599,7 +601,7 @@ class DistributedDataParallel(Module, Joinable):
                     "but got device_ids {}, output_device {}, and module parameters {}.".format(
                         device_ids,
                         output_device,
-                        {p.device for p in module.parameters()},
+                        {p.device for p in self._module_parameters},
                     ),
                 )
 
@@ -621,16 +623,12 @@ class DistributedDataParallel(Module, Joinable):
         self.static_graph = False
         self.dim = dim
         self.module = module
-        self.device = list(self.module.parameters())[0].device
+        self.device = list(self._module_parameters)[0].device
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
-        if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
-            self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
-        else:
-            self.parameters_to_ignore = []
 
         self._use_replicated_tensor_module = (
             _ddp_with_replicated_tensor_enabled()
@@ -647,7 +645,7 @@ class DistributedDataParallel(Module, Joinable):
             )
 
         # Check that a module does not have Uninitialized parameters
-        for param in module.parameters():
+        for param in self._module_parameters:
             if isinstance(param, torch.nn.parameter.UninitializedParameter):
                 self._log_and_throw(
                     RuntimeError,
@@ -1003,6 +1001,10 @@ class DistributedDataParallel(Module, Joinable):
             >>>   for input in inputs:
             >>>     ddp(input).backward()  # no synchronization, accumulate grads
             >>> ddp(another_input).backward()  # synchronize grads
+
+        .. warning::
+            The forward pass should be included inside the context manager, or
+            else gradients will still be synchronized.
         """
         old_require_backward_grad_sync = self.require_backward_grad_sync
         self.require_backward_grad_sync = False
@@ -1410,17 +1412,13 @@ class DistributedDataParallel(Module, Joinable):
         Args:
             state (Any): Optional state that is passed to the hook.
             hook (Callable): Callable with the following signature:
-                            ``hook(state: object, buffers: Dict[str, torch.Tensor])
-                            -> Optional[List[torch.futures.Future[torch.Tensor]]]``
+                         ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]``
             comm_hook_location (_BufferCommHookLocation): Enum value indicating
                             where to run the hook.
                             _BufferCommHookLocation.PRE_FORWARD means that the
                             hook will run _before_ the forward pass, and
                             _BufferCommHookLocation.POST_FORWARD means that the
                             hook will run _after_ the forward pass.
-
-            hook (Callable): Callable with the following signature:
-                         ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]``:
 
             NOTE: To maximize performance, users can return a
                 List[torch.futures.Future] from their hook, and DDP will
@@ -1556,26 +1554,26 @@ class DistributedDataParallel(Module, Joinable):
         self, optim: Type, *args, optim_params=None, **kwargs
     ):
         r"""
-            Registers an optimizer with DDP such that the optimization for a
-            parameter will run immediately when that parameter's gradient is
-            finished with reduction, instead of waiting for all parameters'
-            gradients to finish reduction. This can result in a training speedup
-            depending on your workload since the optimizer can run while gradient
-            reduction for other parameters are still ongoing. In addition, this has
-            the potential to reduce peak memory consumption during training, as it
-            only needs to load the per-parameter optimizer states of a single
-            parameter at a time, instead of loading all per-parameter optimizer
-            states at once.
+        Registers an optimizer with DDP such that the optimization for a
+        parameter will run immediately when that parameter's gradient is
+        finished with reduction, instead of waiting for all parameters'
+        gradients to finish reduction. This can result in a training speedup
+        depending on your workload since the optimizer can run while gradient
+        reduction for other parameters are still ongoing. In addition, this has
+        the potential to reduce peak memory consumption during training, as it
+        only needs to load the per-parameter optimizer states of a single
+        parameter at a time, instead of loading all per-parameter optimizer
+        states at once.
 
-            Args:
-                optim_cls (Type): a ``torch.optim.Optimizer`` class to be registered
-                as a fused optimizer.
-                *args (Sequence[Any]): Arguments to forward to `optim_cls`.
-                optim_params (Optional[Iterable[torch.Tensor]]): Set of parameters
-                to optimize, similar to `params` argument of traditional `torch.optim`
-                Optimizers. If this is omitted, all DDP model parameters will be
-                optimized.
-                **kwargs: (Dict[str, Any]): Keyword arguments to forward to `optim_cls`.
+        Args:
+            optim (Type): a ``torch.optim.Optimizer`` class to be registered
+            as a fused optimizer.
+            *args (Sequence[Any]): Arguments to forward to `optim`.
+            optim_params (Optional[Iterable[torch.Tensor]]): Set of parameters
+            to optimize, similar to `params` argument of traditional `torch.optim`
+            Optimizers. If this is omitted, all DDP model parameters will be
+            optimized.
+            **kwargs: (Dict[str, Any]): Keyword arguments to forward to `optim`.
 
         .. warning ::
             _register_fused_optim should only be called once on a DDP instance,
@@ -1623,10 +1621,10 @@ class DistributedDataParallel(Module, Joinable):
         )
         try:
             overlapped_optim.register_ddp(self)
-        except NotImplementedError:
+        except NotImplementedError as e:
             raise RuntimeError(
                 f"{optim} does not support overlapped DDP. Please file an issue to PyTorch or the respective owner of {optim}."
-            )
+            ) from e
 
     def _distributed_broadcast_coalesced(
         self, tensors, buffer_size, authoritative_rank=0
