@@ -83,12 +83,7 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
 )
-from ._state_dict_utils import (
-    _register_load_state_dict_post_hooks,
-    _register_load_state_dict_pre_hooks,
-    _register_state_dict_hooks,
-    _register_state_dict_pre_hooks,
-)
+from ._state_dict_utils import _register_all_state_dict_hooks
 from ._unshard_param_utils import (
     _deregister_orig_params,
     _register_flat_param,
@@ -413,10 +408,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
         _init_state_dict_state(self)
-        _register_state_dict_pre_hooks(self)
-        _register_state_dict_hooks(self)
-        _register_load_state_dict_pre_hooks(self)
-        _register_load_state_dict_post_hooks(self)
+        _register_all_state_dict_hooks(self)
 
     @property
     def module(self) -> nn.Module:
