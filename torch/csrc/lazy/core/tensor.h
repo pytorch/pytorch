@@ -37,8 +37,12 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
         : tensor_data(std::move(tensor_data)),
           device(std::move(device)),
           unique_id(GetNextTensorId()) {}
+    // TODO(alanwaketan): Remove this ctor. This is a
+    // temporary ctor to ease XLA LTC migration.
+    Data(BackendDevice device)
+        : device(std::move(device)), unique_id(GetNextTensorId()) {}
 
-    ~Data();
+    virtual ~Data();
 
     BackendDataPtr handle;
     Value ir_value;
@@ -65,6 +69,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   // easier. Restore it back to delete.
   LazyTensor() = default;
 
+  virtual ~LazyTensor() = default;
+
   size_t generation() const {
     return data()->generation;
   }
@@ -82,7 +88,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   void UpdateFromTensorOut(at::Tensor tensor);
   void UpdateFromTensorOut(const LazyTensorPtr& tensor);
 
-  Data* data() const;
+  const std::shared_ptr<Data>& data() const;
 
   at::ScalarType dtype() const;
 
@@ -123,19 +129,17 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   // Applies the queue of operations in preparation for using the data.
   void ApplyPendingGraph();
 
+  void AssignIrValue(Value ir_value) const;
+
+ protected:
+  explicit LazyTensor(std::shared_ptr<Data> data);
+
+  void SetTensorData(at::Tensor tensor_data);
+
  private:
   LazyTensor(const at::Tensor& tensor, const BackendDevice& device);
   LazyTensor(Value ir_value, const BackendDevice& device);
   explicit LazyTensor(BackendDataPtr handle);
-  explicit LazyTensor(std::shared_ptr<Data> data);
-
-  std::shared_ptr<Data> data_ptr() const {
-    return data_;
-  }
-
-  void AssignIrValue(Value ir_value) const;
-
-  void SetTensorData(at::Tensor tensor_data);
 
   Value CreateTensorNode(BackendDataPtr data, bool read_only) const;
 
