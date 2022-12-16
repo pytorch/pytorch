@@ -319,7 +319,7 @@ def dequantize_per_channel(
        reserved for pattern matching)
 
     Returns:
-       dquantized float32 Tensor
+       dequantized float32 Tensor
     """
     assert input.dtype == dtype, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
