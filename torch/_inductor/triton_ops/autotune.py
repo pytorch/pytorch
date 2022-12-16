@@ -399,7 +399,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     if len(size_hints) == 1:
         return cached_autotune([triton_config(size_hints, 1024)], meta=meta)
     if len(size_hints) == 2:
-        if not config.triton.autotune or tile_hint == TileHint.SQUARE:
+        if not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE:
             return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
         return cached_autotune(
             [
@@ -413,7 +413,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             filename=filename,
         )
     if len(size_hints) == 3:
-        if not config.triton.autotune:
+        if not config.triton.autotune_pointwise:
             return cached_autotune([triton_config(size_hints, 16, 16, 16)], meta=meta)
         return cached_autotune(
             [
@@ -449,7 +449,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             return cached_autotune([outer_config], meta=meta)
         elif reduction_hint == ReductionHint.OUTER_TINY:
             return cached_autotune([tiny_config], meta=meta)
-        if not config.triton.autotune:
+        if not config.triton.autotune_pointwise:
             return cached_autotune(
                 [triton_config_reduction(size_hints, 32, 128)], meta=meta
             )
