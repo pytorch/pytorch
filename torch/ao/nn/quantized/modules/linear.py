@@ -289,7 +289,7 @@ class Linear(WeightedQuantizedModule):
             ref_qlinear (Module): a reference quantized linear module, either produced by torch.ao.quantization
                           utilities or provided by the user
             output_scale (float): scale for output Tensor
-            zero_point (int): zero point for output Tensor
+            output_zero_point (int): zero point for output Tensor
         """
         qlinear = cls(
             ref_qlinear.in_features,
