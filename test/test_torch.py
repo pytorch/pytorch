@@ -8116,6 +8116,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(chalf.imag, torch.zeros_like(chalf.imag))
 
     def test_type_alias(self):
+        assert False
         type_alias_map = {torch.float64: torch.double,
                           torch.float32: torch.float,
                           torch.int32: torch.int,
