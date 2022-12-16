@@ -734,6 +734,11 @@ def disable(fn=None):
     return DisableContext()
 
 
+def comptime(fn):
+    """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
+    return
+
+
 def skip(fn=None):
     """
     Skip frames associated with the function code, but still process recursively

@@ -2912,6 +2912,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         gm = torch.fx.symbolic_trace(optimized)
         self.assertTrue(same(gm(input), real))
 
+    def test_comptime(self):
+        def g(tx):
+            print(tx.symbolic_locals)
+
+        from torch._dynamo.eval_frame import comptime
+
+        def f(x):
+            y = x * 2
+            comptime(g)
+            return y + 3
+
+        opt_f = torch._dynamo.optimize("eager")(f)
+        x = torch.randn(2)
+        self.assertTrue(same(opt_f(x), f(x)))
+        opt_f(x)
+
     def test_inference_mode(self):
         @torch.inference_mode()
         def func(x, y):

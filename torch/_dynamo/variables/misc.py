@@ -87,6 +87,25 @@ class UnknownVariable(VariableTracker):
     """
 
 
+class CompTimeVariable(VariableTracker):
+    """
+    This variable is special, it lets you execute arbitrary code at
+    Dynamo compile time
+    """
+
+    def reconstruct(self, codegen):
+        raise NotImplementedError("comptime is special form")
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        assert not kwargs
+        assert len(args) == 1
+        assert isinstance(args[0], UserFunctionVariable)
+        args[0].get_function()(tx)
+        return variables.ConstantVariable(None)
+
+
 class ClosureVariable(UnknownVariable):
     def __init__(self, name, **kwargs):
         super(ClosureVariable, self).__init__(**kwargs)

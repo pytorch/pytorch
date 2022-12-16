@@ -76,6 +76,7 @@ from .lists import (
 )
 from .misc import (
     AutogradFunctionVariable,
+    CompTimeVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -225,6 +226,8 @@ class VariableBuilder:
         return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
+        from ..eval_frame import comptime
+
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
@@ -412,6 +415,8 @@ class VariableBuilder:
                 InspectSignatureVariable.create,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif value is comptime:
+            return CompTimeVariable()
         elif value is dataclasses.fields:
             return LambdaVariable(
                 _dataclasses_fields_lambda,
