@@ -57,7 +57,6 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
     "demucs",  # OOM
     # Huggingface
-    "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
 ]
 
@@ -101,6 +100,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "tacotron2",
     "vision_maskrcnn",  # accuracy
     # Huggingface
+    "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
@@ -121,19 +121,9 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "XGLMForCausalLM",  # OOM
     # TIMM
     "convit_base",  # fp64_OOM
-    "dm_nfnet_f0",  # accuracy
-    "convmixer_768_32",  # accuracy - Unable to repro on A100
-    "hrnet_w18",  # accuracy - Unable to repro on A100
-    "sebotnet33ts_256",  # accuracy - Unable to repro on A100
-    "hrnet_w18",  # accuracy - Unable to repro on A100
-    "eca_botnext26ts_256",  # accuracy - Fails on A100
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
-    "res2net101_26w_4s",  # accuracy
-    "spnasnet_100",  # accuracy
-    "resnest101e",  # accuracy
-    "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
