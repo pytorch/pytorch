@@ -1353,7 +1353,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
       ideep::convolution_transpose_forward::compute(
           pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
     } else {
-      ideep::convolution_transpose_forward::compute_v2((
+      ideep::convolution_transpose_forward::compute_v2(
           src, weights, b, dst_dims, dst,
           strides, padding_l, padding_r, dilates,
           groups(), src_scales, weights_scales,
