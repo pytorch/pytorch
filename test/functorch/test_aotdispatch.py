@@ -1260,6 +1260,43 @@ def forward(self, primals_1, primals_2):
         out = af(inp)
         self.assertEqual(out, f(inp))
 
+    @patch("functorch.compile.config.use_dynamic_shapes", True)
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    @skipIfNoSympy
+    def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
+        """
+        In this test, the important thing is that primals_1 is **only** needed in the backward
+        in order to grab its sizes.
+        We need to assert that what we save for the backward are the tensor's sizes, and not the tensor itself.
+
+        The way this test is set up, it will actually fail if we try to save the input tensor for backward.
+        Why?
+        b.masked_fill_(c, 0) has a backward that requires knowing a's sizes
+        b.masked_fill_(c, 0) **also** mutates a (because b and a are aliased)
+        The autograd engine yells at us if we save "a" for backward, and then try to mutate it.
+        """
+        inp = torch.randn(2, 2, requires_grad=True)
+
+        def f(a):
+            b = a[0]
+            c = torch.ones_like(b, dtype=torch.bool)
+            d = b.masked_fill_(c, 0)
+            return d
+
+        compiled_f = aot_function(f, nop)
+        inp_ref = torch.ones(2, 2, requires_grad=True)
+        inp_test = torch.ones(2, 2, requires_grad=True)
+
+        out_ref = f(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        self.assertEqual(inp_ref.grad, inp_test.grad)
+
     def test_real_weights_in_symbolic_mode(self):
         from functorch.experimental import functionalize
 
