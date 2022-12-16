@@ -250,7 +250,6 @@ def _common_unshard_post_state_dict_hook(
             for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
                 fqn = f"{prefix}{clean_fqn}"
                 state_dict[fqn] = buffer.clone()
-                print(f"{dist.get_rank()} got buffer {fqn} with shape {state_dict[fqn].shape}")
     return state_dict
 
 
