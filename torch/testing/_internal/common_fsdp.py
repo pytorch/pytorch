@@ -1031,7 +1031,10 @@ class FSDPTest(MultiProcessTestCase):
         # the DDP parameters are in FP16 (from `half()`) while the FSDP
         # parameters are in FP32 (from `summon_full_params()`) and (2) DDP runs
         # the optimizer in FP16 while FSDP runs it in FP32
-        if mixed_precision is None:
+        # TODO: Disable checking the parameters for pure FP16 due to floating
+        # point inaccuracy. Note that this means that the backward pass is not
+        # checked: https://github.com/pytorch/pytorch/issues/90784
+        if mixed_precision is None and not use_pure_fp16:
             self.assertEqual(
                 ddp_params,
                 fsdp_unsharded_params,
