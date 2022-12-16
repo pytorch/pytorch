@@ -19,7 +19,7 @@ from torch._prims_common import (
     Number,
 )
 
-from . import config, ir, overrides
+from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
@@ -962,6 +962,36 @@ def register_onednn_fusion_ops():
         @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
             return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+
+        @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
+        def convolution_transpose_unary(
+            x: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            output_padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionTransposeUnary.create(
+                    x,
+                    weight,
+                    bias,
+                    padding,
+                    output_padding,
+                    stride,
+                    dilation,
+                    groups,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
 
         if torch._C.has_mkl:
 
@@ -2654,6 +2684,40 @@ def max_pool2d_with_indices_backward(
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
+    try:
+        gO_stride = grad_output.get_stride()
+    except AttributeError:
+        # some classes don't have `get_stride`
+        # TODO will need a better way of determining if inputs are channels-last
+        gO_stride = None
+    if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):
+        data = x.data.data
+        x_buffer = ir.ComputedBuffer(
+            name=None,
+            layout=ir.FlexibleLayout(
+                device=data.get_device(),
+                dtype=data.get_dtype(),
+                size=data.get_size(),
+            ),
+            data=data,
+        )
+        x_buffer.decide_layout()
+        x_stride = x_buffer.get_stride()
+    else:
+        try:
+            x_stride = x.get_stride()
+        except AttributeError:
+            x_stride = None
+    if (
+        (x_stride is not None and x_stride[1] == 1)
+        or gO_stride is not None
+        and gO_stride[1] == 1
+    ):
+        # don't codegen channels-last, it's very slow
+        return fallback_max_pool2d_with_indices_backward(
+            grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
+        )
+
     indices.realize_hint()
 
     *batch, height, width = x.get_size()
@@ -3676,7 +3740,7 @@ def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
 
 
-@register_lowering(aten._test_inductor_realize)
+@register_lowering(torch.ops._inductor_test.realize)
 def _realize(x):
     x.realize()
     return clone(x)
