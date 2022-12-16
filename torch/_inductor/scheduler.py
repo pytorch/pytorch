@@ -357,6 +357,17 @@ class SchedulerNode(BaseSchedulerNode):
     def mark_run(self):
         self.allocate()
 
+    def ranges_from_index_vars(self, index_vars):
+        sizes = self._sizes
+        assert sum(map(len, sizes)) == sum(map(len, index_vars))
+        var_ranges = dict(
+            zip(
+                itertools.chain.from_iterable(index_vars),
+                itertools.chain.from_iterable(sizes),
+            )
+        )
+        return var_ranges
+
     def codegen(self, index_vars):
         sizes = self._sizes
         assert sum(map(len, sizes)) == sum(map(len, index_vars))

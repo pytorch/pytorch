@@ -4731,7 +4731,7 @@ class CommonTemplate:
             func()
 
 
-if HAS_CPU:
+if HAS_CPU and False:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")

@@ -12,7 +12,9 @@ from torch._inductor.decomposition import decompositions
 from torch._inductor.lowering import fallbacks, lowerings
 from torch._inductor.utils import gen_gm_and_inputs
 
+
 aten = torch.ops.aten
+
 
 
 def compute_speedups(
@@ -123,24 +125,24 @@ def skip_operator(operator):
     if isinstance(operator, torch._ops.OpOverload):
         op_impls.append(operator.overloadpacket)
 
-    if any(op in fallbacks for op in op_impls):
-        print(f"Skipping {operator}, no inductor impl")
-        return True
+    # if any(op in fallbacks for op in op_impls):
+    #     print(f"Skipping {operator}, no inductor impl")
+    #     return True
 
-    if all(op not in decompositions and op not in lowerings for op in op_impls):
-        print(f"Skipping {operator}, no inductor impl")
-        return True
+    # if all(op not in decompositions and op not in lowerings for op in op_impls):
+    #     print(f"Skipping {operator}, no inductor impl")
+    #     return True
 
-    if inductor_config.triton.convolution == "aten" and "convolution" in str(operator):
-        return True
+    # if inductor_config.triton.convolution == "aten" and "convolution" in str(operator):
+    #     return True
 
-    if inductor_config.triton.mm == "aten" and operator in (
-        aten.mm.default,
-        aten.bmm.default,
-        aten.addmm.default,
-        aten.matmul.default,
-    ):
-        return True
+    # if inductor_config.triton.mm == "aten" and operator in (
+    #     aten.mm.default,
+    #     aten.bmm.default,
+    #     aten.addmm.default,
+    #     aten.matmul.default,
+    # ):
+    #     return True
 
     return False
 
@@ -162,16 +164,21 @@ def skip_operator(operator):
     "--measure-nvfuser", help="default we only measure inductor", default=False
 )
 @click.option("--device", help="cpu or cuda", default="cuda")
+@click.option("--inp-file", help="use custom input file instead of suite", default=None)
+@click.option("--sample-start-idx", help="specify start index of samples", default=0)
 def benchmark(
-    suite, op, dtype, max_samples, accuracy_checking, repeats, measure_nvfuser, device
+    suite, op, dtype, max_samples, accuracy_checking, repeats, measure_nvfuser, device, inp_file, sample_start_idx,
 ):
-    assert suite in ("timm", "huggingface", "torchbench"), f"got {suite}"
-    if suite == "timm":
-        loader = OperatorInputsLoader.get_timm_loader()
-    elif suite == "huggingface":
-        loader = OperatorInputsLoader.get_huggingface_loader()
+    if inp_file is not None:
+        loader = OperatorInputsLoader(inp_file)
     else:
-        loader = OperatorInputsLoader.get_torchbench_loader()
+        assert suite in ("timm", "huggingface", "torchbench"), f"got {suite}"
+        if suite == "timm":
+            loader = OperatorInputsLoader.get_timm_loader()
+        elif suite == "huggingface":
+            loader = OperatorInputsLoader.get_huggingface_loader()
+        else:
+            loader = OperatorInputsLoader.get_torchbench_loader()
 
     assert dtype in ("float16", "float32"), f"got {dtype}"
 
@@ -185,7 +192,8 @@ def benchmark(
         ops = loader.get_all_ops()
     else:
         ops = [eval(op)]
-
+    
+    max_samples = max_samples + sample_start_idx
     for operator in ops:
         if skip_operator(operator):
             continue
@@ -195,11 +203,13 @@ def benchmark(
         timings = []
 
         for i in range(min(max_samples, 1000000)):
-            print(f"Iter {i}")
             try:
                 inps = next(inp_gen)
                 if inps is None:
                     break
+                if i < sample_start_idx:
+                    continue
+                print(f"Iter {i}")
                 args, kwargs = inps
             except StopIteration:
                 break

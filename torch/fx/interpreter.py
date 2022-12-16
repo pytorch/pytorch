@@ -110,6 +110,9 @@ class Interpreter:
             Any: The value returned from executing the Module
         """
         self.env = initial_env if initial_env else {}
+        import torch
+        # if "RangeAnalysis" in str(torch._inductor.virtualized.V.ops):
+        #     breakpoint()
 
         # Positional function args are consumed left-to-right by
         # `placeholder` nodes. Use an iterator to keep track of
@@ -126,9 +129,25 @@ class Interpreter:
                 # values for a subset of the program.
                 continue
 
+            # if str(node) == "constant_18" and "RangeAnalysis" in str(torch._inductor.virtualized.V.ops):
+            #     breakpoint()
+
             try:
-                self.env[node] = self.run_node(node)
+                import torch
+                # if "RangeAnalysis" in str(torch._inductor.virtualized.V.ops):
+                #     breakpoint()
+                out = self.run_node(node)
+                # if "RangeAnalysis" in str(torch._inductor.virtualized.V.ops) and "oo" in str(out):
+                #     breakpoint()
+                # if "RangeAnalysis" in str(torch._inductor.virtualized.V.ops):
+                #     print(node.format_node())
+                #     print(str(out))
+                # if "RangeAnalysis" in str(torch._inductor.virtualized.V.ops) and out is None:
+                #     breakpoint()
+                self.env[node] = out
             except Exception as e:
+                if "RangeAnalysis" in str(torch._inductor.virtualized.V.ops):
+                    breakpoint()
                 msg = f"While executing {node.format_node()}"
                 msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
                 msg += f"\nOriginal traceback:\n{node.stack_trace}"

@@ -867,10 +867,10 @@ def _check_module_exists(name: str) -> bool:
 
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
-TEST_SCIPY = _check_module_exists('scipy')
+TEST_SCIPY = False # _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_CUDA = torch.cuda.is_available()
-TEST_NUMBA = _check_module_exists('numba')
+TEST_NUMBA = False # _check_module_exists('numba')
 
 TEST_DILL = _check_module_exists('dill')
 
