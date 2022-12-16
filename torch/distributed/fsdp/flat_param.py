@@ -47,6 +47,28 @@ __all__ = [
 ]
 
 
+"""
+[Note: Fully Sharded Module]
+We define the "fully sharded module" to be the original ``nn.Module`` that owns
+a ``FlatParamHandle``. It is the *single* module logically responsible for the
+*single* unshard/reshard pair for the handle's ``FlatParameter`` for a given
+forward or backward pass. The fully sharded module should be passed to the
+``FlatParamHandle`` constructor.
+
+For the wrapper code path:
+- The ``FullyShardedDataParallel`` module wrapping the fully sharded module
+runs the unshard/reshard on behalf of the fully sharded module by overriding
+``nn.Module.forward``.
+- The fully sharded module is exactly the module passed to the
+``FullyShardedDataParallel`` constructor's ``module`` argument.
+
+For the non-wrapper code path:
+- Hooks registered on the fully sharded module run the unshard/reshard.
+- The fully sharded module may either be the direct argument to ``fully_shard``
+or a submodule chosen by the provided wrapping policy.
+"""
+
+
 class ParamInfo(NamedTuple):
     """Information for an original module parameter."""
 
@@ -142,11 +164,9 @@ class FlatParameter(nn.Parameter):
             entry; see :class:`ParamInfo`.
         _numels (Tuple[int, ...]): Each parameter's numel.
         _shapes (Tuple[torch.Size, ...]): Each parameter's shape.
-        _fqns (Tuple[str, ...]): Each original parameter's name prefixed with
-            the parent module names starting from the module passed to
-            construct this flattened parameter via :class:`FlatParamHandle`;
-            the prefixed names are guaranteed to be unique within the subtree
-            rooted in that module. We refer to these names as FQNs.
+        _fqns (Tuple[str, ...]): The original parameters' FQNs prefixed from
+            the owning handle's ``_fully_sharded_module``. The names are
+            guaranteed to be unique within the subtree rooted at that module.
         _num_params (int): Number of original parameters flattened into this
             flattened parameter; this is the length of ``_param_infos``,
             ``_numels``, ``_shapes``, and ``_fqns``.
@@ -156,9 +176,6 @@ class FlatParameter(nn.Parameter):
             (i.e. some per-parameter state) used to customize pre-flatten and
             post-unflatten behavior. This is experimental, and users should not
             depend on its existence in the future.
-        _comm_module_prefix (str): Module name prefix starting from ``module``
-            to ``comm_module`` as passed to :class:`FlatParamHandle`, including
-            a trailing '.' if this is not the empty string.
         _modules (Set[nn.Module]): Modules that contain some original parameter
             that is flattened into the ``FlatParameter``.
 
@@ -228,7 +245,6 @@ class FlatParameter(nn.Parameter):
         fqns: List[str],
         shared_param_infos: List[SharedParamInfo],
         param_extensions: List[Any],
-        comm_module_prefix: str,
         params: Optional[List[nn.Parameter]],
         shared_params: Optional[List[nn.Parameter]],
     ) -> None:
@@ -258,7 +274,6 @@ class FlatParameter(nn.Parameter):
         self._fqns = tuple(fqns)
         self._shared_param_infos = tuple(shared_param_infos)
         self._param_extensions = tuple(param_extensions)
-        self._comm_module_prefix = comm_module_prefix
         self._modules = set(pi.module for pi in self._param_infos).union(
             set(spi.module for spi in self._shared_param_infos)
         )
@@ -299,18 +314,7 @@ class FlatParamHandle:
     Args:
         params (Sequence[nn.Parameter]): The parameters to use for the
             flattened parameter.
-        module (nn.Module): A module that is the root of the subtree containing
-            all parameters in ``params``. For the non-module-wrapper code path,
-            this should be the local FSDP root module, while for the
-            module-wrapper code path, this may not necessarily be the local
-            FSDP root module (i.e. when there is nested wrapping).
-        comm_module (nn.Module): The module responsible for the unshard/reshard
-            pair for this handle. For the non-module-wrapper code path, this
-            is what would have been ``module`` in the module-wrapper equivalent
-            wrapping, which may not be the local FSDP root module. I.e., this
-            is what becomes ``FullyShardedDataParallel._fsdp_wrapped_module``.
-            For the module-wrapper code path, this is always the same as
-            ``module``. We refer to this as "comm. module" in internal docs.
+        fully_sharded_module (nn.Module): See [Note: Fully Sharded Module].
         device (torch.device): The compute and communication device, which
             should be a non-CPU device. We refer to it as the compute device.
         sharding_strategy (ShardingStrategy): Sharding strategy to apply to
@@ -321,17 +325,14 @@ class FlatParamHandle:
             setting passed to the FSDP constructor.
         mp_reduce_dtype (Optional[torch.dtype]): Gradient reduction mixed
             precision setting passed to the FSDP constructor.
-        keep_low_precision_grads (bool): Whether to keep gradients in low precision.
+        keep_low_precision_grads (bool): Whether to keep gradients in low
+            precision.
         use_orig_params (bool): If ``True``, then FSDP preserves the original
             parameter variables and returns them from ``named_parameters()``
             (e.g. to support different optimizer hyperparameters within one
             :class:`FlatParameter`). If ``False``, then FSDP reconstructs the
             parameter every iteration and returns the :class:`FlatParameter` s
             from ``named_parameters()``.
-
-    NOTE: We enforce that there is a single comm. module that is responsible
-    for the unshard/reshard pair for this handle. This invariant holds for both
-    the module-wrapper and non-module-wrapper code paths.
     """
 
     ##################
@@ -340,8 +341,7 @@ class FlatParamHandle:
     def __init__(
         self,
         params: Sequence[nn.Parameter],
-        module: nn.Module,
-        comm_module: nn.Module,
+        fully_sharded_module: nn.Module,
         device: torch.device,
         sharding_strategy: HandleShardingStrategy,
         offload_params: bool,
@@ -362,8 +362,8 @@ class FlatParamHandle:
         self._keep_low_precision_grads = keep_low_precision_grads
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
-        self._comm_module = comm_module
-        self._init_flat_param(params, module, comm_module, use_orig_params)
+        self._fully_sharded_module = fully_sharded_module
+        self._init_flat_param(params, fully_sharded_module, use_orig_params)
         self._orig_param_dtype = self.flat_param.dtype
         self._use_unsharded_views(as_params=False)
         self._init_param_reduce_dtypes(mp_param_dtype, mp_reduce_dtype)
@@ -372,7 +372,6 @@ class FlatParamHandle:
         self,
         params: Sequence[Optional[nn.Parameter]],
         module: nn.Module,
-        comm_module: nn.Module,
         use_orig_params: bool,
     ) -> None:
         """
@@ -480,7 +479,6 @@ class FlatParamHandle:
             fqns,
             shared_param_infos,
             param_extensions,
-            self._get_comm_module_prefix(module, comm_module),
             convert_to_params(params_to_flatten) if use_orig_params else None,
             convert_to_params(shared_params) if use_orig_params else None,
         )
@@ -535,25 +533,6 @@ class FlatParamHandle:
             self._reduce_dtype = mp_reduce_dtype or self._orig_param_dtype
         assert self._fwd_bwd_param_dtype is not None
         assert self._reduce_dtype is not None
-
-    def _get_comm_module_prefix(
-        self,
-        local_root_module: nn.Module,
-        comm_module: nn.Module,
-    ) -> str:
-        """
-        Returns the prefix from ``local_root_module`` to ``comm_module``. For
-        example, if we have ``local_root.submodule.comm_module``, then the
-        returned prefix is ``local_root.submodule.`` (with the trailing '.').
-        """
-        if local_root_module is comm_module:
-            return ""
-        for submodule_name, submodule in local_root_module.named_modules():
-            if submodule is comm_module:
-                return submodule_name + "."
-        raise AssertionError(
-            "Expects `comm_module` to be in `local_root_module`'s subtree"
-        )
 
     ###################################
     # SHARD INITIALIZATION & METADATA #
@@ -1859,13 +1838,7 @@ class FlatParamHandle:
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
         return tensor.size() == sharded_size
 
-    # NOTE: These two methods to get parameter and module names are used for
-    # `state_dict()`, which constructs a prefix starting from the module on
-    # which `state_dict()` is called. Since the comm. module is the module that
-    # saves its managed parameters, we must strip the comm. module prefix to
-    # align with the state-dict prefix.
     def parameter_module_names(self) -> Iterator[Tuple[str, str]]:
-        comm_module_prefix = self.flat_param._comm_module_prefix
         shared_param_infos = [
             ParamInfo(param_name, module, module_name)
             for (
@@ -1880,17 +1853,9 @@ class FlatParamHandle:
         for param_name, _, module_name in chain(
             self.flat_param._param_infos, shared_param_infos
         ):
-            assert module_name.startswith(comm_module_prefix), (
-                f"module_name: {module_name} comm_module_prefix: "
-                f"{comm_module_prefix}"
-            )
-            module_name_prefixed_from_comm_module = module_name[
-                len(comm_module_prefix) :
-            ]
-            yield (param_name, module_name_prefixed_from_comm_module)
+            yield (param_name, module_name)
 
     def shared_parameter_module_names(self) -> Iterator[Tuple[str, str]]:
-        comm_module_prefix = self.flat_param._comm_module_prefix
         for param_name, _, module_name in [
             ParamInfo(param_name, module, module_name)
             for (
@@ -1902,14 +1867,7 @@ class FlatParamHandle:
                 _,
             ) in self.flat_param._shared_param_infos
         ]:
-            assert module_name.startswith(comm_module_prefix), (
-                f"module_name: {module_name} comm_module_prefix: "
-                f"{comm_module_prefix}"
-            )
-            module_name_prefixed_from_comm_module = module_name[
-                len(comm_module_prefix) :
-            ]
-            yield (param_name, module_name_prefixed_from_comm_module)
+            yield (param_name, module_name)
 
     @property
     def _fqns_in_shard(self) -> List[str]:

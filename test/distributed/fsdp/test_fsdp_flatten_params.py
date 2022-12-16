@@ -146,7 +146,6 @@ class TestFlattenParams(FSDPTest):
             FlatParamHandle(
                 [],
                 module,
-                module,
                 torch.device("cuda"),
                 *self._get_default_config(),
                 self.process_group,
@@ -218,7 +217,6 @@ class TestFlattenParams(FSDPTest):
         params_to_flatten = list(module.parameters())
         flat_param_handle = FlatParamHandle(
             params_to_flatten,
-            module,
             module,
             torch.device("cuda"),
             *self._get_default_config(),
@@ -320,7 +318,6 @@ class TestFlattenParams(FSDPTest):
         params_to_flatten = list(module.parameters())
         flat_param_handle = FlatParamHandle(
             params_to_flatten,
-            module,
             module,
             torch.device("cuda"),
             *self._get_default_config(),

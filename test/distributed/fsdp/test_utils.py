@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp._utils import _apply_to_tensors
-from torch.distributed.fsdp._wrap_utils import _get_submodule_to_states
+from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_states
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.utils import _replace_by_prefix
 from torch.testing._internal.common_utils import (
@@ -119,7 +119,7 @@ class TestUtils(TestCase):
 
 
 class TestGetSubmoduleToStates(TestCase):
-    """Tests the function ``_get_submodule_to_states()``."""
+    """Tests the function ``_get_fully_sharded_module_to_states()``."""
 
     class SharedParameterMode(Enum):
         """
@@ -173,7 +173,7 @@ class TestGetSubmoduleToStates(TestCase):
         # module wrap policy
         module_classes = (nn.Sequential,)
         auto_wrap_policy = ModuleWrapPolicy(set(module_classes))
-        submodule_to_states = _get_submodule_to_states(
+        submodule_to_states = _get_fully_sharded_module_to_states(
             model, auto_wrap_policy, set(), set()
         )
         # Check the number of submodules with states in the mapping
