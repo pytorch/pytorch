@@ -97,7 +97,8 @@ The following table compares the differences between Eager Mode Quantization and
 There are three types of quantization supported:
 
 1. dynamic quantization (weights quantized with activations read/stored in
-   floating point and quantized for compute)
+   floating point and quantized for compute). Note: weight only quantization (weights quantized, no activations) for ops like embeddings, uses the
+   dynamic quantization APIs
 2. static quantization (weights quantized, activations quantized, calibration
    required post training)
 3. static quantization aware training (weights quantized, activations quantized,
@@ -126,15 +127,14 @@ Note that for FX quantization, the corresponding functionals are also supported.
 | | nn.GRUCell              | | N               | | Y                |
 | | nn.LSTMCell             | | N               | | Y                |
 +---------------------------+-------------------+--------------------+
-|nn.EmbeddingBag            | Y (activations    |                    |
-|                           | are in fp32)      | Y                  |
+|nn.EmbeddingBag            | N                 | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | N                  |
+|nn.Embedding               | N                 | Y                  |
 +---------------------------+-------------------+--------------------+
-| nn.MultiheadAttention     | Y (through        | Not supported      |
+|nn.MultiheadAttention      | Y (through        | Not supported      |
 |                           | custom modules)   |                    |
 +---------------------------+-------------------+--------------------+
-| Activations               | Broadly supported | Un-changed,        |
+|Activations                | Broadly supported | Un-changed,        |
 |                           |                   | computations       |
 |                           |                   | stay in fp32       |
 +---------------------------+-------------------+--------------------+
@@ -149,7 +149,7 @@ Post Training Dynamic Quantization
 
 This is the simplest to apply form of quantization where the weights are
 quantized ahead of time but the activations are dynamically quantized
-during inference. This is used for situations where the model execution time
+within each op and are otherwise left as fp32. This is used for situations where the model execution time
 is dominated by loading weights from memory rather than computing the matrix
 multiplications. This is true for LSTM and Transformer type models with
 small batch size.
@@ -173,26 +173,32 @@ PTDQ API Example::
   import torch
 
   # define a floating point model
-  class M(torch.nn.Module):
+  class M(torch.nn.Module): # example model with Embedding and Linear
       def __init__(self):
           super().__init__()
+          self.emb = torch.nn.Embedding(4, 4)
           self.fc = torch.nn.Linear(4, 4)
 
       def forward(self, x):
+          x = self.emb(x)
           x = self.fc(x)
           return x
 
   # create a model instance
   model_fp32 = M()
-  # create a quantized model instance
+
+  # assign qconfigs
+  model_fp32.fc.qconfig = torch.ao.quantization.default_dynamic_qconfig
+  model_fp32.emb.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig
+
+  # apply quantization to embeddings
   model_int8 = torch.quantization.quantize_dynamic(
       model_fp32,  # the original model
-      {torch.nn.Linear},  # a set of layers to dynamically quantize
-      dtype=torch.qint8)  # the target dtype for quantized weights
+  )
 
   # run the model
-  input_fp32 = torch.randn(4, 4, 4, 4)
-  res = model_int8(input_fp32)
+  indices = torch.tensor([0,1,1,2])
+  res = model_int8(indices)
 
 To learn more about dynamic quantization please see our `dynamic quantization tutorial
 <https://pytorch.org/tutorials/recipes/recipes/dynamic_quantization.html>`_.
@@ -433,6 +439,8 @@ There are multiple quantization types in post training quantization (weight only
 FXPTQ API Example::
 
   import torch
+  import torch.nn as nn
+
   from torch.ao.quantization import (
     get_default_qconfig_mapping,
     get_default_qat_qconfig_mapping,
@@ -450,7 +458,11 @@ FXPTQ API Example::
   # we need to deepcopy if we still want to keep model_fp unchanged after quantization since quantization apis change the input model
   model_to_quantize = copy.deepcopy(model_fp)
   model_to_quantize.eval()
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig)
+  qconfig_mapping = (
+    QConfigMapping()
+      .set_global(torch.ao.quantization.default_dynamic_qconfig)
+      .set_object_type(nn.Embedding, torch.ao.quantization.float_qparams_weight_only_qconfig)
+  )
   # a tuple of one or more example inputs are needed to trace the model
   example_inputs = (input_fp32)
   # prepare
@@ -800,21 +812,22 @@ Note that for FX Graph Mode Quantization, the corresponding functionals are also
 | | nn.Linear               | | Y               | | Y                |
 | | nn.Conv1d/2d/3d         | | Y               | | N                |
 +---------------------------+-------------------+--------------------+
-| | nn.LSTM                 | | N               | | Y                |
+| | nn.LSTM                 | | Y (through      | | Y                |
+| |                         | | custom modules) | |                  |
 | | nn.GRU                  | | N               | | Y                |
 +---------------------------+-------------------+--------------------+
 | | nn.RNNCell              | | N               | | Y                |
 | | nn.GRUCell              | | N               | | Y                |
 | | nn.LSTMCell             | | N               | | Y                |
 +---------------------------+-------------------+--------------------+
-|nn.EmbeddingBag            | Y (activations    |                    |
-|                           | are in fp32)      | Y                  |
+|nn.EmbeddingBag            | N                 | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | N                  |
+|nn.Embedding               | N                 | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.MultiheadAttention      |Not Supported      | Not supported      |
+|nn.MultiheadAttention      | Y (through        | Not supported      |
+|                           | custom modules)   |                    |
 +---------------------------+-------------------+--------------------+
-|Activations                |Broadly supported  | Un-changed,        |
+| Activations               | Broadly supported | Un-changed,        |
 |                           |                   | computations       |
 |                           |                   | stay in fp32       |
 +---------------------------+-------------------+--------------------+
