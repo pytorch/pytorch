@@ -113,14 +113,13 @@ def _zero_model(
     zero_buffers: bool = False,
 ):
     """Zeros the parameters and optionally buffers of ``model`` in place."""
-    with FSDP.summon_full_params(model):
-        for param in model.parameters():
+    for param in model.parameters():
+        with torch.no_grad():
+            param.zero_()
+    if zero_buffers:
+        for buffer in model.buffers():
             with torch.no_grad():
-                param.zero_()
-        if zero_buffers:
-            for buffer in model.buffers():
-                with torch.no_grad():
-                    buffer.zero_()
+                buffer.zero_()
 
 
 def _get_state_dict(model, cpu_offload=False, half=False):
