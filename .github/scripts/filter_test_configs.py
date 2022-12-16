@@ -164,6 +164,7 @@ def main() -> None:
     # workflow dispatcher
     tag_regex = re.compile(r"^ciflow/\w+/(?P<pr_number>\d+)$")
 
+    labels = set()
     if pr_number:
         # If a PR number is set, query all the labels from that PR
         labels = get_labels(int(pr_number))
