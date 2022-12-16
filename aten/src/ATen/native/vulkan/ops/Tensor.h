@@ -9,7 +9,6 @@
 namespace at {
 namespace native {
 namespace vulkan {
-namespace ops {
 
 struct LastAccess {
   api::PipelineStageFlags stage;
@@ -297,7 +296,6 @@ void add_buffer_barrier(
     const api::PipelineStageFlags,
     const api::MemoryAccessFlags);
 
-} // namespace ops
 } // namespace vulkan
 } // namespace native
 } // namespace at
