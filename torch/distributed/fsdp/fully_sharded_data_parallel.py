@@ -29,6 +29,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
+    _get_fsdp_states,
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
@@ -466,11 +467,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             List[FullyShardedDataParallel]: FSDP modules that are nested in
             the input ``module``.
         """
+        _fsdp_modules = _get_fsdp_states(module)
+        if not root_only:
+            return _fsdp_modules
         return [
-            submodule
-            for submodule in module.modules()
-            if isinstance(submodule, FullyShardedDataParallel)
-            and (not root_only or submodule.check_is_root())
+            fsdp_module for fsdp_module in _fsdp_modules if fsdp_module.check_is_root()
         ]
 
     @staticmethod
