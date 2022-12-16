@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import types
 from copy import deepcopy
 from unittest.mock import patch
 
@@ -668,6 +669,15 @@ class ModuleForwardHasGraphBreak(torch.nn.Module):
         return x * self.scale
 
 
+class ModulePatch1(torch.nn.Module):
+    pass
+
+
+class ModulePatch2(torch.nn.Module):
+    def forward(self, x):
+        return x - 1
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -1124,6 +1134,20 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
         # There will be a graph break for the inner mod being OptimizedModule
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_module_patch(self):
+        mod = ModulePatch1()
+        mod.forward = types.MethodType(ModulePatch2.forward, mod)
+
+        def fn(x):
+            return mod(x)
+
+        self.assertTrue(
+            torch.allclose(
+                torch._dynamo.optimize(nopython=True)(fn)(torch.ones(10)),
+                torch.zeros(1),
+            )
+        )
 
 
 if __name__ == "__main__":
