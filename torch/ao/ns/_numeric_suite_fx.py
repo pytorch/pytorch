@@ -121,8 +121,8 @@ from .fx.ns_types import (
 )
 from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_root_node_getter
 from torch.ao.quantization.backend_config import BackendConfig
-from torch.ao.quantization.fx.match_utils import find_matches
-from torch.ao.quantization.fx.qconfig_mapping_utils import generate_node_name_to_qconfig
+from torch.ao.quantization.fx.match_utils import _find_matches
+from torch.ao.quantization.fx.qconfig_mapping_utils import _generate_node_name_to_qconfig
 from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.ns.fx.n_shadows_utils import (
@@ -815,7 +815,7 @@ def prepare_n_shadows_model(
     standalone_module_names: List[str] = []
     standalone_module_classes: List[Type] = []
     custom_module_classes: List[Type] = []
-    matches = find_matches(
+    matches = _find_matches(
         mt.graph, modules, patterns, root_node_getter_mapping,
         standalone_module_names, standalone_module_classes, custom_module_classes)
     subgraphs_dedup: Dict[str, List[Node]] = \
@@ -825,7 +825,7 @@ def prepare_n_shadows_model(
     # TODO(future PR): deduplicate repeating entries
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]] = []
     for qconfig_mapping in qconfig_multi_mapping.qconfig_mappings_list:
-        node_name_to_qconfig = generate_node_name_to_qconfig(
+        node_name_to_qconfig = _generate_node_name_to_qconfig(
             mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope)
         list_of_node_name_to_qconfig.append(node_name_to_qconfig)
 
