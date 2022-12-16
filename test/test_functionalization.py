@@ -157,6 +157,16 @@ class TestFunctionalization(TestCase):
         r = _functionalize(f, reapply_views=True, crossref=False)(torch.ones(2))
         self.assertEqual(str(r.device), 'cpu')
 
+    def test_advanced_indexing(self):
+        def f():
+            x = torch.zeros(3, 3)
+            idx = torch.tensor([0])
+            val = torch.ones(3, 1)
+            x[:, idx] = val
+            return x
+
+        self.assert_functionalization(f)
+
     def test_view_clone_view_inplace(self):
         def f(input):
             shape = [1, 1024, 128, 128]
