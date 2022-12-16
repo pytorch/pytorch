@@ -518,7 +518,7 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
   return self;
 }
 
-SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize) {
+SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, const int64_t n_dense_dim) {
   if (layout.has_value()) {
     if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not use specified blocksize");
@@ -526,24 +526,27 @@ SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layo
     if (self.layout() == *layout) {
       return self;
     }
+    if (n_dense_dim != 0 && !(*layout == kSparseCsr || *layout == kSparseCsc || *layout == kSparseBsr || *layout == kSparseBsc)) {
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not support hybrid dimensions");
+    }
     switch (*layout) {
     case kStrided:
       return self;
     case kSparse:
       return dense_to_sparse(self, self.dim());
     case kSparseCsr:
-      return self.to_sparse_csr();
+      return self.to_sparse_csr(n_dense_dim);
     case kSparseCsc:
-      return self.to_sparse_csc();
+      return self.to_sparse_csc(n_dense_dim);
     case kSparseBsr:
       if (blocksize.has_value()) {
-        return self.to_sparse_bsr(*blocksize);
+        return self.to_sparse_bsr(*blocksize, n_dense_dim);
       }
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
       break;
     case kSparseBsc:
       if (blocksize.has_value()) {
-        return self.to_sparse_bsc(*blocksize);
+        return self.to_sparse_bsc(*blocksize, n_dense_dim);
       }
       break;
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");

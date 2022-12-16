@@ -798,28 +798,31 @@ Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[1] > 0);
   auto block_size_0 = self.size(0) / blocksize[0];
   auto block_size_1 = self.size(1) / blocksize[1];
-  return self.reshape({block_size_0, blocksize[0], block_size_1, blocksize[1]})
+
+  auto new_shape = DimVector({block_size_0, blocksize[0], block_size_1, blocksize[1]});
+  new_shape.append(DimVector(self.sizes().slice(2, self.dim() - 2)));
+  return self.reshape(new_shape)
       .transpose(1, 2)
       .contiguous();
 }
 
-Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize) {
-  if (self.dim() == 2) {
+Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize, const int64_t n_dense_dim) {
+  if (self.dim() == 2 + n_dense_dim) {
     return _tile_tensor(self, blocksize);
   }
-  auto n_batch_dim = self.dim() - 2;
+  auto n_batch_dim = self.dim() - 2 - n_dense_dim;
   // Same as _tile_tensor, just per matrix entry of self, if self is 3D.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[0] > 0);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(blocksize[1] > 0);
-  auto block_size_0 = self.size(-2) / blocksize[0];
-  auto block_size_1 = self.size(-1) / blocksize[1];
+  auto block_size_0 = self.size(n_batch_dim) / blocksize[0];
+  auto block_size_1 = self.size(n_batch_dim + 1) / blocksize[1];
   auto tiled_sizes = DimVector(self.sizes().slice(0, n_batch_dim));
   tiled_sizes.push_back(block_size_0);
   tiled_sizes.push_back(blocksize[0]);
   tiled_sizes.push_back(block_size_1);
   tiled_sizes.push_back(blocksize[1]);
-
-  return self.reshape(tiled_sizes).transpose(-3, -2).contiguous();
+  tiled_sizes.append(DimVector(self.sizes().slice(n_batch_dim + 2, n_dense_dim)));
+  return self.reshape(tiled_sizes).transpose(n_batch_dim + 1, n_batch_dim + 2).contiguous();
 }
 
 Tensor _mask_to_indices(const Tensor& mask) {
@@ -853,10 +856,20 @@ std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
 
 // Sparse layout conversions Start
 
-Tensor dense_to_sparse_csr(const Tensor& self) {
-  auto n_batch_dim = self.dim() - 2;
+Tensor dense_to_sparse_csr(const Tensor& self, const int64_t n_dense_dim) {
+  TORCH_CHECK(
+      n_dense_dim >= 0 && n_dense_dim <= self.dim() - 2,
+      "number of dense dimensions must be in [0,", self.dim() - 2,
+      "] range, but it is equal to ", n_dense_dim);
+
+  auto n_batch_dim = self.dim() - 2 - n_dense_dim;
   auto values = self;
   auto not_zero_mask = self != 0;
+  if (n_dense_dim > 0) {
+    std::vector<int64_t> reduce_dims(n_dense_dim);
+    std::iota(reduce_dims.begin(), reduce_dims.end(), n_batch_dim + 2);
+    not_zero_mask = not_zero_mask.sum(reduce_dims) != 0;
+  }
 
   if (n_batch_dim > 0) {
     dense_to_sparse_compressed_prepare_check_mask_values_batched(
@@ -871,7 +884,7 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
       row_indices, not_zero_mask.size(0), false /*out_int32*/);
   {
     auto mask_indices = _mask_to_indices(not_zero_mask.flatten());
-    values = values.flatten().index_select(0, mask_indices);
+    values = values.flatten(0, 1).index_select(0, mask_indices);
   }
 
   if (n_batch_dim > 0) {
@@ -888,10 +901,20 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
       values.device());
 }
 
-Tensor dense_to_sparse_csc(const Tensor& self) {
-  auto n_batch_dim = self.dim() - 2;
+Tensor dense_to_sparse_csc(const Tensor& self, const int64_t n_dense_dim) {
+  TORCH_CHECK(
+      n_dense_dim >= 0 && n_dense_dim <= self.dim() - 2,
+      "number of dense dimensions must be in [0,", self.dim() - 2,
+      "] range, but it is equal to ", n_dense_dim);
+
+  auto n_batch_dim = self.dim() - 2 - n_dense_dim;
   auto values = self;
   auto not_zero_mask = self != 0;
+  if (n_dense_dim > 0) {
+    std::vector<int64_t> reduce_dims(n_dense_dim);
+    std::iota(reduce_dims.begin(), reduce_dims.end(), n_batch_dim + 2);
+    not_zero_mask = not_zero_mask.sum(reduce_dims) != 0;
+  }
 
   if (n_batch_dim > 0) {
     dense_to_sparse_compressed_prepare_check_mask_values_batched(
@@ -908,7 +931,7 @@ Tensor dense_to_sparse_csc(const Tensor& self) {
   {
     // We need to transpose the mask and values before flattening so the nnz dim
     // will run in col-major order.
-    values = values.transpose(0, 1).flatten();
+    values = values.transpose(0, 1).flatten(0, 1);
     auto mask_indices =
         _mask_to_indices(not_zero_mask.transpose(0, 1).flatten());
     values = values.index_select(0, mask_indices);
@@ -928,36 +951,40 @@ Tensor dense_to_sparse_csc(const Tensor& self) {
       values.device());
 }
 
-Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
+Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, const int64_t n_dense_dim) {
+  auto sparse_row_dim = -(n_dense_dim + 2);
+  auto sparse_col_dim = -(n_dense_dim + 1);
   TORCH_CHECK(
       blocksize[0] > 0 && blocksize[1] > 0,
       "blocksize needs to be non zero, but got ",
       blocksize);
   TORCH_CHECK(
-      self.size(-2) % blocksize[0] == 0,
-      "Tensor size(-2) ",
-      self.size(-2),
+      self.size(sparse_row_dim) % blocksize[0] == 0,
+      "Tensor size(", sparse_row_dim, ") ",
+      self.size(sparse_row_dim),
       " needs to be divisible by blocksize[0] ",
       blocksize[0]);
   TORCH_CHECK(
-      self.size(-1) % blocksize[1] == 0,
-      "Tensor size(-1) ",
-      self.size(-1),
+      self.size(sparse_col_dim) % blocksize[1] == 0,
+      "Tensor size(", sparse_col_dim, ") ",
+      self.size(sparse_col_dim),
       " needs to be divisible by blocksize[1] ",
       blocksize[1]);
-  // TODO: specify the number of dense dimensions, or equivalently,
-  // the number of batch dimensions. Until then, below we'll assume
-  // that the number of dense dimensions is 0.
-  auto n_batch_dim = self.dim() - 2;
+  TORCH_CHECK(
+      n_dense_dim >= 0 && n_dense_dim <= self.dim() - 2,
+      "number of dense dimensions must be in [0,", self.dim() - 2,
+      "] range, but it is equal to ", n_dense_dim);
 
-  auto values = _batch_tile_tensor(self, blocksize);
-  auto not_zero_mask = _batch_tile_tensor((self != 0), blocksize);
-  auto mask_shape = DimVector(not_zero_mask.sizes().slice(0, n_batch_dim + 2));
-  // Can't use -1 here one of sparse/batch dims may be zero
-  mask_shape.push_back(blocksize[0] * blocksize[1]);
-  not_zero_mask = not_zero_mask.view(mask_shape).any(-1);
+  auto n_batch_dim = self.dim() - 2 - n_dense_dim;
+  auto is_batched = n_batch_dim > 0;
+  auto values = _batch_tile_tensor(self, blocksize, n_dense_dim);
 
-  if (n_batch_dim > 0) {
+  auto not_zero_mask = _batch_tile_tensor(self != 0, blocksize, n_dense_dim);
+  std::vector<int64_t> reduce_dims(2 + n_dense_dim);
+  std::iota(reduce_dims.begin(), reduce_dims.end(), n_batch_dim + 2);
+  not_zero_mask = not_zero_mask.sum(reduce_dims) != 0;
+
+  if (is_batched) {
     dense_to_sparse_compressed_prepare_check_mask_values_batched(
         Layout::SparseBsr, values, not_zero_mask, n_batch_dim);
   }
@@ -972,10 +999,10 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
 
   {
     auto mask_indices = _mask_to_indices(not_zero_mask.flatten());
-    values = values.flatten(0, -3).index_select(0, mask_indices);
+    values = values.flatten(0, 1).index_select(0, mask_indices);
   }
 
-  if (n_batch_dim > 0) {
+  if (is_batched) {
     reshape_2d_sparse_compressed_members_to_nd_batched(
         self.sizes(), n_batch_dim, crow_indices, col_indices, values);
   }
@@ -989,31 +1016,38 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
       values.device());
 }
 
-Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
+Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, const int64_t n_dense_dim) {
+  auto sparse_row_dim = -(n_dense_dim + 2);
+  auto sparse_col_dim = -(n_dense_dim + 1);
   TORCH_CHECK(
       blocksize[0] > 0 && blocksize[1] > 0,
       "blocksize needs to be non zero, but got ",
       blocksize);
   TORCH_CHECK(
-      self.size(-2) % blocksize[0] == 0,
-      "Tensor size(-2) ",
-      self.size(-2),
+      self.size(sparse_row_dim) % blocksize[0] == 0,
+      "Tensor size(", sparse_row_dim, ") ",
+      self.size(sparse_row_dim),
       " needs to be divisible by blocksize[0] ",
       blocksize[0]);
   TORCH_CHECK(
-      self.size(-1) % blocksize[1] == 0,
-      "Tensor size(-1) ",
-      self.size(-1),
+      self.size(sparse_col_dim) % blocksize[1] == 0,
+      "Tensor size(", sparse_col_dim, ") ",
+      self.size(sparse_col_dim),
       " needs to be divisible by blocksize[1] ",
       blocksize[1]);
-  auto n_batch_dim = self.dim() - 2;
+  TORCH_CHECK(
+      n_dense_dim >= 0 && n_dense_dim <= self.dim() - 2,
+      "number of dense dimensions must be in [0,", self.dim() - 2,
+      "] range, but it is equal to ", n_dense_dim);
+
+  auto n_batch_dim = self.dim() - 2 - n_dense_dim;
   auto is_batched = n_batch_dim > 0;
-  auto values = _batch_tile_tensor(self, blocksize);
-  auto not_zero_mask = _batch_tile_tensor((self != 0), blocksize);
-  auto mask_shape = DimVector(not_zero_mask.sizes().slice(0, n_batch_dim + 2));
-  // Can't use -1 here one of sparse/batch dims may be zero
-  mask_shape.push_back(blocksize[0] * blocksize[1]);
-  not_zero_mask = not_zero_mask.view(mask_shape).any(-1);
+  auto values = _batch_tile_tensor(self, blocksize, n_dense_dim);
+
+  auto not_zero_mask = _batch_tile_tensor((self != 0), blocksize, n_dense_dim);
+  std::vector<int64_t> reduce_dims(2 + n_dense_dim);
+  std::iota(reduce_dims.begin(), reduce_dims.end(), n_batch_dim + 2);
+  not_zero_mask = not_zero_mask.sum(reduce_dims) != 0;
 
   if (is_batched) {
     dense_to_sparse_compressed_prepare_check_mask_values_batched(
@@ -1030,14 +1064,14 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
       col_indices, not_zero_mask.size(-1), false /*out_int32*/);
   {
     // We need the block-values in col major order, but blocks themselves to
-    // remain in row-major order, so we transpose the leading two dims, leaving
-    // the trailing two dims as is.
-    values = values.transpose(0, 1).flatten(0, -3);
+    // remain in row-major order, so we transpose the leading two dims.
+    values = values.transpose(0, 1).flatten(0, 1);
     // The mask must transpose as well to index it correctly.
     auto mask_indices =
         _mask_to_indices(not_zero_mask.transpose(0, 1).flatten());
     values = values.index_select(0, mask_indices);
   }
+
   if (is_batched) {
     reshape_2d_sparse_compressed_members_to_nd_batched(
         self.sizes(), n_batch_dim, ccol_indices, row_indices, values);
@@ -1296,7 +1330,10 @@ Tensor sparse_compressed_to_flipped(
       new_values.device());
 }
 
-Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
+Tensor sparse_compressed_to_sparse_csr(const Tensor& self, const int64_t n_dense_dim) {
+  if (n_dense_dim != 0) {
+    AT_ERROR("sparse_compressed_to_sparse_csr conversion does not support hybrid dimensions");
+  }
   if (self.layout() == kSparseCsc) {
     return sparse_compressed_to_flipped(self, c10::nullopt, "to_sparse_csr");
   }
@@ -1308,11 +1345,14 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
       self.layout());
 }
 
-Tensor coo_to_sparse_csr(const Tensor& self) {
+Tensor coo_to_sparse_csr(const Tensor& self, const int64_t n_dense_dim) {
   TORCH_CHECK(
       self.sparse_dim() == 2,
       "Only tensors with two sparse dimensions can be converted to the SparseCsr layout, got self with ",
       self.sparse_dim(), " sparse dimensions.");
+  if (n_dense_dim != 0) {
+    AT_ERROR("coo_to_sparse_csr conversion does not support hybrid dimensions");
+  }
   auto coalesced_self = self.coalesce();
   auto row_indices = coalesced_self.indices()[0];
   bool out_int32 = (row_indices.scalar_type() == at::kInt);
@@ -1328,11 +1368,14 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
       coalesced_self.device());
 }
 
-Tensor coo_to_sparse_csc(const Tensor& self) {
+Tensor coo_to_sparse_csc(const Tensor& self, const int64_t n_dense_dim) {
   TORCH_CHECK(
       self.sparse_dim() == 2,
       "Only tensors with two sparse dimensions can be converted to the SparseCsc layout, got self with ",
       self.sparse_dim(), " sparse dimensions.");
+  if (n_dense_dim != 0) {
+    AT_ERROR("coo_to_sparse_csc conversion does not support hybrid dimensions");
+  }
   auto coalesced_self = self.transpose(0, 1).coalesce().to_sparse_csr();
   return at::native::_sparse_csc_tensor_unsafe(
       coalesced_self.crow_indices(),
@@ -1344,12 +1387,18 @@ Tensor coo_to_sparse_csc(const Tensor& self) {
       coalesced_self.device());
 }
 
-Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
-  return self.to_sparse_csr().to_sparse_bsr(blocksize);
+Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, const int64_t n_dense_dim) {
+  if (n_dense_dim != 0) {
+    AT_ERROR("coo_to_sparse_bsr conversion does not support hybrid dimensions");
+  }
+  return self.to_sparse_csr().to_sparse_bsr(blocksize, n_dense_dim);
 }
 
-Tensor coo_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
-  return self.to_sparse_bsr(blocksize).to_sparse_bsc(blocksize);
+Tensor coo_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, const int64_t n_dense_dim) {
+  if (n_dense_dim != 0) {
+    AT_ERROR("coo_to_sparse_bsc conversion does not support hybrid dimensions");
+  }
+  return self.to_sparse_bsr(blocksize, n_dense_dim).to_sparse_bsc(blocksize, n_dense_dim);
 }
 
 namespace {
@@ -1644,7 +1693,10 @@ Tensor _csr_to_block_csr_cpu(const Tensor& self, IntArrayRef blocksize) {
       result_values.device());
 }
 
-Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
+Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, const int64_t n_dense_dim) {
+  if (n_dense_dim != 0) {
+    AT_ERROR("sparse_compressed_to_sparse_bsr conversion does not support hybrid dimensions");
+  }
   if (self.layout() == kSparseBsc) {
     DimVector self_blocksize = at::sparse_csr::getBlockSize(self);
     TORCH_CHECK(self_blocksize == blocksize, "to_sparse_bsr:",
@@ -1696,7 +1748,10 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
   return self;
 }
 
-Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
+Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, const int64_t n_dense_dim) {
+  if (n_dense_dim != 0) {
+    AT_ERROR("sparse_compressed_to_sparse_bsc conversion does not support hybrid dimensions");
+  }
   if (self.layout() == kSparseBsr) {
     DimVector self_blocksize = at::sparse_csr::getBlockSize(self);
     TORCH_CHECK(self_blocksize == blocksize, "to_sparse_bsc:",
@@ -1717,7 +1772,10 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
   return self;
 }
 
-Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
+Tensor sparse_compressed_to_sparse_csc(const Tensor& self, const int64_t n_dense_dim) {
+  if (n_dense_dim != 0) {
+    AT_ERROR("sparse_compressed_to_sparse_csc conversion does not support hybrid dimensions");
+  }
   if (self.layout() == kSparseCsr) {
     return sparse_compressed_to_flipped(self, c10::nullopt, "to_sparse_csc");
   }
@@ -1730,7 +1788,7 @@ Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
   return self;
 }
 
-Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
+Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim) {
   TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
   TORCH_CHECK(sparse_dim <= 2,
               "sparse_dim must be less than or equal to 2");
@@ -1757,11 +1815,14 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
       self.layout());
 }
 
-Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize) {
+Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, const int64_t n_dense_dim) {
   Layout layout_ = layout.value_or(kSparse);
   TORCH_CHECK(!blocksize.has_value() || layout_ == kSparseBsr || layout_ == kSparseBsc,
               "to_sparse: ", self.layout(), " to ", layout_,
               " conversion does not use the specified blocksize ", blocksize.value(), ".");
+  if (n_dense_dim != 0) {
+    AT_ERROR("sparse_compressed_to_sparse for ", self.layout(), " to ", layout_, " conversion does not support hybrid dimensions");
+  }
   if (self.layout() == layout_ && (!blocksize.has_value() || at::sparse_csr::getBlockSize(self) == *blocksize)) {
     return self;
   }
@@ -1771,26 +1832,26 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
   case kSparse:
     return sparse_compressed_to_sparse(self, 2);
   case kSparseCsr:
-    return sparse_compressed_to_sparse_csr(self);
+    return sparse_compressed_to_sparse_csr(self, n_dense_dim);
   case kSparseCsc:
-    return sparse_compressed_to_sparse_csc(self);
+    return sparse_compressed_to_sparse_csc(self, n_dense_dim);
   case kSparseBsr:
     if (blocksize.has_value()) {
-      return sparse_compressed_to_sparse_bsr(self, *blocksize);
+      return sparse_compressed_to_sparse_bsr(self, *blocksize, n_dense_dim);
     } else {
       DimVector blocksize_ = at::sparse_csr::getBlockSize(self);
       TORCH_CHECK(blocksize_.size() == 2, "to_sparse: ", self.layout(), " to ", layout_,
                   " conversion requires blocksize specified.");
-      return sparse_compressed_to_sparse_bsr(self, blocksize_);
+      return sparse_compressed_to_sparse_bsr(self, blocksize_, n_dense_dim);
     }
   case kSparseBsc:
     if (blocksize.has_value()) {
-      return sparse_compressed_to_sparse_bsc(self, *blocksize);
+      return sparse_compressed_to_sparse_bsc(self, *blocksize, n_dense_dim);
     } else {
       DimVector blocksize_ = at::sparse_csr::getBlockSize(self);
       TORCH_CHECK(blocksize_.size() == 2, "to_sparse: ", self.layout(), " to ", layout_,
                   " conversion requires blocksize specified.");
-      return sparse_compressed_to_sparse_bsc(self, blocksize_);
+      return sparse_compressed_to_sparse_bsc(self, blocksize_, n_dense_dim);
     }
   default:
     break;
@@ -1799,11 +1860,14 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
   return Tensor();
 }
 
-Tensor sparse_coo_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize) {
+Tensor sparse_coo_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, const int64_t n_dense_dim) {
   Layout layout_ = layout.value_or(kSparse);
   TORCH_CHECK(!blocksize.has_value() || layout_ == kSparseBsr || layout_ == kSparseBsc,
               "to_sparse: ", self.layout(), " to ", layout_,
               " conversion does not use the specified blocksize ", blocksize.value(), ".");
+  if (n_dense_dim != 0) {
+    AT_ERROR("sparse_coo_to_sparse for ", self.layout(), " to ", layout_, " conversion does not support hybrid dimensions");
+  }
   if (self.layout() == layout_) {
     return self;
   }
@@ -1813,17 +1877,17 @@ Tensor sparse_coo_to_sparse(const Tensor& self, c10::optional<c10::Layout> layou
   case kSparse:
     return self;
   case kSparseCsr:
-    return self.to_sparse_csr();
+    return self.to_sparse_csr(n_dense_dim);
   case kSparseCsc:
-    return self.to_sparse_csc();
+    return self.to_sparse_csc(n_dense_dim);
   case kSparseBsr:
     TORCH_CHECK(blocksize.has_value(), "to_sparse: ", self.layout(), " to ", layout_,
                 " conversion requires blocksize specified.");
-    return self.to_sparse_bsr(*blocksize);
+    return self.to_sparse_bsr(*blocksize, n_dense_dim);
   case kSparseBsc:
     TORCH_CHECK(blocksize.has_value(), "to_sparse: ", self.layout(), " to ", layout_,
                 " conversion requires blocksize specified.");
-    return self.to_sparse_bsc(*blocksize);
+    return self.to_sparse_bsc(*blocksize, n_dense_dim);
     default:
       break;
   }
