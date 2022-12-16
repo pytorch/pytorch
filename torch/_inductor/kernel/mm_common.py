@@ -4,7 +4,6 @@ import logging
 import sympy
 
 import torch
-from torch._inductor import config as inductor_config
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
@@ -69,24 +68,6 @@ def acc_type(dtype):
     if dtype in (torch.float16, torch.bfloat16):
         return "tl.float32"
     return f"tl.{dtype}".replace("torch.", "")
-
-
-@functools.lru_cache(None)
-def is_big_gpu(index):
-    cores = torch.cuda.get_device_properties(index).multi_processor_count
-    if cores < 80:  # V100
-        log.warning("not enough cuda cores to use max_autotune mode")
-        return False
-    return True
-
-
-def use_triton_template(layout):
-    return (
-        inductor_config.max_autotune
-        and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
-        and is_big_gpu(layout.device.index or 0)
-    )
 
 
 def mm_options(config, sym_k, layout):

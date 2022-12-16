@@ -155,7 +155,7 @@ class TestSelectAlgorithm(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._inductor.kernel.mm_common import is_big_gpu
+    from torch._inductor.utils import is_big_gpu
 
     if IS_LINUX and HAS_CUDA and is_big_gpu(0):
         run_tests()

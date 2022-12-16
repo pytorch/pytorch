@@ -76,7 +76,7 @@ class DiskCache:
         super().__init__()
         self.unique_name = unique_name
 
-    def lookup(self, key, generate):
+    def lookup(self, key: Any, generate: Callable[[], Any]):
         """
         Check if we have already generated key, if not call generate()
         to populate the cache.
@@ -120,7 +120,7 @@ def write(source_code, ext, extra=""):
     return basename, path
 
 
-def write_atomic(path, source_code):
+def write_atomic(path: str, source_code: str):
     # use a temp file for thread safety
     fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
     with os.fdopen(fd, "w") as f:

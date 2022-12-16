@@ -6,15 +6,9 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import ceildiv as cdiv
+from ..utils import ceildiv as cdiv, use_triton_template
 
-from .mm_common import (
-    addmm_epilogue,
-    mm_args,
-    mm_configs,
-    mm_options,
-    use_triton_template,
-)
+from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
 
 aten = torch.ops.aten
 
