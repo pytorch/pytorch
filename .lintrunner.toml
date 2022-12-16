@@ -783,6 +783,7 @@ include_patterns = [
     'benchmarks/dynamo/**/*.py',
     'torch/_inductor/**/*.py',
     'test/inductor/**/*.py',
+    'test/test_weak.py',
     'torch/onnx/**/*.py',
     'torch/package/**/*.py',
     'torch/_decomp/**/*.py',
@@ -818,3 +819,21 @@ init_command = [
     'usort==1.0.2',
 ]
 is_formatter = true
+
+[[linter]]
+code = 'COPYRIGHT'
+include_patterns = ['**']
+exclude_patterns = ['.lintrunner.toml']
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=Confidential and proprietary',
+    '--linter-name=COPYRIGHT',
+    '--error-name=Confidential Code',
+    """--error-description=\
+        Proprietary and confidential source code\
+        should not be contributed to PyTorch codebase\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
