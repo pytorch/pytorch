@@ -303,32 +303,22 @@ class GradModeVariable(ContextWrappingVariable):
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(target_values, kwargs):
-        values = target_values
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
         # cache_enabled : Optional[bool] = None):cache_enabled
-        assert "device_type" in kwargs
-        values.append(kwargs["device_type"])
-        del kwargs["device_type"]
+        bound_args = inspect.signature(torch.autocast).bind(*target_values, **kwargs)
+        bound_args.apply_defaults()
+        target_values = []
+        kwargs.clear()
 
-        if "dtype" in kwargs:
-            values.append(kwargs["dtype"])
-            del kwargs["dtype"]
-        else:
-            values.append(variables.ConstantVariable(None))
-
-        if "enabled" in kwargs:
-            values.append(kwargs["enabled"])
-            del kwargs["enabled"]
-        else:
-            values.append(variables.ConstantVariable(True))
-
-        if "cache_enabled" in kwargs:
-            values.append(kwargs["cache_enabled"])
-            del kwargs["cache_enabled"]
-        else:
-            values.append(variables.ConstantVariable(None))
+        for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
+            if isinstance(bound_args.arguments[key], VariableTracker):
+                target_values.append(bound_args.arguments[key])
+            else:
+                target_values.append(
+                    variables.ConstantVariable(bound_args.arguments[key])
+                )
 
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
