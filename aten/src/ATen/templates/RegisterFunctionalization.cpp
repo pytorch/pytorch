@@ -2,6 +2,7 @@
 // ${generated_comment}
 
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/FunctionalInverses.h>
 #include <torch/library.h>
