@@ -515,12 +515,6 @@ class TestFSDPMisc(FSDPTest):
         # Manually construct this list but verify against the global list of
         # homogeneous attribute names
         all_attr_name_and_values = [
-            (
-                "backward_prefetch",
-                BackwardPrefetch.BACKWARD_PRE,
-                BackwardPrefetch.BACKWARD_POST,
-            ),
-            ("forward_prefetch", False, True),
             ("_use_orig_params", False, True),
             ("limit_all_gathers", False, True),
         ]
