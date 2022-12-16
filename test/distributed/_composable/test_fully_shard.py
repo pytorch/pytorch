@@ -479,7 +479,6 @@ class TestFSDPModelCheckpointing(FSDPTest):
             self.assertEqual(p.sum(), 0)
 
         sd = {k: v.clone() for k, v in composable_sd.items()}
-        print(f"sd keys: {list(sd.keys())}")
         load_composable.load_state_dict(sd)
         self._check_model_parity(load_composable, save_composable)
 
@@ -544,8 +543,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
                     save_model,
                     policy=ModuleWrapPolicy({TransformerEncoderLayer, TransformerDecoderLayer}),
                     ignored_modules=(
-                        [mod for mod in save_model.get_ignored_modules()]
-                        if ignore_modules else []
+                        save_model.get_ignored_modules() if ignore_modules else []
                     )
                 )
 
@@ -565,8 +563,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
                     load_model,
                     policy=ModuleWrapPolicy({TransformerDecoderLayer, TransformerEncoderLayer}),
                     ignored_modules=(
-                        [mod for mod in load_model.get_ignored_modules()]
-                        if ignore_modules else []
+                        load_model.get_ignored_modules() if ignore_modules else []
                     )
                 )
                 load_model.load_state_dict(state_dict)
