@@ -235,6 +235,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 1e-2})
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_coalesce(self, device, dtype, coalesced):
 
         def _test_coalesce(t):
@@ -4181,7 +4182,8 @@ class TestSparseAny(TestCase):
                         RuntimeError, "Only tensors with two sparse dimensions can be converted to the Sparse(Csr|Csc) layout"):
                     explicit_to_sparse(t)
                 continue
-            elif from_layout in {torch.sparse_csr, torch.sparse_csc} and to_layout is torch.sparse_coo and is_batch:
+            elif from_layout in {torch.sparse_csr, torch.sparse_csc,
+                                 torch.sparse_bsr, torch.sparse_bsc} and to_layout is torch.sparse_coo and is_batch:
                 with self.assertRaisesRegex(RuntimeError,
                                             "crow_indices is supposed to be a vector, but got \\d+ dimensional tensor"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
@@ -4189,16 +4191,6 @@ class TestSparseAny(TestCase):
                                             "crow_indices is supposed to be a vector, but got \\d+ dimensional tensor"):
                     explicit_to_sparse(t)
                 continue
-            elif from_layout in {torch.sparse_bsr, torch.sparse_bsc} and to_layout is torch.sparse_coo:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        "sparse_compressed_to_sparse expected SparseCsr or SparseCsc layout but got Sparse(Bsr|Bsc)"):
-                    t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        "sparse_compressed_to_sparse expected SparseCsr or SparseCsc layout but got Sparse(Bsr|Bsc)"):
-                    explicit_to_sparse(t)
-                self.skipTest('NOT IMPL')
             elif (from_layout, to_layout) in {(torch.sparse_bsc, torch.sparse_csr), (torch.sparse_bsc, torch.sparse_csc),
                                               (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc),
                                               (torch.sparse_csc, torch.sparse_bsr), (torch.sparse_csc, torch.sparse_bsc),
@@ -4241,6 +4233,14 @@ class TestSparseAny(TestCase):
                 # Also, check consistency with explicit conversion methods:
                 r2 = explicit_to_sparse(t)
                 self.assertEqual(r2, r)
+
+        # extra tests
+        if (from_layout, to_layout) == (torch.sparse_csr, torch.sparse_bsr):
+            # See gh-90910
+            t = torch.tensor([[0, 0, 1, 0], [0, 1, 0, 0]], dtype=dtype, device=device).to_sparse_csr()
+            r = t.to_sparse_bsr(2, 2)
+            torch._validate_sparse_compressed_tensor_args(r.crow_indices(), r.col_indices(), r.values(), r.shape, r.layout)
+            self.assertEqual(r, t)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
