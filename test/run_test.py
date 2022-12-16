@@ -747,6 +747,9 @@ def run_test_ops(test_module, test_directory, options):
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", "--flake-runs=50"]
+    elif options.continue_through_error:
+        # If continue through error, don't stop on first failure
+        rerun_options = ["--reruns=2"]
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
