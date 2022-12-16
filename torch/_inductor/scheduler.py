@@ -953,39 +953,49 @@ class Scheduler:
                         node1, node2 = node2, node1
 
                 if (node1, node2) in possible_fusions or (
-                    node1,
                     node2,
+                    node1,
                 ) in possible_fusions:
                     continue
 
-                if not isinstance(node2, (FusedSchedulerNode, SchedulerNode)):
-                    # TODO: Handle fused nodes
-                    continue
+                def all_nodes(*args):
+                    for a in args:
+                        yield from a.get_nodes()
 
-                if isinstance(node2, FusedSchedulerNode) and any(
-                    not isinstance(n, SchedulerNode) for n in node2.get_nodes()
+                if any(
+                    not isinstance(n, (FusedSchedulerNode, SchedulerNode))
+                    for n in all_nodes(node1, node2)
                 ):
                     continue
+
+                def node_ndim(node):
+                    pointwise, reduction = node.get_ranges()
+                    return len(pointwise) + len(reduction)
+
+                ndim = max(node_ndim(n) for n in node1.get_nodes())
+
+                def filter_in(dep):
+                    if not isinstance(dep, MemoryDep):
+                        return False
+                    return (
+                        isinstance(dep, MemoryDep)
+                        and dep.name == buf_name
+                        and len(dep.size) == ndim
+                    )
 
                 node1_buf_deps = [
                     dep
                     for dep in (node1.read_writes.reads | node1.read_writes.writes)
-                    if dep.name == buf_name
+                    if filter_in(dep)
                 ]
                 node2_buf_deps = [
                     dep
                     for dep in (node2.read_writes.reads | node2.read_writes.writes)
-                    if dep.name == buf_name
+                    if filter_in(dep)
                 ]
 
-                orders = set()
                 for dep1, dep2 in itertools.product(node1_buf_deps, node2_buf_deps):
                     if dep1 == dep2:
-                        continue
-
-                    if not isinstance(dep1, MemoryDep) or not isinstance(
-                        dep2, MemoryDep
-                    ):
                         continue
 
                     reorder = self.reorder_deps(dep1, dep2)
