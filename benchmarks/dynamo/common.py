@@ -57,7 +57,6 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
     "demucs",  # OOM
     # Huggingface
-    "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
 ]
 
@@ -86,43 +85,20 @@ CI_SKIP_AOT_EAGER_TRAINING = [
 
 CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     *CI_SKIP_AOT_EAGER_TRAINING,
-    "BERT_pytorch",
-    "dlrm",
     "drq",
-    "functorch_dp_cifar10",
-    "hf_Bart",
-    "hf_GPT2",
-    "hf_Reformer",
-    "hf_T5_base",
     "mobilenet_v2_quantized_qat",
     "resnet50_quantized_qat",
     "soft_actor_critic",
-    "speech_transformer",
     "tacotron2",
-    "timm_efficientnet",
-    "timm_regnet",
-    "timm_vovnet",
     "tts_angular",
-    "DebertaForMaskedLM",
-    "DebertaForQuestionAnswering",
-    "DebertaV2ForQuestionAnswering",
-    "beit_base_patch16_224",
     "botnet26t_256",
-    "convnext_base",
     "crossvit_9_240",
-    "dpn107",
     "eca_botnext26ts_256",
     "eca_halonext26ts",
     "hrnet_w18",
     "levit_128",
-    "pit_b_224",
-    "poolformer_m36",
-    "regnety_002",
     "sebotnet33ts_256",
-    "swin_base_patch4_window7_224",
     "twins_pcpvt_base",
-    "visformer_small",
-    "volo_d1_224",
 ]
 
 CI_SKIP_INDCUTOR_INFERENCE = [
@@ -142,6 +118,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "tacotron2",
     "vision_maskrcnn",  # accuracy
     # Huggingface
+    "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
@@ -162,19 +139,9 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "XGLMForCausalLM",  # OOM
     # TIMM
     "convit_base",  # fp64_OOM
-    "dm_nfnet_f0",  # accuracy
-    "convmixer_768_32",  # accuracy - Unable to repro on A100
-    "hrnet_w18",  # accuracy - Unable to repro on A100
-    "sebotnet33ts_256",  # accuracy - Unable to repro on A100
-    "hrnet_w18",  # accuracy - Unable to repro on A100
-    "eca_botnext26ts_256",  # accuracy - Fails on A100
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
-    "res2net101_26w_4s",  # accuracy
-    "spnasnet_100",  # accuracy
-    "resnest101e",  # accuracy
-    "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -2116,14 +2083,23 @@ def run(runner, args, original_dir=None):
         for name in runner.iter_model_names(args):
             current_name = name
             placeholder_batch_size = 0
-            try:
-                subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"])
-            except subprocess.SubprocessError:
-                print("ERROR")
+
+            def write_csv():
                 for device in args.devices:
                     output_csv(
                         output_filename, [], [device, name, placeholder_batch_size, 0.0]
                     )
+
+            try:
+                subprocess.check_call(
+                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=60 * 20
+                )
+            except subprocess.TimeoutExpired:
+                print("TIMEOUT", file=sys.stderr)
+                write_csv()
+            except subprocess.SubprocessError:
+                print("ERROR", file=sys.stderr)
+                write_csv()
         print_summary(output_filename)
 
 

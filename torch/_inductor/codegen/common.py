@@ -2,19 +2,24 @@ import collections
 import contextlib
 import itertools
 import logging
-import math
 import re
-import textwrap
 import typing
 from collections import namedtuple
-from io import StringIO
 from itertools import chain
 
 import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
-from ..utils import free_symbol_startswith, sympy_dot, sympy_subs, sympy_symbol, unique
+from ..utils import (
+    DeferredLineBase,
+    free_symbol_startswith,
+    IndentedBuffer,
+    sympy_dot,
+    sympy_subs,
+    sympy_symbol,
+    unique,
+)
 from ..virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -125,86 +130,12 @@ class OpOverrides:
         return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
 
 
-class IndentedBuffer:
-    tabwidth = 4
-
-    def __init__(self, initial_indent=0):
-        self._lines = []
-        self._indent = initial_indent
-
-    def getvalue(
-        self,
-    ):
-        buf = StringIO()
-        for line in self._lines:
-            if isinstance(line, DeferredLine):
-                line = line()
-                if line is None:
-                    continue
-            assert isinstance(line, str)
-            buf.write(line)
-            buf.write("\n")
-        return buf.getvalue()
-
-    def clear(self):
-        self._lines.clear()
-
-    def __bool__(self):
-        return bool(self._lines)
-
-    def prefix(self):
-        return " " * (self._indent * self.tabwidth)
-
-    def writeline(self, line):
-        if isinstance(line, DeferredLine):
-            self._lines.append(line.with_prefix(self.prefix()))
-        elif line.strip():
-            self._lines.append(f"{self.prefix()}{line}")
-        else:
-            self._lines.append("")
-
-    def writelines(self, lines):
-        for line in lines:
-            self.writeline(line)
-
-    def indent(self, offset=1):
-        @contextlib.contextmanager
-        def ctx():
-            self._indent += offset
-            yield
-            self._indent -= offset
-
-        return ctx()
-
-    def splice(self, other_code, strip=False):
-        if isinstance(other_code, IndentedBuffer):
-            dedent = float("inf")
-            for line in other_code._lines:
-                if line:
-                    dedent = min(dedent, len(line) - len(line.lstrip()))
-            if math.isinf(dedent):
-                dedent = 0
-            for line in other_code._lines:
-                IndentedBuffer.writeline(self, line[dedent:])
-        else:
-            other_code = textwrap.dedent(other_code)
-            if strip:
-                other_code = other_code.lstrip()
-            if not other_code:
-                return
-            other_code = other_code.rstrip()
-            for line in other_code.split("\n"):
-                self.writeline(line)
-
-
-class DeferredLine:
+class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
     def __init__(self, name, line):
-        if not line.strip():
-            line = ""
+        super().__init__(line)
         self.name = name
-        self.line = line
 
     def __call__(self):
         if (
@@ -214,20 +145,8 @@ class DeferredLine:
             return self.line
         return None
 
-    def with_prefix(self, prefix):
-        return DeferredLine(self.name, f"{prefix}{self.line}")
-
-    def lstrip(self):
-        return DeferredLine(self.name, self.line.lstrip())
-
-    def __getitem__(self, index):
-        return DeferredLine(self.name, self.line[index])
-
-    def __bool__(self):
-        return bool(self.line)
-
-    def __len__(self):
-        return len(self.line)
+    def _new_line(self, line):
+        return DeferredLine(self.name, line)
 
 
 class DeferredIndentedBuffer(IndentedBuffer):
@@ -469,7 +388,6 @@ class CSE:
         iter_buffers=None,
         store_cache=None,
         reduction_cache=None,
-        varname_map=None,
     ):
         self.prefix = prefix
         self.suffix = suffix
@@ -478,8 +396,8 @@ class CSE:
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
-        self.varname_map = varname_map or {}
         self.invalidated_stores = set()
+        self.varname_map = {}
 
     def invalidate(self, keep_vars: typing.Set[str]):
         for name, tmp in list(self.store_cache.items()):
@@ -490,12 +408,11 @@ class CSE:
 
     def clone(self):
         return CSE(
-            prefix=self.prefix,
-            suffix=self.suffix,
-            name_prefix=self.name_prefix,
-            iter_buffers=self.iter_buffer_ids,
-            store_cache=self.store_cache,
-            varname_map=self.varname_map,
+            self.prefix,
+            self.suffix,
+            self.name_prefix,
+            self.iter_buffer_ids,
+            self.store_cache,
         )
 
     def generate(
