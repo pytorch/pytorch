@@ -11,6 +11,9 @@ from typing import Any, Callable, Optional, Tuple, Union, List
 from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec
 from .pytree_hacks import tree_map_
 from functools import partial
+import os
+import sys
+from torch._decomp import decomposition_table
 
 from torch._C._functorch import (
     _add_batch_dim,
@@ -195,6 +198,39 @@ def _get_name(func: Callable):
     # examples, don't have a __name__.
     return repr(func)
 
+
+DECOMPOSITIONS_LOADED = False
+VMAP_DECOMPOSITIONS_LIB = None
+
+# torch.package, Python 3.11, and torch.jit-less environments are unhappy with
+# decompositions. Only load them when needed if possible.
+def lazy_load_decompositions():
+    global DECOMPOSITIONS_LOADED
+    if DECOMPOSITIONS_LOADED:
+        return
+    DECOMPOSITIONS_LOADED = True
+
+    if not (os.environ.get("PYTORCH_JIT", "1" if sys.version_info < (3, 11) else "0") == "1" and
+            __debug__):
+        return
+    # use an alternate way to register an operator into the decomposition table
+    # _register_jit_decomposition doesn't work for some operators, e.g. addr,
+    #  because the Tensor types generated cannot be unioned by torchscript
+    # decomp should be type OpOverload
+    global VMAP_DECOMPOSITIONS_LIB
+    VMAP_DECOMPOSITIONS_LIB = torch.library.Library("aten", "IMPL", "FuncTorchBatched")
+
+
+    def _register_python_decomposition_vmap(decomp):
+        if decomp in decomposition_table:
+            VMAP_DECOMPOSITIONS_LIB.impl(decomp, decomposition_table[decomp])
+        else:
+            raise RuntimeError(f"could not find decomposition for {decomp}")
+
+
+    _register_python_decomposition_vmap(torch.ops.aten.mse_loss_backward.default)
+    _register_python_decomposition_vmap(torch.ops.aten.addr.default)
+
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
 # on BatchedTensors perform the batched operations that the user is asking for.
@@ -362,6 +398,7 @@ def vmap(
 
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
+        lazy_load_decompositions()
         _check_out_dims_is_int_or_int_pytree(out_dims, func)
         batch_size, flat_in_dims, flat_args, args_spec = _process_batched_inputs(in_dims, args, func)
         return _flat_vmap(
