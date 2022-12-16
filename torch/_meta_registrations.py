@@ -250,15 +250,6 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     return L, infos
 
 
-# From aten/src/ATen/native/BatchLinearAlgebra.cpp
-@register_meta(aten.linalg_cholesky.default)
-def meta_linalg_cholesky(A: Tensor, upper=False):
-    # All the checks done on info in the corresponding C++ function
-    # are data dependent, so we skip info computation
-    L, infos = linalg_cholesky_ex(A, upper, False)
-    return L, infos
-
-
 # From aten/src/ATen/native/ReflectionPad.cpp
 @register_meta(
     [aten.reflection_pad2d_backward.default, aten.replication_pad2d_backward.default]
@@ -1012,8 +1003,8 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     )
     check(p >= 0, lambda: "cdist only supports non-negative p values")
     check(
-        compute_mode >= 0 and compute_mode <= 2,
-        lambda: f"possible modes: 0, 1, 2, but was: {compute_mode}",
+        compute_mode in (None, 1, 2),
+        lambda: f"possible modes: None, 1, 2, but was: {compute_mode}",
     )
     r1 = x1.size(-2)
     r2 = x2.size(-2)
@@ -1833,7 +1824,14 @@ def meta_scatter_add_(self, dim, index, src):
     return self
 
 
-@register_meta(aten.scatter)
+@register_meta(
+    [
+        aten.scatter.src,
+        aten.scatter.value,
+        aten.scatter.reduce,
+        aten.scatter.value_reduce,
+    ]
+)
 @out_wrapper()
 def meta_scatter(self, dim, index, src_or_value, reduce=None):
     src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
@@ -1841,11 +1839,177 @@ def meta_scatter(self, dim, index, src_or_value, reduce=None):
     return self.new_empty(self.shape)
 
 
-@register_meta(aten.scatter_)
+@register_meta(
+    [
+        aten.scatter_.src,
+        aten.scatter_.value,
+        aten.scatter_.reduce,
+        aten.scatter_.value_reduce,
+    ]
+)
 def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
     scatter_meta_impl(self, dim, index, src, reduce)
     return self
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention,
+    ]
+)
+def meta__scaled_dot_product_flash(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float = 0.0,
+    return_softmax: bool = False,
+    is_causal: bool = False,
+):
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    max_seqlen_batch_q = query.size(2)
+    head_dim = query.size(3)
+
+    max_seqlen_batch_k = key.size(2)
+
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    Nnz_q = batch_size * max_seqlen_batch_q
+
+    output = torch.empty(
+        (Nnz_q, num_heads, head_dim), dtype=query.dtype, device=query.device
+    )
+    ouput = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
+        1, 2
+    )
+    max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
+    logsumexp = torch.empty(
+        (batch_size, num_heads, max_seqlen_q),
+        dtype=torch.float,
+        device=query.device,
+    )
+    is_sm80 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+    is_sm75 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5)
+    head_size_rounded = 64 if head_dim <= 64 else 128
+    blocksize_c = (
+        128
+        if (head_size_rounded == 128 and (dropout_p != 0.0 or not is_sm80))
+        or (is_sm75 and head_size_rounded == 64 and dropout_p != 0.0)
+        else 256
+    )
+    max_seqlen_k = math.ceil(max_seqlen_batch_k / blocksize_c) * blocksize_c
+    if max_seqlen_k <= 128:
+        max_seqlen_k = 128
+    elif max_seqlen_k <= 256:
+        max_seqlen_k = 256
+
+    softmax = torch.empty(
+        (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
+        dtype=query.dtype,
+        device=query.device,
+    )
+    return ouput, logsumexp, softmax
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_efficient_attention,
+    ]
+)
+def meta__scaled_dot_product_efficient(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    compute_log_sumexp: bool,
+    is_causal: bool = False,
+):
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    B = query.size(0)
+    M = query.size(1)
+    N = key.size(1)
+    num_heads = query.size(-2)
+    K = query.size(-1)
+    Kv = value.size(-1)
+
+    res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
+
+    logsumexp_dim = math.ceil(query.size(2) / 32) * 32 if compute_log_sumexp else 0
+    logsum_exp = torch.empty(
+        (B, num_heads, logsumexp_dim),
+        dtype=torch.float,
+        device=query.device,
+    )
+
+    res = res.transpose(1, 2)
+
+    return res, logsum_exp
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_efficient_attention_backward,
+    ]
+)
+def meta__scaled_dot_product_efficient_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    is_causal: bool = False,
+):
+    is_alias = (
+        query._storage().data_ptr()
+        == key._storage().data_ptr()
+        == value._storage().data_ptr()
+    )
+
+    grad_out = grad_out.transpose(1, 2)
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    B = query.size(0)
+    M = query.size(1)
+    N = key.size(1)
+    nH = query.size(2)
+    K = query.size(3)
+
+    grad_kv_needs_init = is_causal and N > M
+
+    chunk_grad_outputs: bool = (
+        (not grad_kv_needs_init)
+        and M == N
+        and query.size(3) == value.size(3)
+        and is_alias
+    )
+
+    if chunk_grad_outputs:
+        chunk = torch.empty((B, M, 3, nH, K), dtype=query.dtype, device=query.device)
+        grad_q = chunk.select(2, 0)
+        grad_k = chunk.select(2, 1)
+        grad_v = chunk.select(2, 2)
+    else:
+        grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
+        grad_k = (
+            torch.zeros(key.shape, dtype=key.dtype, device=key.device)
+            if grad_kv_needs_init
+            else torch.empty(key.shape, dtype=key.dtype, device=key.device)
+        )
+        grad_v = (
+            torch.zeros(value.shape, dtype=value.dtype, device=value.device)
+            if grad_kv_needs_init
+            else torch.empty(value.shape, dtype=value.dtype, device=value.device)
+        )
+
+    return grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2)
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
@@ -1859,32 +2023,6 @@ def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
 def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
     scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
     return self
-
-
-@register_meta(aten.upsample_nearest2d.vec)
-def upsample_nearest2d_vec(input, output_size, scale_factors):
-    mem_format = utils.suggest_memory_format(input)
-    spatial_dimensions = input.dim() - 2
-
-    input_shape = input.shape
-    if output_size is not None:
-        assert scale_factors is None
-        out_size = output_size
-    elif scale_factors is not None:
-        assert output_size is None
-        out_size = []
-        for i in range(spatial_dimensions):
-            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
-            assert sym_float >= 0
-            out_size.append(math.floor(sym_float))
-
-    output_height = out_size[0]
-    output_width = out_size[1]
-    nbatch = input_shape[0]
-    channels = input_shape[1]
-    return input.new_empty((nbatch, channels, output_height, output_width)).to(
-        memory_format=mem_format
-    )
 
 
 @register_meta([aten.sort.default, aten.sort.stable])
@@ -1983,6 +2121,12 @@ def activate_meta():
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
+            if op_overload in global_decomposition_table["meta"]:
+                raise RuntimeError(
+                    f"{op_overload} is a CompositeImplicitAutograd op, we shouldn't "
+                    "register meta function for it. Instead, we should let the decomposition run and write "
+                    "meta kernels for the base operators."
+                )
             pass
         elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
@@ -1996,6 +2140,7 @@ def activate_meta():
             "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
             "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
             "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
+            "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32  # noqa: B950
         }:
             pass
         else:

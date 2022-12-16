@@ -21,8 +21,6 @@ from time import sleep, time
 from typing import Any, Callable, Dict, List
 
 import torch
-
-from torch.hub import tqdm
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
 
@@ -331,7 +329,7 @@ def get_warning_all_flag(warning_all=True):
 
 
 def cpp_flags():
-    return "-std=c++14 -Wno-unused-variable"
+    return "-std=c++17 -Wno-unused-variable"
 
 
 def optimization_flags():
@@ -437,7 +435,7 @@ class CppCodeCache:
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
-                        raise exc.CppCompileError(cmd, e.output)
+                        raise exc.CppCompileError(cmd, e.output) from e
 
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
@@ -597,7 +595,7 @@ class AsyncCompile:
         if hasattr(pool, "_start_queue_management_thread"):
             pool._start_queue_management_thread()
         else:
-            for _ in range(config.compile_threads):
+            for i in range(config.compile_threads):
                 pool._adjust_process_count()
             pool._start_executor_manager_thread()
         _compile_end()
@@ -638,26 +636,10 @@ class AsyncCompile:
         return self.submit(task)
 
     def wait(self, scope: Dict[str, Any]):
-        num_kernels = len(
-            [
-                value
-                for key, value in scope.items()
-                if isinstance(value, (Future, TritonFuture))
-            ]
-        )
-        pbar = tqdm(
-            total=num_kernels,
-            desc="Inductor Compilation",
-            disable=config.disable_progress,
-            delay=15,
-        )
         if config.compile_threads > 1:
-            for key, result in scope.items():
-                if config.verbose_progress:
-                    pbar.set_postfix_str(key)
+            for key, result in list(scope.items()):
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
-                    pbar.update(1)
 
         _compile_end()
 

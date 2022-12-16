@@ -262,10 +262,10 @@ def error_on_missing_kernels(
     try:
         with open(kernel_defn_file_path, "r") as f:
             backend_defns = f.read()
-    except IOError:
+    except IOError as e:
         raise AssertionError(
             f"Unable to read from the specified impl_path file: {kernel_defn_file_path}"
-        )
+        ) from e
 
     if full_codegen is None:
         full_codegen = []

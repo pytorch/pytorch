@@ -48,7 +48,12 @@ class ExprPrinter(Printer):
         base = self._print(base)
         assert exp.is_integer
         exp = int(exp)
-        return "*".join([self.paren(base)] * exp)
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        elif exp < 0:
+            return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+        else:  # exp == 0
+            return "1"
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -590,8 +595,6 @@ class Kernel(CodeGen):
 
     def __enter__(self):
         class CSEProxy:
-            self.name = "CSEProxy"
-
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):

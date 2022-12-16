@@ -677,8 +677,8 @@ class TensorLikePair(Pair):
 
         try:
             return torch.as_tensor(tensor_like)
-        except Exception:
-            raise UnsupportedInputs()
+        except Exception as e:
+            raise UnsupportedInputs() from e
 
     def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
         if tensor.layout not in {
@@ -1076,35 +1076,9 @@ def originate_pairs(
     Returns:
         (List[Pair]): Originated pairs.
     """
-    if isinstance(actual, torch.TypedStorage) and isinstance(
-        expected, torch.TypedStorage
-    ):
-        actual_len = actual._size()
-        expected_len = expected._size()
-        if actual_len != expected_len:
-            raise ErrorMeta(
-                AssertionError,
-                f"The length of the sequences mismatch: {actual_len} != {expected_len}",
-                id=id,
-            )
-
-        pairs = []
-        for idx in range(actual_len):
-            pairs.extend(
-                originate_pairs(
-                    actual._getitem(idx),
-                    expected._getitem(idx),
-                    pair_types=pair_types,
-                    sequence_types=sequence_types,
-                    mapping_types=mapping_types,
-                    id=(*id, idx),
-                    **options,
-                )
-            )
-        return pairs
     # We explicitly exclude str's here since they are self-referential and would cause an infinite recursion loop:
     # "a" == "a"[0][0]...
-    elif (
+    if (
         isinstance(actual, sequence_types)
         and not isinstance(actual, str)
         and isinstance(expected, sequence_types)

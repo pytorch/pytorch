@@ -1319,6 +1319,31 @@ class TestMPS(TestCase):
 
         self.assertEqual(x_cpu, x.cpu())
 
+    def test_view_slice(self):
+        # https://github.com/pytorch/pytorch/issues/83995
+        NUM_SAMPLES = 60
+        s = (0, 1)
+
+        X = torch.rand(8000, 3, dtype=torch.float32, device='cpu')
+        X_mps = X.detach().clone().to("cpu")
+
+        idx = torch.randint(0, X.shape[0], (1,)).repeat(len(s))
+        pts = torch.randint(0, X.shape[0], (NUM_SAMPLES, X.shape[1]))
+        idx_mps = idx.to("mps")
+        pts_mps = pts.to("mps")
+        pts[:, s] = idx
+        pts_mps[:, s] = idx_mps
+
+        actual_pts = torch.zeros(NUM_SAMPLES, X.shape[1], dtype=torch.float)
+        actual_pts_mps = torch.zeros(NUM_SAMPLES, X.shape[1], dtype=torch.float, device="mps")
+
+        for i in range(NUM_SAMPLES):
+            for j in range(X.shape[1]):
+                actual_pts_mps[i, j] = X_mps[pts_mps[i, j], j]
+                actual_pts[i, j] = X[pts[i, j], j]
+                self.assertEqual(actual_pts[i, j], actual_pts_mps[i, j])
+
+
     def test_slice(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
         cpu_x = torch.tensor(values, device='cpu')
@@ -1650,7 +1675,7 @@ class TestMPS(TestCase):
     def test_bool_expand(self):
         x = torch.tensor([[1], [0]], dtype=torch.bool, device='mps')
         y = torch.tensor([0, 1], dtype=torch.bool, device='mps')
-        self.assertNotEqual(x.expand(2, 2), y.expand(2, 2), rtol=0, atol=0, exact_device=True)
+        self.assertFalse(torch.equal(x.expand(2, 2), y.expand(2, 2)))
 
     # Empty unary op should return tensor of the same size
     def test_empty_neg(self):
@@ -3610,6 +3635,15 @@ class TestNLLLoss(TestCase):
         r_mps = m(input_mps)
         self.assertEqual(r_cpu, r_mps.to("cpu"))
 
+        # Arbitrary input dimensions
+        pad = (1, 1, 0, 0, 0, 0)
+        value = 3.5
+        input_cpu = torch.randn((1, 1, 3, 3, 3, 3, 3, 3, 3, 3))
+        input_mps = input_cpu.detach().clone().to("mps")
+        r_cpu = F.pad(input_cpu, pad=pad, value=value)
+        r_mps = F.pad(input_mps, pad=pad, value=value)
+        self.assertEqual(r_cpu, r_mps.to("cpu"))
+
     def test_circular_pad(self):
         # https://github.com/pytorch/pytorch/issues/80856
         k_cpu = torch.ones(3, 3, 9, 9)
@@ -3675,6 +3709,14 @@ class TestNLLLoss(TestCase):
         helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ConstantPad2d)
         # input size < pad size
         helper((1, 2, 3), (0, 0, 0, 1), nn.ConstantPad2d)
+        # pad dims < input dims
+        helper((50, 9, 300), (0, 0, 0, 31), nn.ConstantPad2d)
+        # pad dims == input dims
+        helper((1, 3), (0, 2, 0, 1), nn.ConstantPad2d)
+        # input.numel() == 0 but output.numel() > 0
+        helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
+        # pad dims < input dims - 2
+        helper((1, 2, 3, 4), (1, 2), nn.ConstantPad2d)
 
         # 3D Padding
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
@@ -3682,6 +3724,8 @@ class TestNLLLoss(TestCase):
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReplicationPad3d)
         # Constant Pad 3D
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
+        # input size < pad size
+        helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
 
     # Test stack forward
     def test_stack(self):
@@ -5043,7 +5087,7 @@ class TestNLLLoss(TestCase):
         # see https://github.com/pytorch/pytorch/issues/79835#issuecomment-1164984534
         x = torch.ones(4, dtype=torch.int32, device='mps')
         self.assertEqual(x + 1, torch.full((4,), 2, dtype=torch.int32, device='mps'))
-        self.assertEqual(x + 1.5, torch.full((4,), 2.5, device='mps'), rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(x + 1.5, torch.full((4,), 2.5, device='mps')))
 
     def test_types_binary_op(self):
         # Float * Bool
