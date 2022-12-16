@@ -164,7 +164,7 @@ class NNModuleVariable(VariableTracker):
         @contextmanager
         def record_nn_module_stack():
             try:
-                tx.nn_module_stack[self.module_key] = type(mod)
+                tx.nn_module_stack[self.module_key] = str(type(mod))
                 yield
             finally:
                 del tx.nn_module_stack[self.module_key]
@@ -204,7 +204,6 @@ class NNModuleVariable(VariableTracker):
                         "call_module",
                         self.module_key,
                         *proxy_args_kwargs(args, kwargs),
-                        current_tx=tx,
                     ),
                     **options,
                 )
@@ -347,6 +346,12 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
+        elif name == "keys":
+            assert not (args or kwargs)
+            result = []
+            for name in module.keys():
+                result.append(ConstantVariable(name, **options))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "values":
             assert not (args or kwargs)
             return wrap_values(module.items())
@@ -469,7 +474,6 @@ class NNModuleVariable(VariableTracker):
                     name,
                     args=(proxy_for_mod, *proxy_args),
                     kwargs=proxy_kwargs,
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -506,8 +510,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         try:
             fn = inspect.getattr_static(self.value_type, "__iter__")
-        except AttributeError:
-            raise NotImplementedError()
+        except AttributeError as e:
+            raise NotImplementedError from e
 
         if fn in (
             torch.nn.ModuleList.__iter__,

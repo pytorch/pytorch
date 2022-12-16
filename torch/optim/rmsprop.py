@@ -114,6 +114,44 @@ class RMSprop(Optimizer):
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
 
+    def _init_group(self, group, params_with_grad, grads, square_avgs, momentum_buffer_list, grad_avgs):
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            params_with_grad.append(p)
+
+            if p.grad.is_sparse:
+                raise RuntimeError("RMSprop does not support sparse gradients")
+            grads.append(p.grad)
+
+            state = self.state[p]
+
+            # State initialization
+            if len(state) == 0:
+                state["step"] = 0
+                state["square_avg"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+                if group["momentum"] > 0:
+                    state["momentum_buffer"] = torch.zeros_like(
+                        p, memory_format=torch.preserve_format
+                    )
+                if group["centered"]:
+                    state["grad_avg"] = torch.zeros_like(
+                        p, memory_format=torch.preserve_format
+                    )
+            square_avgs.append(state["square_avg"])
+
+            if group["momentum"] > 0:
+                momentum_buffer_list.append(state["momentum_buffer"])
+            if group["centered"]:
+                grad_avgs.append(state["grad_avg"])
+
+            if group["differentiable"] and isinstance(state["step"], Tensor):
+                raise RuntimeError("`step` can't be a tensor")
+
+            state["step"] += 1
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -134,42 +172,7 @@ class RMSprop(Optimizer):
             grad_avgs = []
             momentum_buffer_list = []
 
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-                params_with_grad.append(p)
-
-                if p.grad.is_sparse:
-                    raise RuntimeError("RMSprop does not support sparse gradients")
-                grads.append(p.grad)
-
-                state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state["step"] = 0
-                    state["square_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
-                    if group["momentum"] > 0:
-                        state["momentum_buffer"] = torch.zeros_like(
-                            p, memory_format=torch.preserve_format
-                        )
-                    if group["centered"]:
-                        state["grad_avg"] = torch.zeros_like(
-                            p, memory_format=torch.preserve_format
-                        )
-                square_avgs.append(state["square_avg"])
-
-                if group["momentum"] > 0:
-                    momentum_buffer_list.append(state["momentum_buffer"])
-                if group["centered"]:
-                    grad_avgs.append(state["grad_avg"])
-
-                if group["differentiable"] and isinstance(state["step"], Tensor):
-                    raise RuntimeError("`step` can't be a tensor")
-
-                state["step"] += 1
+            self._init_group(group, params_with_grad, grads, square_avgs, momentum_buffer_list, grad_avgs)
 
             rmsprop(
                 params_with_grad,

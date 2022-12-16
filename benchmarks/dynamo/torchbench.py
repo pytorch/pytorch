@@ -295,8 +295,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         gc.collect()
         batch_size = benchmark.batch_size
 
-        self.init_optimizer(device, model.parameters())
-
         # Torchbench has quite different setup for yolov3, so directly passing
         # the right example_inputs
         if model_name == "yolov3":
@@ -356,7 +354,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)

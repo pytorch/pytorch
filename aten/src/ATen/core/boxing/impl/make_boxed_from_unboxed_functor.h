@@ -577,14 +577,16 @@ namespace impl {
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
         // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
 #ifdef __cpp_if_constexpr
-        using ReturnType_ = std::decay_t<ReturnType>;
+        // [Note: VC++ and 'std': ambiguous symbol]
+        using ReturnType_ = ::std::decay_t<ReturnType>;
         ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
 #else
         using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
         ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, delay_check(stack));
 #endif
         torch::jit::drop(*stack, num_inputs);
-        push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
+        // See note [ VC++ and 'std': ambiguous symbol]
+        push_outputs<ReturnType_, AllowDeprecatedTypes>::call(::std::move(output), stack);
 #ifdef __cpp_if_constexpr
       } else {
 #else

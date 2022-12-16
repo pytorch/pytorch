@@ -2,7 +2,7 @@
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.distributed.checkpoint.nested_dict import (
+from torch.distributed.checkpoint._nested_dict import (
     flatten_state_dict,
     unflatten_state_dict,
 )
