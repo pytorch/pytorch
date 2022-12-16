@@ -542,6 +542,8 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         gm = permute_linear_fusion(gm)
         gm = permute_matmul_fusion(gm)
 
+    gm = type_cast_matmul_fusion(gm)
+
     # make sure the autograd is disabled.
     if torch.is_grad_enabled():
         return gm
@@ -782,7 +784,7 @@ class NormalizedLinearNode:
 class NormalizedMatmulNode:
     def __init__(self, node: torch.fx.Node) -> None:
         assert node.op == "call_function"
-        assert node.target in [torch.bmm, torch.matmul]
+        assert node.target in [torch.bmm, torch.matmul, torch.mm]
         self.node: torch.fx.Node = node
 
     def get_input(self) -> torch.fx.Node:
@@ -959,6 +961,53 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                     fused_node = module.graph.call_function(
                         transpose_matmul,
                         args=(A, B, Atrans, Btrans),
+                    )
+                node.replace_all_uses_with(fused_node)
+
+    module.graph.lint()
+    module.graph.eliminate_dead_code()
+    module.recompile()
+    return module
+
+def triton_int_mm(A: torch.Tensor, B: torch.Tensor, output_dtype) -> torch.Tensor:
+    from torch._inductor.triton_ops import matmul
+    if A.dtype == torch.int8 and B.dtype == torch.int8 and output_dtype == torch.int32:
+        out = A.new_empty(A.size(0), B.size(1), dtype=output_dtype)
+        torch._triton_mm(A, B, out)
+    else:
+        out = torch.mm(A.int(), b.int())
+    return out
+
+def type_cast_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    for node in module.graph.nodes:
+        if node.op == "call_function" and (
+            node.target == torch.bmm or node.target == torch.matmul or node.target == torch.mm
+        ):
+            normalized = NormalizedMatmulNode(node)
+            A = normalized.get_input()
+            B = normalized.get_other()
+            Atrans = Btrans = False
+            if A.op == "call_method" and A.target == "int":
+                Atrans = True
+                if len(A.args) > 0:
+                    A = A.args[0]
+                else:
+                    A = A.kwargs["input"]
+
+            if B.op == "call_method" and B.target == "int":
+                Btrans = True
+                if len(B.args) > 0:
+                    B = B.args[0]
+                else:
+                    B = B.kwargs["input"]
+
+#            import sys; sys.exit(1)
+
+            if Atrans or Btrans:
+                with module.graph.inserting_before(node):
+                    fused_node = module.graph.call_function(
+                        triton_int_mm,
+                        args=(A, B, torch.int32),
                     )
                 node.replace_all_uses_with(fused_node)
 

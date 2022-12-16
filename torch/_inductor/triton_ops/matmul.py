@@ -9,8 +9,8 @@ if has_triton():
 
     from .autotune import mm_autotune, mm_heuristics
 
-    @mm_heuristics()
     @mm_autotune(get_io_bound_configs=True)
+    @mm_heuristics()
     @triton.jit
     def _kernel(
         A,
@@ -129,8 +129,20 @@ if has_triton():
                 ACC_TYPE=ACC_TYPE,
             )
 
+            return c
+
         @staticmethod
         def forward(a, b, out, allow_tf32=True):
             return _matmul_out._call(a, b, out, allow_tf32)
 
+
+
     matmul_out = _matmul_out.forward
+
+    MATMUL_IS_REGISTERED = None
+    if MATMUL_IS_REGISTERED is None:
+        _test_lib_impl = torch.library.Library("aten", "IMPL")
+        _test_lib_impl.impl("_triton_mm", lambda self, other, res: matmul_out(self, other, res), "CUDA")
+        _test_lib_impl.impl("_triton_mm", lambda self, other, res: res, "Meta")
+    
+        MATMUL_IS_REGISTERED = True

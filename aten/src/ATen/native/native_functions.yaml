@@ -3795,6 +3795,10 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
+- func: _triton_mm(Tensor self, Tensor other, Tensor res) -> Tensor
+  dispatch:
+    CPU: _triton_mm_cpu
+
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 

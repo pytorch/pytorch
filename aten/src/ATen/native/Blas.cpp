@@ -223,4 +223,9 @@ Tensor vdot(const Tensor &self, const Tensor &other){
 
 }
 
+Tensor _triton_mm_cpu(const Tensor& self, const Tensor& other, const Tensor& res) {
+  TORCH_CHECK(false, "Do not call _triton_mm for CPU.");
+  return res;
+}
+
 }}  // namespace at::native
