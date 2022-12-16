@@ -76,9 +76,7 @@ class TestFSDPCheckpoint(FSDPTest):
 
         test_model = copy.deepcopy(model)
         # compose checkpoint and fully_shard
-        test_model.seq = checkpoint(
-            test_model.seq, use_reentrant=use_reentrant
-        )
+        test_model.seq = checkpoint(test_model.seq, use_reentrant=use_reentrant)
         test_model.seq = fully_shard(
             test_model.seq,
             policy=ModuleWrapPolicy({nn.Linear}),
@@ -103,12 +101,8 @@ class TestFSDPCheckpoint(FSDPTest):
         test_model.u1 = fully_shard(test_model.u1, policy=None)
         test_model.u2 = fully_shard(test_model.u2)
 
-        test_model.u1.seq = checkpoint(
-            test_model.u1.seq, use_reentrant=use_reentrant
-        )
-        test_model.u2.seq = checkpoint(
-            test_model.u2.seq, use_reentrant=use_reentrant
-        )
+        test_model.u1.seq = checkpoint(test_model.u1.seq, use_reentrant=use_reentrant)
+        test_model.u2.seq = checkpoint(test_model.u2.seq, use_reentrant=use_reentrant)
 
         self.run_subtests(
             {
@@ -165,9 +159,7 @@ class TestFSDPCheckpoint(FSDPTest):
         test_model = copy.deepcopy(model)
         test_model.u1.seq = checkpoint(test_model.u1.seq, use_reentrant=False)
         test_model.u2.seq = checkpoint(test_model.u2.seq, use_reentrant=False)
-        test_model = fully_shard(
-            test_model, strategy=ShardingStrategy.NO_SHARD
-        )
+        test_model = fully_shard(test_model, strategy=ShardingStrategy.NO_SHARD)
 
         self.run_subtests(
             {
@@ -185,9 +177,7 @@ class TestFSDPCheckpoint(FSDPTest):
         # `replicate` are applied on the same module, it should raise exception.
         model = CompositeModel(device=torch.device("cpu"))
         fully_shard(model.l1)
-        with self.assertRaisesRegex(
-            AssertionError, "Cannot apply .*replicate"
-        ):
+        with self.assertRaisesRegex(AssertionError, "Cannot apply .*replicate"):
             replicate(model.l1)
         replicate(model.l2)  # should not raise
 
