@@ -7,8 +7,9 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
+from ..utils import use_triton_template
 from ..virtualized import V
-from .mm_common import mm_args, mm_grid, mm_options, use_triton_template
+from .mm_common import mm_args, mm_grid, mm_options
 
 aten = torch.ops.aten
 
