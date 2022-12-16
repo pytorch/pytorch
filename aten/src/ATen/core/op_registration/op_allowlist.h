@@ -9,7 +9,7 @@
  * This header implements functionality to build PyTorch with only a certain
  * set of operators (+ dependencies) included.
  *
- * - Build with -DTORCH_OPERATOR_WHITELIST="aten::add;aten::sub" and only these
+ * - Build with -DTORCH_OPERATOR_ALLOWLIST="aten::add;aten::sub" and only these
  *   two ops will be included in your build.  The allowlist records operators
  *   only, no overloads; if you include aten::add, all overloads of aten::add
  *   will be included.
@@ -133,13 +133,13 @@ constexpr bool op_allowlist_check(string_view op_name) {
   // https://stackoverflow.com/questions/34280729/throw-in-constexpr-function
   // https://github.com/fmtlib/fmt/issues/682
   assert(op_name.find("(") == string_view::npos);
-#if !defined(TORCH_OPERATOR_WHITELIST)
-  // If the TORCH_OPERATOR_WHITELIST parameter is not defined,
+#if !defined(TORCH_OPERATOR_ALLOWLIST)
+  // If the TORCH_OPERATOR_ALLOWLIST parameter is not defined,
   // all ops are to be registered
   return true;
 #else
   return allowlist_contains(
-    C10_STRINGIZE(TORCH_OPERATOR_WHITELIST),
+    C10_STRINGIZE(TORCH_OPERATOR_ALLOWLIST),
     // This function is majorly used for mobile selective build with
     // root operators, where the overload is included in the allowlist.
     op_name);
@@ -175,7 +175,7 @@ constexpr bool custom_class_allowlist_check(string_view custom_class_name) {
 #endif
 }
 
-// schema_allowlist_check() implicitly depends on a macro, TORCH_OPERATOR_WHITELIST.
+// schema_allowlist_check() implicitly depends on a macro, TORCH_OPERATOR_ALLOWLIST.
 // Add this API to pass arbitrary allowlist.
 constexpr bool op_allowlist_contains_name_in_schema(string_view allowlist, string_view schema) {
   return allowlist_contains(allowlist, schema.substr(0, schema.find("(")));

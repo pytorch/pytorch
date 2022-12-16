@@ -98,7 +98,7 @@ def write_selected_mobile_ops(
         # if these lists are not defined the corresponding selective build macros trivially return the item in question was selected
         if not selective_builder.include_all_operators:
             body_parts.append(
-                "#define TORCH_OPERATOR_WHITELIST "
+                "#define TORCH_OPERATOR_ALLOWLIST "
                 + (";".join(sorted(root_ops)))
                 + ";\n\n"
             )
@@ -131,7 +131,7 @@ def write_selected_mobile_ops_with_all_dtypes(
     with open(output_file_path, "wb") as out_file:
         body_parts = [selected_mobile_ops_preamble]
         body_parts.append(
-            "#define TORCH_OPERATOR_WHITELIST " + (";".join(sorted(root_ops))) + ";\n\n"
+            "#define TORCH_OPERATOR_ALLOWLIST " + (";".join(sorted(root_ops))) + ";\n\n"
         )
 
         selective_builder = SelectiveBuilder.get_nop_selector()
