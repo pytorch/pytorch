@@ -11,6 +11,7 @@ from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _assert_in_training_states,
     _FSDPState,
+    _get_fsdp_states,
     _is_composable,
     TrainingState,
 )
@@ -53,7 +54,7 @@ def _validate_and_get_hybrid_shard_state(
     intra_node_pgs = set()
     inter_node_pgs = set()
     inter_node_states = set()
-    for fsdp_module in root_module.fsdp_modules(root_module):
+    for fsdp_module in _get_fsdp_states(root_module):
         # TODO: Change this to handle's sharding strategy if we deprecate
         # `ShardingStrategy` internally.
         # https://github.com/pytorch/pytorch/issues/90857
@@ -116,7 +117,7 @@ def _lazy_init(
     assert state is root_module
     inconsistent_limit_all_gathers = False
     inter_node_state = _validate_and_get_hybrid_shard_state(root_module)
-    for fsdp_module in state.fsdp_modules(root_module):
+    for fsdp_module in _get_fsdp_states(root_module):
         if fsdp_module is root_module:
             continue
 
@@ -420,7 +421,7 @@ def _root_pre_forward(
             # TODO: This assumes singleton handles keys.
             handles_keys = [tuple(handle) for handle in state._handles]
         else:
-            for fsdp_module in state.fsdp_modules(state):
+            for fsdp_module in _get_fsdp_states(state):
                 handles_key = tuple(fsdp_module._handles)
                 handles_keys.append(handles_key)
         for handles_key in handles_keys:
@@ -787,7 +788,7 @@ def _post_backward_final_callback(
             torch.cuda.current_stream().synchronize()
     state._exec_order_data.next_iter()
 
-    states = [state] if _is_composable(state) else state.fsdp_modules(state)
+    states = [state] if _is_composable(state) else _get_fsdp_states(state)
     for state in states:
         _catch_all_reshard(state)
         _finalize_params(state)
@@ -969,7 +970,7 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -999,7 +1000,7 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,
@@ -1191,7 +1192,7 @@ def _get_buffers_and_dtypes_for_computation(
         visited_buffers = set()
         # Traverse the FSDP instances bottom-up so that we prefer the owning
         # FSDP instance's mixed precision setting for each buffer
-        for fsdp_module in reversed(state.fsdp_modules(root_module)):
+        for fsdp_module in reversed(_get_fsdp_states(root_module)):
             for buffer in fsdp_module.buffers():
                 if buffer in visited_buffers:
                     continue
