@@ -202,7 +202,7 @@ def _get_name(func: Callable):
 # vmap's randomness behavior differs from JAX's, which would require a PRNG key
 # to be passed everywhere.
 
-@exposed_in('torch')
+@exposed_in('torch.func')
 def vmap(
         func: Callable,
         in_dims: in_dims_t = 0,
