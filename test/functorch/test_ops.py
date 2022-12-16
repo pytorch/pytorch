@@ -351,12 +351,29 @@ class TestOperators(TestCase):
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
+
+        # Non-contiguous Bugs
+        #
+        # AssertionError: Tensor-likes are not close!
+        xfail('_softmax_backward_data', device_type='cpu'),
+        xfail('as_strided'),
+        xfail('as_strided', 'partial_views'),
+        # RuntimeError: !self.requires_grad() || self.is_contiguous() 
+        xfail('as_strided_scatter'),
+        # RuntimeError: Tensor must have a last dimension with stride 1
+        xfail('view_as_complex'),
+        decorate('nn.functional._scaled_dot_product_attention',
+                 decorator=expectedFailureIf(not IS_WINDOWS, "expects contiguous inputs")),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('svd_lowrank',
+             {torch.float32: tol(atol=3e-05, rtol=3e-05)}, device_type='cuda'),
+        tol1('linalg.tensorsolve',
+             {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
     ))
     def test_grad(self, device, dtype, op):
         if op.name in vjp_fail:
@@ -377,6 +394,10 @@ class TestOperators(TestCase):
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
 
+            noncontig_sample = sample.noncontiguous()
+            noncontig_args = [noncontig_sample.input] + list(noncontig_sample.args)
+            noncontig_kwargs = noncontig_sample.kwargs
+
             diff_argnums = tuple(i for i, arg in enumerate(args) if diff_arg(arg))
             assert len(diff_argnums) > 0
             diff_args = tuple(args[i] for i in diff_argnums)
@@ -393,9 +414,11 @@ class TestOperators(TestCase):
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)
+            result_noncontig = grad(wrapped_fn, diff_argnums)(*noncontig_args, **noncontig_kwargs)
             expected = _autograd_grad(_as_tuple(wrapped_fn(*args, **kwargs)), diff_args)
 
             self.assertEqual(result, expected)
+            self.assertEqual(result_noncontig, expected)
 
     @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
