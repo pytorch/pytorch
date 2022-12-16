@@ -359,7 +359,7 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
 
-        # RuntimeError: !self.requires_grad() || self.is_contiguous() 
+        # RuntimeError: !self.requires_grad() || self.is_contiguous()
         xfail('as_strided_scatter'),
 
         # RuntimeError: Tensor must have a last dimension with stride 1
