@@ -544,6 +544,13 @@ Tensor& addmm_out_sparse_compressed_cpu(
   }
 
   if (result.numel() == 0) {
+    // If result gets resized and is sparse compressed,
+    // it's compressed_indices tensor will contain junk values
+    // so the whole tensor is not a valid compressed tensor.
+    // To combat that, result needs to get zeroed out.
+    if (at::sparse_csr::is_sparse_compressed(result)) {
+      result.zero_();
+    }
     return result;
   }
 

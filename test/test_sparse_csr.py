@@ -1726,6 +1726,22 @@ class TestSparseCSR(TestCase):
                     y = gen_y(y_shape, nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
                     _test_mm(x, y)
 
+        def test_empty_inputs(lhs_layout, rhs_layout):
+            xd = torch.rand(10, 0, device=device, dtype=dtype)
+            yd = xd.transpose(-2, -1)
+            zd = torch.rand(0, 0, device=device, dtype=dtype)
+
+            xls, yls, zls = [t.to_sparse(layout=lhs_layout) for t in (xd, yd, zd)]
+            xrs, yrs, zrs = [t.to_sparse(layout=rhs_layout) for t in (xd, yd, zd)]
+
+            for ls, rs, ld, rd in [(xls, yrs, xd, yd), (xls, zrs, xd, zd), (zls, yrs, zd, yd), (zls, zrs, zd, zd)]:
+                res_sparse = ls @ rs
+                res_dense = ld @ rd
+                self.assertEqual(res_sparse.to_dense(), res_dense)
+
+        for lhs_layout, rhs_layout in itertools.product([torch.sparse_csr, torch.sparse_csc], repeat=2):
+            test_empty_inputs(lhs_layout, rhs_layout)
+
         for i in [2, 4]:
             for j in [2, 4, 7]:
                 for k in [2, 3, 7]:
