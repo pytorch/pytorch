@@ -408,8 +408,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   ideep::tag w_tag = ideep::tag::any;
   const bool with_groups = groups > 1;
   if (transpose) {
-    // template args: <(src/dst) is_channels_last, transposed>
-    w_desc = ideep::convolution_transpose_forward::expected_weights_desc<true, false>(
+    w_desc = ideep::convolution_transpose_forward::expected_weights_desc(
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
@@ -420,6 +419,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
     dims_giohw = with_groups ? ideep::utils::group_dims(dims_iohw, groups) : dims_iohw;
     std::vector<int64_t> perms(dims_giohw.size(), 0); // for permutation of weight
     std::iota(perms.begin(), perms.end(), 0);
+    w_desc = w_desc.transpose(with_groups, with_groups + 1);
     std::swap(perms[with_groups], perms[with_groups + 1]);
     weight_copy = weight.reshape(dims_giohw).permute(c10::IntArrayRef(perms)).clone();
   } else {
@@ -427,7 +427,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
-        dnnl::memory::data_type::u8, ideep::dims(), op_attr, /*is_channels_last=*/true);
+        dnnl::memory::data_type::u8, ideep::dims(), op_attr);
     weight_copy = weight.clone();
   }
   if (with_groups) {
