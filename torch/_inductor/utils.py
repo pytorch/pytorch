@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import functools
+import logging
 import math
 import operator
 import os
@@ -19,7 +20,8 @@ from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config, config as inductor_config
 from .cuda_properties import get_device_capability
-from .kernel.mm_common import log
+
+log = logging.getLogger(__name__)
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
