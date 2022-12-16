@@ -35,9 +35,12 @@ def load_model(model_name: str = "bigscience/bloom-560m", large_model_support: b
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.float16,
-        device_map="auto",
         **large_model_support_kwargs,
     )
+    if not large_model_support:
+        # manually assign device
+        model = model.to(0)
+
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     inputs = tokenizer(sentence, return_tensors="pt").to(0)
