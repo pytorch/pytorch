@@ -97,6 +97,9 @@ def init_model(
 
 
 class Test2dCheckpoint(DTensorTestBase):
+
+
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
@@ -117,10 +120,6 @@ class Test2dCheckpoint(DTensorTestBase):
         model(input).sum().backward()
         optim.step()
 
-        with FSDP.summon_full_params(model):
-            print(f"before-save: net1.bias {model.net1.bias}")
-            print(f"before-save: net2.bias {model.net2.bias}")
-
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
             state_dict = {
                 "model": model.state_dict(),
@@ -140,6 +139,13 @@ class Test2dCheckpoint(DTensorTestBase):
         model_2 = init_model()[0]
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
+        input_seed = self.rank
+        torch.manual_seed(input_seed + 10)
+        input = torch.rand(4, 5).cuda(self.rank)
+
+        model_2(input).sum().backward()
+        optim_2.step()
+
         with FSDP.summon_full_params(model):
             if dist.get_rank() == 0:
                 print(f"model: {model.net1.weight}")
@@ -150,12 +156,10 @@ class Test2dCheckpoint(DTensorTestBase):
 
         with FSDP.summon_full_params(model):
             with FSDP.summon_full_params(model_2):
-                self.assertNotEqual(model.net1.weight, model_2.net1.weight)
-                self.assertNotEqual(model.net2.weight, model_2.net1.weight)
-                self.assertNotEqual(model.net3.weight, model_2.net1.weight)
-                self.assertNotEqual(model.net1.bias, model_2.net1.bias)
-                self.assertNotEqual(model.net2.bias, model_2.net1.bias)
-                self.assertNotEqual(model.net3.bias, model_2.net1.bias)
+                for n_p1, n_p2 in zip(model.named_parameters(), model_2.named_parameters()):
+                    print(f"rank{dist.get_rank()}, n_p1: {n_p1}, n_p2:{n_p2}")
+                    self.assertNotEqual(n_p1, n_p2)
+                    break
 
 
 if __name__ == "__main__":
