@@ -1,6 +1,8 @@
 # Owner(s): ["module: meta tensors"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef, skipIfRocm, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, skipIfCrossRef, skipIfRocm, skipIfTorchDynamo, parametrize,
+    instantiate_parametrized_tests)
 import torch
 import torch._dynamo
 import itertools
@@ -277,8 +279,10 @@ class FakeTensorTest(TestCase):
             self.assertTrue(mode.in_kernel_invocation)
 
     @skipIfRocm
+    @parametrize("allow_fallback_kernels", [False, True],
+                 lambda a: 'with_fallback' if a else 'without_fallback')
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cudnn_rnn(self):
+    def test_cudnn_rnn(self, allow_fallback_kernels):
         def fn(
             a0,
             b0,
@@ -338,7 +342,7 @@ class FakeTensorTest(TestCase):
                 None,
             )
 
-        mode = FakeTensorMode()
+        mode = FakeTensorMode(allow_fallback_kernels=allow_fallback_kernels)
         for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
             with context():
                 inps = (
@@ -788,6 +792,8 @@ class FakeTensorPropTest(TestCase):
                     # AssertionError: tensor's device must be `meta`, got cpu instead
                     failed = True
                 self.assertTrue(failed)
+
+instantiate_parametrized_tests(FakeTensorTest)
 
 if __name__ == "__main__":
     run_tests()
