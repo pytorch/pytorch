@@ -12,7 +12,6 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
 )
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.testing import FileCheck
 from torch import nn
@@ -375,7 +374,7 @@ class FakeTensorTest(TestCase):
     def test_cuda_lstm(self):
         # Ensure CUDA (non-cuDNN) impl succeeds with fake tensors.
         with torch.backends.cudnn.flags(enabled=False):
-            fake_tensor_mode = FakeTensorMode(shape_env=ShapeEnv(), allow_fallback_kernels=False)
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
             with fake_tensor_mode:
                 N = 5
                 L = 4
