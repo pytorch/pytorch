@@ -489,7 +489,7 @@ def export_without_kwargs(
     torch._dynamo.reset()
     # Export FX graph to ONNX ModelProto.
     return _export(
-        compiler.captured_graphs[0],
+        compiler.captured_graph,
         # Function optimized by _dynamo doesn't have None in args.
         *tuple(arg for arg in bound_args if arg is not None),
         decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
