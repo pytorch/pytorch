@@ -177,7 +177,28 @@ core_trainer_sources = [
     "torch/csrc/jit/serialization/type_name_uniquer.cpp",
 ]
 
-core_sources_full_mobile_no_backend_interface = [
+torch_mobile_core = [
+    # backend_debug_info.cpp provides
+    # __torch__.torch.classes.backend.BackendDebugInfo class
+    # This should not be needed eventually.
+    # TODO: Remove this dependency
+    "torch/csrc/jit/backends/backend_debug_info.cpp",
+    "torch/csrc/jit/mobile/compatibility/model_compatibility.cpp",
+    "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
+    "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/observer.cpp",
+    "torch/csrc/jit/mobile/parse_bytecode.cpp",
+    "torch/csrc/jit/mobile/parse_operators.cpp",
+    "torch/csrc/jit/mobile/quantization.cpp",
+    "torch/csrc/jit/mobile/upgrader_mobile.cpp",
+    "torch/csrc/jit/runtime/register_prim_ops.cpp",
+    "torch/csrc/jit/runtime/register_special_ops.cpp",
+]
+
+core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
@@ -385,6 +406,26 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/utils/variadic.cpp",
 ]
 
+core_sources_full_mobile_no_backend_interface = core_sources_full_mobile_no_backend_interface_xplat + [
+    # backend_debug_info.cpp provides
+    # __torch__.torch.classes.backend.BackendDebugInfo class
+    # This should not be needed eventually.
+    # TODO: Remove this dependency
+    "torch/csrc/jit/backends/backend_debug_info.cpp",
+    "torch/csrc/jit/mobile/compatibility/model_compatibility.cpp",
+    "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
+    "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/observer.cpp",
+    "torch/csrc/jit/mobile/parse_bytecode.cpp",
+    "torch/csrc/jit/mobile/parse_operators.cpp",
+    "torch/csrc/jit/mobile/quantization.cpp",
+    "torch/csrc/jit/mobile/upgrader_mobile.cpp",
+]
+
+
 core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
     "torch/csrc/jit/backends/backend_debug_info.cpp",
     "torch/csrc/jit/backends/backend_interface.cpp",
@@ -468,7 +509,6 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
-    "torch/csrc/distributed/c10d/OpsImpl.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
     "torch/csrc/distributed/c10d/ProcessGroup.cpp",
@@ -563,28 +603,6 @@ torch_mobile_tracer_sources = [
     "torch/csrc/jit/mobile/model_tracer/BuildFeatureTracer.cpp",
 ]
 
-torch_mobile_core = [
-    # backend_debug_info.cpp provides
-    # __torch__.torch.classes.backend.BackendDebugInfo class
-    # This should not be needed eventually.
-    # TODO: Remove this dependency
-    "torch/csrc/jit/backends/backend_debug_info.cpp",
-    "torch/csrc/jit/mobile/compatibility/model_compatibility.cpp",
-    # TODO: This line needs to be uncommented to build mobile in OSS with flatbuffers
-    # "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
-    "torch/csrc/jit/mobile/function.cpp",
-    "torch/csrc/jit/mobile/import.cpp",
-    "torch/csrc/jit/mobile/interpreter.cpp",
-    "torch/csrc/jit/mobile/module.cpp",
-    "torch/csrc/jit/mobile/observer.cpp",
-    "torch/csrc/jit/mobile/parse_bytecode.cpp",
-    "torch/csrc/jit/mobile/parse_operators.cpp",
-    "torch/csrc/jit/mobile/quantization.cpp",
-    "torch/csrc/jit/mobile/upgrader_mobile.cpp",
-    "torch/csrc/jit/runtime/register_prim_ops.cpp",
-    "torch/csrc/jit/runtime/register_special_ops.cpp",
-]
-
 libtorch_lite_eager_symbolication = [
     "torch/csrc/jit/frontend/source_range.cpp",
     "torch/csrc/jit/ir/scope.cpp",
@@ -621,6 +639,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     # when it is built in libtorch
     "torch/csrc/jit/mobile/debug_info.cpp",
     "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
@@ -638,24 +657,16 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_bytecode.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
+    "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",
     "torch/csrc/utils/byte_order.cpp",
     "torch/csrc/utils/out_types.cpp",
 ]
 
 def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
-    enable_flatbuffer = bool(native.read_config("fbcode", "caffe2_enable_flatbuffer", None))
-    flatbuffer_serializer_sources = [
-        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
-        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
-    ]
-    if enable_flatbuffer:
-        return (
-            libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources +
-            flatbuffer_serializer_sources
-        )
-    else:
-        return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
+    return (
+        libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
+    )
 
 libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
@@ -1028,7 +1039,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
 
 aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/AccumulateType.cpp",
-    "aten/src/ATen/BatchedTensorImpl.cpp",
+    "aten/src/ATen/LegacyBatchedTensorImpl.cpp",
     "aten/src/ATen/CPUGeneratorImpl.cpp",
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
@@ -1062,8 +1073,8 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/FuncTorchTLS.cpp",
     "aten/src/ATen/Utils.cpp",
     "aten/src/ATen/Version.cpp",
-    "aten/src/ATen/VmapMode.cpp",
-    "aten/src/ATen/VmapTransforms.cpp",
+    "aten/src/ATen/LegacyVmapMode.cpp",
+    "aten/src/ATen/LegacyVmapTransforms.cpp",
     "aten/src/ATen/core/BackendSelectFallbackKernel.cpp",
     "aten/src/ATen/core/DeprecatedTypeProperties.cpp",
     "aten/src/ATen/core/DeprecatedTypePropertiesRegistry.cpp",
@@ -1292,7 +1303,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/AveragePool3d.cpp",
     "aten/src/ATen/native/BatchLinearAlgebra.cpp",
     "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
-    "aten/src/ATen/native/Batching.cpp",
+    "aten/src/ATen/native/LegacyBatching.cpp",
     "aten/src/ATen/native/BinaryOps.cpp",
     "aten/src/ATen/native/Blas.cpp",
     "aten/src/ATen/native/BlasKernel.cpp",

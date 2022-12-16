@@ -414,7 +414,7 @@ class OptimizeIndexing(object):
             def indexing_div_rep(x, y):
                 return x / y
 
-            return expr.replace(ModularIndexing, indexing_div_rep).replace(
+            return expr.replace(ModularIndexing, mod_indexing_rep).replace(
                 IndexingDiv, indexing_div_rep
             )
 
