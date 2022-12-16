@@ -742,6 +742,6 @@ def _register_state_dict_hooks_base(
         )
     else:
         for handle in state._handles:
-            getattr(handle.flat_param._fully_sharded_module, hook_registration_fn_name)(
+            getattr(handle._fully_sharded_module, hook_registration_fn_name)(
                 hook_with_state, **hook_registration_fn_kwargs
             )
