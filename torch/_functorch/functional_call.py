@@ -16,7 +16,7 @@ def functional_call(
     args: Union[Any, Tuple],
     kwargs: Dict[str, Any] = None,
 ):
-    parameters_and_buffers = parameter_and_buffer_dicts
+    parameters_and_buffers = parameter_and_buffer_dicts if isinstance(parameter_and_buffer_dicts, dict) else {}
     if isinstance(parameter_and_buffer_dicts, tuple):
         keys = [parameter_and_buffer.keys() for parameter_and_buffer in parameter_and_buffer_dicts]
         for key in keys:
