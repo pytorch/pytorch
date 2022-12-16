@@ -126,12 +126,11 @@ class DebugInterpreter(fx.Interpreter):
         import sympy
 
         def subst_symint(ni):
-            if isinstance(ni, SymInt):
-                r = sympy.expand(ni.node.expr.xreplace(self.symbol_mapping))
-                assert len(r.free_symbols) == 0, r
-                return int(r)
-            else:
+            if not isinstance(ni, SymInt):
                 return ni
+            r = sympy.expand(ni.node.expr.xreplace(self.symbol_mapping))
+            assert len(r.free_symbols) == 0, r
+            return int(r)
 
         def subst_symint_tuple(nis):
             return tuple(subst_symint(ni) for ni in nis)
@@ -155,8 +154,11 @@ class DebugInterpreter(fx.Interpreter):
         if 'val' in n.meta:
             n_vals, n_spec = pytree.tree_flatten(n.meta['val'])
             r_vals, r_spec = pytree.tree_flatten(r)
-            # TODO: sometimes we get confused about returning a
-            # tuple or list
+            # TODO: There is some sort of problem where we record that an
+            # operator returned a tuple/list, and then later it turns out the
+            # real version of the operator returned a list/tuple. Need to
+            # figure out what's actually going on here, the error itself is
+            # harmless enough as we only getitem out the outputs.
             # assert n_spec == r_spec, f"{n_spec} != {r_spec}"
             assert len(n_vals) == len(r_vals), f"{len(n_vals)} != {len(r_vals)}"
             for i, nv, rv in zip(range(len(n_vals)), n_vals, r_vals):
