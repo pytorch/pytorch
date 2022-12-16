@@ -23,21 +23,19 @@ IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'
 
 def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     outs = []
+    out_spec = None
     for idx in range(batch_size):
         flat_args, args_spec = pytree.tree_flatten(batched_args)
         flat_dims, dims_spec = pytree.tree_flatten(in_dims)
         assert(args_spec == dims_spec)
         new_args = [a.select(in_dim, idx) if in_dim is not None else a for a, in_dim in zip(flat_args, flat_dims)]
         out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
-        outs.append(out)
+        flat_out, out_spec = pytree.tree_flatten(out)
+        outs.append(flat_out)
 
-    loop_out = []
-    if isinstance(outs[0], torch.Tensor):
-        loop_out = torch.stack(outs)
-    else:
-        for idx in range(len(outs[0])):
-            loop_out.append(torch.stack([i[idx] for i in outs], out_dim))
-    return loop_out
+    outs = zip(*outs)
+    result = [torch.stack(out_lst) for out_lst in outs]
+    return pytree.tree_unflatten(result, out_spec)
 
 
 # Like loop helper function but for 2 levels of vmap. If we need more levels than this, probably possible
