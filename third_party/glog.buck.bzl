@@ -1,5 +1,3 @@
-load("@prelude//:rules.bzl", "cxx_library", "genrule")
-
 GLOG_CONFIG_HEADERS = [
     "vlog_is_on.h",
     "stl_logging.h",
@@ -26,7 +24,7 @@ GLOG_SED_COMMAND = " ".join([
 ])
 
 def define_glog():
-    cxx_library(
+    native.cxx_library(
         name = "glog",
         srcs = [
             "glog/src/demangle.cc",
@@ -74,7 +72,7 @@ def define_glog():
         visibility = ["PUBLIC"],
     )
 
-    cxx_library(
+    native.cxx_library(
         name = "glog_config",
         header_namespace = "",
         exported_headers = {
@@ -83,7 +81,7 @@ def define_glog():
         },
     )
 
-    genrule(
+    native.genrule(
         name = "glog_config.h",
         srcs = ["glog/src/config.h.cmake.in"],
         out = "config.h",
@@ -91,7 +89,7 @@ def define_glog():
     )
 
     for header in GLOG_CONFIG_HEADERS:
-        genrule(
+        native.genrule(
             name = "glog_{}".format(header),
             out = header,
             srcs = ["glog/src/glog/{}.in".format(header)],

@@ -1,4 +1,6 @@
 #!/bin/bash
+set -e
+
 printf "\nCreating .buckconfig\n"
 
 VERSION="${1:-1}"

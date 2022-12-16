@@ -1,7 +1,6 @@
 # Only used for PyTorch open source BUCK build
 # @lint-ignore-every BUCKRESTRICTEDSYNTAX
 load(":buck_helpers.bzl", "filter_attributes")
-load("@prelude//:rules.bzl", "cxx_test")
 
 def fb_xplat_cxx_test(
         name,
@@ -10,7 +9,7 @@ def fb_xplat_cxx_test(
     if read_config("pt", "is_oss", "0") == "0":
         fail("This file is for open source pytorch build. Do not use it in fbsource!")
 
-    cxx_test(
+    native.cxx_test(
         name = name,
         deps = deps + [
             "//third_party:gtest",

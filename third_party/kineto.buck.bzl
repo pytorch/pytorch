@@ -1,5 +1,4 @@
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
-load("@prelude//:rules.bzl", "cxx_library", "genrule")
 
 # kineto code should be updated to not have to
 # suppress these warnings.
@@ -11,7 +10,7 @@ KINETO_COMPILER_FLAGS = [
 ]
 
 def define_kineto():
-    cxx_library(
+    native.cxx_library(
         name = "libkineto",
         srcs = [
             "kineto/libkineto/src/ActivityProfilerController.cpp",
@@ -42,7 +41,7 @@ def define_kineto():
         ],
     )
 
-    cxx_library(
+    native.cxx_library(
         name = "libkineto_api",
         srcs = [
             "kineto/libkineto/src/libkineto_api.cpp",
@@ -65,7 +64,7 @@ def define_kineto():
         ],
     )
 
-    cxx_library(
+    native.cxx_library(
         name = "config_loader",
         srcs = [
             "kineto/libkineto/src/ConfigLoader.cpp",
@@ -83,7 +82,7 @@ def define_kineto():
         ],
     )
 
-    cxx_library(
+    native.cxx_library(
         name = "config",
         srcs = [
             "kineto/libkineto/src/AbstractConfig.cpp",
@@ -107,7 +106,7 @@ def define_kineto():
         ],
     )
 
-    cxx_library(
+    native.cxx_library(
         name = "logger",
         srcs = [
             "kineto/libkineto/src/ILoggerObserver.cpp",
@@ -130,7 +129,7 @@ def define_kineto():
         ],
     )
 
-    cxx_library(
+    native.cxx_library(
         name = "base_logger",
         srcs = [
             "kineto/libkineto/src/GenericTraceActivity.cpp",
@@ -150,7 +149,7 @@ def define_kineto():
         ],
     )
 
-    cxx_library(
+    native.cxx_library(
         name = "thread_util",
         srcs = [
             "kineto/libkineto/src/ThreadUtil.cpp",
@@ -170,7 +169,7 @@ def define_kineto():
         ],
     )
 
-    cxx_library(
+    native.cxx_library(
         name = "libkineto_headers",
         exported_headers = native.glob([
             "kineto/libkineto/include/*.h",
