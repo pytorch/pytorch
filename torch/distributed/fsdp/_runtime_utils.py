@@ -47,8 +47,8 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
     HandleShardingStrategy.HYBRID_SHARD,
 }
 
+# Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
-    "process_group",
     "backward_prefetch",
     "forward_prefetch",
     "_use_orig_params",
@@ -227,8 +227,6 @@ def _share_state_and_init_handle_attrs(
         for handle in fsdp_state._handles:
             handle.init_flat_param_attributes()
     for attr_name, attr_values in attr_name_to_values.items():
-        if has_hybrid_sharding_strategy and attr_name == "process_group":
-            continue
         if len(attr_values) != 1:
             raise ValueError(
                 f"Expects one homogeneous value for {attr_name} but got {attr_values}"
@@ -428,7 +426,9 @@ def _post_forward(
         reshard_fn (Optional[Callable]): A callable to reshard any currently
             unsharded parameters (e.g. from the current forward) or ``None`` to
             not do any resharding.
-        module (nn.Module): Unused; expected by the hook signature.
+        module (nn.Module): Module whose forward just ran, which should be a
+            fully sharded module (see [Note: Fully Sharded Module]); expected
+            by the hook signature.
         input (Any): Unused; exepcted by the hook signature.
         output (Any): Forward pass output; pre-backward hooks are registered on
             the tensors that require gradients in this output.
@@ -441,7 +441,7 @@ def _post_forward(
         reshard_fn()
     # Register pre-backward hooks to unshard the flattened parameters
     # for the gradient computation (if needed)
-    output = _register_pre_backward_hooks(state, output, handles)
+    output = _register_pre_backward_hooks(state, module, output, handles)
     state.training_state = TrainingState.IDLE
     for handle in handles:
         handle._training_state = HandleTrainingState.IDLE
@@ -556,10 +556,17 @@ def _cast_fp_inputs_to_dtype(
 @no_type_check
 def _pre_backward_hook(
     state: _FSDPState,
+    module: nn.Module,
     _handles: List[FlatParamHandle],
     *unused: Any,
 ) -> Any:
-    """Prepares ``_handles`` 's ``FlatParameter`` s for gradient computation."""
+    """
+    Prepares ``_handles`` 's ``FlatParameter`` s for gradient computation.
+
+    Args:
+        module (nn.Module): Fully sharded module (see [Note: Fully Sharded
+            Module]).
+    """
     _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
     # Only run the pre-backward hook once per group of handles involved in the
     # same module forward computation
@@ -573,21 +580,13 @@ def _pre_backward_hook(
         # attach it to the outermost backward graph task so that it is called
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
-            _register_post_backward_final_callback(state)
-            # TODO: This tensor-level pre-backward hook does not have access
-            # to the root module, so we cannot get all FSDP handles in the
-            # composable code path.
-            if not _is_composable(state):
-                _clear_grads_if_needed(_get_fsdp_handles(state))
+            _register_post_backward_final_callback(state, module)
+            _clear_grads_if_needed(_get_fsdp_handles(module))
         elif _handles_key:
             allowed_states = [TrainingState.IDLE]
             if _is_composable(state):
                 allowed_states.append(TrainingState.FORWARD_BACKWARD)
             _assert_in_training_states(state, allowed_states)
-        if _is_composable(state):
-            # TODO: Following up from above, for the composable path, we can
-            # only clear the gradients for `_handles`.
-            _clear_grads_if_needed(_handles)
         state.training_state = TrainingState.FORWARD_BACKWARD
         # Queueing the post-backward callback is the only logic that is not
         # per-handle in the pre-backward hook, so we can return early here if
@@ -855,6 +854,7 @@ def _low_precision_hook_enabled(state: _FSDPState) -> bool:
 @torch.no_grad()
 def _post_backward_final_callback(
     state: _FSDPState,
+    module: nn.Module,
 ):
     """
     This waits for the post-backward to finish and performs some final cleanup.
@@ -875,8 +875,7 @@ def _post_backward_final_callback(
             torch.cuda.current_stream().synchronize()
     state._exec_order_data.next_iter()
 
-    states = [state] if _is_composable(state) else _get_fsdp_states(state)
-    for state in states:
+    for state in _get_fsdp_states(module):
         _catch_all_reshard(state)
         _finalize_params(state)
         state._ran_pre_backward_hook.clear()
@@ -1130,6 +1129,7 @@ def _register_root_pre_forward_hook(
 @no_type_check
 def _register_pre_backward_hooks(
     state: _FSDPState,
+    module: nn.Module,
     outputs: Any,
     handles: List[FlatParamHandle],
 ) -> None:
@@ -1137,6 +1137,10 @@ def _register_pre_backward_hooks(
     Registers pre-backward hooks on the tensors that require gradients in the
     forward pass outputs ``outputs``, which were computed using the
     ``FlatParameter`` s of ``handles``.
+
+    Args:
+        module (nn.Module): Fully sharded module (see [Note: Fully Sharded
+            Module]).
 
     Returns:
         Forward pass outputs with pre-backward hooks registered to tensors that
@@ -1158,7 +1162,9 @@ def _register_pre_backward_hooks(
 
     def _register_hook(t: torch.Tensor) -> torch.Tensor:
         if t.requires_grad:
-            t.register_hook(functools.partial(_pre_backward_hook, state, handles))
+            t.register_hook(
+                functools.partial(_pre_backward_hook, state, module, handles)
+            )
             state._needs_pre_backward_unshard[handles_key] = True
         return t
 
@@ -1205,7 +1211,9 @@ def _register_post_backward_hooks(
 
 
 @no_type_check
-def _register_post_backward_final_callback(state: _FSDPState) -> None:
+def _register_post_backward_final_callback(
+    state: _FSDPState, module: nn.Module
+) -> None:
     """
     Registers the post-backward final callback that runs at the end of the
     backward pass. This should be called from the root FSDP instance at the
@@ -1220,7 +1228,7 @@ def _register_post_backward_final_callback(state: _FSDPState) -> None:
     _assert_in_training_states(state, [TrainingState.IDLE])
     state._post_backward_callback_queued = True
     Variable._execution_engine.queue_callback(
-        functools.partial(_post_backward_final_callback, state)
+        functools.partial(_post_backward_final_callback, state, module)
     )
 
 
