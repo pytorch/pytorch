@@ -64,7 +64,6 @@ decompositions = get_decompositions(
         aten._log_softmax,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
-        aten.masked_fill_,
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
         aten.mse_loss_backward,
@@ -439,6 +438,11 @@ def masked_fill(value, mask, other):
         # TODO: error out on improper complex conversions
         other = other.to(value.dtype)
     return torch.where(mask, other, value)
+
+
+@register_decomposition([aten.masked_fill])
+def masked_fill_(x, mask, value):
+    return x.copy_(aten.masked_fill(x, mask, value))
 
 
 @register_decomposition([aten.nan_to_num])

@@ -162,6 +162,8 @@ aten::logaddexp2.out
 aten::logit_backward.grad_input
 aten::lu_unpack
 aten::lu_unpack.out
+aten::masked_fill_.Scalar
+aten::masked_fill_.Tensor
 aten::masked_scatter_
 aten::max
 aten::max.dim
