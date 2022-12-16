@@ -25,7 +25,7 @@ def replicate(
     return module
 
 
-def _composable(module: nn.Module) -> bool:
+def _can_compose(module: nn.Module) -> bool:
     r"""Check if module is composable for `replicate` API."""
     return "fully_shard" not in _get_registry(module)
 
@@ -39,7 +39,7 @@ class _ReplicateState:
 
     def mark_modules(self, *modules: nn.Module, **kwargs) -> None:
         for module in modules:
-            assert _composable(
+            assert _can_compose(
                 module
             ), "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
             self.modules.append(module)
@@ -52,7 +52,7 @@ class _ReplicateState:
 
     def _recursive_collect_params(self, module: nn.Module) -> None:
         # skip if managed by other APIs
-        if not _composable(module):
+        if not _can_compose(module):
             return
 
         # skip if module parameters already collected
