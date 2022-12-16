@@ -165,7 +165,7 @@ Inductor Compilation
 
 TorchInductor has a builtin stats and trace function for displaying time
 spent in each compilation phase, output code, output graph visualization
-and IR dump. ``env TORCHINDUCTOR_TRACE=1 python repro.py``. This is a
+and IR dump. ``env TORCH_COMPILE_DEBUG=1 python repro.py``. This is a
 debugging tool designed to make it easier to debug/understand the
 internals of TorchInductor with an output that will look something like
 `this <https://gist.github.com/jansel/f4af078791ad681a0d4094adeb844396>`__
