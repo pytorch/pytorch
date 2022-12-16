@@ -39,9 +39,8 @@ class _ReplicateState:
 
     def mark_modules(self, *modules: nn.Module, **kwargs) -> None:
         for module in modules:
-            assert _can_compose(
-                module
-            ), "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
+            if not _can_compose(module):
+                raise AssertionError("Cannot apply `replicate()` on a Module already managed by `fully_shard`")
             self.modules.append(module)
             replicate.state(module)._distributed_state = self
             replicate.state(module)._params_collected = False
