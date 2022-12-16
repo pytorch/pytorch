@@ -518,7 +518,7 @@ class TritonKernel(Kernel):
         mutations=None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
-        max_regs=2**16  # Max registers in an SM in an A100
+        max_regs=2**16,  # Max registers in an SM in an A100
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -1328,7 +1328,9 @@ class TritonScheduling:
                     input_deps |= n.read_writes.reads
                     output_deps |= n.read_writes.writes
                 else:
-                    max_deps = max(max_deps, len(n.read_writes.reads) + len(n.read_writes.writes))
+                    max_deps = max(
+                        max_deps, len(n.read_writes.reads) + len(n.read_writes.writes)
+                    )
         return max_deps
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
@@ -1362,7 +1364,10 @@ class TritonScheduling:
                 mutations.update(node.get_mutations())
 
         with TritonKernel(
-            *tiled_groups, reduction_hint=reduction_hint_val, mutations=mutations, max_regs=max_regs
+            *tiled_groups,
+            reduction_hint=reduction_hint_val,
+            mutations=mutations,
+            max_regs=max_regs,
         ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:

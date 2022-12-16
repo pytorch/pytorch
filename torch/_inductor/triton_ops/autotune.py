@@ -357,7 +357,9 @@ def triton_config_reduction(size_hints, x, r, num_stages=2, max_warps=8) -> Conf
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), max_warps))
+    num_warps = next_power_of_2(
+        min(max(conditional_product(x, r) // 128, 2), max_warps)
+    )
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -429,7 +431,9 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def reduction(size_hints, reduction_hint=False, max_regs=2**14, meta=None, filename=None):
+def reduction(
+    size_hints, reduction_hint=False, max_regs=2**14, meta=None, filename=None
+):
     """args to @triton.heuristics()"""
     assert meta is not None
     rnumel = size_hints[-1]
