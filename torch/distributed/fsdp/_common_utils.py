@@ -4,25 +4,40 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, no_type_check, Set, Union
+from typing import Callable, Dict, Generator, List, no_type_check, Optional, Set
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
+from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+
+from .api import FullStateDictConfig, StateDictConfig, StateDictType
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
 
-# We leverage Python's dynamic attribute definition to unify the state
-# management for the wrapper and non-wrapper approaches. The `Any` represents
-# the `_State` object in _composable/contract.py, but we do not import it to
-# avoid circular imports.
-_FSDPState = Union[nn.Module, Any]
+class _FSDPState(_State):
+    def __init__(self) -> None:
+        # TODO: Move all the attributes to this class to enable typing for
+        # FSDP/fully_shard.
+        self._use_orig_params: bool = False
+        self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
+        self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
+        self._state_dict_config: StateDictConfig = FullStateDictConfig()
+        self._is_root: Optional[bool] = None
+        self.rank: int = -1
+
+
+def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
+    state = _get_module_state(module)
+    if state is None or not isinstance(state, _FSDPState):
+        return None
+    return state
 
 
 class TrainingState(Enum):
@@ -54,6 +69,9 @@ def _is_composable(state: _FSDPState):
 
 @no_type_check
 def _all_handles(state: _FSDPState) -> List:
+    """
+    Returns all ``FlatParamHandle`` s managed by ``state``.
+    """
     return (
         state._handles
         if _is_composable(state)
@@ -64,18 +82,21 @@ def _all_handles(state: _FSDPState) -> List:
 @no_type_check
 def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     """
-    Given a module and returns the flat handles that map to this module. If the
-    module is FullyShardedDataParallel, the module._handles will be returned.
+    Returns the ``FlatParamHandle`` s corresponding to ``module``. These are
+    the handles that contain some parameter in ``module``.
     """
     if _is_composable(state):
-        return state._module_to_handles[module][:]
+        assert (
+            module in state._comm_module_to_handles
+        ), f"Expects a `comm_module` but got {module} on rank {state.rank}"
+        return state._comm_module_to_handles[module][:]
     else:
         return module._handles[:]
 
 
 @no_type_check
 def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
-    """Given a module and returns if this module has parameters sharded by FSDP."""
+    """Returns if ``module`` has parameters managed by FSDP."""
     return len(_module_handles(state, module)) > 0
 
 
