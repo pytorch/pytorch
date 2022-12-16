@@ -146,15 +146,18 @@ def mm_configs():
 
 
 def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
-    m, n, k, layout, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
-
+    """
+    Computes mm(mat1, mat2) + mm(mat3, mat4)
+    """
     if not V.graph.sizevars.maybe_guard_list_equals(
         mat1.get_size(), mat3.get_size()
     ) or not V.graph.sizevars.maybe_guard_list_equals(mat2.get_size(), mat4.get_size()):
         # TODO(jansel): support different K values when this is fixed:
         # https://github.com/openai/triton/issues/967
         return lowerings[aten.addmm](lowerings[aten.mm](mat1, mat2), mat3, mat4)
+
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    m, n, k, layout, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
 
     # options to tune from
     choices = [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout)]

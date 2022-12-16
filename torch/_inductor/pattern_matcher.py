@@ -1,10 +1,12 @@
+import dataclasses
 import functools
+import inspect
 import itertools
 import logging
 import operator
 import os
-from collections import defaultdict, namedtuple
-from typing import Any, List, Union
+from collections import defaultdict
+from typing import Any, Callable, List, Union
 
 import torch
 import torch._inductor as inductor
@@ -243,19 +245,102 @@ class ListOf(PatternExpr):
         return m.bundle()
 
 
-patterns = defaultdict(list)
-PatternsEntry = namedtuple("PatternsEntry", ["pattern", "extra_check", "handler"])
+pass_patterns = [
+    defaultdict(list),
+    defaultdict(list),
+    defaultdict(list),
+]
 
 
-def _return_true(match: Match):
+@dataclasses.dataclass
+class PatternEntry:
+    pattern: PatternExpr
+    extra_check: Callable[[Match], bool]
+
+    def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
+        raise NotImplementedError()
+
+    def register(self, pass_number, target):
+        if isinstance(pass_number, int):
+            pass_patterns[pass_number][target] = self
+        else:
+            for x in pass_number:
+                self.register(x, target)
+
+
+@dataclasses.dataclass
+class LoweringPatternEntry(PatternEntry):
+    handler: Callable[[Match, ...], Any]
+
+    def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
+        handler = functools.wraps(self.handler)(functools.partial(self.handler, match))
+        with graph.inserting_before(node):
+            node.replace_all_uses_with(
+                graph.call_function(handler, tuple(match.args), match.kwargs)
+            )
+        assert match.nodes[-1] is node
+        match.erase_nodes(graph)
+
+
+@dataclasses.dataclass
+class ReplacementPatternEntry(PatternEntry):
+    replacement_graph: torch.fx.GraphModule
+    signature: inspect.Signature
+
+    def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
+        class Replacer(torch.fx.Interpreter):
+            call_method = None
+            call_module = None
+            get_attr = None
+
+            def call_function(self, target, args, kwargs):
+                return graph.call_function(target, args, kwargs)
+
+        norm_args = self.signature.bind(*match.args, **match.kwargs)
+        with graph.inserting_before(node):
+            node.replace_all_uses_with(
+                Replacer(self.replacement_graph).run(*norm_args.arguments.values())
+            )
+        assert match.nodes[-1] is node
+        match.erase_nodes(graph)
+
+
+def _return_true(match):
     return True
 
 
-def register_pattern(pattern, extra_check=_return_true):
+def register_replacement_pattern(pattern, extra_check=_return_true, pass_number=0):
+    """
+    Register an aten to aten replacement pattern
+    """
+
+    def decorator(handler):
+        signature = inspect.signature(handler)
+        replacement_graph = torch.fx.symbolic_trace(handler)
+        for target in pattern.fns:
+            ReplacementPatternEntry(
+                pattern=pattern,
+                extra_check=extra_check,
+                replacement_graph=replacement_graph,
+                signature=signature,
+            ).register(pass_number, target)
+        return handler
+
+    assert isinstance(pattern, CallFunction)
+    return decorator
+
+
+def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
+    """
+    Register an aten to inductor IR replacement pattern
+    """
+
     def decorator(handler):
         assert callable(handler)
         for target in pattern.fns:
-            patterns[target].append(PatternsEntry(pattern, extra_check, handler))
+            LoweringPatternEntry(
+                pattern=pattern, extra_check=extra_check, handler=handler
+            ).register(pass_number, target)
         handler._inductor_lowering_function = True
         return handler
 
@@ -263,27 +348,26 @@ def register_pattern(pattern, extra_check=_return_true):
     return decorator
 
 
+register_pattern = register_lowering_pattern
+
+
 def replace_matched_patterns(graph: torch.fx.Graph):
     # the actual replacement work
-    for node in reversed(graph.nodes):
-        if node.op == "call_function" and node.target in patterns:
-            for pattern, extra_check, handler in patterns[node.target]:
-                if node._erased:
-                    break
-                m = pattern.match(node)
-                if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
-                    log.warning(f"{node}{node.args} {m} {pattern}")
-                if m and extra_check(m):
-                    handler = functools.wraps(handler)(functools.partial(handler, m))
-                    with graph.inserting_before(node):
-                        node.replace_all_uses_with(
-                            graph.call_function(handler, tuple(m.args), m.kwargs)
-                        )
-                    assert m.nodes[-1] is node
-                    m.erase_nodes(graph)
-
-                    counters["inductor"]["pattern_matcher_count"] += 1
-                    counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
+    for patterns in pass_patterns:
+        if not patterns:
+            continue
+        for node in reversed(graph.nodes):
+            if node.op == "call_function" and node.target in patterns:
+                for entry in patterns[node.target]:
+                    if node._erased:
+                        break
+                    m = entry.pattern.match(node)
+                    if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
+                        log.warning(f"{node}{node.args} {m} {entry.pattern}")
+                    if m and entry.extra_check(m):
+                        entry.apply(m, graph, node)
+                        counters["inductor"]["pattern_matcher_count"] += 1
+                        counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -323,7 +407,50 @@ def fx_passes(gm: torch.fx.GraphModule):
 ################################################################################
 
 
-@register_pattern(
+@register_replacement_pattern(
+    CallFunction(
+        aten.add,
+        CallFunction(aten.mm, Arg(), Arg()),
+        KeywordArg("added"),
+    ),
+    pass_number=2,
+)
+@register_replacement_pattern(
+    CallFunction(
+        aten.add,
+        KeywordArg("added"),
+        CallFunction(aten.mm, Arg(), Arg()),
+    ),
+    pass_number=2,
+)
+def addmm(mat1, mat2, added):
+    return aten.addmm(added, mat1, mat2)
+
+
+# This slows things down:
+"""
+@register_replacement_pattern(
+    CallFunction(
+        aten.add,
+        CallFunction(aten.bmm, Arg(), Arg()),
+        KeywordArg("added"),
+    ),
+    pass_number=3
+)
+@register_replacement_pattern(
+    CallFunction(
+        aten.add,
+        KeywordArg("added"),
+        CallFunction(aten.bmm, Arg(), Arg()),
+    ),
+    pass_number=3
+)
+def baddbmm(mat1, mat2, added):
+    return aten.baddbmm(added, mat1, mat2)
+"""
+
+
+@register_lowering_pattern(
     CallFunction(
         aten.add,
         CallFunction(aten.mm, Arg(), Arg()),
@@ -334,46 +461,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
-@register_pattern(
-    CallFunction(
-        aten.add,
-        CallFunction(aten.mm, Arg(), Arg()),
-        KeywordArg("added"),
-    )
-)
-@register_pattern(
-    CallFunction(
-        aten.add,
-        KeywordArg("added"),
-        CallFunction(aten.mm, Arg(), Arg()),
-    )
-)
-def addmm(match: Match, mat1, mat2, *, added):
-    return L[aten.addmm](added, mat1, mat2)
-
-
-# This slows things down:
-"""
-@register_pattern(
-    CallFunction(
-        aten.add,
-        CallFunction(aten.bmm, Arg(), Arg()),
-        KeywordArg("added"),
-    )
-)
-@register_pattern(
-    CallFunction(
-        aten.add,
-        KeywordArg("added"),
-        CallFunction(aten.bmm, Arg(), Arg()),
-    )
-)
-def baddbmm(match: Match, mat1, mat2, *, added):
-    return L[aten.baddbmm](added, mat1, mat2)
-"""
-
-
-@register_pattern(
+@register_lowering_pattern(
     CallFunction(aten.cat, ListOf(CallFunction(aten.mm, Arg(), Arg())), Arg()),
 )
 def cat_mm(match, inputs, dim):
@@ -385,7 +473,7 @@ def cat_mm(match, inputs, dim):
     return cat_tuned_op(match, inputs, dim, op=L[aten.mm], shape_of=shape_of)
 
 
-@register_pattern(
+@register_lowering_pattern(
     CallFunction(
         aten.cat, ListOf(CallFunction(aten.addmm, Arg(), Arg(), Arg())), Arg()
     ),
@@ -453,7 +541,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 _cat_1 = CallFunction(aten.cat, Arg(), 1, _users=2)
 
 
-@register_pattern(
+@register_lowering_pattern(
     CallFunction(
         aten.cat,
         [
