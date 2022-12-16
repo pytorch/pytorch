@@ -77,7 +77,7 @@ class CapabilityBasedPartitioner:
                 stack : List[Node] = []
                 stack.append(root_node)
 
-                while !stack.empty():
+                while len(stack) != 0:
                     node = stack.pop(0)
 
                     if node in visited:
