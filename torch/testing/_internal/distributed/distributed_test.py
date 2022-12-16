@@ -721,10 +721,6 @@ class DistributedTest:
             backend = BACKEND.lower()
             self.assertEqual(dist.Backend(BACKEND.upper()), backend)
             self.assertEqual(dist.Backend(BACKEND), backend)
-            with self.assertRaisesRegex(ValueError, "Invalid backend: 'undefined'"):
-                dist.Backend("undefined")
-            with self.assertRaisesRegex(ValueError, "Invalid backend: 'xYz'"):
-                dist.Backend("xYz")
             with self.assertRaises(ValueError):
                 dist.Backend(None)
             with self.assertRaises(ValueError):
