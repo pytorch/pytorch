@@ -202,8 +202,6 @@ def main() -> None:
     # quickly check it without the need to parse the JSON string
     set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
 
-    set_output("keep-going", "keep-going" in labels)
-
 
 if __name__ == "__main__":
     main()
