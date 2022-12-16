@@ -521,14 +521,16 @@ class Reduction(Loops):
         num_sm = get_device_properties(device).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
-        threads_per_sm = 2048
-        min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
-        max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
 
         def inner_reduction_splits(reduction_numel_hint, numel_hint):
             # do heuristics that's close to eager mode for split inner reduction
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
-            num_warps = 8
+
+            # In inner reductions we aim to have 1 active thread of size 1024
+            threads_per_sm = 1024
+            min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
+            max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
+            num_warps = 32
             num_threads = 32 * num_warps
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
                 return 1
@@ -560,6 +562,10 @@ class Reduction(Loops):
             return (reduction_numel_hint + split_size * num_threads - 1) // (
                 split_size * num_threads
             )
+
+        threads_per_sm = 2048
+        min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
+        max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
 
         def outer_reduction_splits(reduction_numel_hint, numel_hint):
             # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128

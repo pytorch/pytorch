@@ -518,6 +518,7 @@ class TritonKernel(Kernel):
         mutations=None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
+        max_regs=2**16  # Max registers in an SM in an A100
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -535,6 +536,7 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.initialize_range_tree(pid_cache)
         self.reduction_hint = reduction_hint
+        self.max_regs = max_regs
 
         # define this in a closure to make cache local to object
         @functools.lru_cache(None)
@@ -1061,6 +1063,7 @@ class TritonKernel(Kernel):
             heuristics_line = f"""
                 @{heuristics}(size_hints={size_hints!r},
                               reduction_hint={reduction_hint},
+                              {f"max_regs={self.max_regs}," if heuristics == "reduction" else ""}
                               filename=__file__,
                               meta={triton_meta!r})
                 @triton.jit
@@ -1294,6 +1297,40 @@ class TritonScheduling:
         else:
             return node.node.data.reduction_hint
 
+    @staticmethod
+    def estimate_reg_usage(node_schedule):
+        # We estimate the minimum registry usage of a kernel by counting the number of dependencies
+        # of a given node
+        # We add those of reductions within a given {Enable,Disable}Reduction group as these should
+        # give independent outputs
+        # nb. The current implemented metric is a bit naïve at first sight.
+        #  It assumes that each intermediate operation computed within a fused IR node can be
+        #  scheduled by the SM into the registers from the inputs / outputs. This doesn't seem to
+        #  be too bad of an approximation in practice
+        #  There are other more advanced approximations, but these do not take into account
+        #  the register optimisations that the cuda compiler may perform:
+        # - add one output per fused op in each IR node
+        # - count/estimate the number of alive variables at any given point.
+        in_reduction_loop = False
+        max_deps = -1
+        input_deps = set()
+        output_deps = set()
+        for n in node_schedule:
+            if n is EnableReduction:
+                in_reduction_loop = True
+            elif n is DisableReduction:
+                in_reduction_loop = False
+                max_deps = max(max_deps, len(input_deps) + len(output_deps))
+                input_deps = set()
+                output_deps = set()
+            else:
+                if in_reduction_loop:
+                    input_deps |= n.read_writes.reads
+                    output_deps |= n.read_writes.writes
+                else:
+                    max_deps = max(max_deps, len(n.read_writes.reads) + len(n.read_writes.writes))
+        return max_deps
+
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reductions = list(
@@ -1312,13 +1349,20 @@ class TritonScheduling:
         else:
             reduction_hint_val = ReductionHint.DEFAULT
 
+        # TODO(lezcano): Query the value of MAX_REGS_SM. This is the value on an A100
+        MAX_REGS_SM = 2**16
+        # TODO(lezcano): Query the size of the dtype of the kernel
+        size_dtype = 4
+        reg_usage = TritonScheduling.estimate_reg_usage(node_schedule)
+        max_regs = MAX_REGS_SM // (reg_usage * max(size_dtype // 4, 1))
+
         mutations = set()
         for node in node_schedule:
             if hasattr(node, "get_mutations"):
                 mutations.update(node.get_mutations())
 
         with TritonKernel(
-            *tiled_groups, reduction_hint=reduction_hint_val, mutations=mutations
+            *tiled_groups, reduction_hint=reduction_hint_val, mutations=mutations, max_regs=max_regs
         ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:

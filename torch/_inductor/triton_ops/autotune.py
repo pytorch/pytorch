@@ -335,7 +335,7 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=2, max_warps=8) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -357,7 +357,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), 8))
+    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), max_warps))
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -429,14 +429,16 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
+def reduction(size_hints, reduction_hint=False, max_regs=2**14, meta=None, filename=None):
     """args to @triton.heuristics()"""
     assert meta is not None
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
+        u = 2 ** (max_regs.bit_length() - 1)  # previous power of 2
         contiguous_config = triton_config_reduction(
-            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), num_stages=1
+            size_hints, 1, max(min(rnumel, u), 256), num_stages=1, max_warps=32
         )
+
         outer_config = triton_config_reduction(size_hints, 128, 8)
         tiny_config = triton_config_reduction(
             size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
