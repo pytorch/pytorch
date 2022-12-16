@@ -275,15 +275,15 @@ uint32_t* ImagingResampleInner(
   if (unpacked_output_p == nullptr) {
     // Happens if need_horizontal and need_vertical are both False.
     // But this should never be hit because we check for that in
-    // upsample_avx_bilinear_or_bicubic()
+    // upsample_avx_bilinear()
     unpacked_output_p = unpacked_input_p;
   }
 
   return unpacked_output_p;
 }
 
-// This is the only public entry point in this file.  It supports bilinear and
-// bicubic modes for uint8 dtype when C <= 4, with or without antialias. The
+// This is the only public entry point in this file.  It supports bilinear
+// mode for uint8 dtype when C <= 4, with or without antialias. The
 // implem is based on PIL-SIMD.
 // Its equivalent implementation (fallback) for when AVX isn't supported or when
 // C > 4 is separable_upsample_generic_Nd_kernel_impl()  There are a bunch of
@@ -298,7 +298,7 @@ uint32_t* ImagingResampleInner(
 // here: all these kernels are general enough to handle an arbitrary number of
 // weights, but when aa=False they could be optimized further.
 template <typename scale_type, class F>
-void upsample_avx_bilinear_or_bicubic(
+void upsample_avx_bilinear(
     const at::Tensor& input,
     const at::Tensor& output,
     bool align_corners,
