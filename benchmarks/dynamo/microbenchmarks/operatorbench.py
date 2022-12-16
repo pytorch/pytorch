@@ -164,7 +164,7 @@ def skip_operator(operator):
 )
 @click.option("--device", help="cpu or cuda", default="cuda")
 @click.option("--inp-file", help="use custom input file instead of suite", default=None)
-@click.option("--sample-start-idx", help="specify start index of samples", default=0)
+@click.option("--start-idx", help="specify start index of samples", default=0)
 def benchmark(
     suite,
     op,
@@ -175,7 +175,7 @@ def benchmark(
     measure_nvfuser,
     device,
     inp_file,
-    sample_start_idx,
+    start_idx,
 ):
     if inp_file is not None:
         loader = OperatorInputsLoader(inp_file)
@@ -201,7 +201,7 @@ def benchmark(
     else:
         ops = [eval(op)]
 
-    max_samples = max_samples + sample_start_idx
+    max_samples = max_samples + start_idx
     for operator in ops:
         if skip_operator(operator):
             continue
@@ -215,7 +215,7 @@ def benchmark(
                 inps = next(inp_gen)
                 if inps is None:
                     break
-                if i < sample_start_idx:
+                if i < start_idx:
                     continue
                 print(f"Iter {i}")
                 args, kwargs = inps
