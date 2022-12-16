@@ -139,13 +139,9 @@ def _cuda_system_info_comment():
     except FileNotFoundError:
         model_str += "# nvcc not found\n"
 
-    gpu_names = subprocess.run(
-        ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
-        stdout=subprocess.PIPE,
+    gpu_names = Counter(
+        torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())
     )
-    gpu_names = gpu_names.stdout.decode().split("\n")
-    gpu_names = [name for name in gpu_names if name not in ("", "name")]
-    gpu_names = Counter(gpu_names)
 
     model_str += "# GPU Hardware Info: \n"
     for name, count in gpu_names.items():
@@ -154,20 +150,35 @@ def _cuda_system_info_comment():
     return model_str
 
 
+def generate_config_string():
+    import torch._inductor.config
+
+    return textwrap.dedent(
+        f"""\
+import {config.dynamo_import}.config
+import {config.inductor_import}.config
+{config.dynamo_import}.config.load_config({repr(torch._dynamo.config.save_config())})
+{config.inductor_import}.config.load_config({repr(torch._inductor.config.save_config())})
+        """
+    )
+
+
 TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
 
 
 def generate_compiler_repro_string(gm, args):
     model_str = textwrap.dedent(
         f"""
-        import torch
-        from torch import tensor, device
-        import torch.fx as fx
-        from {config.dynamo_import}.testing import rand_strided
-        from math import inf
-        from torch.fx.experimental.proxy_tensor import make_fx
+import torch
+from torch import tensor, device
+import torch.fx as fx
+from {config.dynamo_import}.testing import rand_strided
+from math import inf
+from torch.fx.experimental.proxy_tensor import make_fx
 
-        {TEST_REPLACEABLE_COMMENT}
+{generate_config_string()}
+
+{TEST_REPLACEABLE_COMMENT}
 
         """
     )
@@ -286,6 +297,8 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
                 """
             )
         )
+    with open(file_name, "r") as fd:
+        print(fd.read())
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
     stdout, stderr = TemporaryFile(), TemporaryFile()
@@ -636,6 +649,8 @@ from {config.dynamo_import}.testing import rand_strided
 from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.debug_utils import same_two_models
 
+{generate_config_string()}
+
 {TEST_REPLACEABLE_COMMENT}
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
@@ -826,6 +841,8 @@ from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.optimizations.backends import BACKENDS
 from {config.dynamo_import}.testing import rand_strided
 
+{generate_config_string()}
+
 {TEST_REPLACEABLE_COMMENT}
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
@@ -871,7 +888,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
-                compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs, **kwargs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
@@ -888,7 +905,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                    compiled_gm = compiler_fn(
+                        copy.deepcopy(gm), example_inputs, **kwargs
+                    )
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(

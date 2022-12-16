@@ -842,19 +842,19 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   c10::call_once(*cache_initialized_flag, [&](){
       LinearParams params;
       ideep::matmul_forward::prepare</*is_dynamic=*/false>(
-          params, x, w, b, y, 1.0f, 1.0f,
+          params, x, w, b, y,
           src_scales, weights_scales, dst_scales,
-          src_zero_point, dst_zero_point, op_attr);
+          src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr);
       get_cache() = LinearPrimitiveCache(cache_key, params);
-      onednn_utils::try_reorder(
-          w, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+      w = w.reorder_if_differ_in(params.pd.weights_desc());
   });
   if (get_cache().hit(cache_key)) {
     LinearParams& params = get_cache().get_param();
     ideep::matmul_forward::compute(params, x, w, b, y);
   } else {
-    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales,
-                                      dst_scales, src_zero_point, dst_zero_point, op_attr);
+    ideep::matmul_forward::compute(x, w, b, y, src_scales, weights_scales,
+                                   dst_scales, src_zero_point, dst_zero_point,
+                                   1.0f, 1.0f, op_attr);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = N;
@@ -955,12 +955,14 @@ class QLinearInt8FusedQDQ final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), TORCH_FN(QLinearInt8<true>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_leaky_relu"), TORCH_FN(QLinearLeakyReluInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
 }
 
