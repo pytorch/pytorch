@@ -47,8 +47,8 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
     HandleShardingStrategy.HYBRID_SHARD,
 }
 
+# Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
-    "process_group",
     "backward_prefetch",
     "forward_prefetch",
     "_use_orig_params",
@@ -235,8 +235,6 @@ def _share_state_and_init_handle_attrs(
         for handle in fsdp_state._handles:
             handle.init_flat_param_attributes()
     for attr_name, attr_values in attr_name_to_values.items():
-        if has_hybrid_sharding_strategy and attr_name == "process_group":
-            continue
         if len(attr_values) != 1:
             raise ValueError(
                 f"Expects one homogeneous value for {attr_name} but got {attr_values}"
