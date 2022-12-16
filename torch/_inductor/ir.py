@@ -3849,6 +3849,20 @@ class StorageBox(MutableBox):
         return len(read_writes.reads)
 
 
+class InterpreterShim(torch.fx.Interpreter):
+    def __init__(self, graph, submodules):
+        """
+        We don't call super() here to avoid constructing a
+        GraphModule which is very expensive (it does codegen).
+        """
+        self.module = self
+        self.graph = graph
+        self.submodules = submodules
+        self.garbage_collect_values = False
+        self.env = {}
+        self.fetch_attr = submodules.__getitem__
+
+
 class LoopBody:
     """
     Captures the body of a Loops subclass into an FX graph.  Persists any
@@ -3906,7 +3920,7 @@ class LoopBody:
     def add_indirect(self):
         name = f"indirect{len(self.indirect_vars)}"
         var = sympy_symbol(name)
-        self.indirect_vars.append([var])
+        self.indirect_vars.append(var)
         return var
 
     def replace_indirect(self, old, new):
@@ -3928,6 +3942,21 @@ class LoopBody:
             for name, expr in self.indexing_exprs.items()
         }
         result = self.root_block()
+        self.indexing = None
+        return result
+
+    def indexing_dtype_strength_reduction(self, indices):
+        index = list(indices.keys())
+        assert len(index) == len(self.var_ranges), (index, self.var_ranges)
+        assert all(v not in self.var_ranges for v in index)
+        replacements = dict(zip(self.var_ranges.keys(), index))
+        self.indexing = {
+            name: sympy_subs(expr, replacements)
+            for name, expr in self.indexing_exprs.items()
+        }
+        result = torch._inductor.optimize_indexing.indexing_dtype_strength_reduction(
+            self.root_block, indices, self.indexing
+        )
         self.indexing = None
         return result
 
@@ -4022,20 +4051,7 @@ class LoopBodyBlock:
         graph = self.graph
         submodules = self.body.submodules
 
-        class InterpreterShim(torch.fx.Interpreter):
-            def __init__(self):
-                """
-                We don't call super() here to avoid constructing a
-                GraphModule which is very expensive (it does codegen).
-                """
-                self.module = self
-                self.graph = graph
-                self.submodules = submodules
-                self.garbage_collect_values = False
-                self.env = {}
-                self.fetch_attr = submodules.__getitem__
-
-        return InterpreterShim().run(V.get_ops_handler())
+        return InterpreterShim(graph, submodules).run(V.get_ops_handler())
 
     def debug_str(self, name="block"):
         code = torch.fx.GraphModule(self.body.submodules, self.graph).code

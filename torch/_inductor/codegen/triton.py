@@ -14,6 +14,7 @@ import torch
 
 from .. import config, ir, scheduler
 from ..ir import ReductionHint
+from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     free_symbol_startswith,
     get_fused_kernel_name,
@@ -23,6 +24,7 @@ from ..utils import (
     sympy_symbol,
 )
 from ..virtualized import ops, V
+
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -1283,6 +1285,7 @@ class TritonScheduling:
                 reduction_hint_val = ReductionHint.DEFAULT
         else:
             reduction_hint_val = ReductionHint.DEFAULT
+
         with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
@@ -1294,7 +1297,13 @@ class TritonScheduling:
                 elif node is EnableReduction:
                     stack.close()
                 else:
-                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+                    ranges = kernel.split_and_set_ranges(node.get_ranges())
+                    # TODO - mostly works but needs a couple fixes
+                    if not config.dynamic_shapes:
+                        indexing_dtype_strength_reduction(
+                            node._body, node.ranges_from_index_vars(ranges)
+                        )
+                    node.codegen(ranges)
 
         wrapper = V.graph.wrapper_code
         src_code = kernel.codegen_kernel()

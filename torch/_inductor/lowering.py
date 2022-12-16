@@ -1258,7 +1258,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
-make_fallback(aten.upsample_bilinear2d_backward, require_dense)
 
 
 add_layout_constraint(aten.convolution, constrain_to_fx_strides)
