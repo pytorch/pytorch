@@ -1,4 +1,4 @@
-from typing import Any, Callable, List
+from typing import Any, Callable, List, no_type_check
 
 import torch
 import torch.distributed as dist
@@ -40,7 +40,7 @@ class OptimInBackwardHookState:
     optim_stream: torch.cuda.Stream
     wait_for_optim_stream_enqueued: bool
 
-
+@no_type_check
 def _apply_optim_in_backward_hook(
     gradient_is_bucket_view: bool
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
@@ -105,8 +105,8 @@ def _apply_optim_in_backward_hook(
         apply_optim_in_backward_hook, optim_stream_state=optim_in_bwd_state
     )
     # These are needed for DDP's logging of comm hooks
-    setattr(comm_hook, '__name__', apply_optim_in_backward_hook.__name__)
-    setattr(comm_hook, '__qualname__', apply_optim_in_backward_hook.__qualname__)
+    comm_hook.__name__ = apply_optim_in_backward_hook.__name__
+    comm_hook.__qualname__ = apply_optim_in_backward_hook.__qualname__
 
     return comm_hook
 

@@ -4621,7 +4621,7 @@ class DistributedTest:
                         )
                         model(inp).sum().backward()
                         optim.step()
-                        model_optim_in_bwd(inp).sum().backward() # runs optimizer as well
+                        model_optim_in_bwd(inp).sum().backward()  # runs optimizer as well
                         for p1, p2 in zip(
                             model.parameters(), model_optim_in_bwd.parameters()
                         ):

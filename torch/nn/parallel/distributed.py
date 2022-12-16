@@ -21,9 +21,6 @@ from torch.distributed.algorithms.join import (
 )
 
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import (
-    allreduce_hook
-)
 from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
     _apply_optim_in_backward_hook
 )
@@ -743,7 +740,7 @@ class DistributedDataParallel(Module, Joinable):
                     "DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0, and manually set"
                     "gradients to None/zero as desired."
                 )
-                self.reducer._set_grads_to_none()
+                self.reducer._set_grads_to_none()  # type: ignore[attr-defined]
 
     def _build_replicated_tensor_module(self):
         if self._use_replicated_tensor_module:

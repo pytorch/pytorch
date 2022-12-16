@@ -4,7 +4,6 @@
 #include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 
 #include <functional>
-#include "ATen/core/jit_type.h"
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
