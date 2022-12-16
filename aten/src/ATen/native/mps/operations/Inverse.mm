@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <torch/library.h>
 #include <c10/util/Optional.h>
 
