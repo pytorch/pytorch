@@ -1,12 +1,11 @@
 from itertools import chain
+from operator import getitem
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
 from typing import Type, Set, Dict, Callable, Tuple, Optional, Union
-
-import operator
 
 from torch.ao.pruning import BaseSparsifier
 from .parametrization import FakeStructuredSparsity, BiasHook, module_contains_param
@@ -22,6 +21,7 @@ from .prune_functions import (
     prune_conv2d_pool_activation_conv2d,
     prune_conv2d_pool_flatten_linear,
     prune_lstm_linear,
+    prune_lstm_layernorm_linear,
 )
 
 
@@ -104,7 +104,9 @@ def _get_default_structured_pruning_patterns() -> Dict[
         (nn.Conv2d, "output"): prune_conv2d,
         (nn.Conv2d, nn.Conv2d): prune_conv2d_conv2d,
         # lstm -> getitem -> linear
-        (nn.LSTM, MatchAllNode, nn.Linear): prune_lstm_linear,
+        (nn.LSTM, getitem, nn.Linear): prune_lstm_linear,
+        # lstm -> getitem -> layernorm -> linear
+        (nn.LSTM, getitem, nn.LayerNorm, nn.Linear): prune_lstm_layernorm_linear,
     }
 
     for activation in chain(

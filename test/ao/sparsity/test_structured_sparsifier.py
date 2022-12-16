@@ -27,6 +27,7 @@ from torch.testing._internal.common_pruning import (
     Conv2dPoolFlatten,
     Conv2dPoolFlattenFunctional,
     LSTMLinearModel,
+    elements_are_subset,
 )
 
 
@@ -667,12 +668,8 @@ class TestBaseStructuredSparsifier(TestCase):
 
     def test_prune_lstm_linear_multiple_layer(self):
         """
-        Test fusion support for LSTM(multi-layer) -> Linear layers.
+        Test fusion support for LSTM(multi-layer) -> Linear
         """
-
-        # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
-        # Instead we check that the weights of the new LSTM are a subset of the weights of 
-        # the old LSTM
         model = LSTMLinearModel(
             ntoken=10,
             ninp=8,
@@ -700,18 +697,27 @@ class TestBaseStructuredSparsifier(TestCase):
 
         model.eval()
         _, _ = model(rnn_input)
-
         pruned_model = fx_pruner.prune()
         pruned_model.eval()
         _, _ = pruned_model(rnn_input)
 
-        pprint(model.named_parameters())
-        pprint(pruned_model.named_parameters())
+        expected_params = dict(model.named_parameters())
+        for name, param in model.named_parameters():
+            assert name in expected_params
+            # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
+            # Instead we check that the weights of the new LSTM are a subset of the weights of 
+            # the old LSTM
+            assert elements_are_subset(param, expected_params[name])
+            del expected_params[name]
+
+        # assert we haven't deleted any keys
+        assert len(expected_params) == 0
+
 
 
     def test_prune_lstm_linear_single_layer(self):
         """
-        Test fusion support for LSTM -> Linear layers
+        Test fusion support for LSTM (single-layer) -> Linear
         """
         model = LSTMLinearModel(
             ntoken=10,

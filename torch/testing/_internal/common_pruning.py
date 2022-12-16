@@ -7,6 +7,10 @@ import torch.nn.functional as F
 from torch import nn
 
 
+def elements_are_subset(subset_tensor, superset_tensor):
+    return all(i in superset_tensor for i in subset_tensor)
+
+
 class SimpleLinear(nn.Module):
     r"""Model with only Linear layers without biases, some wrapped in a Sequential,
     some following the Sequential. Used to test basic pruned Linear-Linear fusion."""
@@ -318,9 +322,7 @@ class LSTMLinearModel(nn.Module):
         super().__init__()
         self.rnn = nn.LSTM(ninp, nhid, nlayers)
         self.linear= nn.Linear(nhid, ntoken)
-
         self.init_weights()
-
         self.nhid = nhid
         self.nlayers = nlayers
 
