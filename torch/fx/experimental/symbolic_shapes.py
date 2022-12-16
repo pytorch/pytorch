@@ -16,6 +16,8 @@ import logging
 from torch import SymInt, SymFloat
 from torch._guards import ShapeGuard
 
+log = logging.getLogger(__name__)
+
 try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import]
@@ -25,8 +27,6 @@ except ImportError:
     HAS_SYMPY = False
 
 aten = torch.ops.aten  # type: ignore[has-type]
-
-log = logging.getLogger(__name__)
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
@@ -917,7 +917,7 @@ class ShapeEnv(object):
                     pass
             return
         except RecursionError:
-            raise RuntimeError(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+            log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):

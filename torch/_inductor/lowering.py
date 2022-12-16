@@ -18,7 +18,7 @@ from torch._prims_common import (
     Number,
 )
 
-from . import config, ir, overrides
+from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
@@ -961,6 +961,36 @@ def register_onednn_fusion_ops():
         @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
             return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+
+        @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
+        def convolution_transpose_unary(
+            x: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            output_padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionTransposeUnary.create(
+                    x,
+                    weight,
+                    bias,
+                    padding,
+                    output_padding,
+                    stride,
+                    dilation,
+                    groups,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
 
         if torch._C.has_mkl:
 
@@ -3684,7 +3714,7 @@ def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
 
 
-@register_lowering(aten._test_inductor_realize)
+@register_lowering(torch.ops._inductor_test.realize)
 def _realize(x):
     x.realize()
     return clone(x)
