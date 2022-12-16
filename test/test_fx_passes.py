@@ -43,6 +43,22 @@ class TestModule(torch.nn.Module):
 
         return add_4, add_6, relu
 
+class TestDeepModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 4)
+
+    def forward(self, a, b, c):
+        o = a + b
+        o = o + 1.0
+
+        # testing to avoid DFS uses in passes. Since Python has 1000 max recursion depth.
+        for _ in range(1001):
+          o = o - c
+
+        return o
+
+
 class TestPartitionFunctions:
     @staticmethod
     def forward1(a, b, c):
@@ -334,6 +350,18 @@ class TestFXGraphPasses(JitTestCase):
 
         with self.assertRaises(Exception):
             fuse_by_partitions(gm, partitions)
+
+    def test_fuser_pass_deep_model(self):
+        m = TestDeepModule()
+        traced = symbolic_trace(m)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(traced,
+                                                 supported_ops,
+                                                 allows_single_node_partition=True)
+        partitions = partitioner.propose_partitions()
+        print(traced)
+        print(partitions)
 
 @dataclass
 class TestCase:
