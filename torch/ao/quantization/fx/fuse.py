@@ -123,8 +123,9 @@ def fuse(
     return model
 
 def _find_matches(
-        root: GraphModule, graph: Graph,
-        patterns: Dict[Pattern, Callable]
+        root: GraphModule,
+        graph: Graph,
+        pattern_to_fuse_handler_cls: Dict[Pattern, Callable],
 ) -> Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]]:
     modules = dict(root.named_modules())
     # node name -> (root_node, match_value)
@@ -155,10 +156,10 @@ def _find_matches(
 
     for node in reversed(graph.nodes):
         if node.name not in match_map:
-            for pattern, value in patterns.items():
+            for pattern, fuse_handler_cls in pattern_to_fuse_handler_cls.items():
                 matched_node_pattern: List[Node] = []
                 if _is_match(modules, node, pattern):
-                    apply_match(pattern, node, (node, pattern, value(node)), matched_node_pattern, node_to_subpattern)
+                    apply_match(pattern, node, (node, pattern, fuse_handler_cls(node)), matched_node_pattern, node_to_subpattern)
                     break
 
     return match_map
