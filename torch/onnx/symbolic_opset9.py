@@ -527,6 +527,30 @@ def reciprocal(g: jit_utils.GraphContext, self):
 @_beartype.beartype
 def cat(g: jit_utils.GraphContext, tensor_list, dim):
     tensors = symbolic_helper._unpack_list(tensor_list)
+    # torch.cat ignores empty tensors such as `torch.Tensor([])`
+    # These needs to be removed as input from ONNX's concat too, otherwise shape inference
+    # will likely fail due to inputs with different ranks (0 for empty tensor, > 0 for anything else)
+    nonempty_tensors = []
+    for t in tensors:
+        if symbolic_helper._is_constant(t) and not symbolic_helper._get_tensor_dim_size(
+            t, 0
+        ):
+            continue
+        nonempty_tensors.append(t)
+    assert len(nonempty_tensors) > 0
+    assert all(
+        [
+            symbolic_helper._get_tensor_rank(nonempty_tensors[0]) is None
+            or symbolic_helper._get_tensor_rank(t)
+            == symbolic_helper._get_tensor_rank(nonempty_tensors[0])
+            for t in nonempty_tensors
+        ]
+    )
+    tensor_list.node().removeAllInputs()
+    for t in nonempty_tensors:
+        tensor_list.node().addInput(t)
+
+    tensors = symbolic_helper._unpack_list(tensor_list)
     return g.op("Concat", *tensors, axis_i=dim)
 
 
@@ -633,6 +657,18 @@ def neg(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::sqrt")
 @_beartype.beartype
 def sqrt(g: jit_utils.GraphContext, self):
+    if _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    ) in {
+        _type_utils.JitScalarType.UINT8,
+        _type_utils.JitScalarType.INT8,
+        _type_utils.JitScalarType.INT16,
+        _type_utils.JitScalarType.INT,
+        _type_utils.JitScalarType.INT64,
+    }:
+        # torch converts all int inputs to sqrt to float
+        self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+
     return g.op("Sqrt", self)
 
 
@@ -732,7 +768,9 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None:
+        if dim is None or dim == tuple():
+            # Dim can be 0, which will cause (not dim) == True. So we don't want to do
+            # (not dim)
             # all-reduce path
             return symbolic_helper._handle_reduce_dim_none(g, self, onnx_op_name)
         else:
@@ -850,6 +888,12 @@ def _standard_gamma(g: jit_utils.GraphContext, self, generator):
 @_onnx_symbolic("aten::t")
 @_beartype.beartype
 def t(g: jit_utils.GraphContext, self):
+    rank = symbolic_helper._get_tensor_rank(self)
+    if rank is None or rank < 2:
+        # The transpose of a 1d or 0d tensor is itself. ONNX does not define the behavior
+        # clearly and onnxruntime fails on these cases. So we add an Identity node to
+        # mirror the behavior of eager mode.
+        return g.op("Identity", self)
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
@@ -894,7 +938,7 @@ def expand_as(g: jit_utils.GraphContext, self, other):
         self_t = self_t.to(torch.double)
         dims = []
         for d in range(self_t.dim()):
-            if (self_t.mean(d).unsqueeze(d).expand_as(self_t) == self_t).all():
+            if torch.equal(self_t.mean(d).unsqueeze(d).expand_as(self_t), self_t):
                 dims.append(d)
                 self = g.op("Constant", value_t=self_t.mean(dims).to(orig_type))
 
@@ -2704,11 +2748,29 @@ def native_layer_norm(
 
     mean = g.op("ReduceMean", input, axes_i=axes)
     numerator = sub(g, input, mean)
+
+    # Cast it to eps dtype to avoid precision loss
+    is_type_half = (
+        _type_utils.JitScalarType.from_value(numerator)
+        == _type_utils.JitScalarType.HALF
+    )
+    if is_type_half:
+        eps_dtype = _type_utils.JitScalarType.from_value(eps_cst)
+        numerator = g.op(
+            "Cast", numerator, to_i=_type_utils.JitScalarType(eps_dtype).onnx_type()
+        )
+
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
-    denominator = sqrt(g, add(g, variance, eps_cst))
-
+    denominator = sqrt(g, g.op("Add", variance, eps_cst))
     normalized = g.op("Div", numerator, denominator)
+
+    # Cast back to input type as eps related ops are all done
+    if is_type_half:
+        input_dtype = _type_utils.JitScalarType.from_value(input)
+        normalized = g.op(
+            "Cast", normalized, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+        )
 
     if not (weight is None or symbolic_helper._is_none(weight)):
         normalized = mul(g, normalized, weight)
@@ -2716,7 +2778,16 @@ def native_layer_norm(
         normalized = add(g, normalized, bias)
 
     # rdenominator := 1 / sqrt(variance + eps)
-    rdenominator = reciprocal(g, denominator)
+    # According to aten::native_layer_norm, rdenominator should have the same dtype as input,
+    # mean and normalized, so we need to Cast it back
+    if is_type_half:
+        denominator = g.op(
+            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+        )
+        rdenominator = g.op("Reciprocal", denominator)
+    else:
+        rdenominator = reciprocal(g, denominator)
+
     return normalized, mean, rdenominator
 
 

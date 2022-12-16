@@ -17,7 +17,10 @@ from unittest.mock import patch
 import torch
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+
+from .hooks import Hooks
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
@@ -120,7 +123,7 @@ def enable_dynamic(enable: bool = True):
         yield
         return
     with patch("torch._dynamo.config.dynamic_shapes", True), patch(
-        "functorch._src.config.use_dynamic_shapes", True
+        "torch._functorch.config.use_dynamic_shapes", True
     ):
         yield
 
@@ -297,7 +300,7 @@ class DisableContext(_TorchDynamoContext):
         super().__init__(callback=None)
 
 
-def catch_errors_wrapper(callback):
+def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
         if (
@@ -321,20 +324,23 @@ def catch_errors_wrapper(callback):
                         backend_compile_fn=callback._torchdynamo_orig_callable,
                     )
                     hijacked_callback = convert_frame.convert_frame(
-                        ddp_optimizer.compile_fn, guard_export_fn=None
+                        ddp_optimizer.compile_fn,
+                        hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size)
+                    return hijacked_callback(frame, cache_size, hooks)
 
         with compile_lock:
-            return callback(frame, cache_size)
+            return callback(frame, cache_size, hooks)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors
 
 
-def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context, dynamic=False):
+def _optimize_catch_errors(
+    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, dynamic=False
+):
     return OptimizeContext(
-        catch_errors_wrapper(compile_fn),
+        catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
         dynamic=dynamic,
@@ -344,7 +350,12 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context, dynamic=Fa
 def get_compiler_fn(compiler_fn):
     from .debug_utils import wrap_backend_debug
 
-    compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
+    if isinstance(compiler_fn, torch._TorchCompileInductorWrapper):
+        compiler_str = "inductor"
+    elif isinstance(compiler_fn, str):
+        compiler_str = compiler_fn
+    else:
+        compiler_str = None
     compiler_fn = lookup_backend(compiler_fn)
     return wrap_backend_debug(compiler_fn, compiler_str)
 
@@ -382,6 +393,7 @@ def optimize(
     *,
     nopython=False,
     guard_export_fn=None,
+    guard_fail_fn=None,
     disable=False,
     dynamic=False,
 ):
@@ -409,6 +421,12 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    # Note: The hooks object could be global instead of passed around, *however* that would make
+    # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
+    # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
+    # compiler, however, this feels onerous for callback and hooks, and it feels better to give our users an
+    # easier to understand UX at the cost of a little more plumbing on our end.
+    hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
@@ -432,10 +450,13 @@ def optimize(
 
     if nopython:
         return optimize_assert(
-            backend, guard_export_fn=guard_export_fn, dynamic=dynamic
+            backend,
+            dynamic=dynamic,
+            hooks=hooks,
         )
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, guard_export_fn=guard_export_fn),
+        convert_frame.convert_frame(backend, hooks=hooks),
+        hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
     )
@@ -594,7 +615,7 @@ def export(
     with patch(f"{__name__}.most_recent_backend", None):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
-            guard_export_fn=guard_export_print,
+            hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
@@ -637,9 +658,7 @@ def export(
             dynamo_result_flat = args[0]
             lookup = [*dynamo_result_flat, *self.new_args]
             new_result_flat = [lookup[i] for i in matched_output_elements_positions]
-            new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
-
-            return super().output(target, (new_result,), {})
+            return super().output(target, (new_result_flat,), {})
 
         def run_node(self, n):
             self.current_node = n
@@ -661,6 +680,17 @@ def export(
         graph,
     ).transform()
 
+    # Make dynamo graph to have same input/output spec as user code
+    new_graph.graph._codegen = _PyTreeCodeGen(
+        _PyTreeInfo(
+            [f"orig_arg_{i}" for i in range(len(args))],
+            in_spec,
+            out_spec_traced,
+        )
+    )
+
+    new_graph.recompile()
+
     return (new_graph, out_guards)
 
 
@@ -669,7 +699,7 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, guard_export_fn=None, export=False, dynamic=False):
+def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=False):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -679,7 +709,8 @@ def optimize_assert(backend, *, guard_export_fn=None, export=False, dynamic=Fals
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, guard_export_fn, export=export),
+        convert_frame.convert_frame_assert(backend, export=export),
+        hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
     )
@@ -754,6 +785,10 @@ class TorchPatcher:
                 opt._cuda_graph_capture_health_check
             )
             opt.zero_grad = disable(opt.zero_grad)
+
+            if hasattr(opt, "_init_group"):
+                opt._init_group = disable(opt._init_group)
+
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
             # which is the *last* hook applied, we want to keep the no_grad hook

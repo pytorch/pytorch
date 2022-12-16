@@ -282,7 +282,7 @@ class SerializationMixin(object):
         with gzip.open(f2.name, 'rb') as f:
             j = pickle.load(f)
             b = torch.load(f)
-        self.assertEqual(a, b, rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(a, b))
         self.assertEqual(i, j)
 
     def _test_serialization_sparse(self, weights_only):
@@ -554,7 +554,7 @@ class SerializationMixin(object):
         msg = 'filelike serialization with {}'
 
         b = torch.load(data)
-        self.assertEqual(tensor, b), msg.format(desc, rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(tensor, b), msg.format(desc))
 
     @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_missing_attrs(self):
@@ -675,6 +675,8 @@ class SerializationMixin(object):
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
             torch.load(resource)
 
+    # FIXME: See https://github.com/pytorch/pytorch/issues/90497
+    @unittest.expectedFailure
     def test_save_different_dtype_unallocated(self):
         devices = ['cpu']
         if torch.cuda.is_available():
@@ -827,7 +829,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
     def test_serialization_offset(self):
         a = torch.randn(5, 5)
-        b = torch.randn(1024, 512, dtype=torch.float32)
+        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
         m = torch.nn.Conv2d(1, 1, (1, 3))
         i, j = 41, 43
         with tempfile.NamedTemporaryFile() as f:
@@ -836,15 +838,15 @@ class TestOldSerialization(TestCase, SerializationMixin):
             pickle.dump(j, f)
             torch.save(b, f)
             torch.save(m, f)
-            self.assertTrue(f.tell() > 2 * 1024 * 1024)
+            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
             f.seek(0)
             i_loaded = pickle.load(f)
             a_loaded = torch.load(f)
             j_loaded = pickle.load(f)
             b_loaded = torch.load(f)
             m_loaded = torch.load(f)
-        self.assertEqual(a, a_loaded, rtol=0, atol=0, exact_device=True)
-        self.assertEqual(b, b_loaded, rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(a, a_loaded))
+        self.assertTrue(torch.equal(b, b_loaded))
         self.assertTrue(m.kernel_size == m_loaded.kernel_size)
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
@@ -852,21 +854,21 @@ class TestOldSerialization(TestCase, SerializationMixin):
     @parametrize('weights_only', (True, False))
     def test_serialization_offset_filelike(self, weights_only):
         a = torch.randn(5, 5)
-        b = torch.randn(1024, 512, dtype=torch.float32)
+        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
         i, j = 41, 43
         with BytesIOContext() as f:
             pickle.dump(i, f)
             torch.save(a, f)
             pickle.dump(j, f)
             torch.save(b, f)
-            self.assertTrue(f.tell() > 2 * 1024 * 1024)
+            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
             f.seek(0)
             i_loaded = pickle.load(f)
             a_loaded = torch.load(f, weights_only=weights_only)
             j_loaded = pickle.load(f)
             b_loaded = torch.load(f, weights_only=weights_only)
-        self.assertEqual(a, a_loaded, rtol=0, atol=0, exact_device=True)
-        self.assertEqual(b, b_loaded, rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(a, a_loaded))
+        self.assertTrue(torch.equal(b, b_loaded))
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
@@ -948,7 +950,11 @@ class TestSerialization(TestCase, SerializationMixin):
 
         t = torch.zeros(3, 3)
         _test_save_load_attr(t)
-        _test_save_load_attr(torch.nn.Parameter(t))
+        # This should start failing once Parameter
+        # supports saving Python Attribute.
+        err_msg = "'Parameter' object has no attribute"
+        with self.assertRaisesRegex(AttributeError, err_msg):
+            _test_save_load_attr(torch.nn.Parameter(t))
 
     def test_weights_only_assert(self):
         class HelloWorld:
