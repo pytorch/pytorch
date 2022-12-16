@@ -1239,3 +1239,5 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.symbolic_shapes
+
+import torch.func
