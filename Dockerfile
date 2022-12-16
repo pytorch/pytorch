@@ -66,7 +66,6 @@ ARG INSTALL_CHANNEL=pytorch-nightly
 RUN /opt/conda/bin/conda update -y conda
 RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
 ARG TARGETPLATFORM
-ARG TRITON_VERSION
 
 # On arm64 we can only install wheel packages
 RUN case ${TARGETPLATFORM} in \
@@ -75,25 +74,27 @@ RUN case ${TARGETPLATFORM} in \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
+
+FROM ${BASE_IMAGE} as official
+ARG PYTORCH_VERSION
+ARG TRITON_VERSION
+ARG TARGETPLATFORM
+ARG CUDA_VERSION
+LABEL com.nvidia.volumes.needed="nvidia_driver"
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libjpeg-dev \
+        libpng-dev
+COPY --from=conda-installs /opt/conda /opt/conda
 RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
-        /opt/conda/bin/pip install "torchtriton==${TRITON_VERSION}" --extra-index-url https://download.pytorch.org/whl/nightly/cpu ; \
-        apt update && apt install -y --no-install-recommends gcc; \
+        apt install -y --no-install-recommends gcc; \
         CU_VER=$(echo $CUDA_VERSION | cut -d'.' -f 1-2) && \
         mkdir -p /usr/local/triton-min-cuda-${CU_VER} && \
         ln -s /usr/local/triton-min-cuda-${CU_VER} /usr/local/cuda; \
         mkdir -p /usr/local/cuda/bin; cp /opt/conda/bin/ptxas /usr/local/cuda/bin; \
         mkdir -p /usr/local/cuda/include; cp /opt/conda/include/cuda.h /usr/local/cuda/include; \
     fi
-
-FROM ${BASE_IMAGE} as official
-ARG PYTORCH_VERSION
-LABEL com.nvidia.volumes.needed="nvidia_driver"
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        libjpeg-dev \
-        libpng-dev && \
-    rm -rf /var/lib/apt/lists/*
-COPY --from=conda-installs /opt/conda /opt/conda
+RUN rm -rf /var/lib/apt/lists/*
 ENV PATH /opt/conda/bin:$PATH
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
