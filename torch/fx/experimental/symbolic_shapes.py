@@ -16,6 +16,8 @@ import logging
 from torch import SymInt, SymFloat
 from torch._guards import ShapeGuard
 
+log = logging.getLogger(__name__)
+
 try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import]
@@ -338,7 +340,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr, other_expr)
         except Exception:
-            logging.warning(f"failed to eval {method}({expr}, {other_expr})")
+            log.warning(f"failed to eval {method}({expr}, {other_expr})")
             raise
         out = sympy.expand(out)
         pytype: Type
@@ -367,7 +369,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr)
         except Exception:
-            logging.warning(f"failed to eval {method}({expr})")
+            log.warning(f"failed to eval {method}({expr})")
             raise
         out = sympy.expand(out)
         pytype: Type
@@ -744,7 +746,7 @@ class ShapeEnv(object):
             try:
                 exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
             except Exception:
-                logging.warning(f"Failing guard allocated at:\n{tb}")
+                log.warning(f"Failing guard allocated at:\n{tb}")
                 raise
 
         # 3. Every symbol must not be equal to 0/1
@@ -915,7 +917,7 @@ class ShapeEnv(object):
                     pass
             return
         except RecursionError:
-            raise RuntimeError(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+            log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):
