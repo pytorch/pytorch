@@ -801,7 +801,7 @@ class CppVecKernel(CppKernel):
                     f"to_float({var} + {cexpr(load_index)}, {self.var_vec_buf_map[var]}, {nelements});"
                 )
                 if nelements == 1:
-                    line = f"at::vec::Vectorized<float>({self.var_vec_buf_map[var]}[{cexpr(nelements)}])"
+                    line = f"at::vec::Vectorized<float>({self.var_vec_buf_map[var]}[{cexpr(0)}])"
                 else:
                     line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
             else:
