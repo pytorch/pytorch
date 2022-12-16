@@ -819,7 +819,7 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
         except RuntimeError as ex:
             # Rethrow to provide a better error message
             raise GradcheckError(
-                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG_FWD_AD}')
+                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG_FWD_AD}') from ex
 
         for input_idx, (res, exp) in enumerate(zip(result, expected)):
             if torch.allclose(res, exp):
@@ -861,7 +861,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
             # autograd.grad instead of the C++ traceback of what line in the
             # backward formula
             raise GradcheckError(
-                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG}')
+                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG}') from ex
 
     for input_idx, (res, exp) in enumerate(zip(result, expected)):
         if torch.allclose(res, exp):
@@ -977,12 +977,12 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
         try:
             grads_input = torch.autograd.grad(output_to_check, diff_input_list,
                                               grads_output, allow_unused=True)
-        except RuntimeError:
+        except RuntimeError as e:
             warn_bc_breaking()
             raise GradcheckError((
                 'Expected backward function to handle undefined output grads. '
                 'Please look at "Notes about undefined output gradients" in '
-                '"tools/autograd/derivatives.yaml"'))
+                '"tools/autograd/derivatives.yaml"')) from e
 
         for gi, i in zip(grads_input, diff_input_list):
             if (gi is not None) and (not gi.eq(0).all()):

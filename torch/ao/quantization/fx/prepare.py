@@ -1,6 +1,5 @@
 import copy
 import torch
-import operator
 import warnings
 from torch.fx import (
     GraphModule,
@@ -58,7 +57,7 @@ from .pattern_utils import (
 
 from .match_utils import (
     _MatchResultWithQConfig,
-    find_matches,
+    _find_matches,
 )
 
 from ..utils import _parent_name
@@ -383,15 +382,6 @@ def get_target_activation_dtype_for_node(
             return {
                 "input_activation_dtype": None,
                 "output_activation_dtype": None,
-            }
-
-        # TODO(future PR): consider stopping matching getitem
-        is_getitem = node.op == 'call_function' and \
-            node.target == operator.getitem
-        if is_getitem:
-            return {
-                "input_activation_dtype": (torch.float, False),
-                "output_activation_dtype": (torch.float, False),
             }
 
         # get qconfig to determine the eventual dtype of this node
@@ -1215,14 +1205,10 @@ def insert_observers_for_model(
 
             this_node_dtype_info = node_name_to_target_dtype_info[node.name]
             output_not_a_tensor = this_node_dtype_info is None
-            # TODO(future PR): consider stopping matching getitem
-            is_getitem = node.op == 'call_function' and \
-                node.target == operator.getitem
 
             skip_inserting_observers = (
                 (qconfig is None) or
-                output_not_a_tensor or
-                is_getitem
+                output_not_a_tensor
             ) and (
                 not node.op == 'output'
             )
@@ -1541,7 +1527,7 @@ def prepare(
     standalone_module_classes = list(prepare_custom_config.standalone_module_classes.keys())
 
     custom_module_classes = get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
-    matches_without_qconfig = find_matches(
+    matches_without_qconfig = _find_matches(
         model.graph, modules, pattern_to_quantize_handler, root_node_getter_mapping,
         standalone_module_names, standalone_module_classes, custom_module_classes)
 

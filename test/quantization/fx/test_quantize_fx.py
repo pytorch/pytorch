@@ -27,7 +27,7 @@ from torch.ao.quantization.quantize_fx import (
 from torch.ao.quantization.fx.quantize_handler import DefaultNodeQuantizeHandler
 
 from torch.ao.quantization.fx.match_utils import (
-    is_match,
+    _is_match,
     MatchAllNode,
 )
 
@@ -711,7 +711,23 @@ class TestQuantizeFx(QuantizationTestCase):
         modules = dict(m.named_modules())
         for n in m.graph.nodes:
             if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
-                self.assertTrue(is_match(modules, n, pattern))
+                self.assertTrue(_is_match(modules, n, pattern))
+
+    def test_pattern_match_constant(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x, _ = torch.ops.aten.max_pool2d_with_indices.default(x)
+                return x
+
+        pattern = (operator.getitem, torch.ops.aten.max_pool2d_with_indices.default, 0)
+        m = torch.fx.symbolic_trace(M())
+        # eliminate the code that get the second output of maxpool, so that the pattern
+        # can be matched
+        m.graph.eliminate_dead_code()
+        modules = dict(m.named_modules())
+        for n in m.graph.nodes:
+            if n.op == "call_function" and n.target == operator.getitem:
+                self.assertTrue(_is_match(modules, n, pattern))
 
     def test_fused_module_qat_swap(self):
         class Tmp(torch.nn.Module):
@@ -1009,7 +1025,7 @@ class TestQuantizeFx(QuantizationTestCase):
                         module.weight_scale = None
                         model.load_state_dict(state_dict)
                         module = getattr(model, module_name)
-                        self.assertEqual(prev_scale, module.weight_scale, rtol=0, atol=0, exact_device=True)
+                        self.assertTrue(torch.equal(prev_scale, module.weight_scale))
 
 
             checkWeightQParams(qr)
@@ -2040,6 +2056,31 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_qconfig_mapping_repr(self):
         self.assertTrue(isinstance(get_default_qconfig_mapping().__repr__(), str))
+
+    def test_default_qconfig_mapping_override_global(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = M().eval()
+        my_qconfig = QConfig(activation=MinMaxObserver, weight=default_weight_observer)
+        qconfig_mapping = get_default_qconfig_mapping()
+        # Override global qconfig
+        old_global_qconfig = qconfig_mapping.global_qconfig
+        qconfig_mapping.set_global(my_qconfig)
+        # Verify the correct qconfig was used
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs)
+        self.assertTrue(isinstance(old_global_qconfig.activation(), HistogramObserver))
+        self.assertTrue(isinstance(my_qconfig.activation(), MinMaxObserver))
+        self.assertTrue(hasattr(m, "activation_post_process_0"))
+        self.assertTrue(hasattr(m, "activation_post_process_1"))
+        self.assertTrue(isinstance(m.activation_post_process_0, MinMaxObserver))
+        self.assertTrue(isinstance(m.activation_post_process_1, MinMaxObserver))
 
     # Dummy classes for PrepareCustomConfig testing
 
@@ -4551,7 +4592,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m_ref = convert_to_reference_fx(m_copy)
             result = m(*example_inputs)
             result_ref = m_ref(*example_inputs)
-            self.assertEqual(result, result_ref, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(result, result_ref))
 
     def test_ref_conv_module(self):
         """ Make sure the numerics for models with ref conv module
@@ -4589,7 +4630,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m_ref = convert_to_reference_fx(m_copy)
             result = m(data)
             result_ref = m_ref(data)
-            self.assertEqual(result, result_ref, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(result, result_ref))
 
     def test_sub_scalar(self):
         class M(torch.nn.Module):
@@ -4690,7 +4731,7 @@ class TestQuantizeFx(QuantizationTestCase):
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=expected_node_occurrence)
             # checking result match
-            self.assertEqual(out_ref, out, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(out_ref, out))
 
     def test_convert_qconfig_mapping(self):
         class Linear(torch.nn.Module):

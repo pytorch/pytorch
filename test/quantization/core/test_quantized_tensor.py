@@ -70,7 +70,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     return [scale.astype(np.float32), int(nudged_zero_point)]
 
 # Note we explicitly cast variables to np.float32 in a couple of places to avoid
-# the default casting in Python often resuling in double precision and to make
+# the default casting in Python often resulting in double precision and to make
 # sure we're doing the same numerics as C++ code.
 def param_search_greedy(x, bit_rate, n_bins=200, ratio=0.16):
     xmin, xmax = np.min(x), np.max(x)
@@ -443,8 +443,7 @@ class TestQuantizedTensor(TestCase):
         for dtype, zero_points in itertools.product([torch.qint8, torch.quint8], [zero_points_float, zero_points_int]):
             q = torch._empty_per_channel_affine_quantized(
                 [numel], scales=scales, zero_points=zero_points, axis=ch_axis, dtype=dtype, device=device)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
+            self.assertEqual(scales, q.q_per_channel_scales(), exact_dtype=False)
             self.assertEqual(zero_points, q.q_per_channel_zero_points())
             self.assertEqual(ch_axis, q.q_per_channel_axis())
 
@@ -453,8 +452,7 @@ class TestQuantizedTensor(TestCase):
             int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8, device=device)
             q = torch._make_per_channel_quantized_tensor(int_tensor, scales, zero_points, ch_axis)
             self.assertEqual(int_tensor, q.int_repr())
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
+            self.assertEqual(scales, q.q_per_channel_scales(), exact_dtype=False)
             self.assertEqual(zero_points, q.q_per_channel_zero_points())
             self.assertEqual(ch_axis, q.q_per_channel_axis())
 
@@ -809,8 +807,7 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
             self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
             self.assertEqual(qr.int_repr(), qlast.int_repr())
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(scales, qlast.q_per_channel_scales())
+            self.assertEqual(scales.to(dtype=torch.float64), qlast.q_per_channel_scales())
             self.assertEqual(zero_points, qlast.q_per_channel_zero_points())
             self.assertEqual(1, qlast.q_per_channel_axis())
             self.assertEqual(qlast.dequantize(), qr.dequantize())
@@ -1201,7 +1198,7 @@ class TestQuantizedTensor(TestCase):
             self.assertNotEqual(b.int_repr(), c.int_repr())
             # torch.equal is not supported for the cuda backend
             if device == 'cpu':
-                self.assertNotEqual(b, c, rtol=0, atol=0, exact_device=True)
+                self.assertFalse(torch.equal(b, c))
 
             # a case can't view non-contiguos Tensor
             a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
@@ -1248,7 +1245,7 @@ class TestQuantizedTensor(TestCase):
             self.assertNotEqual(b.int_repr(), c.int_repr())
             # torch.equal is not supported for the cuda backend
             if device == 'cpu':
-                self.assertNotEqual(b, c, rtol=0, atol=0, exact_device=True)
+                self.assertFalse(torch.equal(b, c))
 
             # Throws an error if numel is wrong
             q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
@@ -1282,7 +1279,7 @@ class TestQuantizedTensor(TestCase):
             self.assertNotEqual(b.int_repr(), c.int_repr())
             # torch.equal is not supported for the cuda backend
             if device == 'cpu':
-                self.assertNotEqual(b, c, rtol=0, atol=0, exact_device=True)
+                self.assertFalse(torch.equal(b, c))
 
             # we can use reshape for non-contiguous Tensor
             a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype, device=device)

@@ -13,7 +13,7 @@ import sympy
 
 import torch
 
-from . import config, dependencies, ir
+from . import config, dependencies, ir, metrics
 from .dependencies import MemoryDep, StarDep
 from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, dynamo_utils, has_triton
@@ -347,6 +347,12 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
+                        # mutations not tracked in cpp kernels
+                        if isinstance(
+                            V.kernel, torch._inductor.codegen.triton.TritonKernel
+                        ):
+                            V.kernel.mutations.add(input_node.get_name())
+                            V.kernel.mutations.add(self.get_name())
                         return
         super().allocate()
 
@@ -593,6 +599,7 @@ class Scheduler:
         self.compute_predecessors()
         self.dead_node_elimination()
 
+        metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
@@ -1123,6 +1130,9 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
+
+            if config.triton.debug_sync_kernel:
+                self.get_backend(device).codegen_sync()
 
             self.available_buffer_names.update(node.get_names())
 
