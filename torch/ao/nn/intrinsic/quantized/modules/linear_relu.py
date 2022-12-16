@@ -3,6 +3,11 @@ import torch.ao.nn.quantized as nnq
 import torch.ao.nn.intrinsic as nni
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
 
+__all__ = [
+    "LinearReLU",
+    "LinearLeakyReLU",
+]
+
 class LinearReLU(nnq.Linear):
     r"""
     A LinearReLU module fused from Linear and ReLU modules
