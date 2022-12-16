@@ -231,14 +231,6 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.rsqrt({x})"
 
     @staticmethod
-    def log1p(x):
-        return f"tl.libdevice.log1p({x})"
-
-    @staticmethod
-    def expm1(x):
-        return f"tl.libdevice.expm1({x})"
-
-    @staticmethod
     def sigmoid(x):
         return f"tl.sigmoid({x})"
 
@@ -1462,11 +1454,6 @@ class TritonScheduling:
         else:
             reduction_hint_val = ReductionHint.DEFAULT
 
-        mutations = set()
-        for node in node_schedule:
-            if hasattr(node, "get_mutations"):
-                mutations.update(node.get_mutations())
-
         with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
@@ -1496,7 +1483,7 @@ class TritonScheduling:
                 if config.triton.descriptive_kernel_names
                 else ""
             )
-            kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
+            kernel_name = "triton_" + fused_name + wrapper.next_kernel_suffix()
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
@@ -1506,226 +1493,6 @@ class TritonScheduling:
             wrapper.define_kernel(kernel_name, src_code)
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
-
-    #     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
-    #         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
-    #         reductions = list(
-    #             filter(
-    #                 lambda n: n not in (EnableReduction, DisableReduction)
-    #                 and n.is_reduction(),
-    #                 node_schedule,
-    #             )
-    #         )
-    #         if len(reductions) > 0:
-    #             hints = [self.reduction_hint(n) for n in reductions]
-    #             if hints.count(hints[0]) == len(hints):
-    #                 reduction_hint_val = hints[0]
-    #             else:
-    #                 reduction_hint_val = ReductionHint.DEFAULT
-    #         else:
-    #             reduction_hint_val = ReductionHint.DEFAULT
-
-    #         ranges_per_node = []
-    #         with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
-    #             for node in node_schedule:
-    #                 if node in (EnableReduction, DisableReduction):
-    #                     ranges_per_node.append(None)
-    #                 else:
-    #                     ranges_per_node.append(kernel.split_and_set_ranges(node.get_ranges()))
-
-    #         @dataclasses.dataclass
-    #         class BodyHolder():
-    #             body: Any
-
-    #         body_holder = BodyHolder(node_schedule[0]._body)
-
-    #         class CaptureIndexing(V.WrapperHandler):
-
-    #             def add_index(self, expr, category, buf_name=None):
-    #                 add_index = body_holder.body.add_index_expr(expr, category, buf_name)
-    #                 return tracer.create_proxy(
-    #                     "call_module",
-    #                     "get_index",
-    #                     (add_index,),
-    #                     {},
-    #                 )
-
-    #             def load(self, name: str, index: sympy.Expr):
-    #                 index = self.add_index(index, "reads", name)
-    #                 return self._inner.load(name, index)
-
-    #             def store(self, name, index, value, mode=None):
-    #                 index = self.add_index(index, "writes", name)
-    #                 return self._inner.store(name, index, value, mode)
-
-    #             def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-    #                 index = self.add_index(index, "writes", name)
-    #                 return self._inner.reduction(
-    #                     name, dtype, src_dtype, reduction_type, index, value
-    #                 )
-
-    #             def index_expr(self, index, dtype):
-    #                 if isinstance(index, (int, sympy.Integer)):
-    #                     return ops.constant(int(index), dtype)
-    #                 index = self.add_index(index, "other")
-    #                 return self._inner.index_expr(index, dtype)
-
-    #             @staticmethod
-    #             def masked(mask_proxy, masked_body, other_proxy):
-    #                 """
-    #                 Recursively capture the masked out body in another LoopBodyBlock
-    #                 """
-
-    #                 def shim(mask, other):
-    #                     return V.ops.masked(mask, subblock, other)
-
-    #                 name = body_holder.body.add_submodule(shim, "masked_subblock")
-    #                 subblock = ir.LoopBodyBlock(self.body, masked_body, [])
-    #                 body_holder.body.subblocks[name] = subblock
-    #                 return tracer.create_proxy(
-    #                     "call_module", name, (mask_proxy, other_proxy), {}
-    #                 )
-
-    #             @staticmethod
-    #             def indirect_indexing(index_proxy):
-    #                 """
-    #                 Flow data from tensors into indexing formulas.
-    #                 Introduce a call_module to update the indexing.
-    #                 """
-
-    #                 def set_indirect(new_var):
-    #                     body_holder.body.replace_indirect(var, V.ops.indirect_indexing(new_var))
-
-    #                 var = body_holder.body.add_indirect()
-    #                 tracer.create_proxy(
-    #                     "call_module",
-    #                     body_holder.body.add_submodule(set_indirect, f"set_{var}"),
-    #                     (index_proxy,),
-    #                     {},
-    #                 )
-    #                 return var
-
-    #         graphs = []
-    #         fused_node = self.scheduler.nodes[0]
-    #         used_buffer_names = fused_node.used_buffer_names()
-    #         last_used = set(fused_node.last_usage)
-    #         instantiated = {node.get_name() for node in node_schedule}
-    #         input_names = used_buffer_names - instantiated
-    #         intermediary = instantiated & last_used
-    #         intermediary_buffer_values = {}
-    #         output_buffers = used_buffer_names - intermediary - input_names
-    #         node_values = {}
-
-    #         for node_idx in range(len(node_schedule)):
-
-    #             tracer = torch.fx.Tracer()
-    #             tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
-    #             proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
-
-    #             capt_indexing = CaptureIndexing(proxy_ops)
-    #             body_holder.body = node_schedule[node_idx]._body
-
-    #             ranges = node_schedule[node_idx].ranges_from_index_vars(ranges_per_node[node_idx])
-    #             # fused_node.used_buffer_names() - fused_node.last_usage
-    #             ra = RangeAnalysis(node_values, node_schedule[node_idx]._body, ranges, input_names, intermediary, output_buffers, intermediary_buffer_values)
-    #             with V.set_ops_handler(ra):
-    #                 # set_indirect1
-    #                 pass
-    #                 # breakpoint()
-    #                 # # may not need to re-trace, could just use
-    #                 # # node_schedule[0]._body.root_block.graph
-    #                 # # this makes the changes persistent
-    #                 # breakpoint()
-    #                 # node_schedule[node_idx]._body.indexing_exprs_name
-    #                 # node_schedule[node_idx]._body.indexing_exprs_name
-    #                 # node_schedule[node_idx]._body.var_ranges
-    #                 # node_schedule[node_idx].indexing gives index mapping values
-    #                 if node not in (EnableReduction, DisableReduction):
-    #                     out = node_schedule[node_idx]._body.indexing_dtype_strength_reduction(*ranges_per_node[node_idx])
-    #                 # breakpoint()
-    #                 # print(out)
-
-    #         #     graphs.append(tracer.graph)
-
-    #         # can find the fused node by fused_node.snodes == node_schedule
-
-    #         # TODO: check self.scheduler.mutation_real_name
-    #         # last_uses = fused_node.last_usage
-    #         # intermediary_nodes = {node.get_name() for node in node_schedule} & fused_node.last_usage
-
-    #         node_idx = 0
-    #         # breakpoint()
-
-    #         # with V.set_ops_handler(V.MockHandler()):
-    #         #     for node, ranges in zip(node_schedule, ranges_per_node):
-    #         #         node.codegen(ranges)
-    #                 # out_str = node._body(*ranges)
-
-    #         with TritonKernel(
-    #             *tiled_groups, reduction_hint=reduction_hint_val, mutations=mutations
-    #         ) as kernel:
-    #             stack = contextlib.ExitStack()
-    #             for node in node_schedule:
-    #                 if node not in (EnableReduction, DisableReduction):
-    #                     node.mark_run()
-    #             for node in node_schedule:
-    #                 if node is DisableReduction:
-    #                     stack.enter_context(kernel.disable_reduction())
-    #                 elif node is EnableReduction:
-    #                     stack.close()
-    #                 else:
-    #                     node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-
-    # #         with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
-    # #             stack = contextlib.ExitStack()
-    # #             # breakpoint()
-    # #             for node in node_schedule:
-    # #                 if node not in (EnableReduction, DisableReduction):
-    # #                     node.mark_run()
-
-    # # #             for node in node_schedule:
-    # # #                 ranges = kernel.split_and_set_ranges(node.get_ranges())
-    # # #                  str(self.inner_fn(self._index(self.ranges)))
-    # # # #
-    # #             for node in node_schedule:
-    # #                 if node is DisableReduction:
-    # #                     stack.enter_context(kernel.disable_reduction())
-    # #                 elif node is EnableReduction:
-    # #                     stack.close()
-    # #                 else:
-    # #                     # tracer = torch.fx.Tracer()
-    # #                     # tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
-    # #                     # proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
-
-    # #                     # with V.set_ops_handler(V.MockHandler()):
-    # #                     #     out = str(node._)
-
-    # #                     # out = str(self.inner_fn(self._index(self.ranges)))
-    # #                     # return out
-    # #                     ranges = kernel.split_and_set_ranges(node.get_ranges())
-    # #                     # breakpoint()
-    # #                     node.codegen(ranges)
-
-    #         wrapper = V.graph.wrapper_code
-    #         src_code = kernel.codegen_kernel()
-    #         if src_code in wrapper.kernels:
-    #             kernel_name = wrapper.kernels[src_code]
-    #         else:
-    #             fused_name = (
-    #                 get_fused_kernel_name(node_schedule)
-    #                 if config.triton.descriptive_kernel_names
-    #                 else ""
-    #             )
-    #             kernel_name = "triton_" + fused_name + wrapper.next_kernel_suffix()
-    #             wrapper.kernels[src_code] = kernel_name
-    #             subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
-    #             src_code = src_code.replace("KERNEL_NAME", subs_name)
-    #             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
-    #             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
-    #             src_code = src_code.replace("#pragma CMT", "#")
-    #             wrapper.define_kernel(kernel_name, src_code)
-    #         kernel.call_kernel(wrapper, kernel_name)
-    #         self.scheduler.free_buffers()
 
     @staticmethod
     @functools.lru_cache(32)
