@@ -466,7 +466,7 @@ class TransformerEncoderLayer(Module):
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
             is_causal: If specified, applies a causal mask as src_mask. Mutually exclusive with providing src_mask.
-                Default: ``False``.
+              Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
