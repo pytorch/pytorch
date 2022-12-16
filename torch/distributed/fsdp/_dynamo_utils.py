@@ -1,7 +1,6 @@
 from typing import Set
 
 import torch.nn as nn
-from torch._dynamo.variables.builder import _FSDP_MANAGED_MODULE, _FSDP_USE_ORIG_PARAMS
 
 
 def _annotate_modules_for_dynamo(
@@ -37,10 +36,10 @@ def _annotate_modules_for_dynamo(
             order for backward to interleave hooks with compute per layer.  UnspecializedNNModule lets us achieve
             this by capturing the module code more 'functionally' and passing parameters in as inputs each time.
             """
-            setattr(submodule, _FSDP_MANAGED_MODULE, True)
+            submodule._is_fsdp_managed_module = True  # type: ignore[assignment]
 
             # Dynamo only supports FSDP with use_orig_params=True.
             # This is hacky, but I could not think of another way to add an assertion to dynamo
             # for this, since Dynamo skips all the FSDP code frames and thus can't inspect the
             # FSDP module directly
-            setattr(submodule, _FSDP_USE_ORIG_PARAMS, use_orig_params)
+            submodule._fsdp_use_orig_params = use_orig_params  # type: ignore[assignment]

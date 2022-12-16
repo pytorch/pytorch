@@ -114,10 +114,9 @@ class Foo:
 
     def __eq__(self, other):
         def eq(value, other):
-            result = value == other
-            if isinstance(result, torch.Tensor):
-                result = result.all().item()
-            return result
+            if isinstance(value, torch.Tensor):
+                return torch.equal(value, other)
+            return value == other
 
         for attr, value in self.__dict__.items():
             other_value = other.__dict__[attr]
@@ -353,7 +352,7 @@ class ControlFlowToyModel(nn.Module):
 
     def forward(self, x):
         # Second layer is used dependent on input x.
-        use_second_layer = (x == torch.ones(20, 10, device=x.device)).all()
+        use_second_layer = torch.equal(x, torch.ones(20, 10, device=x.device))
         if use_second_layer:
             return self.lin2(F.relu(self.lin1(x)))
         else:
@@ -901,7 +900,7 @@ class DistributedTest:
         @skip_if_no_gpu
         def test_new_subgroups_group_size_exceeds_world_size(self):
             with self.assertRaisesRegex(
-                ValueError, "The arg 'group_size' must not exceed the world size"
+                ValueError, "must not exceed"
             ):
                 dist.new_subgroups(100)
 
@@ -3313,7 +3312,7 @@ class DistributedTest:
 
             for l1, l2 in zip(output_tensor_lists, expected_tensors):
                 for t1, t2 in zip(l1, l2):
-                    if not (t1 == t2).all():
+                    if not torch.equal(t1, t2):
                         return False
             return True
 
@@ -7453,7 +7452,7 @@ class DistributedTest:
                     # Control-flow that is rank and input dependent for the
                     # model.
                     use_second_layer = (
-                        (x == torch.ones(batch, dim, device=x.device)).all()
+                        torch.equal(x, torch.ones(batch, dim, device=x.device))
                         and self.rank == 1
                     )
 

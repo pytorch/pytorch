@@ -466,7 +466,8 @@ void Comm::enqueue_collective(
   ucc_coll_req_h request;
   TORCH_UCC_CHECK(
       ucc_collective_init(&coll, &request, team), "failed to init collective");
-  TORCH_UCC_CHECK(ucc_collective_post(request), "failed to post collective");
+  TORCH_UCC_CHECK_REQUEST(
+      request, ucc_collective_post(request), "failed to post collective");
 
   auto entry =
       std::make_shared<ProcessGroupUCC::ProgressEntry>(&ucc_comm, request);
@@ -495,7 +496,8 @@ void Comm::enqueue_cuda_collective(
   comp_ev.ev_context = nullptr;
   comp_ev.ev_context_size = 0;
   comp_ev.req = request;
-  TORCH_UCC_CHECK(
+  TORCH_UCC_CHECK_REQUEST(
+      request,
       ucc_collective_triggered_post(ee, &comp_ev),
       "failed to post triggered collective");
   ucc_status_t st = ucc_ee_get_event(ee, &post_ev);

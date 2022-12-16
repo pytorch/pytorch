@@ -21,7 +21,7 @@ def with_temp_dir(
         # Only create temp_dir when rank is 0
         if dist.get_rank() == 0:
             temp_dir = tempfile.mkdtemp()
-            print(f"Using temp directory: {self.temp_dir }")
+            print(f"Using temp directory: {temp_dir}")
         else:
             temp_dir = ""
         object_list = [temp_dir]
