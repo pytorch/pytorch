@@ -512,9 +512,11 @@ class CheckFunctionManager:
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
-        aotautograd_guards: List[
-            GuardEnvExpr
-        ] = self.output_graph.tracing_context.guards_context.aotautograd_guards
+        aotautograd_guards: List[GuardEnvExpr] = (
+            self.output_graph.tracing_context.guards_context.aotautograd_guards
+            if self.output_graph
+            else []
+        )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
                 pos_a = guard.input_pos_a
