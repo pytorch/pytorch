@@ -2,6 +2,7 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.fx
+import _collections_abc
 
 from .. import config, variables
 from ..bytecode_transformation import create_instruction
@@ -273,6 +274,10 @@ class TupleVariable(BaseListVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
+
+class DictKeysVariable(TupleVariable):
+    def python_type(self):
+        return _collections_abc.dict_keys
 
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""

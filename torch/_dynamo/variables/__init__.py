@@ -15,6 +15,7 @@ from .lists import (
     RangeVariable,
     SliceVariable,
     TupleVariable,
+    DictKeysVariable,
 )
 from .misc import (
     AutogradFunctionVariable,

@@ -56,7 +56,7 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, TupleVariable
+        from . import ConstantVariable, TupleVariable, DictKeysVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         val = self.items
@@ -85,7 +85,7 @@ class ConstDictVariable(VariableTracker):
             )
         elif name == "keys":
             assert not (args or kwargs)
-            return TupleVariable(
+            return DictKeysVariable(
                 [
                     ConstDictVariable._key_to_var(
                         tx,
