@@ -135,17 +135,6 @@ class TestPoolingNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    def test_adaptive_pooling_input_size(self):
-        for numel in (2, 3):
-            for pool_type in ('Max', 'Avg'):
-                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
-                module_cls = getattr(nn, cls_name)
-                output_size = (2,) * numel
-                module = module_cls(output_size)
-
-                input = torch.randn(output_size)
-                self.assertRaises(ValueError, lambda: module(input))
-
     def test_adaptive_pooling_size_none(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
@@ -1128,7 +1117,6 @@ torch.cuda.synchronize()
 
     def test_pooling_size_empty(self, device):
         t = torch.rand([1, 2, 3, 4], device=device)
-        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool1d(t, []))
         self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool2d(t, []))
         self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool3d(t, []))
 

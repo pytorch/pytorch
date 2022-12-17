@@ -2808,16 +2808,16 @@ def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **k
         yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
 
 
-def error_inputs_adaptive_pool1d(opinfo, device, **kwargs):
+def error_inputs_adaptive_avg_pool1d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # error inputs for size overflow
     # 0x0x3fffffffffffffff * 2 * 2 = 0xfffffffffffffffc = -4 as int64_t
     # Tensor::numel() return int64_t, so following check that negative allocs are correctly handled
     yield ErrorInput(SampleInput(make_arg((2, 2, 2)), kwargs={'output_size': 0x3fffffffffffffff}),
-                     error_regex="integer multiplication overflow")
+                     error_regex="Storage size calculation overflowed")
 
-    # error inputs for incorrect output size
+    # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3)), kwargs={'output_size': ()}),
                      error_regex="'output_size' should contain one int")
 
@@ -2845,14 +2845,14 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
         yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
 
 
-def error_inputs_adaptive_pool2d(opinfo, device, **kwargs):
+def error_inputs_adaptive_avg_pool2d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # error inputs for incorrect input dimension
     yield ErrorInput(SampleInput(make_arg((2, 2)), kwargs={'output_size': (2, 2)}),
                      error_type=ValueError, error_regex="Input dimension should be at least 3")
 
-    # error inputs for incorrect output size
+    # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), kwargs={'output_size': ()}),
                      error_regex="output_size must be 2")
 
@@ -2881,14 +2881,14 @@ def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **k
         yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
 
 
-def error_inputs_adaptive_pool3d(opinfo, device, **kwargs):
+def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # error inputs for incorrect input dimension
     yield ErrorInput(SampleInput(make_arg((2, 2, 2)), kwargs={'output_size': (2, 2, 2)}),
                      error_type=ValueError, error_regex="Input dimension should be at least 4")
 
-    # error inputs for incorrect output size
+    # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), kwargs={'output_size': ()}),
                      error_regex="output_size must be 3")
 
@@ -2914,6 +2914,18 @@ def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **k
         # Unbatched
         yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
 
+
+def error_inputs_adaptive_max_pool1d(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # error inputs for empty output
+    yield ErrorInput(SampleInput(make_arg((1, 2, 3)), kwargs={'output_size': ()}),
+                     error_regex="'output_size' should contain one int")
+
+    # error inputs for output_size lesser than 0
+    yield ErrorInput(SampleInput(make_arg((1, 1, 1)), kwargs={'output_size': (-1,)}),
+                     error_regex="Trying to create tensor with negative dimension")
+
 def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2935,6 +2947,17 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
         # Unbatched
         yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
 
+def error_inputs_adaptive_max_pool2d(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # error inputs for incorrect input dimension
+    yield ErrorInput(SampleInput(make_arg((2, 2)), kwargs={'output_size': (2, 2)}),
+                     error_type=ValueError, error_regex="Input dimension should be at least 3")
+
+    # error inputs for output_size lesser than 0
+    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), kwargs={'output_size': (-1, 0)}),
+                     error_regex="Trying to create tensor with negative dimension")
+
 
 def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2955,6 +2978,18 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
         yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
         # Unbatched
         yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
+
+def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # error inputs for incorrect input dimension
+    yield ErrorInput(SampleInput(make_arg((2, 2, 2)), kwargs={'output_size': (2, 2, 2)}),
+                     error_type=ValueError, error_regex="Input dimension should be at least 4")
+
+    # error inputs for output_size lesser than 0
+    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), kwargs={'output_size': (-1, 0, 2)}),
+                     error_regex="Trying to create tensor with negative dimension")
+
 
 class _TestParamsMaxPoolBase(object):
 
@@ -10982,7 +11017,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           error_inputs_func=error_inputs_adaptive_pool1d,
+           error_inputs_func=error_inputs_adaptive_avg_pool1d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
            dtypes=floating_types_and(torch.bfloat16),
@@ -11002,7 +11037,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           error_inputs_func=error_inputs_adaptive_pool2d,
+           error_inputs_func=error_inputs_adaptive_avg_pool2d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.adaptive_avg_pool3d',
            dtypes=floating_types_and(torch.half),
@@ -11026,7 +11061,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           error_inputs_func=error_inputs_adaptive_pool3d,
+           error_inputs_func=error_inputs_adaptive_avg_pool3d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool3d),
     OpInfo('nn.functional.adaptive_max_pool1d',
            dtypes=floating_types_and(torch.bfloat16),
@@ -11037,6 +11072,7 @@ op_db: List[OpInfo] = [
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           error_inputs_func=error_inputs_adaptive_max_pool1d,
            sample_inputs_func=sample_inputs_adaptive_max_pool1d),
     OpInfo('nn.functional.adaptive_max_pool2d',
            dtypes=floating_types_and(torch.bfloat16),
@@ -11058,6 +11094,7 @@ op_db: List[OpInfo] = [
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           error_inputs_func=error_inputs_adaptive_max_pool2d,
            sample_inputs_func=sample_inputs_adaptive_max_pool2d),
     OpInfo('nn.functional.adaptive_max_pool3d',
            dtypes=floating_types(),
@@ -11081,6 +11118,7 @@ op_db: List[OpInfo] = [
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           error_inputs_func=error_inputs_adaptive_max_pool3d,
            sample_inputs_func=sample_inputs_adaptive_max_pool3d),
     OpInfo('nn.functional.avg_pool1d',
            aten_name='avg_pool1d',
