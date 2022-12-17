@@ -17,6 +17,7 @@ from unittest.mock import patch
 import torch
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 
 from .hooks import Hooks
@@ -349,7 +350,12 @@ def _optimize_catch_errors(
 def get_compiler_fn(compiler_fn):
     from .debug_utils import wrap_backend_debug
 
-    compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
+    if isinstance(compiler_fn, torch._TorchCompileInductorWrapper):
+        compiler_str = "inductor"
+    elif isinstance(compiler_fn, str):
+        compiler_str = compiler_fn
+    else:
+        compiler_str = None
     compiler_fn = lookup_backend(compiler_fn)
     return wrap_backend_debug(compiler_fn, compiler_str)
 
@@ -652,9 +658,7 @@ def export(
             dynamo_result_flat = args[0]
             lookup = [*dynamo_result_flat, *self.new_args]
             new_result_flat = [lookup[i] for i in matched_output_elements_positions]
-            new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
-
-            return super().output(target, (new_result,), {})
+            return super().output(target, (new_result_flat,), {})
 
         def run_node(self, n):
             self.current_node = n
@@ -675,6 +679,17 @@ def export(
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
+
+    # Make dynamo graph to have same input/output spec as user code
+    new_graph.graph._codegen = _PyTreeCodeGen(
+        _PyTreeInfo(
+            [f"orig_arg_{i}" for i in range(len(args))],
+            in_spec,
+            out_spec_traced,
+        )
+    )
+
+    new_graph.recompile()
 
     return (new_graph, out_guards)
 
