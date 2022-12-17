@@ -9,7 +9,7 @@ namespace {
 struct PyDeviceGuard {
   PyObject_HEAD
 
-  c10::DeviceIndex idx_;
+      c10::DeviceIndex idx_;
   c10::cuda::OptionalCUDAGuard guard_;
 
   void enter() {
@@ -133,7 +133,7 @@ PyType_Spec PyCUDADeviceGuard_spec{
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     PyCUDADeviceGuard_Type_slots};
 
-}  // namespace (anonymous)
+} // namespace
 
 namespace torch {
 namespace cuda {
