@@ -1156,13 +1156,10 @@ class TestAutogradFunctionVmapAPI(TestCase):
             @staticmethod
             def vmap(info, in_dims, input):
                 self.assertEqual(info.batch_size, batch_size)
-                self.assertEqual(info.randomness, randomness)
                 return input, in_dims[0]
 
         x = torch.randn(batch_size, 3, device=device)
-
-        for randomness in ('error', 'different', 'same'):
-            vmap(Id.apply, randomness=randomness)(x)
+        vmap(Id.apply)(x)
 
     @_set_autograd_function_extension_enabled()
     def test_in_dims_single_input(self, device):

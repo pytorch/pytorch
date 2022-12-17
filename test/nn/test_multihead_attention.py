@@ -183,9 +183,7 @@ class TestMultiheadAttentionNN(NNTestCase):
                         multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
                         multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
                         static_k=saved_k_tensor, static_v=saved_v_tensor,
-                        average_attn_weights=average_attn_weights,
-                        is_causal=False,
-                    )
+                        average_attn_weights=average_attn_weights)
                 else:
                     result, result_weight = torch.nn.functional.multi_head_attention_forward(
                         _Q, _K, _V,
@@ -198,9 +196,7 @@ class TestMultiheadAttentionNN(NNTestCase):
                         True, multihead_attn_module.q_proj_weight,
                         multihead_attn_module.k_proj_weight, multihead_attn_module.v_proj_weight,
                         static_k=saved_k_tensor, static_v=saved_v_tensor,
-                        average_attn_weights=average_attn_weights,
-                        is_causal=False,
-                    )
+                        average_attn_weights=average_attn_weights)
 
                 result = result.squeeze(0).detach().numpy()
 

@@ -642,8 +642,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             pg.gather(output_ts, tensors, opts)
 
         with self.assertRaisesRegex(
-            # throws error message from dispatcher
-            RuntimeError, "There were no tensor arguments to this function"
+            RuntimeError, "Tensor list must be nonempty"
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = 0
@@ -777,8 +776,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             pg.scatter(tensors, scatter_list, opts)
 
         with self.assertRaisesRegex(
-            # throws error message from dispatcher
-            RuntimeError, "There were no tensor arguments to this function"
+            RuntimeError, "Tensor list must be nonempty"
         ):
             opts = c10d.ScatterOptions()
             opts.rootRank = 0
@@ -1041,13 +1039,13 @@ class DistributedDataParallelTest(
 
     def _get_process_group(self):
         store = self._get_store()
-        c10d.init_process_group("nccl", store=store, rank=self.rank, world_size=self.world_size)
-        return c10d.distributed_c10d._get_default_group()
+        return c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
     def _test_nccl_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
     ):
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         self._test_ddp_with_process_group(
             process_group, devices, device_ids, multi_device, gradient_as_bucket_view
         )
@@ -1159,7 +1157,8 @@ class DistributedDataParallelTest(
 
         self.assertTrue(len(gpus) >= 2, "expecting at least 2 gpus per process")
 
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         gpus = gpus[:2]
         model = DoubleGpuNet(gpus)
@@ -1195,7 +1194,8 @@ class DistributedDataParallelTest(
             )
 
     def _test_fp16(self, gradient_as_bucket_view=False):
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         gpus = gpus_for_rank(self.world_size)[self.rank]
         model = nn.Linear(1, 1, bias=False).cuda(gpus[0]).half()
@@ -1236,7 +1236,8 @@ class DistributedDataParallelTest(
         Note: this test can be sped up by only running it on a CPU module
         once DistributedDataParallel supports them.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         class ForwardReturnValueModule(nn.Module):
             def __init__(self):
@@ -1334,7 +1335,8 @@ class DistributedDataParallelTest(
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_with_lazy_parameters(self):
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         with self.assertRaisesRegex(
             RuntimeError, "Modules with uninitialized parameters"
         ):
@@ -1500,7 +1502,8 @@ class DistributedDataParallelTest(
         Note: this test can be sped up by only running it on a CPU module
         once DistributedDataParallel supports them.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         class MultipleOutputModule(nn.Module):
             def __init__(self):
@@ -1562,7 +1565,8 @@ class DistributedDataParallelTest(
         Note: this test can be sped up by only running it on a CPU module
         once DistributedDataParallel supports them.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         class NoGradModule(nn.Module):
             def __init__(self):
@@ -1608,7 +1612,8 @@ class DistributedDataParallelTest(
         # module.
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         global_batch_size = self.world_size
 
         model, ddp_model, input, target = self._prepare_single_device_module(
@@ -1667,7 +1672,8 @@ class DistributedDataParallelTest(
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_failure_recovery(self):
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # need to create a separate file for the recovered FileStore, because
         # the original one will be deleted when destructing the first FileStore.
@@ -1712,11 +1718,11 @@ class DistributedDataParallelTest(
             loss.backward()
 
         del ddp
-        c10d.destroy_process_group(process_group)
+        del process_group
+        del store  # this will delete self.file_name
 
         store = c10d.FileStore(recovery_filename, self.world_size)
-        c10d.init_process_group("nccl", store=store, rank=self.rank, world_size=self.world_size)
-        process_group = c10d.distributed_c10d._get_default_group()
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         ddp = DistributedDataParallel(
             model,
             device_ids=[device_id],
@@ -1747,7 +1753,8 @@ class DistributedDataParallelTest(
         self.assertFalse(dist.is_initialized())
 
     def _test_grad_layout(self, replica_devices, layer_devs, local_batch_size):
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         global_batch_size = local_batch_size * self.world_size
 
@@ -1902,7 +1909,8 @@ class DistributedDataParallelTest(
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_param_layout_mismatch_error(self):
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
         layer_devs = dev0
@@ -1957,7 +1965,8 @@ class DistributedDataParallelTest(
         This unit test verifies whether the Future object is passed properly using nccl backend.
         The hook callback function creates a Future object and sets a value to it.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # Get GPU model with simple_hook registered.
         gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, self._simple_hook)
@@ -1975,7 +1984,8 @@ class DistributedDataParallelTest(
         Without the then callback, the future_value in reducer is no longer
         a PyObject, and this unit test verifies future_value is properly checked.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_hook(
             state: object, bucket: dist.GradBucket
@@ -2000,7 +2010,8 @@ class DistributedDataParallelTest(
         This unit test verifies whether default Python DDP communication hooks ALLREDUCE, FP16_COMPRESS
         and BF16_COMPRESS, can give the same result with the case of no hook registered.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # For these default DDP comm hooks, the only state is process group.
         state = process_group
@@ -2028,7 +2039,8 @@ class DistributedDataParallelTest(
         This unit test verifies whether wrapping the ALLREDUCE and POWER_SGD hooks with
         the FP16_WRAPPER can give the same result as when there is no hook registered.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         powerSGD_state = powerSGD.PowerSGDState(process_group=process_group)
 
         hook_args = [
@@ -2052,7 +2064,8 @@ class DistributedDataParallelTest(
         This unit test verifies whether wrapping the ALLREDUCE and POWER_SGD hooks with
         the BF16_WRAPPER can give the same result as when there is no hook registered.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         powerSGD_state = powerSGD.PowerSGDState(process_group=process_group)
 
         hook_args = [
@@ -2076,7 +2089,8 @@ class DistributedDataParallelTest(
         This unit test verifies whether Python DDP communication hook POWER_SGD
         can give the same result with the case of no hook registered.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # Get GPU model with the hook registered.
         # Test the hook with different algorithmic configs.
@@ -2103,7 +2117,8 @@ class DistributedDataParallelTest(
         This unit test verifies whether built-in C++ DDP communication hooks ALLREDUCE and FP16_COMPRESS
         can give the same result with the case of no hook registered.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         for comm_hook_type in [
             dist.BuiltinCommHookType.ALLREDUCE,
@@ -2199,7 +2214,8 @@ class DistributedDataParallelTest(
         This unit test verifies whether a DDP communication hook that calls allreduce and then
         multiplies the result by ten and divides by two gives the expected result.
         """
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_with_then_hook(
             state: object, bucket: dist.GradBucket
@@ -2238,7 +2254,8 @@ class DistributedDataParallelTest(
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_weight_sharing(self):
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         size = 2048 * 2048
         dev = self.rank
@@ -2341,7 +2358,8 @@ class DistributedDataParallelTest(
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_channels_last_contig(self):
-        process_group = self._get_process_group()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         tensor = torch.ones((2, 16, 768, 1152), dtype=torch.float32, device=device).to(memory_format=torch.channels_last)
         process_group.broadcast([tensor]).wait()
@@ -2641,8 +2659,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_broadcast_coalesced_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=self.world_size)
-        process_group = c10d.distributed_c10d._get_default_group()
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         device = torch.device("cuda:%d" % self.rank)
         ranks = [0, 1]
         for root_rank in ranks:
@@ -2652,8 +2669,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_coalesced_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=self.world_size)
-        process_group = c10d.distributed_c10d._get_default_group()
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         device = torch.device("cuda:%d" % self.rank)
         tensors = [torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float) for i in range(5)]
         torch.distributed.all_reduce_coalesced(tensors, group=process_group)
@@ -2702,6 +2718,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         # Test with new_group
         pg = c10d.new_group([0, 1], pg_options=pg_opts)
+        # test if the process group constructed with high priority stream
+        self.assertTrue(pg.options.is_high_priority_stream)
         # test the process group works as expected
         t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
         pg.allreduce(t).wait()

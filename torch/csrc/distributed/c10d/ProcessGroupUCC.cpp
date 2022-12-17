@@ -564,7 +564,7 @@ ProcessGroupUCC::ProcessGroupUCC(
     int rank,
     int size,
     std::chrono::duration<float> timeout)
-    : Backend(rank, size), timeout_(timeout) {
+    : ProcessGroup(rank, size), timeout_(timeout) {
   c10::call_once(torch_ucc_config.flag, read_config);
   oob = std::make_shared<torch_ucc_oob_coll_info_t>();
   oob->rank = rank;
@@ -1585,7 +1585,7 @@ uint64_t ProcessGroupUCC::getSequenceNumberForGroup() {
   return seq_;
 }
 
-c10::intrusive_ptr<Backend> ProcessGroupUCC::createProcessGroupUCC(
+c10::intrusive_ptr<ProcessGroup> ProcessGroupUCC::createProcessGroupUCC(
     const c10::intrusive_ptr<::c10d::Store>& store,
     int rank,
     int size,

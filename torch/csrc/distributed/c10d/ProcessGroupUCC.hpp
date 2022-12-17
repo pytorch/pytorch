@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-#include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -53,7 +53,7 @@ struct event_pool_t {
 class Comm;
 
 // UCC does not support multiple CUDA devices per process.
-class TORCH_API ProcessGroupUCC : public Backend {
+class TORCH_API ProcessGroupUCC : public ProcessGroup {
  private:
   void set_timeout(ucc_coll_args_t& args);
 
@@ -153,7 +153,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
       const c10::intrusive_ptr<Store>& store,
       int rank = -1,
       int size = -1,
-      std::chrono::duration<float> timeout = kBackendDefaultTimeout);
+      std::chrono::duration<float> timeout = kProcessGroupDefaultTimeout);
 
   void initComm(c10::Device dev);
 
@@ -266,7 +266,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
-  static c10::intrusive_ptr<Backend> createProcessGroupUCC(
+  static c10::intrusive_ptr<ProcessGroup> createProcessGroupUCC(
       const c10::intrusive_ptr<::c10d::Store>& store,
       int rank,
       int size,
