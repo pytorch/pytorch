@@ -336,8 +336,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_arg_dupe_via_dynamo_recompiles(self):
         class F(torch.nn.Module):
             def forward(self, x, y):
-                x.t_()
-                y.t_()
+                x = x.t_()
+                y = y.t_()
                 return (x + y,)
 
         x = torch.randn(3, 3, requires_grad=True).clone()
@@ -366,6 +366,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         fxx = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
+        fxx(x, x)
         fxx(x, y)
         self.assertEqual(cc.frame_count, 2)
         self.assertEqual(failure_reason, "x is y")
