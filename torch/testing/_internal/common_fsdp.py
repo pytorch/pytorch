@@ -740,7 +740,6 @@ class FSDPTest(MultiProcessTestCase):
         self,
         subtest_config: Dict[str, List[Any]],
         test_fn: Callable,
-        print_config_on_error: bool = False,
         *test_args,
         **test_kwargs: Any,
     ):
@@ -754,8 +753,6 @@ class FSDPTest(MultiProcessTestCase):
             subtest_config (Dict[str, List[Any]]): A mapping from subtest
                 keyword argument name to a list of its possible values.
             test_fn (Callable): A callable that runs the actual test.
-            print_config_on_error (bool): Whether to print the subtest config
-                upon an error. (Default: ``False``)
             test_args: Positional arguments to pass to ``test_fn``.
             test_kwargs: Keyword arguments to pass to ``test_fn``.
         """
@@ -771,14 +768,7 @@ class FSDPTest(MultiProcessTestCase):
                 kwarg: value for kwarg, value in zip(subtest_config_keys, values)
             }
             with self.subTest(**subtest_kwargs):
-                if print_config_on_error:
-                    try:
-                        test_fn(*test_args, **test_kwargs, **subtest_kwargs)
-                    except Exception as e:
-                        print(f"Subtest raised error with config: {str(subtest_kwargs)}")
-                        raise e
-                else:
-                    test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+                test_fn(*test_args, **test_kwargs, **subtest_kwargs)
             dist.barrier()
 
     @classmethod
