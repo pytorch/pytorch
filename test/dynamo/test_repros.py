@@ -2066,6 +2066,56 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
+    def test_nested_while_loop_graph_break(self):
+        def inner_loop(x):
+            i = 3
+            while i > 0:
+                i -= 1
+                x += 1
+                torch._dynamo.graph_break()
+            return x
+
+        def inner(x):
+            inner_loop(x)
+            return torch.sin(x)
+
+        def fn(x):
+            i = 20
+            while i > 10:
+                x = inner(x)
+                i -= 1
+                torch._dynamo.graph_break()
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_while_loop_graph_break_inside_call_function(self):
+        # Repro of huggingface graph break inside loop in `get_parameter_dtype`.
+        # Skip only the inner frame that has loop that contains graph break.
+        def inner(x):
+            for i in range(3):
+                x += 1
+                torch._dynamo.graph_break()
+            return x
+
+        def fn(x):
+            x += 2
+            inner(x)
+            x += 3
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
+
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
