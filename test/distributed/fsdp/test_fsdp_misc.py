@@ -12,7 +12,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import (
-    BackwardPrefetch,
     CPUOffload,
     FlatParameter,
     FullyShardedDataParallel as FSDP,
