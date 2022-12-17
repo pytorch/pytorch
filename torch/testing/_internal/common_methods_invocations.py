@@ -2815,7 +2815,7 @@ def error_inputs_adaptive_avg_pool1d(opinfo, device, **kwargs):
     # 0x0x3fffffffffffffff * 2 * 2 = 0xfffffffffffffffc = -4 as int64_t
     # Tensor::numel() return int64_t, so following check that negative allocs are correctly handled
     yield ErrorInput(SampleInput(make_arg((2, 2, 2)), kwargs={'output_size': 0x3fffffffffffffff}),
-                     error_regex="Storage size calculation overflowed")
+                     error_regex="overflow")
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3)), kwargs={'output_size': ()}),
