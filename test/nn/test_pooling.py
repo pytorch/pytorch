@@ -13,7 +13,7 @@ import math
 from torch._six import inf, nan
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
+from torch.testing._internal.common_utils import TestCase, run_tests, set_default_dtype, \
     instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
@@ -157,14 +157,6 @@ class TestPoolingNN(NNTestCase):
                 input = torch.randn((4,) * (numel + 1))
                 output = module(input)
                 self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
-
-    @unittest.skipIf(TEST_WITH_UBSAN, "signed integer overflow error with UBSAN")
-    def test_adaptive_pooling_size_overflow(self):
-        # 0x0x3fffffffffffffff * 2 * 2 = 0xfffffffffffffffc = -4 as int64_t
-        # Tensor::numel() return int64_t, so following check that negative allocs are correctly handled
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.nn.AdaptiveMaxPool1d(0x3fffffffffffffff)(torch.empty([2, 2, 2])))
 
     def test_adaptive_pooling_avg_nhwc(self):
         device_list = ['cpu']
@@ -1136,9 +1128,6 @@ torch.cuda.synchronize()
 
     def test_pooling_size_empty(self, device):
         t = torch.rand([1, 2, 3, 4], device=device)
-        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool1d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool2d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool3d(t, []))
         self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool1d(t, []))
         self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool2d(t, []))
         self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool3d(t, []))
@@ -1476,20 +1465,6 @@ torch.cuda.synchronize()
             x = torch.randn(shape, device=device, requires_grad=True)
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
             self.assertEqual(x.grad, torch.ones_like(x.grad))
-
-    def test_adaptive_pool_invalid(self, device):
-        inp_1d = (torch.randn(1, 1, 1, device=device), (-1,))
-        inp_2d = (torch.randn(1, 1, 1, 1, device=device), (-1, 0))
-        inp_3d = (torch.randn(1, 1, 1, 1, 1, device=device), (-1, 0, 2))
-        module_input_dict = {torch.nn.AdaptiveAvgPool1d: inp_1d,
-                             torch.nn.AdaptiveAvgPool2d: inp_2d,
-                             torch.nn.AdaptiveAvgPool3d: inp_3d}
-
-        for m, inp in module_input_dict.items():
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"elements of output_size must be greater than or equal to 0"):
-                t, output_size = inp
-                m(output_size)(t)
 
     @slowTest
     def test_adaptive_pool_odd_size(self, device):
