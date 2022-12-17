@@ -129,7 +129,9 @@ def create_symbolic_tensor(name, arg, shape_env):
 
 def create_symint(shape_env, i):
     from torch._dynamo.source import ConstantSource
-    return shape_env.create_symintnode(shape_env.create_symbol(i, source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}")))
+    return shape_env.create_symintnode(
+        shape_env.create_symbol(i, source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"))
+    )
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):

@@ -737,6 +737,7 @@ class ShapeEnv(object):
                 input_guards.append((source, sympy.Integer(val)))
 
         for t, source in zip(placeholders, sources):
+            assert isinstance(source, Source)
             if t is None:
                 continue
             if isinstance(t, SymInt):
@@ -786,8 +787,9 @@ class ShapeEnv(object):
             return "True"
 
     def evaluate_guards_for_args(self, placeholders, args):
+        from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        code = self.codegen_guards(placeholders, arg_names)
+        code = self.codegen_guards(placeholders, [GlobalSource(a) for a in arg_names])
         return eval(code, {}, dict(zip(arg_names, args)))
 
     def bind_symbols(self, placeholders, args):
