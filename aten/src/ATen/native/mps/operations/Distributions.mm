@@ -347,8 +347,10 @@ Tensor& randperm_out_mps(int64_t n, c10::optional<Generator> generator, Tensor& 
     TORCH_WARN_ONCE("MPS: randperm op is supported natively starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performance implications.");
 
-    result = result.to("cpu");
-    result = at::randperm_out(result, n).to("mps");
+    auto result_cpu = result.to("cpu");
+    at::randperm_out(result_cpu, n);
+    result.resize_as_(result_cpu);
+    result.copy_(result_cpu);
     return result;
   }
 
