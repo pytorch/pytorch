@@ -12,7 +12,7 @@ from typing import (
 )
 
 import torch
-import torch.distributed.fsdp._composable_utils as composable_utils
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -107,7 +107,7 @@ def _validate_and_get_hybrid_shard_state(
     intra_node_pgs = set()
     inter_node_pgs = set()
     inter_node_states = set()
-    for fsdp_module in composable_utils._get_fsdp_states(root_module):
+    for fsdp_module in traversal_utils._get_fsdp_states(root_module):
         # TODO: Change this to handle's sharding strategy if we deprecate
         # `ShardingStrategy` internally.
         # https://github.com/pytorch/pytorch/issues/90857
@@ -180,7 +180,7 @@ def _share_state_and_init_handle_attrs(
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
-    for fsdp_state in composable_utils._get_fsdp_states(root_module):
+    for fsdp_state in traversal_utils._get_fsdp_states(root_module):
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             p_assert(
                 hasattr(fsdp_state, attr_name),
@@ -489,7 +489,7 @@ def _root_pre_forward(
             # TODO: This assumes singleton handles keys.
             handles_keys = [tuple(handle) for handle in state._handles]
         else:
-            for fsdp_module in composable_utils._get_fsdp_states(state):
+            for fsdp_module in traversal_utils._get_fsdp_states(state):
                 handles_key = tuple(fsdp_module._handles)
                 handles_keys.append(handles_key)
         for handles_key in handles_keys:
@@ -499,7 +499,7 @@ def _root_pre_forward(
         state._streams["unshard"],
         state._streams["pre_unshard"],
     )
-    _clear_grads_if_needed(composable_utils._get_fsdp_handles(module))
+    _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
 
 
 def _prepare_forward_inputs(
@@ -537,15 +537,9 @@ def _cast_fp_inputs_to_dtype(
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
         if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
-        y = x.to(dtype)
-        # Explicitly copy over `requires_grad` since this runs inside
-        # `torch.no_grad()`
-        if x.is_leaf:
-            y.requires_grad = x.requires_grad
-        return y
+        return x.to(dtype)
 
-    with torch.no_grad():
-        return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
+    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
 
 @no_type_check
@@ -576,7 +570,7 @@ def _pre_backward_hook(
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
             _register_post_backward_final_callback(state, module)
-            _clear_grads_if_needed(composable_utils._get_fsdp_handles(module))
+            _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
         elif _handles_key:
             allowed_states = [TrainingState.IDLE]
             if _is_composable(state):
@@ -871,7 +865,7 @@ def _post_backward_final_callback(
             torch.cuda.current_stream().synchronize()
     root_state._exec_order_data.next_iter()
 
-    for fsdp_state in composable_utils._get_fsdp_states(module):
+    for fsdp_state in traversal_utils._get_fsdp_states(module):
         _catch_all_reshard(fsdp_state)
         _finalize_params(fsdp_state)
         fsdp_state._ran_pre_backward_hook.clear()
@@ -1052,7 +1046,7 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -1082,7 +1076,7 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,
@@ -1283,7 +1277,7 @@ def _get_buffers_and_dtypes_for_computation(
         visited_buffers = set()
         # Traverse the FSDP instances bottom-up so that we prefer the owning
         # FSDP instance's mixed precision setting for each buffer
-        for fsdp_module in reversed(composable_utils._get_fsdp_states(root_module)):
+        for fsdp_module in reversed(traversal_utils._get_fsdp_states(root_module)):
             for buffer in fsdp_module.buffers():
                 if buffer in visited_buffers:
                     continue

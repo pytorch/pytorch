@@ -18,10 +18,10 @@ from torch.distributed.fsdp.wrap import (
 )
 
 
-class SubmoduleState(NamedTuple):
+class FullyShardedModuleState(NamedTuple):
     """
-    Submodule state for ``_get_submodule_to_states()``, representing a logical
-    grouping (e.g. parameters to be flattened together).
+    Module state for ``_get_fully_sharded_module_to_states()``, representing
+    a logical grouping (e.g. parameters to be flattened together).
     """
 
     params: List[nn.Parameter]
@@ -77,17 +77,18 @@ def _auto_wrap(
     _recursive_wrap(**auto_wrap_kwargs, **fsdp_kwargs)
 
 
-def _get_submodule_to_states(
+def _get_fully_sharded_module_to_states(
     root_module: nn.Module,
     auto_wrap_policy: _FSDPPolicy,
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
-) -> Dict[nn.Module, SubmoduleState]:
+) -> Dict[nn.Module, FullyShardedModuleState]:
     """
-    Returns a mapping from submodule to its parameters, buffers, parameter
-    names, and buffer names, where each entry logically represents a grouping
-    according to the given auto wrap policy and ignored modules/parameters.
-    However, this method does not actually perform any module wrapping.
+    Returns a mapping from fully sharded module to its parameters, buffers,
+    parameter names, and buffer names, where each entry logically represents a
+    grouping according to the given auto wrap policy and ignored
+    modules/parameters. However, this method does not actually perform any
+    module wrapping.
 
     The mapped-to values are the states from the subtree rooted at the
     corresponding submodule key, excluding child submodules in the mapping and
@@ -96,11 +97,14 @@ def _get_submodule_to_states(
 
     Each non-ignored parameter and buffer appears exactly once in the returned
     ``dict``, and the ``dict`` is ordered by increasing tree depth. A mapped-to
-    parameter list may be empty if the submodule has no parameters or if its
-    parameters were assigned to a parent submodule instead.
+    parameter list may be empty if the fully sharded module has no parameters
+    or if its parameters were assigned to a parent fully sharded module
+    instead.
     """
     # Record the modules to wrap without actually wrapping
-    wrapped_modules: List[nn.Module] = []  # these are only logically wrapped
+    wrapped_modules: Deque[
+        nn.Module
+    ] = collections.deque()  # these are only logically wrapped
     wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules)
     if auto_wrap_policy is not None:
         _recursive_wrap(
@@ -115,15 +119,16 @@ def _get_submodule_to_states(
     if root_module not in wrapped_modules:
         wrapped_modules.append(root_module)
 
-    submodule_to_states = collections.OrderedDict()
+    fully_sharded_module_to_states = collections.OrderedDict()
     visited_params = set()
     for ignored_param in ignored_params:
         visited_params.add(ignored_param)
     visited_buffers = set()
     # Constructing `wrapped_modules` with `_recursive_wrap()` follows a
-    # post-order traversal. We record state in `submodule_to_states` using a
-    # reverse post-ordering since that is a topological sort. This assigns
-    # parent-child shared parameters to the parent submodule.
+    # post-order (right-to-left bottom-up) traversal. We record state in
+    # `fully_sharded_module_to_states` using a reverse post-ordering since that
+    # is a topological sort that follows `.modules()` depth-first order. This
+    # assigns parent-child shared parameters to the parent submodule.
     # TODO: To handle sibling shared parameters, we need to pre-compute the
     # shared parameters and assign them to the LCA submodule manually.
     wrapped_modules.reverse()
@@ -157,14 +162,14 @@ def _get_submodule_to_states(
                     buffers.append(buffer)
                     visited_buffers.add(buffer)
                     buffer_names.append(prefix + buffer_name)
-        submodule_to_states[submodule] = SubmoduleState(
+        fully_sharded_module_to_states[submodule] = FullyShardedModuleState(
             params, buffers, param_names, buffer_names
         )
-    return submodule_to_states
+    return fully_sharded_module_to_states
 
 
 def _record_module_wrapper_cls(
-    wrapped_modules: List[nn.Module],
+    wrapped_modules: Deque[nn.Module],
     module: nn.Module,
     **kwargs,
 ) -> nn.Module:
@@ -173,5 +178,11 @@ def _record_module_wrapper_cls(
     that records the wrapped module to the input ``wrapped_modules`` without
     actually wrapping with a class.
     """
-    wrapped_modules.append(module)
+    # NOTE: Use `appendleft()` instead of `append()` so that for a given tree
+    # depth, the modules are recorded from right to left, meaning that
+    # reversing the overall recorded order gives us a topological sort that
+    # follows the `.modules()` depth-first order. Using `append()` orders from
+    # left to right, still giving a valid topological sort, but the sort order
+    # differs from `.modules()` depth-first order.
+    wrapped_modules.appendleft(module)
     return module

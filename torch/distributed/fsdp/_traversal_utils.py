@@ -1,8 +1,8 @@
 """
 NOTE: This file must be imported like
-``import torch.distributed.fsdp._composable_utils`` and not like
-``from torch.distirbuted.fsdp._composable_utils import ...`` to avoid circular
-imports. For brevity, we may canonically import the file ``composable_utils``.
+``import torch.distributed.fsdp._traversal_utils`` and not like
+``from torch.distirbuted.fsdp._traversal_utils import ...`` to avoid circular
+imports. For brevity, we may canonically import the file ``traversal_utils``.
 """
 
 import collections
@@ -72,7 +72,7 @@ def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
         visited_modules.add(submodule)
         if not _composable(submodule):
             continue
-        for child_module in submodule.children():
+        for child_module in reversed(list(submodule.children())):
             if child_module not in visited_modules:
                 deque.appendleft(child_module)
         optional_state = _get_module_fsdp_state(submodule)

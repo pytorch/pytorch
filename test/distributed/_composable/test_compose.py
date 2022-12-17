@@ -192,8 +192,8 @@ class TestFSDPCheckpoint(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_replicate_composability(self):
         """
-        Tests composing ``fully_shard`` and ``replicate``. To save CI time, we
-        run the different configs in subtests.
+        Tests composing ``fully_shard`` and ``replicate``. To save unit test
+        time, we run the different configs in subtests.
 
         TODO (awgu): Once https://github.com/pytorch/pytorch/pull/90711/ lands,
         add "1fm1fm,1r1r,1fm".

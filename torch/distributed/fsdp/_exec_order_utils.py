@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
-import torch.distributed.fsdp._composable_utils as composable_utils
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _FSDPState, _get_param_to_fqns
 from torch.distributed.fsdp.flat_param import FlatParamHandle
@@ -84,7 +84,7 @@ class _ExecOrderData:
         self.rank = process_group.rank()
         self.world_size = process_group.size()
         # Fix an order over the handles, which should be the same across ranks
-        for handle in composable_utils._get_fsdp_handles(root_module):
+        for handle in traversal_utils._get_fsdp_handles(root_module):
             index = len(self.all_handles)
             self.all_handles.append(handle)
             self.handle_to_handle_index[handle] = index

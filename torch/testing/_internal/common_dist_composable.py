@@ -78,6 +78,8 @@ class FakeSequential(nn.Module):
 class NestedSequentialModel(nn.Module):
     def __init__(self, device: torch.device) -> None:
         super().__init__()
+        # This nested structure exercises traversal order to catch differences
+        # between valid traversals (e.g. BFS and DFS variations).
         self.seq1 = nn.Sequential(
             nn.Linear(1, 1, device=device),
             FakeSequential(

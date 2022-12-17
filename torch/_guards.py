@@ -6,12 +6,14 @@ from abc import ABC
 from contextlib import contextmanager
 from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
 
+log = logging.getLogger(__name__)
+
 # TODO(voz): Stolen pattern, not sure why this is the case,
 # but mypy complains.
 try:
     import sympy  # type: ignore[import]
 except ImportError:
-    logging.warning("No sympy found")
+    log.warning("No sympy found")
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
@@ -283,8 +285,9 @@ class TracingContext:
     def get() -> Optional["TracingContext"]:
         return _CURRENT_TRACING_CONTEXT
 
-    def __init__(self):
+    def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
+        self.fake_mode = fake_mode
 
 
 """
