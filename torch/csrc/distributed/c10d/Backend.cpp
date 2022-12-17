@@ -4,8 +4,7 @@
 
 namespace c10d {
 
-Backend::Backend(int rank, int size)
-    : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
+Backend::Backend(int rank, int size) : rank_(rank), size_(size) {
   C10_LOG_API_USAGE_ONCE("c10d.backend");
 }
 

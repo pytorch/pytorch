@@ -4,7 +4,6 @@
 #ifdef USE_C10D_GLOO
 
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <chrono>
 #include <exception>
 #include <ratio>
@@ -609,7 +608,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : Backend::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
+    : ProcessGroup::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
 
 namespace {
 
@@ -732,7 +731,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
-    : Backend(rank, size),
+    : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
       options_(options),
       stop_(false),

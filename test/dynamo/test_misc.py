@@ -2673,7 +2673,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 b_float32 = torch.rand((8, 8), device="cuda")
                 d_float32 = torch.rand((8, 8), device="cuda")
 
-                with torch.autocast("cuda"):
+                with torch.autocast(device_type="cuda"):
                     e_float64 = torch.mm(a_float32, b_float32)
                     f_float64 = torch.mm(d_float32, e_float64)
                 return f_float64
@@ -2967,47 +2967,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
-    def test_torch_cudnn_is_acceptable(self):
-        def fn(x):
-            if torch.backends.cudnn.is_acceptable(tensor=x):
-                return x + 1
-            return x
-
-        x = torch.rand(4).cuda()
-        ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
-        res = opt_fn(x)
-        self.assertTrue(same(ref, res))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
-    def test_torch_cudnn_is_acceptable_bad_inputs(self):
-        def fn1(x):
-            if torch.backends.cudnn.is_acceptable("invalid"):
-                return x + 1
-            return x
-
-        def fn2(x):
-            if torch.backends.cudnn.is_acceptable(x, 3.14):
-                return x + 1
-            return x
-
-        with self.assertRaisesRegex(
-            AssertionError, "Expect input to cudnn.is_acceptable to be a tensor"
-        ):
-            x1 = torch.rand(4).cuda()
-            opt_fn1 = torch._dynamo.optimize("eager", nopython=True)(fn1)
-            res1 = opt_fn1(x1)
-
-        with self.assertRaisesRegex(
-            AssertionError, "Expect 1 input to cudnn.is_acceptable"
-        ):
-            x2 = torch.rand(4).cuda()
-            opt_fn2 = torch._dynamo.optimize("eager", nopython=True)(fn2)
-            res = opt_fn2(x2)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_get_device(self):

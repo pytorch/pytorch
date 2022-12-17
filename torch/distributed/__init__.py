@@ -28,7 +28,6 @@ if is_available():
         FileStore,
         TCPStore,
         ProcessGroup,
-        Backend as _Backend,
         PrefixStore,
         Reducer,
         Logger,

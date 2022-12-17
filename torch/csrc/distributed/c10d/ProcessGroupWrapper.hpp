@@ -2,17 +2,18 @@
 
 #ifdef USE_C10D_GLOO
 
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
 namespace c10d {
 
-class TORCH_API ProcessGroupWrapper : public Backend {
+class TORCH_API ProcessGroupWrapper : public ProcessGroup {
  public:
   explicit ProcessGroupWrapper(
-      c10::intrusive_ptr<Backend> backend,
-      c10::intrusive_ptr<Backend> glooBackend);
+      c10::intrusive_ptr<ProcessGroup> pg,
+      c10::intrusive_ptr<ProcessGroupGloo> glooPg);
 
   const std::string getBackendName() const override;
 
@@ -115,15 +116,15 @@ class TORCH_API ProcessGroupWrapper : public Backend {
       at::Tensor& inputBuffer,
       const ReduceScatterOptions& opts) override;
 
-  c10::intrusive_ptr<Backend> getWrappedPg() const;
+  c10::intrusive_ptr<ProcessGroup> getWrappedPg() const;
 
  private:
   // Underlying process group that actual application collectives will be
   // dispatched to
-  c10::intrusive_ptr<Backend> backend_;
+  c10::intrusive_ptr<ProcessGroup> pg_;
   // Gloo process group responsible for internal coordination such as monitored
   // barrier, sequence number checking, collective fingerprint collecting.
-  c10::intrusive_ptr<Backend> glooBackend_;
+  c10::intrusive_ptr<ProcessGroupGloo> glooPg_;
   // Conducts several checks to ensure that the underlying collective is well
   // formed with the goal of notifying the user about incorrect collective use
   // in the application.
