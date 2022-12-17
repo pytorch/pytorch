@@ -697,6 +697,10 @@ class TritonKernel(Kernel):
         itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
+    def is_indirect_indexing(self, index: sympy.Expr):
+        # tmpX  means indirect indexing
+        return free_symbol_startswith(index, "tmp")
+
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
@@ -808,6 +812,7 @@ class TritonKernel(Kernel):
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
+        indirect_indexing = self.is_indirect_indexing(index)
         index, mask_vars, mask = self.indexing(index)
 
         if "rmask" in mask:
