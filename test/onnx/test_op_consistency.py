@@ -326,33 +326,22 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
         reason=reason_onnx_does_not_support("Ceil")
     ),
     fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
-    xfail(
-        "div", variant_name="trunc_rounding", dtypes=(torch.float16,),
-        reason=reason_jit_tracer_error("f16 types")
+    fixme(
+        "div", variant_name="no_rounding_mode", dtypes=[torch.uint8, torch.int8, torch.int16, torch.float64],
+        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16", "f64"])
     ),
     fixme(
-        "div", variant_name="no_rounding_mode", dtypes=[torch.uint8, torch.int8, torch.int16],
-        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
+        "div", variant_name="floor_rounding", dtypes=[torch.uint8, torch.int8, torch.int16, torch.float64],
+        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16", "f64"])
     ),
     fixme(
-        "div", variant_name="floor_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
-        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
-    ),
-    fixme(
-        "div", variant_name="floor_rounding", dtypes=[torch.float64],
-        reason=reason_onnx_runtime_does_not_support("Div", ["f64"])
-    ),
-    fixme(
-        "div", variant_name="trunc_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
-        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
+        "div", variant_name="trunc_rounding", dtypes=[torch.uint8, torch.int8, torch.int16, torch.float64],
+        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16", "f64"])
     ),
     fixme("floor_divide", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
-    xfail(
-        "remainder", dtypes=[torch.uint8, torch.int8, torch.int16], opsets=[opsets_before(11)],
-        reason="Sub not defined for u8, i16 before opset 14. Mod is used after 11 so we support from opset 11.",
-    ),
     fixme("remainder", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
     dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
+    fixme("true_divide", dtypes=[torch.float64], reason="float64 output is return as float32"),
 )
 # fmt: on
 

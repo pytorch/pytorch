@@ -449,12 +449,17 @@ def _trunc_divide(g: jit_utils.GraphContext, self, other):
 def floor_divide(g: jit_utils.GraphContext, self, other):
     quotient = true_divide(g, self, other)
     floor = g.op("Floor", quotient)
-    self_type = self.type().scalarType()
-    other_type = other.type().scalarType()
-    if self_type is not None and other_type is not None:
-        self_torch_type = _type_utils.JitScalarType.from_value(self).dtype()
-        other_torch_type = _type_utils.JitScalarType.from_value(other).dtype()
-        output_torch_type = torch.promote_types(self_torch_type, other_torch_type)
+    self_type = _type_utils.JitScalarType.from_value(
+        self, default=_type_utils.JitScalarType.UNDEFINED
+    )
+    other_type = _type_utils.JitScalarType.from_value(
+        other, default=_type_utils.JitScalarType.UNDEFINED
+    )
+    if (
+        self_type is not _type_utils.JitScalarType.UNDEFINED
+        and other_type is not _type_utils.JitScalarType.UNDEFINED
+    ):
+        output_torch_type = torch.promote_types(self_type.dtype(), other_type.dtype())
         return g.op(
             "Cast",
             floor,
@@ -483,8 +488,6 @@ def true_divide(g: jit_utils.GraphContext, self, other):
     # Performs div as usual.
     # Implicit casting will be handled in scalar type analysis pass.
     if symbolic_helper._is_fp(self) or symbolic_helper._is_fp(other):
-        # FIXME(justinchuby): Fix the output type when both input are f64.
-        # Currently, the output type is f32.
         return g.op("Div", self, other)
 
     # Case 2: neither is floating
