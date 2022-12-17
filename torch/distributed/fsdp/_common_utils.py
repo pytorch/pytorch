@@ -119,10 +119,11 @@ def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     """
     if _is_composable(state):
         assert (
-            module in state._comm_module_to_handles
+            module in state._fully_sharded_module_to_handles
         ), f"Expects a `comm_module` but got {module} on rank {state.rank}"
-        return state._comm_module_to_handles[module][:]
+        return state._fully_sharded_module_to_handles[module][:]
     else:
+        # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
         return module._handles[:]
 
 
