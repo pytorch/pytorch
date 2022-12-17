@@ -472,9 +472,11 @@ if HAS_SYMPY:
         def __init__(
             self,
             symbol_to_source,
+            source_ref,
         ):
             super().__init__()
             self.symbol_to_source = symbol_to_source
+            self.source_ref = source_ref
 
         def _print_Symbol(self, expr) -> str:
             assert isinstance(expr, Symbol), str(type(expr))
@@ -482,7 +484,7 @@ if HAS_SYMPY:
                 f"{expr} (could be from {[s.name() for s in expr.sources]}) "
                 f"not in {self.symbol_to_source}"
             )
-            return self.symbol_to_source[expr][0].name()
+            return self.source_ref(self.symbol_to_source[expr][0])
 
 
 
@@ -644,7 +646,8 @@ class ShapeEnv(object):
     # on if the guards evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
-    def codegen_guards(self, placeholders, sources):
+    def codegen_guards(self, placeholders, sources,
+                       source_ref=lambda n: n.name()):
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -756,11 +759,15 @@ class ShapeEnv(object):
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
         for source, expr in input_guards:
-            sexpr = ShapeGuardPrinter(symbol_to_source).doprint(expr)
             # Small optimization
-            if source == sexpr:
+            if (
+                isinstance(expr, Symbol) and
+                expr in symbol_to_source and
+                source == symbol_to_source[expr][0]
+            ):
                 continue
-            exprs.append(f"{source.name()} == {sexpr}")
+            sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
+            exprs.append(f"{source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
@@ -769,7 +776,7 @@ class ShapeEnv(object):
                 continue
             g = self.simplify(g)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
+                exprs.append(ShapeGuardPrinter(symbol_to_source, source_ref).doprint(g))
             except Exception:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
@@ -779,7 +786,7 @@ class ShapeEnv(object):
             assert sources
             # We must assert that each symbol is not zero or one, as we make
             # negative inferences on shape variables
-            exprs.append(f"{sources[0].name()} != 0 and {sources[0].name()} != 1")
+            exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
         if exprs:
             return " and ".join(exprs)

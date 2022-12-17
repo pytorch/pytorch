@@ -43,7 +43,7 @@ class GuardSource(enum.Enum):
             return locals_
         if self in (GuardSource.GLOBAL, GuardSource.GLOBAL_NN_MODULE):
             return globals_
-        raise NotImplementedError()
+        raise NotImplementedError(str(self))
 
     def is_nn_module(self) -> bool:
         return self in (GuardSource.GLOBAL_NN_MODULE, GuardSource.LOCAL_NN_MODULE)
