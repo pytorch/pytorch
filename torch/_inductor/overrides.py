@@ -32,7 +32,10 @@ class AutogradMonkeypatch(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if not kwargs:
             kwargs = {}
-        if func is replacements:
+        if func in replacements and not (
+            config.fallback_random
+            and replacements[func] in replacements_using_triton_random
+        ):
             return replacements[func](*args, **kwargs)
         return func(*args, **kwargs)
 
@@ -406,69 +409,6 @@ class LinearBinary(nn.Linear):
         return y
 
 
-class ConvTransposeUnary2d(nn.ConvTranspose2d):
-    def __init__(
-        self,
-        conv_transpose: nn.Module,
-        unary: nn.Module,
-    ):
-        super(ConvTransposeUnary2d, self).__init__(
-            conv_transpose.in_channels,
-            conv_transpose.out_channels,
-            conv_transpose.kernel_size,
-            conv_transpose.stride,
-            conv_transpose.padding,
-            conv_transpose.output_padding,
-            conv_transpose.groups,
-            conv_transpose.bias is not None,
-            conv_transpose.dilation,
-            conv_transpose.padding_mode,
-            conv_transpose.weight.device,
-            conv_transpose.weight.dtype,
-        )
-        self._update_module_params(conv_transpose, unary)
-
-    def _update_module_params(self, conv_transpose, unary):
-        self.__dict__ = copy.deepcopy(conv_transpose.__dict__)
-        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
-            unary
-        )
-
-    def _conv_transpose_forward(self, input, weight, bias):
-        if self.padding_mode != "zeros":
-            return torch.ops.mkldnn._convolution_transpose_pointwise(
-                F.pad(
-                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
-                ),
-                weight,
-                bias,
-                _pair(0),
-                self.output_padding,
-                self.stride,
-                self.dilation,
-                self.groups,
-                self.attr,
-                self.scalars,
-                self.algorithm,
-            )
-        return torch.ops.mkldnn._convolution_transpose_pointwise(
-            input,
-            weight,
-            bias,
-            self.padding,
-            self.output_padding,
-            self.stride,
-            self.dilation,
-            self.groups,
-            self.attr,
-            self.scalars,
-            self.algorithm,
-        )
-
-    def forward(self, input):
-        return self._conv_transpose_forward(input, self.weight, self.bias)
-
-
 def packed_conv_eval(conv: nn.Module, input_size: list):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
@@ -542,16 +482,6 @@ def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
         attr,
     )
     return linear_binary
-
-
-def fused_conv_transpose_unary_eval(
-    conv_transpose: nn.Module, unary: nn.Module, input_size: list
-):
-    assert not (conv_transpose.training), "Fusion only for eval!"
-    return ConvTransposeUnary2d(
-        conv_transpose,
-        unary,
-    )
 
 
 def check_node_kind(current_node, modules, node_kind):
@@ -1335,7 +1265,6 @@ computation_op_unary_op_fusion_map = {
     nn.Linear: fused_linear_unary_eval,
     ConvBinary2d: fused_conv_binary_unary_eval,
     ConvBinaryInplace2d: fused_conv_binary_unary_eval,
-    nn.ConvTranspose2d: fused_conv_transpose_unary_eval,
 }
 
 
