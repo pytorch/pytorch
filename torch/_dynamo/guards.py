@@ -401,7 +401,9 @@ class GuardBuilder(GuardBuilderBase):
             )
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
-    def _produce_guard_code(self, guard, code_list, provided_guarded_object=None, shape_env=False):
+    def _produce_guard_code(
+        self, guard, code_list, provided_guarded_object=None, shape_env=False
+    ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
         # than they should.  See TestMisc.test_release_module_memory

@@ -41,7 +41,7 @@ from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, LocalSource, Source, ShapeEnvSource
+from .source import ConstantSource, LocalSource, ShapeEnvSource, Source
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,

@@ -89,6 +89,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(torch.ones(6, 4))
 
         from torch._guards import GuardSource
+
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
         hit = False
         for guard in out_guards:

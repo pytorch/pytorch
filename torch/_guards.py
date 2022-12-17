@@ -2,7 +2,7 @@ import dataclasses
 import enum
 import logging
 import weakref
-from abc import ABC
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
 
@@ -35,7 +35,11 @@ class GuardSource(enum.Enum):
     def select(self, locals_, globals_):
         # SHAPE_ENV counts as locals, because the guard expressions
         # created by shape env can reference f_locals
-        if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE, GuardSource.SHAPE_ENV):
+        if self in (
+            GuardSource.LOCAL,
+            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.SHAPE_ENV,
+        ):
             return locals_
         if self in (GuardSource.GLOBAL, GuardSource.GLOBAL_NN_MODULE):
             return globals_
@@ -199,11 +203,13 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 
 
 class Checkpointable(ABC, Generic[T]):
+    @abstractmethod
     def copy_graphstate(self) -> T:
-        pass
+        ...
 
+    @abstractmethod
     def restore_graphstate(self, state: T):
-        pass
+        ...
 
 
 """
