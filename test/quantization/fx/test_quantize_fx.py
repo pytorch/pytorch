@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
@@ -56,7 +56,6 @@ from torch.ao.quantization import (
     get_default_qat_qconfig,
     get_default_qconfig_mapping,
     get_default_qat_qconfig_mapping,
-    is_activation_post_process,
     fuse_modules,
     fuse_modules_qat,
     prepare,
@@ -146,6 +145,7 @@ from torch.ao.quantization.observer import (
     default_fixed_qparams_range_0to1_observer,
     default_fixed_qparams_range_neg1to1_observer,
     MinMaxObserver,
+    _is_activation_post_process,
 )
 
 # test utils
@@ -155,6 +155,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_quantization import (
     LinearReluLinearModel,
     LinearReluModel,
+    LinearBnLeakyReluModel,
     QuantizationTestCase,
     skipIfNoFBGEMM,
     skipIfNoQNNPACK,
@@ -165,6 +166,7 @@ from torch.testing._internal.common_quantization import (
     test_only_train_fn,
     ModelForConvTransposeBNFusion,
     get_supported_device_types,
+    skipIfNoONEDNN,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -361,6 +363,48 @@ class TestFuseFx(QuantizationTestCase):
             m,
             expected_node_list=expected_nodes,
             expected_node_occurrence=expected_occurrence)
+
+    @skipIfNoONEDNN
+    def test_fuse_linear_bn_leaky_relu_onednn(self):
+        # linear - bn - leaky_relu is fused for onednn backend only
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        expected_nodes = [
+            ns.call_module(nni.LinearLeakyReLU),
+        ]
+        expected_occurrence = {
+            ns.call_module(nn.BatchNorm1d): 0,
+            ns.call_module(nn.LeakyReLU): 0,
+        }
+
+        for with_bn in [True, False]:
+            # test eval mode
+            m = LinearBnLeakyReluModel(with_bn).eval()
+            # fuse_fx is a top level api and only supports eval mode
+            m = fuse_fx(m,
+                        backend_config=get_onednn_backend_config())
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=expected_nodes,
+                expected_node_occurrence=expected_occurrence)
+
+    def test_linear_bn_leaky_relu_not_fused_by_default(self):
+        # Make sure linear - bn - leaky_relu is not fused by default
+        for with_bn in [True, False]:
+            # test eval mode
+            m = LinearBnLeakyReluModel(with_bn).eval()
+            # fuse_fx is a top level api and only supports eval mode
+            m = fuse_fx(m)
+            expected_nodes = [
+                ns.call_module(nn.Linear),
+                ns.call_module(nn.LeakyReLU),
+            ]
+            expected_occurrence = {
+                ns.call_module(nni.LinearLeakyReLU): 0,
+            }
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=expected_nodes,
+                expected_node_occurrence=expected_occurrence)
 
     def test_fuse_convtranspose_bn_eval(self):
 
@@ -3296,7 +3340,7 @@ class TestQuantizeFx(QuantizationTestCase):
                     _check_node_not_observed(model, new_node, node)
             elif arg_node.op == "call_module":
                 self.assertTrue(
-                    not is_activation_post_process(getattr(model, arg_node.target)),
+                    not _is_activation_post_process(getattr(model, arg_node.target)),
                     "Arg: {0} of node: {1} is observed but is not a float tensor".format(
                         arg_node, node
                     ),
@@ -5055,7 +5099,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 qconfig_dict = func(backend)
                 m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 1, 1, 1)))
                 for name, mod in m.named_modules():
-                    if is_activation_post_process(mod) and mod.dtype == torch.quint8:
+                    if _is_activation_post_process(mod) and mod.dtype == torch.quint8:
                         if backend == "fbgemm":
                             lower_bnd = 0
                             upper_bnd = 127
