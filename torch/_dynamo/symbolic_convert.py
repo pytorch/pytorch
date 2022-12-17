@@ -1026,6 +1026,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         fn = self.pop()
         self.call_function(fn, args, {})
 
+    @break_graph_if_unsupported(push=1)
     def LOAD_ATTR(self, inst):
         obj = self.pop()
         result = BuiltinVariable(getattr).call_function(

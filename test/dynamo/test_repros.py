@@ -1108,6 +1108,39 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
+    def test_property_graph_break(self):
+        """
+        From huggingface modeling_utils.py
+        ```python
+        class ModuleUtilsMixin:
+            @property
+            def dtype(self):
+                return get_parameter_dtype(self)
+        ```
+        """
+        def get_parameter_dtype(self):
+            torch._dynamo.graph_break()
+            return self.weight.dtype
+
+        class Model(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            @property
+            def dtype(self):
+                return get_parameter_dtype(self)
+
+            def forward(self, x):
+                x = x + 1
+                return (x.to(self.dtype) + self.weight).relu()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch._dynamo.optimize(cnt)(Model(torch.randn(10)))
+        opt_f(torch.randn(10))
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 3)
+
     def test_nn_parameter(self):
         def test_fn():
             a = torch.nn.Parameter(torch.randn(5, 5))
