@@ -363,7 +363,7 @@ class CSEVariable:
     def __eq__(self, other) -> bool:
         return type(other) == type(self) and other.name == self.name
 
-    def update_on_args(self, args, kwargs):
+    def update_on_args(self, name, args, kwargs):
         pass
 
 
@@ -520,7 +520,7 @@ class Kernel(CodeGen):
                     csevar = self.cse.generate(
                         self.compute, getattr(parent_handler, name)(*args, **kwargs)
                     )
-                    csevar.update_on_args(args, kwargs)
+                    csevar.update_on_args(name, args, kwargs)
                     return csevar
 
                 return inner
