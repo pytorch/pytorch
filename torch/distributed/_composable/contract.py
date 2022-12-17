@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, Optional, Set, Type
 
 import torch.nn as nn
 from torch.distributed._composable_state import _State
@@ -122,34 +122,25 @@ def contract(state_cls: Type[_State] = _State):
                 f"nn.Module, but got {type(updated)}"
             )
 
-            def check_fqn(orig_fqns: List[str], new_fqns: List[str]):
+            def check_fqn(orig_fqns: Set[str], new_fqns: Set[str]):
                 if orig_fqns == new_fqns:
                     return
 
-                orig_fqn_set, new_fqn_set = set(orig_fqns), set(new_fqns)
-                orig_only = orig_fqn_set - new_fqn_set
-                new_only = new_fqn_set - orig_fqn_set
-                if len(orig_only) or len(new_only):
-                    raise RuntimeError(
-                        "Composable distributed API implementations cannot modify "
-                        "FQNs.\n"
-                        f"Only in original FQNs: {orig_only},\n"
-                        f"Only in new FQNs: {new_only}"
-                    )
-                else:
-                    raise RuntimeError(
-                        "Composable distributed API implementations cannot modify "
-                        "the order of FQNs.\n"
-                        f"Original FQNs: {orig_only}\n"
-                        f"New FQNs: {new_only}"
-                    )
+                orig_only = orig_fqns - new_fqns
+                new_only = new_fqns - orig_fqns
+                raise RuntimeError(
+                    "Composable distributed API implementations cannot modify "
+                    "FQNs.\n"
+                    f"Only in original FQNs: {orig_only},\n"
+                    f"Only in new FQNs: {new_only}"
+                )
 
-            check_fqn(list(orig_named_params.keys()), list(new_named_params.keys()))
+            check_fqn(set(orig_named_params.keys()), set(new_named_params.keys()))
             check_fqn(
-                list(orig_named_buffers.keys()), list(new_named_buffers.keys())
+                set(orig_named_buffers.keys()), set(new_named_buffers.keys())
             )
             check_fqn(
-                list(orig_named_modules.keys()), list(new_named_modules.keys())
+                set(orig_named_modules.keys()), set(new_named_modules.keys())
             )
 
             # TODO: a stricter verification should also reject changing module
