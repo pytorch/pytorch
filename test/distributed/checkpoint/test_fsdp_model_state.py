@@ -79,9 +79,13 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
         self._test_fsdp_model_state(process_group=None)
 
     def _create_new_dist_group(self):
+        world_size = dist.get_world_size()
+        group1 = [i for i in range(world_size) if i % 2 == 0]
+        group2 = [i for i in range(world_size) if i % 2 != 0]
+
         # create new fsdp group for resharding
-        fsdp_0 = dist.new_group(ranks=[0, 2])
-        fsdp_1 = dist.new_group(ranks=[1, 3])
+        fsdp_0 = dist.new_group(ranks=group1)
+        fsdp_1 = dist.new_group(ranks=group2)
         if dist.get_rank() % 2 == 0:
             my_fsdp = fsdp_0
         else:
@@ -93,9 +97,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
     def test_fsdp_model_state_with_resharding(self):
-        self._test_fsdp_model_state(
-            process_group=self.create_new_dist_group()
-        )
+        self._test_fsdp_model_state(process_group=self._create_new_dist_group())
 
 
 if __name__ == "__main__":
