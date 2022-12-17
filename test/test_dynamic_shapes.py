@@ -122,11 +122,14 @@ class FakeSymbolicTensor(torch.Tensor):
 
 
 def create_symbolic_tensor(name, arg, shape_env):
-    sym_shapes, sym_strides, sym_storage_offset = shape_env.create_symbolic_sizes_strides_storage_offset(arg, sname=name)
+    from torch._dynamo.source import ConstantSource
+    sym_shapes, sym_strides, sym_storage_offset = \
+        shape_env.create_symbolic_sizes_strides_storage_offset(arg, source=ConstantSource(name))
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
 def create_symint(shape_env, i):
-    return shape_env.create_symintnode(shape_env.create_symbol(i, sname=f"__testing_only{len(shape_env.var_to_val)}"))
+    from torch._dynamo.source import ConstantSource
+    return shape_env.create_symintnode(shape_env.create_symbol(i, source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}")))
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
