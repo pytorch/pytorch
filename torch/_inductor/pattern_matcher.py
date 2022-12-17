@@ -309,7 +309,7 @@ def _return_true(match):
     return True
 
 
-def register_replacement_pattern(pattern, extra_check=_return_true, pass_number=0):
+def register_replacement_pattern(pattern, extra_check=_return_true, pass_number=1):
     """
     Register an aten to aten replacement pattern
     """
@@ -407,47 +407,6 @@ def fx_passes(gm: torch.fx.GraphModule):
 ################################################################################
 
 
-@register_replacement_pattern(
-    CallFunction(
-        aten.add,
-        CallFunction(aten.mm, Arg(), Arg()),
-        KeywordArg("added"),
-    ),
-    pass_number=2,
-)
-@register_replacement_pattern(
-    CallFunction(
-        aten.add,
-        KeywordArg("added"),
-        CallFunction(aten.mm, Arg(), Arg()),
-    ),
-    pass_number=2,
-)
-def addmm(mat1, mat2, added):
-    return aten.addmm(added, mat1, mat2)
-
-
-# This slows things down:
-"""
-@register_replacement_pattern(
-    CallFunction(
-        aten.add,
-        CallFunction(aten.bmm, Arg(), Arg()),
-        KeywordArg("added"),
-    ),
-    pass_number=3
-)
-@register_replacement_pattern(
-    CallFunction(
-        aten.add,
-        KeywordArg("added"),
-        CallFunction(aten.bmm, Arg(), Arg()),
-    ),
-    pass_number=3
-)
-def baddbmm(mat1, mat2, added):
-    return aten.baddbmm(added, mat1, mat2)
-"""
 
 
 @register_lowering_pattern(
@@ -594,3 +553,46 @@ def cat_slice_cat(match, cat_input, size, dim=1):
             ],
             dim,
         )
+
+
+@register_replacement_pattern(
+    CallFunction(
+        aten.add,
+        CallFunction(aten.mm, Arg(), Arg()),
+        KeywordArg("added"),
+    ),
+    pass_number=2,
+)
+@register_replacement_pattern(
+    CallFunction(
+        aten.add,
+        KeywordArg("added"),
+        CallFunction(aten.mm, Arg(), Arg()),
+    ),
+    pass_number=2,
+)
+def addmm(mat1, mat2, added):
+    return aten.addmm(added, mat1, mat2)
+
+
+# This slows things down:
+"""
+@register_replacement_pattern(
+    CallFunction(
+        aten.add,
+        CallFunction(aten.bmm, Arg(), Arg()),
+        KeywordArg("added"),
+    ),
+    pass_number=3
+)
+@register_replacement_pattern(
+    CallFunction(
+        aten.add,
+        KeywordArg("added"),
+        CallFunction(aten.bmm, Arg(), Arg()),
+    ),
+    pass_number=3
+)
+def baddbmm(mat1, mat2, added):
+    return aten.baddbmm(added, mat1, mat2)
+"""
