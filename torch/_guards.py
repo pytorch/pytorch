@@ -33,7 +33,9 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
 
     def select(self, locals_, globals_):
-        if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE):
+        # SHAPE_ENV counts as locals, because the guard expressions
+        # created by shape env can reference f_locals
+        if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE, GuardSource.SHAPE_ENV):
             return locals_
         if self in (GuardSource.GLOBAL, GuardSource.GLOBAL_NN_MODULE):
             return globals_
@@ -85,7 +87,7 @@ class Guard:
     #
     # Occasionally, name is not a valid Python expression; sometimes
     # it is meaningless.  Example create_fns that are like this include
-    # GRAD_MODE and SYMBOL_MATCH.
+    # GRAD_MODE and SHAPE_ENV.
     name: str
     source: GuardSource
     create_fn: Callable[[GuardBuilderBase, "Guard"], None]
