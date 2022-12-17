@@ -285,8 +285,9 @@ class TracingContext:
     def get() -> Optional["TracingContext"]:
         return _CURRENT_TRACING_CONTEXT
 
-    def __init__(self):
+    def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
+        self.fake_mode = fake_mode
 
 
 """
