@@ -517,15 +517,9 @@ def _cast_fp_inputs_to_dtype(
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
         if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
-        y = x.to(dtype)
-        # Explicitly copy over `requires_grad` since this runs inside
-        # `torch.no_grad()`
-        if x.is_leaf:
-            y.requires_grad = x.requires_grad
-        return y
+        return x.to(dtype)
 
-    with torch.no_grad():
-        return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
+    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
 
 @no_type_check
@@ -1024,7 +1018,7 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -1054,7 +1048,7 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,
