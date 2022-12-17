@@ -2558,6 +2558,7 @@ class TestTensorCreation(TestCase):
         for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
             test_fn(torch.linspace, np.linspace, steps)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @dtypes(torch.complex64)
     def test_linspace_vs_numpy_complex(self, device, dtype):
         self._test_linspace_logspace_complex_helper(torch.linspace, np.linspace,
@@ -2851,6 +2852,7 @@ class TestTensorCreation(TestCase):
 
             self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_linspace_deduction(self, device):
         # Test deduction from input parameters.
         self._test_linspace_logspace_deduction_helper(torch.linspace, device)

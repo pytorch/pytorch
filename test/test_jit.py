@@ -6785,6 +6785,7 @@ a")
         self.checkScript(plus_123, (2,))
         self.checkScript(plus_123, (3,))
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
