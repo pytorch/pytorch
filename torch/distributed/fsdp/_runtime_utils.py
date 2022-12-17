@@ -1,6 +1,16 @@
 import functools
 import warnings
-from typing import Any, Callable, Dict, Iterable, List, no_type_check, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    no_type_check,
+    Optional,
+    Set,
+    Tuple,
+)
 
 import torch
 import torch.nn as nn
@@ -12,6 +22,7 @@ from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
     _get_fsdp_states,
+    _get_module_fsdp_state,
     _is_composable,
     TrainingState,
 )
@@ -35,6 +46,43 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
     HandleShardingStrategy.FULL_SHARD,
     HandleShardingStrategy.HYBRID_SHARD,
 }
+
+
+def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
+    """
+    Returns all root ``_FSDPState`` instances in the module tree rooted at
+    ``module``.
+
+    This is similar to :func:`_get_fsdp_states` except we must call
+    :func:`_is_fsdp_root` to force a lazy initialization to determine the FSDP
+    root in case lazy initialization has not yet happened.
+    """
+    fsdp_root_states: List[_FSDPState] = []
+    visited_fsdp_states: Set[_FSDPState] = set()
+    # NOTE: This function assumes that `module.modules()` proceeds top-down.
+    for submodule in module.modules():
+        optional_state = _get_module_fsdp_state(submodule)
+        if (
+            optional_state is not None
+            and optional_state not in visited_fsdp_states
+            and _is_fsdp_root(optional_state, submodule)
+        ):
+            visited_fsdp_states.add(optional_state)
+            fsdp_root_states.append(optional_state)
+    return fsdp_root_states
+
+
+def _is_fsdp_root(state: _FSDPState, module: nn.Module) -> bool:
+    """
+    Returns if ``state`` corresponds to that of an FSDP root.
+
+    For the wrapper code path, ``state`` and ``module`` should be the same. For
+    the non-wrapper code path, ``state`` should be ``module`` 's state.
+    """
+    # Force a lazy initialization to determine the FSDP root
+    _lazy_init(state, module)
+    assert state._is_root is not None  # mypy
+    return state._is_root
 
 
 @no_type_check
@@ -970,7 +1018,7 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -1000,7 +1048,7 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,
