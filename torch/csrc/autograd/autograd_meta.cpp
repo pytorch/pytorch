@@ -271,8 +271,7 @@ void AutogradMeta::set_fw_grad(
 const Variable& AutogradMeta::fw_grad(
     uint64_t level,
     const at::TensorBase& self) const {
-  // TLS that disables forward AD
-  // This is only used for custom Function implementation
+  // TLS that disables forward AD.
   if (!c10::AutogradState::get_tls_state().get_fw_grad_mode()) {
     return ForwardGrad::undef_grad();
   }
