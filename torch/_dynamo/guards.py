@@ -512,8 +512,6 @@ class CheckFunctionManager:
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
-        graphargs = self.output_graph.graphargs
-
         aotautograd_guards: List[
             GuardEnvExpr
         ] = self.output_graph.tracing_context.guards_context.aotautograd_guards
@@ -521,13 +519,17 @@ class CheckFunctionManager:
             if isinstance(guard, DuplicateInputs):
                 pos_a = guard.input_pos_a
                 pos_b = guard.input_pos_b
-                assert pos_b < len(graphargs) and pos_a < len(
-                    graphargs
+                assert pos_b < len(self.output_graph.graphargs) and pos_a < len(
+                    self.output_graph.graphargs
                 ), "Deduped args out of bounds"
-                assert graphargs[pos_a].is_tensor, "Deduped arg must be a tensor"
-                assert graphargs[pos_b].is_tensor, "Deduped arg must be a tensor"
+                assert self.output_graph.graphargs[
+                    pos_a
+                ].is_tensor, "Deduped arg must be a tensor"
+                assert self.output_graph.graphargs[
+                    pos_b
+                ].is_tensor, "Deduped arg must be a tensor"
 
-                code_part = f"{graphargs[pos_a].source.name()} is {graphargs[pos_b].source.name()}"
+                code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
             else:
