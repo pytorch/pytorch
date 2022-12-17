@@ -93,7 +93,7 @@ from ._unshard_param_utils import (
     _unshard_params,
 )
 from ._utils import p_assert
-from .flat_param import FlatParameter, FlatParamHandle
+from .flat_param import FlatParameter
 from .wrap import _FSDPPolicy
 
 
@@ -470,14 +470,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         if root_only:
             return _get_fsdp_root_states(module)
         return traversal_utils._get_fsdp_states(module)
-
-    @staticmethod
-    def _fsdp_handles(module: nn.Module) -> List[FlatParamHandle]:
-        """
-        Returns all nested FSDP instances' handles in the module hierarchy
-        rooted at ``module``.
-        """
-        return traversal_utils._get_fsdp_handles(module)
 
     def apply(self, fn: Callable[[nn.Module], None]) -> "FullyShardedDataParallel":
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
@@ -1021,7 +1013,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # the normal `nn.utils` one targeting local gradients
         all_no_shard = all(
             not handle.uses_sharded_strategy
-            for handle in FullyShardedDataParallel._fsdp_handles(self)
+            for handle in traversal_utils._get_fsdp_handles(self)
         )
         if all_no_shard:
             return torch.nn.utils.clip_grad_norm_(
@@ -1034,7 +1026,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         sharded_params = set()
         nonsharded_params = set()  # `NO_SHARD` or not FSDP-managed
         grads: List[torch.Tensor] = []
-        for handle in FullyShardedDataParallel._fsdp_handles(self):
+        for handle in traversal_utils._get_fsdp_handles(self):
             target_set = (
                 sharded_params if handle.uses_sharded_strategy else nonsharded_params
             )

@@ -439,8 +439,13 @@ def _init_param_handles_from_module(
     )
     _check_single_device_module(root_module, state._ignored_params)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
-    # Initialize and shard `FlatParamHandle`s one by one following bottom-up
-    # order (hence the `reversed`) to avoid increasing peak GPU memory usage
+    # Initialize and shard `FlatParamHandle`s one by one following reverse
+    # depth-first order (i.e. reverse `.modules()` order), which represents a
+    # reverse topological sort order. This avoids increasing peak GPU memory
+    # usage when the unsharded model exists on CPU or meta device.
+    # NOTE: This order differs from that followed by the wrapper path when
+    # using auto wrapping, which also represents a valid reverse toplogical
+    # sort order, but the difference does not matter.
     materialized_module = False
     for fully_sharded_module, (params, buffers, param_names, buffer_names) in reversed(
         fully_sharded_module_to_states.items()
@@ -476,7 +481,9 @@ def _init_param_handles_from_module(
         # Pass `root_module` to have internal FQN metadata prefix starting from
         # it instead of `submodule`
         _init_param_handle_from_params(state, params, fully_sharded_module)
-    # Reverse to preserve top-down order like `_fsdp_handles()`
+    # Reverse `_handles` to preserve depth-first `.modules()` order for
+    # consistency with the wrapper path (namely, so that `_get_fsdp_handles()`
+    # returns the same ordering for both paths).
     state._handles.reverse()
     return state
 
