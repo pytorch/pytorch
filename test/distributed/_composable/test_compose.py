@@ -42,11 +42,11 @@ class TestFSDPCheckpoint(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    # NOTE: Define `fix_seed_per_iter` for now for BC since some test model
-    # configs do not have a simple base model to compare against. In those
-    # cases, we leverage the fact that the averaged gradient is approximately
-    # equal to the local gradient to check for parity. Fixing the seed per
-    # iteration helps ensure the closeness between averaged and local gradient.
+    # TODO: Define `use_same_inputs_across_ranks` for now for BC since some
+    # test model configs do not have a simple base model to compare against. In
+    # those cases, we use the same inputs across ranks so that the averaged
+    # gradient equals the local gradient to check for parity. This means that
+    # the gradient reduction is unchecked.
     def _test_parity(
         self,
         base_model: nn.Module,
@@ -54,15 +54,15 @@ class TestFSDPCheckpoint(FSDPTest):
         inp_size: torch.Size,
         inp_device: torch.device,
         grad_to_none: bool,
-        fix_seed_per_iter: bool,
+        use_same_inputs_across_ranks: bool,
     ):
         LR = 0.01
         base_optim = torch.optim.Adam(base_model.parameters(), lr=LR)
         test_optim = torch.optim.Adam(test_model.parameters(), lr=LR)
 
         for _ in range(5):
-            if fix_seed_per_iter:
-                torch.manual_seed(self.rank + 1)
+            if use_same_inputs_across_ranks:
+                torch.manual_seed(0)
             x = torch.randn(inp_size, device=inp_device)
             test_loss = test_model(x).sum()
             base_loss = base_model(x).sum()
@@ -99,7 +99,7 @@ class TestFSDPCheckpoint(FSDPTest):
                 "inp_size": [torch.Size((2, 100))],
                 "inp_device": [torch.device("cuda")],
                 "grad_to_none": [True, False],
-                "fix_seed_per_iter": [True],
+                "use_same_inputs_across_ranks": [True],
             },
             self._test_parity,
         )
@@ -123,7 +123,7 @@ class TestFSDPCheckpoint(FSDPTest):
                 "inp_size": [torch.Size((2, 100))],
                 "inp_device": [torch.device("cuda")],
                 "grad_to_none": [True, False],
-                "fix_seed_per_iter": [True],
+                "use_same_inputs_across_ranks": [True],
             },
             self._test_parity,
         )
@@ -161,7 +161,7 @@ class TestFSDPCheckpoint(FSDPTest):
                 "inp_size": [torch.Size((2, 100))],
                 "inp_device": [torch.device("cuda")],
                 "grad_to_none": [True, False],
-                "fix_seed_per_iter": [True],
+                "use_same_inputs_across_ranks": [True],
             },
             self._test_parity,
         )
@@ -184,7 +184,7 @@ class TestFSDPCheckpoint(FSDPTest):
                 "inp_size": [torch.Size((2, 100))],
                 "inp_device": [torch.device("cuda")],
                 "grad_to_none": [True, False],
-                "fix_seed_per_iter": [True],
+                "use_same_inputs_across_ranks": [True],
             },
             self._test_parity,
         )
