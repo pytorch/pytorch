@@ -240,7 +240,7 @@ def load_sharded_optimizer_state_dict(
     >>>    )
     >>>
     >>>    flattened_osd = FSDP.flatten_sharded_optim_state_dict(
-    >>>        optim_state["optimizer"], model, optim_input
+    >>>        optim_state["optimizer"], model, optim
     >>>    )
     >>>
     >>>    optim.load_state_dict(flattened_osd)

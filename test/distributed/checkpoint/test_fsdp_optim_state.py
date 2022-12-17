@@ -87,7 +87,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
             )
 
             flattened_osd = FSDP.flatten_sharded_optim_state_dict(
-                optim_state["optim"], model_2
+                optim_state["optim"], model_2, optim_2
             )
             optim_2.load_state_dict(flattened_osd)
 
