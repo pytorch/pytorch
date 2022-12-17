@@ -185,9 +185,14 @@ class TestGetSubmoduleToStates(TestCase):
         assert num_submodules_with_states == 4, f"{num_submodules_with_states}"
         self.assertEqual(len(fully_sharded_module_to_states), num_submodules_with_states)
 
-        # Check the mapping, i.e. that the dict order follows a post-order
-        # traversal and that the contents are expected
+        # Check the mapping, i.e. that the dict order follows `model.modules()`
+        # order and that the contents are expected
         fully_sharded_modules = list(fully_sharded_module_to_states.keys())
+        expected_fully_sharded_modules = [
+            module for module in model.modules()
+            if isinstance(module, nn.Sequential) or module is model
+        ]
+        self.assertEqual(expected_fully_sharded_modules, fully_sharded_modules)
         # - Root module `model`
         self.assertEqual(fully_sharded_modules[0], model)
         root_states = fully_sharded_module_to_states[fully_sharded_modules[0]]
@@ -195,29 +200,29 @@ class TestGetSubmoduleToStates(TestCase):
         self.assertEqual(root_states.param_names, ["lin.weight"])
         self.assertEqual(root_states.buffers, [])
         self.assertEqual(root_states.buffer_names, [])
-        # # - `seq2`
-        self.assertEqual(fully_sharded_modules[1], model.seq2)
-        seq2_states = fully_sharded_module_to_states[fully_sharded_modules[1]]
-        self.assertEqual(seq2_states.params, [model.seq2[1].weight])
-        self.assertEqual(seq2_states.param_names, ["1.weight"])
-        self.assertEqual(seq2_states.buffers, [model.seq2[1].seq2_1_buffer])
-        self.assertEqual(seq2_states.buffer_names, ["1.seq2_1_buffer"])
-        # - `seq2[0]`
-        self.assertEqual(fully_sharded_modules[2], model.seq2[0])
-        seq2_0_states = fully_sharded_module_to_states[fully_sharded_modules[2]]
-        self.assertEqual(seq2_0_states.params, [])  # shared parameter
-        self.assertEqual(seq2_0_states.param_names, [])
-        self.assertEqual(seq2_0_states.buffers, [])
-        self.assertEqual(seq2_0_states.buffer_names, [])
         # - `seq1`
-        self.assertEqual(fully_sharded_modules[3], model.seq1)
-        seq1_states = fully_sharded_module_to_states[fully_sharded_modules[3]]
+        self.assertEqual(fully_sharded_modules[1], model.seq1)
+        seq1_states = fully_sharded_module_to_states[fully_sharded_modules[1]]
         self.assertEqual(
             seq1_states.params, [model.seq1[0].weight, model.seq1[1].weight]
         )
         self.assertEqual(seq1_states.param_names, ["0.weight", "1.weight"])
         self.assertEqual(seq1_states.buffers, [model.seq1.seq1_buffer])
         self.assertEqual(seq1_states.buffer_names, ["seq1_buffer"])
+        # - `seq2`
+        self.assertEqual(fully_sharded_modules[2], model.seq2)
+        seq2_states = fully_sharded_module_to_states[fully_sharded_modules[2]]
+        self.assertEqual(seq2_states.params, [model.seq2[1].weight])
+        self.assertEqual(seq2_states.param_names, ["1.weight"])
+        self.assertEqual(seq2_states.buffers, [model.seq2[1].seq2_1_buffer])
+        self.assertEqual(seq2_states.buffer_names, ["1.seq2_1_buffer"])
+        # - `seq2[0]`
+        self.assertEqual(fully_sharded_modules[3], model.seq2[0])
+        seq2_0_states = fully_sharded_module_to_states[fully_sharded_modules[3]]
+        self.assertEqual(seq2_0_states.params, [])  # shared parameter
+        self.assertEqual(seq2_0_states.param_names, [])
+        self.assertEqual(seq2_0_states.buffers, [])
+        self.assertEqual(seq2_0_states.buffer_names, [])
 
 
 instantiate_parametrized_tests(TestUtils)

@@ -102,10 +102,8 @@ def _get_fully_sharded_module_to_states(
     instead.
     """
     # Record the modules to wrap without actually wrapping
-    wrapped_modules: Deque[
-        nn.Module
-    ] = collections.deque()  # these are only logically wrapped
-    wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules)
+    wrapped_modules_set: Set[nn.Module] = set()  # these are only logically wrapped
+    wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules_set)
     if auto_wrap_policy is not None:
         _recursive_wrap(
             root_module,
@@ -116,23 +114,22 @@ def _get_fully_sharded_module_to_states(
             only_wrap_children=False,
         )
     # Always include the root module even if not wrapped by the given policy
-    if root_module not in wrapped_modules:
-        wrapped_modules.append(root_module)
+    wrapped_modules_set.add(root_module)
 
     fully_sharded_module_to_states = collections.OrderedDict()
     visited_params = set()
     for ignored_param in ignored_params:
         visited_params.add(ignored_param)
     visited_buffers = set()
-    # Constructing `wrapped_modules` with `_recursive_wrap()` follows a
-    # post-order (right-to-left bottom-up) traversal. We record state in
-    # `fully_sharded_module_to_states` using a reverse post-ordering since that
-    # is a topological sort that follows `.modules()` depth-first order. This
-    # assigns parent-child shared parameters to the parent submodule.
-    # TODO: To handle sibling shared parameters, we need to pre-compute the
-    # shared parameters and assign them to the LCA submodule manually.
-    wrapped_modules.reverse()
-    wrapped_modules_set = set(wrapped_modules)
+    # Construct `wrapped_modules` to follow `.modules()` order to ensure that
+    # downstream data structures (`._handles`) match those of the wrapper path.
+    # NOTE: Since `.modules()` follows a depth-first order, which is a
+    # topological sort, and we iterate over `wrapped_modules` following that
+    # order, parent-child shared parameters are assigned to the parent module.
+    wrapped_modules: List[nn.Module] = []
+    for module in root_module.modules():
+        if module in wrapped_modules_set:
+            wrapped_modules.append(module)
     for submodule in wrapped_modules:
         # Perform a DFS from `submodule` and record all unvisited state that is
         # not already associated with another module in `wrapped_modules`. We
@@ -146,7 +143,7 @@ def _get_fully_sharded_module_to_states(
         while len(deque) > 0:
             module, prefix = deque.popleft()
             # Reverse `named_children()`, use `appendleft()`, and add to the
-            # deque before processing to perform DFS
+            # deque before processing to perform non-recursive DFS
             for child_module_name, child_module in reversed(
                 list(module.named_children())
             ):
@@ -169,20 +166,14 @@ def _get_fully_sharded_module_to_states(
 
 
 def _record_module_wrapper_cls(
-    wrapped_modules: Deque[nn.Module],
+    wrapped_modules_set: Set[nn.Module],
     module: nn.Module,
     **kwargs,
 ) -> nn.Module:
     """
     This defines a pseudo-wrapper class to be passed to ``_recursive_wrap()``
-    that records the wrapped module to the input ``wrapped_modules`` without
-    actually wrapping with a class.
+    that records the wrapped module to the input ``wrapped_modules_set``
+    without actually wrapping with a class.
     """
-    # NOTE: Use `appendleft()` instead of `append()` so that for a given tree
-    # depth, the modules are recorded from right to left, meaning that
-    # reversing the overall recorded order gives us a topological sort that
-    # follows the `.modules()` depth-first order. Using `append()` orders from
-    # left to right, still giving a valid topological sort, but the sort order
-    # differs from `.modules()` depth-first order.
-    wrapped_modules.appendleft(module)
+    wrapped_modules_set.add(module)
     return module
