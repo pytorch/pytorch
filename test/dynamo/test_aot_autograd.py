@@ -308,7 +308,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         def guard_fail_fn(failure):
             nonlocal failure_reason
-            failure_reason = failure[0][0]
+            failure_reason = failure[0]
 
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         compare_equal_outs_and_grads(self, F(), fxy, (x, y))
@@ -349,7 +349,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         def guard_fail_fn(failure):
             nonlocal failure_reason
-            failure_reason = failure[0][0]
+            failure_reason = failure[0]
 
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         fxy(x, y)

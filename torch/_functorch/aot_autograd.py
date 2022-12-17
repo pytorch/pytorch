@@ -1369,7 +1369,7 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
-    tracing_context = TracingContext().get()
+    tracing_context = TracingContext.get()
     if tracing_context:
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
