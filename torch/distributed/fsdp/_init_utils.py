@@ -18,19 +18,19 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._composable_utils as composable_utils
+import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
-    _composable,
     _FSDPState,
     _get_param_to_fqns,
     _is_fsdp_flattened,
     clean_tensor_name,
     TrainingState,
 )
-from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp._wrap_utils import _get_submodule_to_states
 from torch.distributed.fsdp.api import (
@@ -304,7 +304,7 @@ def _init_core_state(
     state._stream_to_name = _stream_to_name
     state._free_event_queue = _FreeEventQueue()
     state._debug_level = dist.get_debug_level()
-    state._exec_order_data = _ExecOrderData(
+    state._exec_order_data = exec_order_utils._ExecOrderData(
         state._debug_level,
         backward_prefetch_limit,
         forward_prefetch_limit,
@@ -524,7 +524,7 @@ def _get_ignored_modules(
     # Always include modules that cannot compose with `fully_shard`
     ignored_modules: Set[nn.Module] = set()
     for module in root_module.modules():
-        if not _composable(module):
+        if not composable_utils._composable(module):
             ignored_modules.add(module)
     if _ignored_modules is None:
         return ignored_modules

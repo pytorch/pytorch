@@ -21,6 +21,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._composable_utils as composable_utils
 import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
@@ -29,8 +30,6 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
-    _get_fsdp_handles,
-    _get_fsdp_states,
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
@@ -470,7 +469,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """
         if root_only:
             return _get_fsdp_root_states(module)
-        return _get_fsdp_states(module)
+        return composable_utils._get_fsdp_states(module)
 
     @staticmethod
     def _fsdp_handles(module: nn.Module) -> List[FlatParamHandle]:
@@ -478,7 +477,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Returns all nested FSDP instances' handles in the module hierarchy
         rooted at ``module``.
         """
-        return _get_fsdp_handles(module)
+        return composable_utils._get_fsdp_handles(module)
 
     def apply(self, fn: Callable[[nn.Module], None]) -> "FullyShardedDataParallel":
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
@@ -503,7 +502,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # Reset lazy init that might be called by _summon_full_params, since
         # it could have set is_root incorrectly for non-root FSDP instances.
         if uninitialized and self._is_root:
-            for module in _get_fsdp_states(self):
+            for module in composable_utils._get_fsdp_states(self):
                 module._reset_lazy_init()
 
         return ret
@@ -583,7 +582,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # Use the default config if a state_dict config is not set.
         if state_dict_config is None:
             state_dict_config = _state_dict_type_to_config[state_dict_type]()
-        for submodule in _get_fsdp_states(module):
+        for submodule in composable_utils._get_fsdp_states(module):
             if prev_state_dict_type is None:
                 prev_state_dict_type = submodule._state_dict_type
             if prev_state_dict_config is None:
@@ -682,9 +681,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     f"{self.compute_device} but got {handle.flat_param.device}",
                 )
             output = self._fsdp_wrapped_module(*args, **kwargs)
-            return _post_forward(
-                self, self._handles, reshard_fn, self, unused, output
-            )
+            return _post_forward(self, self._handles, reshard_fn, self, unused, output)
 
     @staticmethod
     @contextlib.contextmanager
@@ -809,7 +806,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
         if recurse:
             with contextlib.ExitStack() as stack:
-                for module in _get_fsdp_states(self):
+                for module in composable_utils._get_fsdp_states(self):
                     stack.enter_context(
                         module._summon_full_params(
                             recurse=False,
@@ -850,12 +847,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             "`_deregister_orig_params_ctx()` should only be called when "
             "`_use_orig_params=True`",
         )
-        for fsdp_module in _get_fsdp_states(self):
+        for fsdp_module in composable_utils._get_fsdp_states(self):
             _deregister_orig_params(fsdp_module, fsdp_module)
         try:
             yield
         finally:
-            for fsdp_module in _get_fsdp_states(self):
+            for fsdp_module in composable_utils._get_fsdp_states(self):
                 _register_orig_params(fsdp_module, fsdp_module)
 
     def _apply(self, *args, **kwargs):
@@ -1121,7 +1118,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ):
         if full_optim and not rank0_only:
             return
-        if any(fsdp_module._use_orig_params for fsdp_module in _get_fsdp_states(model)):
+        if any(
+            fsdp_module._use_orig_params
+            for fsdp_module in composable_utils._get_fsdp_states(model)
+        ):
             raise NotImplementedError(
                 "Optimizer state checkpointing is not supported yet for `use_orig_params=True`"
             )
@@ -1194,7 +1194,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim,
         )
         use_orig_params: bool = False
-        for module in _get_fsdp_states(model):
+        for module in composable_utils._get_fsdp_states(model):
             use_orig_params = module._use_orig_params
             break
         return _optim_state_dict(
@@ -1313,7 +1313,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim,
         )
         use_orig_params: bool = False
-        for module in _get_fsdp_states(model):
+        for module in composable_utils._get_fsdp_states(model):
             use_orig_params = module._use_orig_params
             break
         sharded_osd = _flatten_optim_state_dict(
@@ -1735,7 +1735,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             raise AssertionError(
                 "register_comm_hook can only be called on a root instance."
             )
-        for submodule in _get_fsdp_states(self):
+        for submodule in composable_utils._get_fsdp_states(self):
             assert (
                 not submodule._hook_registered
             ), "communication hook can be only registered once"

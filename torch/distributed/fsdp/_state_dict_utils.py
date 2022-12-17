@@ -6,6 +6,7 @@ from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
+import torch.distributed.fsdp._composable_utils as composable_utils
 
 # Import the entire FSDP file to avoid circular imports
 import torch.nn as nn
@@ -18,7 +19,6 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
-    _get_fsdp_handles,
     _has_fsdp_params,
     _is_composable,
     _module_handles,
@@ -130,7 +130,7 @@ def _common_pre_state_dict_hook(
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-        _clear_grads_if_needed(_get_fsdp_handles(module))
+        _clear_grads_if_needed(composable_utils._get_fsdp_handles(module))
 
 
 def _common_unshard_pre_state_dict_hook(

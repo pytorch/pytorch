@@ -12,6 +12,7 @@ from typing import (
 )
 
 import torch
+import torch.distributed.fsdp._composable_utils as composable_utils
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -19,8 +20,6 @@ from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISIO
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
-    _get_fsdp_handles,
-    _get_fsdp_states,
     _get_module_fsdp_state,
     _get_sharding_strategy,
     _is_composable,
@@ -108,7 +107,7 @@ def _validate_and_get_hybrid_shard_state(
     intra_node_pgs = set()
     inter_node_pgs = set()
     inter_node_states = set()
-    for fsdp_module in _get_fsdp_states(root_module):
+    for fsdp_module in composable_utils._get_fsdp_states(root_module):
         # TODO: Change this to handle's sharding strategy if we deprecate
         # `ShardingStrategy` internally.
         # https://github.com/pytorch/pytorch/issues/90857
@@ -181,7 +180,7 @@ def _share_state_and_init_handle_attrs(
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
-    for fsdp_state in _get_fsdp_states(root_module):
+    for fsdp_state in composable_utils._get_fsdp_states(root_module):
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             p_assert(
                 hasattr(fsdp_state, attr_name),
@@ -490,7 +489,7 @@ def _root_pre_forward(
             # TODO: This assumes singleton handles keys.
             handles_keys = [tuple(handle) for handle in state._handles]
         else:
-            for fsdp_module in _get_fsdp_states(state):
+            for fsdp_module in composable_utils._get_fsdp_states(state):
                 handles_key = tuple(fsdp_module._handles)
                 handles_keys.append(handles_key)
         for handles_key in handles_keys:
@@ -500,7 +499,7 @@ def _root_pre_forward(
         state._streams["unshard"],
         state._streams["pre_unshard"],
     )
-    _clear_grads_if_needed(_get_fsdp_handles(module))
+    _clear_grads_if_needed(composable_utils._get_fsdp_handles(module))
 
 
 def _prepare_forward_inputs(
@@ -577,7 +576,7 @@ def _pre_backward_hook(
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
             _register_post_backward_final_callback(state, module)
-            _clear_grads_if_needed(_get_fsdp_handles(module))
+            _clear_grads_if_needed(composable_utils._get_fsdp_handles(module))
         elif _handles_key:
             allowed_states = [TrainingState.IDLE]
             if _is_composable(state):
@@ -872,7 +871,7 @@ def _post_backward_final_callback(
             torch.cuda.current_stream().synchronize()
     root_state._exec_order_data.next_iter()
 
-    for fsdp_state in _get_fsdp_states(module):
+    for fsdp_state in composable_utils._get_fsdp_states(module):
         _catch_all_reshard(fsdp_state)
         _finalize_params(fsdp_state)
         fsdp_state._ran_pre_backward_hook.clear()
@@ -1284,7 +1283,7 @@ def _get_buffers_and_dtypes_for_computation(
         visited_buffers = set()
         # Traverse the FSDP instances bottom-up so that we prefer the owning
         # FSDP instance's mixed precision setting for each buffer
-        for fsdp_module in reversed(_get_fsdp_states(root_module)):
+        for fsdp_module in reversed(composable_utils._get_fsdp_states(root_module)):
             for buffer in fsdp_module.buffers():
                 if buffer in visited_buffers:
                     continue
