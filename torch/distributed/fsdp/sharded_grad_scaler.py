@@ -9,6 +9,7 @@ from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator, GradScaler, OptSt
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.optim.sgd import SGD
 
+log = logging.getLogger(__name__)
 
 def _refresh_per_optimizer_state():
     return {"stage": OptState.READY, "found_inf_per_device": {}}
@@ -158,7 +159,7 @@ class ShardedGradScaler(GradScaler):
         for grad in grads:
             for tensor in grad:
                 if tensor.device != expected_device:
-                    logging.error(
+                    log.error(
                         "tensor device is %s and expected device is %s"
                         % (tensor.device, expected_device)
                     )

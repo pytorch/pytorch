@@ -202,6 +202,7 @@ def mark_dirty_error(*args, **kwargs):
 
 class VmapInfo(NamedTuple):
     batch_size: int
+    randomness: str
 
 
 @custom_function_call.py_impl(TransformType.Vmap)
@@ -215,7 +216,10 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
             f"staticmethod to it.")
 
     current_level = interpreter.level()
-    info = VmapInfo(batch_size=interpreter.batch_size())
+    info = VmapInfo(
+        batch_size=interpreter.batch_size(),
+        randomness=interpreter.randomness(),
+    )
     unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
 
     # If none of the tensors are batched at the current level, then we skip the
