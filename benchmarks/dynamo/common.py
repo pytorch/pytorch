@@ -85,20 +85,23 @@ CI_SKIP_AOT_EAGER_TRAINING = [
 
 CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     *CI_SKIP_AOT_EAGER_TRAINING,
-    "drq",
-    "mobilenet_v2_quantized_qat",
-    "resnet50_quantized_qat",
-    "soft_actor_critic",
-    "tacotron2",
-    "tts_angular",
-    "botnet26t_256",
-    "crossvit_9_240",
-    "eca_botnext26ts_256",
-    "eca_halonext26ts",
-    "hrnet_w18",
-    "levit_128",
-    "sebotnet33ts_256",
-    "twins_pcpvt_base",
+    "drq",  # assert type(inner_out) == type(user_out)
+    "hf_T5_base",  # fp64_OOM
+    "mobilenet_v2_quantized_qat",  # setStorage
+    "resnet50_quantized_qat",  # setStorage
+    "soft_actor_critic",  # assert type(inner_out) == type(user_out)
+    "tacotron2",  # aten._thnn_fused_lstm_cell.default
+    "tts_angular",  # _VF.lstm
+    "AllenaiLongformerBase",  #  assert type(inner_out) == type(user_out)
+    "DebertaV2ForQuestionAnswering",  # OOM
+    "botnet26t_256",  # assert type(inner_out) == type(user_out)
+    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
+    "eca_botnext26ts_256",  # assert type(inner_out) == type(user_out)
+    "eca_halonext26ts",  # assert type(inner_out) == type(user_out)
+    "hrnet_w18",  # torch._C._nn.upsample_nearest2d
+    "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
+    "sebotnet33ts_256",  # assert type(inner_out) == type(user_out)
+    "twins_pcpvt_base",  # timeout
 ]
 
 CI_SKIP_INDCUTOR_INFERENCE = [
