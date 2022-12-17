@@ -26,6 +26,7 @@ from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
+    _get_module_fsdp_state,
     _get_param_to_fqns,
     _is_fsdp_flattened,
     clean_tensor_name,
@@ -557,8 +558,9 @@ def _get_ignored_modules(
     for module in root_module.modules():
         if not traversal_utils._composable(module):
             ignored_root_modules.add(module)
-    if not ignored_root_modules:
-        return ignored_root_modules
+    # NOTE: Even if `ignored_root_modules` is empty, do not return early so
+    # that this FSDP instance can get any ignored modules from its children.
+
     # Include child modules and exclude nested FSDP modules themselves
     ignored_modules = set(
         child
@@ -574,9 +576,10 @@ def _get_ignored_modules(
         )
     # Include nested FSDP modules' ignored modules
     for submodule in root_module.modules():
-        if isinstance(submodule, fsdp_file.FullyShardedDataParallel):
-            assert hasattr(submodule, "_ignored_modules")
-            ignored_modules.update(submodule._ignored_modules)
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_modules")
+            ignored_modules.update(optional_fsdp_state._ignored_modules)
     return ignored_modules
 
 
