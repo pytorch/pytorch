@@ -8,8 +8,8 @@ imports. For brevity, we may canonically import the file ``composable_utils``.
 import collections
 from typing import Deque, List, Set
 import torch.nn as nn
+from torch.distributed._composable.contract import _get_registry
 from torch.distributed.fsdp._common_utils import _FSDPState, _get_module_fsdp_state
-import torch.distributed._composable.contract as contract_file
 
 
 """
@@ -36,7 +36,7 @@ def _composable(module: nn.Module) -> bool:
     Returns if ``module`` can compose with ``fully_shard``.
     """
     # TODO: Add any other composable APIs that are mutually exclusive.
-    return "replicate" not in contract_file._get_registry(module)
+    return "replicate" not in _get_registry(module)
 
 
 def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
