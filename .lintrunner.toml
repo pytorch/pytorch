@@ -616,6 +616,37 @@ command = [
 ]
 
 [[linter]]
+code = 'ROOT_LOGGING'
+include_patterns = [
+    '**/*.py',
+]
+# These are not library code, but scripts in their own right, and so
+# therefore are permitted to use logging
+exclude_patterns = [
+    'tools/**',
+    'test/**',
+    'benchmarks/**',
+    'torch/distributed/run.py',
+    'functorch/benchmarks/**',
+    # Grandfathered in
+    'caffe2/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=logging\.(debug|info|warn|warning|error|critical|log|exception)\(',
+    '--replace-pattern=s/logging\.(debug|info|warn|warning|error|critical|log|exception)\(/log.\1(/',
+    '--linter-name=ROOT_LOGGING',
+    '--error-name=use of root logger',
+    """--error-description=\
+        Do not use root logger (logging.info, etc) directly; instead \
+        define 'log = logging.getLogger(__name__)' and call, e.g., log.info().
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'CMAKE'
 include_patterns = [
     "**/*.cmake",
