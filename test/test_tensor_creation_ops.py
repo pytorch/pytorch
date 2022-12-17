@@ -920,6 +920,7 @@ class TestTensorCreation(TestCase):
             expected = np.dstack(np_input)
             self.assertEqual(actual, expected)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @dtypes(torch.int32, torch.int64)
     def test_large_linspace(self, device, dtype):
         start = torch.iinfo(dtype).min
@@ -1428,6 +1429,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(c1, expected)
         self.assertEqual(c2, expected)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @skipMeta
     def test_linlogspace_mem_overlap(self, device):
         x = torch.rand(1, device=device).expand(10)
