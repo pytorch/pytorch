@@ -9,13 +9,13 @@ from .functions import (
 )
 from .lists import (
     BaseListVariable,
+    DictKeysVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
     SliceVariable,
     TupleVariable,
-    DictKeysVariable,
 )
 from .misc import (
     AutogradFunctionVariable,
