@@ -3282,6 +3282,7 @@ class TestScript(JitTestCase):
                 # there should still be a Bailout after disable_grad call
                 FileCheck().check("disable_grad").check("BailOut[").check("BailoutTemplate").run(g)
 
+    @skipIfTorchDynamo("Torchdynamo cannot correctly handle profiler.profile calls")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_profiling_merge(self):
         @torch.jit.script
@@ -10111,6 +10112,7 @@ dedent """
         # testing that tensor type of lists is unified
         self.getExportImportCopy(m)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @_inline_everything
     def test_import_constants_not_specialized(self):
         class Mod(torch.nn.Module):
@@ -10718,6 +10720,7 @@ dedent """
             graph = script.graph_for()
             FileCheck().check("aten::manual_seed").run(graph)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_index_select_shape_prop(self):
 
         @torch.jit.script
