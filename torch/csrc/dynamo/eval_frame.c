@@ -271,7 +271,7 @@ static PyObject* lookup(CacheEntry* e, PyFrameObject *frame, CacheEntry* prev) {
         e->next = extra;
         set_extra(frame->f_code, e);
     }
-    return e->code;
+    return (PyObject*)e->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
     PyObject* r = call_guard_fail_hook(guard_fail_hook, e, f_locals);
@@ -383,7 +383,7 @@ static PyObject* _custom_eval_frame(
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", name(frame));
     PyObject* maybe_cached_code = lookup(extra, frame, NULL);
-    if (cached_code == NULL) {
+    if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
       return NULL;
     } else if (maybe_cached_code == Py_None) {
