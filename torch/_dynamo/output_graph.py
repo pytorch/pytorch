@@ -197,13 +197,24 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         super(OutputGraph, self).__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
-        self.tracing_context: TracingContext = TracingContext()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            throw_on_data_dependent_ops=True,
+            shape_env=ShapeEnv() if config.dynamic_shapes else None,
+        )
+        self.tracing_context: TracingContext = TracingContext(fake_mode)
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
+        # Although we prune unused graphargs before sending graphs to
+        # compilers, we may have legitimately triggered shape guards
+        # on "unused" inputs that we must keep track of.  So after
+        # remove_unused_graphargs is called, orig_graphargs and
+        # graphargs no longer alias; orig_graphargs is the original
+        # graphargs, and graphargs is the pruned list.  Guard creation
+        # should use original graphargs.
         self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
@@ -229,7 +240,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.unspec_variable_map: Dict[
             str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
         ] = {}
-        self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.intermediary_symbols: Dict[sympy.Expr, None] = {}
 
         # Enables creating unique node names by tracking
@@ -245,6 +255,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     @property
     def fake_mode(self):
         return self.root_tx.fake_mode
+
+    @property
+    def shape_env(self):
+        return self.tracing_context.fake_mode.shape_env
 
     @property
     def guards(self) -> Set[Guard]:
