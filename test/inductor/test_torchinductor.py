@@ -5329,7 +5329,7 @@ if HAS_CUDA:
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
-        @patch.object(config.triton, "autotune", True)
+        @patch.object(config.triton, "autotune_pointwise", True)
         def test_inplace_add_alpha_autotune(self):
             def fn(x, y):
                 aten.add_.Tensor(x, y, alpha=0.55)
@@ -5347,7 +5347,7 @@ if HAS_CUDA:
             fn_compiled([x3, y])
             assert same(x2, x3)
 
-        @patch.object(config.triton, "autotune", True)
+        @patch.object(config.triton, "autotune_pointwise", True)
         def test_inplace_buffer_autotune(self):
             def foo(x, y, z):
                 a = x @ y
