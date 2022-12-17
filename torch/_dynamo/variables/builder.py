@@ -946,6 +946,7 @@ def wrap_to_fake_tensor_and_record(
             source is None
             or type(e) is torch.nn.Parameter
             or config.dynamic_shapes is False
+            or not is_tensor
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
