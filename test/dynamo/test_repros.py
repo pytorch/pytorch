@@ -1118,6 +1118,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 return get_parameter_dtype(self)
         ```
         """
+
         def get_parameter_dtype(self):
             torch._dynamo.graph_break()
             return self.weight.dtype
