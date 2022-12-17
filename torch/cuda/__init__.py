@@ -24,7 +24,6 @@ from .graphs import CUDAGraph, graph_pool_handle, graph, \
 from .streams import ExternalStream, Stream, Event
 from .. import device as _device
 import torch._C
-from torch._C import _cuda_DeviceGuard as _DeviceGuard
 
 try:
     from torch._C import _cudart  # type: ignore[attr-defined]
@@ -70,6 +69,12 @@ if hasattr(torch._C, '_CudaDeviceProperties'):
     _CudaDeviceProperties = torch._C._CudaDeviceProperties
 else:
     _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore[assignment, misc]
+
+if hasattr(torch._C, '_cuda_DeviceGuard'):
+    _DeviceGuard = torch._C._cuda_DeviceGuard
+else:
+    _DeviceGuard = _dummy_type('_DeviceGuard')  # type: ignore[assignment, misc]
+
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
