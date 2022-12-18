@@ -55,7 +55,7 @@ void SavedTensorDefaultHooks::push_hooks(PyObject* pack_hook, PyObject* unpack_h
   TORCH_INTERNAL_ASSERT(is_initialized);
   TORCH_INTERNAL_ASSERT(pack_hook != nullptr && unpack_hook != nullptr);
   assertSavedTensorHooksNotDisabled();
-  tls.stack.push(std::make_pair(pack_hook, unpack_hook));
+  tls.stack.emplace(pack_hook, unpack_hook);
 }
 
 void SavedTensorDefaultHooks::pop_hooks() {
