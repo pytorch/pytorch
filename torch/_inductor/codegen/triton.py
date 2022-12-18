@@ -24,6 +24,7 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from .common import (
+    free_symbol_startswith,
     CSEVariable,
     DeferredLine,
     ExprPrinter,
