@@ -24,10 +24,10 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from .common import (
-    free_symbol_startswith,
     CSEVariable,
     DeferredLine,
     ExprPrinter,
+    free_symbol_startswith,
     IndentedBuffer,
     index_prevent_reordering,
     Kernel,
