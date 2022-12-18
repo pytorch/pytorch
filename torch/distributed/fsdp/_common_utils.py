@@ -40,6 +40,7 @@ class _FSDPState(_State):
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
+        self._ignored_modules: Set[nn.Module] = set()
         self.rank: int = -1
 
 
