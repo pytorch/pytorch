@@ -153,9 +153,7 @@ static inline PyObject* call_callback(
     PyObject* frame,
     long cache_len) {
   PyObject* args = Py_BuildValue("(Ol)", frame, cache_len);
-  if (args == NULL) {
-    return NULL;
-  }
+  NULL_CHECK(args);
   PyObject* result = PyObject_CallObject(callable, args);
   Py_DECREF(args);
   return result;
@@ -211,7 +209,7 @@ inline static const char* name(PyFrameObject* frame) {
 }
 #endif
 
-static PyObject* call_guard_fail_hook(
+static void call_guard_fail_hook(
     PyObject* hook,
     CacheEntry* e,
     PyObject* f_locals) {
@@ -222,18 +220,16 @@ static PyObject* call_guard_fail_hook(
       e->code,
       f_locals,
       (e->next == NULL ? Py_True : Py_False));
-  if (args == NULL) return NULL;
+  NULL_CHECK(args);
   PyObject* result = PyObject_CallObject(hook, args);
+  NULL_CHECK(result);
+  Py_DECREF(result);
   Py_DECREF(args);
-  return result;
 }
 
-// Return value: borrowed reference
-// Is either Py_None or a PyCodeObject
-static PyObject* lookup(CacheEntry* e, PyFrameObject *frame, CacheEntry* prev) {
+static PyCodeObject* lookup(CacheEntry* e, PyFrameObject *frame, CacheEntry* prev) {
   if (e == NULL) {
-    // NB: intentionally not using Py_RETURN_NONE, to return borrowed ref
-    return Py_None;
+    return NULL;
   }
   PyObject *f_locals = frame->f_locals;
   PyObject* dotzero = PyDict_GetItem(f_locals, dotzerokey);
@@ -241,24 +237,18 @@ static PyObject* lookup(CacheEntry* e, PyFrameObject *frame, CacheEntry* prev) {
   if (unlikely(dotzero != NULL)) {
     // .0 is a special variable name used for implicit args
     PyObject* args = PyTuple_Pack(1, dotzero);
-    if (args == NULL) return NULL;
+    NULL_CHECK(args);
     valid = PyObject_Call(e->check_fn, args, f_locals);
     Py_DECREF(args);
   } else {
     valid = PyObject_Call(e->check_fn, noargs, f_locals);
   }
   if (unlikely(valid == NULL)) {
+    PyErr_Print();
     if (guard_error_hook != NULL) {
-      PyObject *type, *value, *traceback;
-      PyErr_Fetch(&type, &value, &traceback);
-      PyObject* r = call_guard_fail_hook(guard_error_hook, e, f_locals);
-      if (r == NULL) {
-        return NULL;
-      }
-      Py_DECREF(r);
-      PyErr_Restore(type, value, traceback);
+      call_guard_fail_hook(guard_error_hook, e, f_locals);
     }
-    return NULL;
+    NULL_CHECK(valid);
   }
   Py_DECREF(valid);
   if (valid == Py_True) {
@@ -271,14 +261,10 @@ static PyObject* lookup(CacheEntry* e, PyFrameObject *frame, CacheEntry* prev) {
         e->next = extra;
         set_extra(frame->f_code, e);
     }
-    return (PyObject*)e->code;
+    return e->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
-    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, f_locals);
-    if (r == NULL) {
-      return NULL;
-    }
-    Py_DECREF(r);
+    call_guard_fail_hook(guard_fail_hook, e, f_locals);
   }
   return lookup(e->next, frame, e);
 }
@@ -382,18 +368,15 @@ static PyObject* _custom_eval_frame(
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", name(frame));
-    PyObject* maybe_cached_code = lookup(extra, frame, NULL);
-    if (maybe_cached_code == NULL) {
-      // guard eval failed, keep propagating
-      return NULL;
-    } else if (maybe_cached_code == Py_None) {
+    PyCodeObject* cached_code = lookup(extra, frame, NULL);
+    if (cached_code != NULL) {
+      // used cached version
+      DEBUG_TRACE("cache hit %s", name(frame));
+      return eval_custom_code(tstate, frame, cached_code, throw_flag);
+    } else {
       DEBUG_TRACE("cache miss %s", name(frame));
       return eval_frame_default(tstate, frame, throw_flag);
     }
-    PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
-    // used cached version
-    DEBUG_TRACE("cache hit %s", name(frame));
-    return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
@@ -404,12 +387,8 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  PyObject* maybe_cached_code = lookup(extra, frame, NULL);
-  if (maybe_cached_code == NULL) {
-    // Python error
-    return NULL;
-  } else if (maybe_cached_code != Py_None) {
-    PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
+  PyCodeObject* cached_code = lookup(extra, frame, NULL);
+  if (cached_code != NULL) {
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
     // Re-enable custom behavior

@@ -88,14 +88,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(torch.ones(6, 4))
 
-        from torch._guards import GuardSource
-
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
         hit = False
         for guard in out_guards:
-            if guard.source == GuardSource.SHAPE_ENV:
+            if guard.name == "symbolic_shape_expression":
                 hit = True
-                self.assertTrue("x.size()[0] <= 10" in guard.code_list[0])
+                self.assertTrue("x.size()[0] <= 10" in guard.code_list)
 
         self.assertTrue(hit)
 
