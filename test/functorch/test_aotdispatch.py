@@ -8,7 +8,14 @@
 
 from typing import Union, Callable, List, Any, Optional, Dict
 from unittest.mock import patch
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64, IS_WINDOWS
+from torch.testing._internal.common_utils import (
+    TestCase,
+    run_tests,
+    IS_ARM64,
+    IS_WINDOWS,
+    compare_equal_outs_and_grads,
+    outs_and_grads
+)
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -236,18 +243,6 @@ class TestPythonKey(AOTTestCase):
         grads2 = [a.grad for a in mod.parameters()]
         self.assertEqual(grads, grads2)
 
-
-def _outs_and_grads(fn, graph_inps, inps):
-    outs = fn(*graph_inps)
-    for out in pytree.tree_flatten(outs)[0]:
-        if isinstance(out, torch.Tensor) and out.requires_grad:
-            out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
-    for inp in pytree.tree_flatten(inps)[0]:
-        inp.grad = None
-    return outs, grads
-
-
 class TestAOTAutograd(AOTTestCase):
     # test_mutation will:
     # - Ensure that inputs are non-leaves, so our graphs can mutate them
@@ -302,8 +297,8 @@ class TestAOTAutograd(AOTTestCase):
         else:
             compiled_f = aot_function(
                 f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop, decompositions=decompositions)
-        ref_out, ref_grad = _outs_and_grads(f, graph_inps, inp)
-        test_out, test_grad = _outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
+        ref_out, ref_grad = outs_and_grads(f, graph_inps, inp)
+        test_out, test_grad = outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
         self.assertEqual(ref_grad, test_grad)
 
         if isinstance(ref_out, torch.Tensor):
@@ -1092,9 +1087,20 @@ def forward(self, primals_1, primals_2):
             """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
+
     @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
     def test_invalid_dupe(self, counter):
+        self._test_invalid_dupe(counter, fake=False)
+
+    # See Note: Dynamo recompilation guarding invalid grad for why this test exists
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_invalid_dupe_fake(self, counter):
+        self._test_invalid_dupe(counter, fake=True)
+
+
+    def _test_invalid_dupe(self, counter, fake):
         class F(torch.nn.Module):
             def forward(self, x, y):
                 x.t_()
@@ -1104,20 +1110,47 @@ def forward(self, primals_1, primals_2):
         x = torch.randn(3, 3, requires_grad=True).clone()
         y = torch.randn(3, 3, requires_grad=True).clone()
 
-        fxy = aot_module_simplified(F(), (x, y), nop)
+        if fake:
+            shape_env = ShapeEnv()
+            fake_mode = FakeTensorMode(shape_env=shape_env)
+
+            fake_x = fake_mode.from_tensor(x)
+            fake_y = fake_mode.from_tensor(y)
+
+        if fake:
+            fxy = aot_module_simplified(F(), (fake_x, fake_y), nop)
+        else:
+            fxy = aot_module_simplified(F(), (x, y), nop)
+
         fxy(x, y)
         fxy(x, x)  # is ok!
 
-        fxx = aot_module_simplified(F(), (x, x), nop)
+        if fake:
+            fxx = aot_module_simplified(F(), (fake_x, fake_x), nop)
+        else:
+            fxx = aot_module_simplified(F(), (x, x), nop)
+
         fxx(x, x)
+        # Note This should not raise! Once we have guards in place here,
+        # we will have this working correctly, as it should recompile.
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxx(x, y),
             """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
+
     @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
     def test_invalid_requires_grad(self, counter):
+        self._test_invalid_requires_grad(counter, fake=False)
+
+    # See Note: Dynamo recompilation guarding invalid grad for why this test exists
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_invalid_requires_grad_fake(self, counter):
+        self._test_invalid_requires_grad(counter, fake=True)
+
+    def _test_invalid_requires_grad(self, counter, fake):
         class F(torch.nn.Module):
             def forward(self, x, y):
                 return (x + y,)
@@ -1126,19 +1159,29 @@ def forward(self, primals_1, primals_2):
         y = torch.randn(3, 3, requires_grad=True)
         z = torch.randn(3, 3, requires_grad=False)
 
-        # Non-mutating please!
-        def compare(m1, m2, inps):
-            r1, g1 = _outs_and_grads(m1, inps, inps)
-            r2, g2 = _outs_and_grads(m2, inps, inps)
-            self.assertEqual(r1, r2)
-            self.assertEqual(g1, g2)
+        if fake:
+            shape_env = ShapeEnv()
+            fake_mode = FakeTensorMode(shape_env=shape_env)
 
-        fxy = aot_module_simplified(F(), (x, y), nop)
-        compare(F(), fxy, (x, y))
-        compare(F(), fxy, (x, z))
+            fake_x = fake_mode.from_tensor(x)
+            fake_y = fake_mode.from_tensor(y)
+            fake_z = fake_mode.from_tensor(z)
 
-        fxz = aot_module_simplified(F(), (x, z), nop)
-        compare(F(), fxz, (x, z))
+        if fake:
+            fxy = aot_module_simplified(F(), (fake_x, fake_y), nop)
+        else:
+            fxy = aot_module_simplified(F(), (x, y), nop)
+
+        compare_equal_outs_and_grads(self, F(), fxy, (x, y))
+        compare_equal_outs_and_grads(self, F(), fxy, (x, z))
+
+        if fake:
+            fxz = aot_module_simplified(F(), (fake_x, fake_z), nop)
+        else:
+            fxz = aot_module_simplified(F(), (x, z), nop)
+
+        compare_equal_outs_and_grads(self, F(), fxz, (x, z))
+
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxz(x, y),
             """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
@@ -1259,6 +1302,43 @@ def forward(self, primals_1, primals_2):
         af = aot_function(f, nop, partition_fn=partial(min_cut_rematerialization_partition, compiler="inductor"))
         out = af(inp)
         self.assertEqual(out, f(inp))
+
+    @patch("functorch.compile.config.use_dynamic_shapes", True)
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    @skipIfNoSympy
+    def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
+        """
+        In this test, the important thing is that primals_1 is **only** needed in the backward
+        in order to grab its sizes.
+        We need to assert that what we save for the backward are the tensor's sizes, and not the tensor itself.
+
+        The way this test is set up, it will actually fail if we try to save the input tensor for backward.
+        Why?
+        b.masked_fill_(c, 0) has a backward that requires knowing a's sizes
+        b.masked_fill_(c, 0) **also** mutates a (because b and a are aliased)
+        The autograd engine yells at us if we save "a" for backward, and then try to mutate it.
+        """
+        inp = torch.randn(2, 2, requires_grad=True)
+
+        def f(a):
+            b = a[0]
+            c = torch.ones_like(b, dtype=torch.bool)
+            d = b.masked_fill_(c, 0)
+            return d
+
+        compiled_f = aot_function(f, nop)
+        inp_ref = torch.ones(2, 2, requires_grad=True)
+        inp_test = torch.ones(2, 2, requires_grad=True)
+
+        out_ref = f(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        self.assertEqual(inp_ref.grad, inp_test.grad)
 
     def test_real_weights_in_symbolic_mode(self):
         from functorch.experimental import functionalize

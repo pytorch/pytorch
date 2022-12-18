@@ -963,36 +963,6 @@ def register_onednn_fusion_ops():
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
             return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
 
-        @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
-        def convolution_transpose_unary(
-            x: TensorBox,
-            weight: TensorBox,
-            bias: TensorBox,
-            padding,
-            output_padding,
-            stride,
-            dilation,
-            groups,
-            attr,
-            scalars,
-            algorithm,
-        ):
-            return TensorBox.create(
-                ir.ConvolutionTransposeUnary.create(
-                    x,
-                    weight,
-                    bias,
-                    padding,
-                    output_padding,
-                    stride,
-                    dilation,
-                    groups,
-                    attr,
-                    scalars,
-                    algorithm,
-                )
-            )
-
         if torch._C.has_mkl:
 
             @register_lowering(torch.ops.mkl._mkl_linear)
