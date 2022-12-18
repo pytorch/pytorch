@@ -1891,7 +1891,7 @@ aot_autograd_failures = {
     xfail('cholesky_inverse'),
     xfail('segment_reduce', 'lengths'),
     xfail('nn.functional.embedding_bag'),
-    xfail('nn.functional.nll_loss', ''),  # UBSAN failure!
+    skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc
     xfail('to_sparse'),
