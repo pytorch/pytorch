@@ -155,6 +155,13 @@ CI_SKIP_OPTIMIZER = {
     "sebotnet33ts_256",  # accuracy
     "tf_mixnet_l",  # This model is non-deterministic with same input + weights,
     # but without optimizing over multiple iterations, this still passes
+    # TorchBench
+    "dlrm",  # symbolic shapes error
+    "hrnet_w18",  # Stack issue in fx
+    "Pnasnetlarge",  # Stack issue in fx
+    "MobileBertForMaskedLM",  # Stack issue in fx
+    "MobileBertForQuestionAnswering",  # Stack issue in fx
+    "PegasusForConditionalGeneration",  # OOM
 }
 
 

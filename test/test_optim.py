@@ -4270,8 +4270,8 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-    @skipIfTorchDynamo("The inplace mu update fails with dynamo, " \
-        "since this is only happening when differentiable is enabled, skipping for now")
+    @skipIfTorchDynamo("The inplace mu update fails with dynamo, "
+                       "since this is only happening when differentiable is enabled, skipping for now")
     def test_asgd(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
