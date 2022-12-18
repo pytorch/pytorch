@@ -118,6 +118,10 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
     "tacotron2",
 }
 
+REQUIRE_HIGHER_FP16_TOLERANCE = {
+    "drq",
+}
+
 REQUIRE_COSINE_TOLERACE = {
     # Just keeping it here even though its empty, if we need this in future.
 }
@@ -330,6 +334,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         cosine = self.args.cosine
         # Increase the tolerance for torch allclose
         if self.args.float16 or self.args.amp:
+            if name in REQUIRE_HIGHER_FP16_TOLERANCE:
+                return 1e-2, cosine
             return 1e-3, cosine
         if is_training and current_device == "cuda":
             tolerance = 1e-3
