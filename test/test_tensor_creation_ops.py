@@ -1176,6 +1176,7 @@ class TestTensorCreation(TestCase):
 
     # TODO: update to work on CUDA, too?
     @onlyCPU
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_simple_scalar_cast(self, device):
         ok = [torch.tensor([1.5]), torch.zeros(1, 1, 1, 1)]
         ok_values = [1.5, 0]
@@ -2659,6 +2660,7 @@ class TestTensorCreation(TestCase):
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @dtypes(torch.float, torch.double, torch.long)
     @parametrize("window", ['hann', 'hamming', 'bartlett', 'blackman'])
     def test_signal_window_functions(self, device, dtype, window):
