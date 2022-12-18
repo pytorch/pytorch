@@ -28,6 +28,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
+from torch._guards import TracingContext, DuplicateInputs
 
 log = logging.getLogger(__name__)
 
@@ -1367,6 +1368,16 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
         return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
 
     deduped_flat_args = remove_dupe_args(flat_args)
+
+    tracing_context = TracingContext.get()
+    if tracing_context:
+        # TODO(voz): This structure is 1:1, we could consider an alternate structure like
+        # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
+        # which feels like needless complexity for a tiny bit of efficiency at this point.
+        for dupe_arg_pos, kept_pos in add_dupe_map.items():
+            # Edge case, only happens for identity
+            if dupe_arg_pos != kept_pos:
+                tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_pos, dupe_arg_pos))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):

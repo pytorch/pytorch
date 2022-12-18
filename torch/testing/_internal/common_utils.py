@@ -90,6 +90,7 @@ from torch.testing._comparison import (
 )
 from torch.testing._comparison import assert_equal as assert_equal
 from torch.testing._internal.common_dtype import get_all_dtypes
+import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
 
@@ -4051,6 +4052,22 @@ def custom_op(opname, symbolic_fn, opset_version):
     finally:
         unregister_custom_op_symbolic(opname, opset_version)
 
+
+def outs_and_grads(fn, graph_inps, inps):
+    outs = fn(*graph_inps)
+    for out in pytree.tree_flatten(outs)[0]:
+        if isinstance(out, torch.Tensor) and out.requires_grad:
+            out.sum().backward(retain_graph=True)
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+    for inp in pytree.tree_flatten(inps)[0]:
+        inp.grad = None
+    return outs, grads
+
+def compare_equal_outs_and_grads(test, m1, m2, inps):
+    r1, g1 = outs_and_grads(m1, inps, inps)
+    r2, g2 = outs_and_grads(m2, inps, inps)
+    test.assertEqual(r1, r2)
+    test.assertEqual(g1, g2)
 
 class TestGradients(TestCase):
     exact_dtype = True
