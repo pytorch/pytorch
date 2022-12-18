@@ -8,4 +8,5 @@ __all__ = [
     'ConvReLU3d',
     'LinearReLU',
     'LinearLeakyReLU',
+    'LinearTanh',
 ]

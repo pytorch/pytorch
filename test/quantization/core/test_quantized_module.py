@@ -1087,6 +1087,24 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                     batch_size, in_features, out_features, use_bias,
                     per_channel, negative_slope=neg_slope)
 
+    @skipIfNoONEDNN
+    def test_linear_tanh(self):
+        """test API functionality for nn.intrinsic.quantized.linear_tanh"""
+        with override_quantized_engine('onednn'):
+            options = itertools.product(
+                [1, 5],  # batch size
+                [16, 32],  # in_features
+                [4, 8],  # out_features
+                [True, False],  # use_bias
+                [True, False])  # negative slope
+            for (batch_size, in_features, out_features, use_bias,
+                 per_channel) in options:
+                self._test_linear_api_impl(
+                    nniq.LinearTanh, 'QuantizedLinearTanh',
+                    torch.ops.quantized.linear_tanh,
+                    batch_size, in_features, out_features, use_bias,
+                    per_channel)
+
 class TestDynamicQuantizedModule(QuantizationTestCase):
     def _test_qconv_impl(self, q_mod, dq_mod, dim, dtype, bias):
         in_channels = 3
