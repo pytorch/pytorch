@@ -164,6 +164,7 @@ class TestTensorCreation(TestCase):
                     self.assertEqual(x, torch.tensor([n] * numel, dtype=dt, device=device))
                     self.assertEqual(dt, x.dtype)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_roll(self, device):
         numbers = torch.arange(1, 9, device=device)
 
@@ -2225,6 +2226,7 @@ class TestTensorCreation(TestCase):
             self.assertNotEqual(torch.tensor(n, device='cuda'), n_astensor)
 
     # TODO: this test should be updated
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @suppress_warnings
     def test_range(self, device):
         res1 = torch.range(0, 1, device=device)
@@ -2253,6 +2255,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
     # TODO: this test should be updated
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_range_warning(self, device):
         with warnings.catch_warnings(record=True) as w:
             torch.range(0, 10, device=device)
@@ -2669,6 +2672,7 @@ class TestTensorCreation(TestCase):
     @onlyNativeDeviceTypes
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
     @dtypes(torch.float, torch.double, torch.long)
     def test_kaiser_window(self, device, dtype):
@@ -2861,6 +2865,7 @@ class TestTensorCreation(TestCase):
         # Test deduction from input parameters.
         self._test_linspace_logspace_deduction_helper(torch.linspace, device)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_logspace_deduction(self, device):
         # Test deduction from input parameters.
         self._test_linspace_logspace_deduction_helper(torch.logspace, device)
