@@ -158,7 +158,7 @@ CI_SKIP_OPTIMIZER = {
     # TorchBench
     "dlrm",  # symbolic shapes error
     "hrnet_w18",  # Stack issue in fx
-    "Pnasnetlarge",  # Stack issue in fx
+    "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
     "MobileBertForQuestionAnswering",  # Stack issue in fx
     "PegasusForConditionalGeneration",  # OOM
