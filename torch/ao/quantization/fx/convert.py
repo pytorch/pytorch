@@ -24,10 +24,10 @@ from ..qconfig import (
 )
 from ..qconfig_mapping import QConfigMapping
 from .qconfig_mapping_utils import (
-    generate_node_name_to_qconfig,
-    compare_prepare_convert_qconfig_mappings,
-    update_qconfig_for_fusion,
-    is_qconfig_supported_by_dtype_configs,
+    _generate_node_name_to_qconfig,
+    _compare_prepare_convert_qconfig_mappings,
+    _update_qconfig_for_fusion,
+    _is_qconfig_supported_by_dtype_configs,
     _update_qconfig_for_qat,
 )
 from torch.ao.quantization.backend_config.utils import (
@@ -40,10 +40,11 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     get_native_backend_config,
 )
+from torch.ao.quantization.observer import _is_activation_post_process
 from .graph_module import (
     QuantizedGraphModule,
-    is_observed_module,
-    is_observed_standalone_module,
+    _is_observed_module,
+    _is_observed_standalone_module,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from torch.nn.utils.parametrize import type_before_parametrizations
@@ -62,7 +63,6 @@ from torch.ao.quantization.utils import (
 )
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
-    is_activation_post_process,
 )
 from torch.ao.quantization.stubs import DeQuantStub
 from .custom_config import (
@@ -450,7 +450,7 @@ def _restore_state(
 ) -> Tuple[Dict[str, Tuple[str, type]],
            PrepareCustomConfig,
            Set[str]]:
-    assert is_observed_module(observed), \
+    assert _is_observed_module(observed), \
         'incoming model must be produced by prepare_fx'
     prepare_custom_config: PrepareCustomConfig = observed._prepare_custom_config  # type: ignore[assignment]
     node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
@@ -574,7 +574,7 @@ def _maybe_get_observer_for_node(
     for maybe_obs_node, _ in node.users.items():
         if maybe_obs_node.op == 'call_module':
             maybe_obs = modules[str(maybe_obs_node.target)]
-            if is_activation_post_process(maybe_obs):
+            if _is_activation_post_process(maybe_obs):
                 return maybe_obs
     return None
 
@@ -683,7 +683,7 @@ def convert_weighted_module(
     # skip converting to reference quantized module if the qconfig is not supported
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config)
     dtype_configs = pattern_to_dtype_configs.get(type(original_module), [])
-    if not is_qconfig_supported_by_dtype_configs(qconfig, dtype_configs):
+    if not _is_qconfig_supported_by_dtype_configs(qconfig, dtype_configs):
         return
 
     # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
@@ -920,10 +920,10 @@ def convert(
 
         if model._is_qat:
             _update_qconfig_for_qat(qconfig_mapping, {})
-        update_qconfig_for_fusion(model, qconfig_mapping)
+        _update_qconfig_for_fusion(model, qconfig_mapping)
 
-        compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
-        convert_node_name_to_qconfig = generate_node_name_to_qconfig(
+        _compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
+        convert_node_name_to_qconfig = _generate_node_name_to_qconfig(
             model, modules_copy, model.graph, qconfig_mapping, node_name_to_scope)
         # check the convert_node_name_to_qconfig generated and ensure that
         # all the values either match what was set in prepare node_name_to_qconfig
@@ -1002,7 +1002,7 @@ def convert(
         elif node.op == "call_module":
             mod = _get_module(node, modules)
             assert mod is not None
-            if is_activation_post_process(mod):
+            if _is_activation_post_process(mod):
                 observed_node = node.args[0]
                 if observed_node in statically_quantized_custom_module_nodes:
                     _replace_observer_or_dequant_stub_with_dequantize_node(node, model.graph)
@@ -1017,7 +1017,7 @@ def convert(
                             node_name_to_qconfig)
             elif isinstance(mod, DeQuantStub):
                 _replace_observer_or_dequant_stub_with_dequantize_node(node, model.graph)
-            elif is_observed_standalone_module(mod):
+            elif _is_observed_standalone_module(mod):
                 convert_standalone_module(
                     node, modules, model, is_reference, backend_config)
             # below this point `type_before_parametrizations` is used

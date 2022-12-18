@@ -8,6 +8,7 @@ from typing import (
     List,
     no_type_check,
     Optional,
+    Set,
     Tuple,
 )
 
@@ -20,6 +21,8 @@ from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _assert_in_training_states,
     _FSDPState,
+    _get_fsdp_states,
+    _get_module_fsdp_state,
     _is_composable,
     TrainingState,
 )
@@ -45,38 +48,82 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
 }
 
 
+def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
+    """
+    Returns all root ``_FSDPState`` instances in the module tree rooted at
+    ``module``.
+
+    This is similar to :func:`_get_fsdp_states` except we must call
+    :func:`_is_fsdp_root` to force a lazy initialization to determine the FSDP
+    root in case lazy initialization has not yet happened.
+    """
+    fsdp_root_states: List[_FSDPState] = []
+    visited_fsdp_states: Set[_FSDPState] = set()
+    # NOTE: This function assumes that `module.modules()` proceeds top-down.
+    for submodule in module.modules():
+        optional_state = _get_module_fsdp_state(submodule)
+        if (
+            optional_state is not None
+            and optional_state not in visited_fsdp_states
+            and _is_fsdp_root(optional_state, submodule)
+        ):
+            visited_fsdp_states.add(optional_state)
+            fsdp_root_states.append(optional_state)
+    return fsdp_root_states
+
+
+def _is_fsdp_root(state: _FSDPState, module: nn.Module) -> bool:
+    """
+    Returns if ``state`` corresponds to that of an FSDP root.
+
+    For the wrapper code path, ``state`` and ``module`` should be the same. For
+    the non-wrapper code path, ``state`` should be ``module`` 's state.
+    """
+    # Force a lazy initialization to determine the FSDP root
+    _lazy_init(state, module)
+    assert state._is_root is not None  # mypy
+    return state._is_root
+
+
 @no_type_check
-def _validate_hybrid_shard_setup(fsdp_root: _FSDPState, fsdp_module: nn.Module):
+def _validate_and_get_hybrid_shard_state(
+    root_module: nn.Module,
+) -> default_hooks.DefaultState:
     """
-    Performs validation that hybrid sharding strategy is setup. In particular, we:
-    1) Ensure root and passed in FSDP module have the same hybrid sharding strategy,
-    i.e. both should be using the same hybrid shard strategy or no hybrid shard at all.
-    2) Ensure that inter and intra-node process groups are the same across root and
-    this FSDP module.
+    Precondition: ``root_module`` is a ``FullyShardedDataParallel`` instance.
+
+    This checks that all instances using a hybrid sharding strategy have the
+    same intra- and inter-node process groups.
+
+    Returns:
+        DefaultState: One of the instances' inter-node state (does not
+        matter which since they will share the same one).
     """
-    if (
-        fsdp_root.sharding_strategy in HYBRID_SHARDING_STRATEGIES
-        or fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES
-    ):
-        if fsdp_root.sharding_strategy != fsdp_module.sharding_strategy:
-            raise ValueError(
-                "When using hybrid sharding strategy, expect sharding strategies"
-                f" to be the same, but got {fsdp_root.sharding_strategy} vs {fsdp_module.sharding_strategy}"
-            )
-
-        # Ensure inter and intra-node process groups are the same
-        # TODO (rohan-varma) unclear whether these should be asserts or Exceptions
-        # as they can happen due to bug in FSDP process group setup or user passing in
-        # incorrect configuration.
-        if fsdp_root.process_group != fsdp_module.process_group:
-            raise ValueError(
-                f"For {fsdp_root.sharding_strategy} intra-node process groups do not match"
-            )
-
-        if fsdp_root._inter_node_pg != fsdp_module._inter_node_pg:
-            raise ValueError(
-                f"For {fsdp_root.sharding_strategy}, inter-node process groups do not match"
-            )
+    intra_node_pgs = set()
+    inter_node_pgs = set()
+    inter_node_states = set()
+    for fsdp_module in _get_fsdp_states(root_module):
+        # TODO: Change this to handle's sharding strategy if we deprecate
+        # `ShardingStrategy` internally.
+        # https://github.com/pytorch/pytorch/issues/90857
+        if fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            intra_node_pgs.add(fsdp_module.process_group)
+            inter_node_pgs.add(fsdp_module._inter_node_pg)
+            inter_node_states.add(fsdp_module._inter_node_state)
+    if len(intra_node_pgs) == 0 and len(inter_node_pgs) == 0:
+        # No instances use a hybrid sharding strategy
+        return None
+    error_prefix = "At least one instance uses a hybrid sharding strategy but has no "
+    if len(intra_node_pgs) > 0 and len(inter_node_pgs) == 0:
+        raise AssertionError(error_prefix + "inter-node proces group set")
+    if len(intra_node_pgs) == 0 and len(inter_node_pgs) > 0:
+        raise AssertionError(error_prefix + "intra-node process group set")
+    error_prefix = "Some instances use a hybrid sharding strategy, but "
+    if len(intra_node_pgs) != 1:
+        raise ValueError(error_prefix + "intra-node process groups do not match")
+    if len(inter_node_pgs) != 1:
+        raise ValueError(error_prefix + "inter-node process groups do not match")
+    return next(iter(inter_node_states))
 
 
 @no_type_check
@@ -117,16 +164,21 @@ def _lazy_init(
     # non-root instances
     assert state is root_module
     inconsistent_limit_all_gathers = False
-    for fsdp_module in state.fsdp_modules(root_module):
+    inter_node_state = _validate_and_get_hybrid_shard_state(root_module)
+    for fsdp_module in _get_fsdp_states(root_module):
         if fsdp_module is root_module:
             continue
 
         if fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
-            _validate_hybrid_shard_setup(state, fsdp_module)
             # Share the allreduce state across FSDP units. This is not strictly necessary
             # as each one already uses the same process group, but can slightly save memory
             # since other FSDP units allreduce state can be garbage collected.
-            fsdp_module._inter_node_state = state._inter_node_state
+            assert inter_node_state is not None, (
+                "`_validate_and_get_hybrid_shard_state()` should have returned "
+                "a valid inter-node state if there exists an FSDP instance "
+                "using a hybrid sharding strategy"
+            )
+            fsdp_module._inter_node_state = inter_node_state
 
         # Relax the assert for non-root FSDP instances in case the nested
         # initialized module is wrapped again in FSDP later (e.g. after
@@ -315,6 +367,7 @@ def _pre_forward(
         )
     return args, kwargs
 
+
 @no_type_check
 def _pre_forward_unshard(
     state: _FSDPState,
@@ -384,7 +437,7 @@ def _post_forward_reshard(
 
     free_unsharded_flat_params = [
         not state._is_root
-        and handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
+        and handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
         for handle in handles
     ]
     _reshard(state, handles, free_unsharded_flat_params)
@@ -416,7 +469,7 @@ def _root_pre_forward(
             # TODO: This assumes singleton handles keys.
             handles_keys = [tuple(handle) for handle in state._handles]
         else:
-            for fsdp_module in state.fsdp_modules(state):
+            for fsdp_module in _get_fsdp_states(state):
                 handles_key = tuple(fsdp_module._handles)
                 handles_keys.append(handles_key)
         for handles_key in handles_keys:
@@ -464,15 +517,9 @@ def _cast_fp_inputs_to_dtype(
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
         if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
-        y = x.to(dtype)
-        # Explicitly copy over `requires_grad` since this runs inside
-        # `torch.no_grad()`
-        if x.is_leaf:
-            y.requires_grad = x.requires_grad
-        return y
+        return x.to(dtype)
 
-    with torch.no_grad():
-        return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
+    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
 
 @no_type_check
@@ -594,9 +641,9 @@ def _post_backward_hook(
                 )
             if (
                 not _low_precision_hook_enabled(state)
-                and flat_param.grad.dtype != handle._config.reduce_dtype
+                and flat_param.grad.dtype != handle._reduce_dtype
             ):
-                flat_param.grad.data = flat_param.grad.to(handle._config.reduce_dtype)
+                flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
 
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
@@ -621,7 +668,7 @@ def _post_backward_hook(
                     padded_unsharded_grad,
                     new_sharded_grad,
                 )
-                if handle._config.sharding_strategy in (
+                if handle._sharding_strategy in (
                     HandleShardingStrategy.HYBRID_SHARD,
                     HandleShardingStrategy._HYBRID_SHARD_ZERO2,
                 ):
@@ -652,7 +699,7 @@ def _post_backward_hook(
                     _cast_grad_to_param_dtype(state, flat_param.grad, flat_param)
                 grad_to_offload = flat_param.grad.data
 
-            if handle._config.offload_params:
+            if handle._offload_params:
                 # Offload the gradient to CPU to ensure parameters and
                 # gradients are on the same device as required by the optimizer
                 # TODO: Investigate why `NO_SHARD` breaks correctness when
@@ -700,7 +747,7 @@ def _should_free_in_backward(
     # For NO_SHARD we don't need to free full parameters, for ZeRO-2 strategies, we skip
     # freeing in backward.
     return free_unsharded or (
-        handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
+        handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
     )
 
 
@@ -789,7 +836,7 @@ def _post_backward_final_callback(
             torch.cuda.current_stream().synchronize()
     state._exec_order_data.next_iter()
 
-    states = [state] if _is_composable(state) else state.fsdp_modules(state)
+    states = [state] if _is_composable(state) else _get_fsdp_states(state)
     for state in states:
         _catch_all_reshard(state)
         _finalize_params(state)
@@ -971,7 +1018,7 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -982,9 +1029,7 @@ def _register_pre_forward_hooks(
                 _pre_forward, state, module_param_handles, unshard_fn
             )
             state._pre_forward_handles.append(
-                module.register_forward_pre_hook(
-                    hook, prepend=True, with_kwargs=True
-                )
+                module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
             )
 
 
@@ -1003,7 +1048,7 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,
@@ -1195,7 +1240,7 @@ def _get_buffers_and_dtypes_for_computation(
         visited_buffers = set()
         # Traverse the FSDP instances bottom-up so that we prefer the owning
         # FSDP instance's mixed precision setting for each buffer
-        for fsdp_module in reversed(state.fsdp_modules(root_module)):
+        for fsdp_module in reversed(_get_fsdp_states(root_module)):
             for buffer in fsdp_module.buffers():
                 if buffer in visited_buffers:
                     continue
