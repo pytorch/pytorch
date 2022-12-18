@@ -803,6 +803,18 @@ class TorchPatcher:
             if hasattr(opt, "_init_group"):
                 opt._init_group = disable(opt._init_group)
 
+            # disable any currently set hooks
+            # Note: we only want to disable the profiling hook
+            # which is the *last* hook applied, we want to keep the no_grad hook
+            hooked = getattr(opt.step, "hooked", False)
+            if hooked:
+                unwrapped_step = getattr(opt.step, "__wrapped__", None)
+                if unwrapped_step:
+                    opt.step = unwrapped_step
+
+            # disable future hooking
+            opt.step.hooked = True
+
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
         def inner_fn(*args, **kwargs):
