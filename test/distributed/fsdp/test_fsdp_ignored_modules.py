@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.api import ShardingStrategy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -89,10 +90,11 @@ class ModelWithIgnoredModules(Model):
 class TestFSDPIgnoredModules(FSDPTest):
     def _train_model(self, model, optim, num_iters, device=torch.device("cuda")):
         for _ in range(num_iters):
-            inp = model.module.get_input(device)
+            module = model.module if isinstance(model, FSDP) else model
+            inp = module.get_input(device)
             output = model(*inp)
-            loss = model.module.get_loss(inp, output).to(device)
-            model.module.run_backward(loss)
+            loss = module.get_loss(inp, output).to(device)
+            module.run_backward(loss)
             optim.step()
 
     @skip_if_lt_x_gpu(2)
@@ -224,6 +226,23 @@ class TestFSDPIgnoredModules(FSDPTest):
         wrapped_model = FSDP(model, ignored_modules=model_ignored_modules)
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
         self._train_model(wrapped_model, optim, 3)
+
+    @skip_if_lt_x_gpu(2)
+    def test_ignored_modules_not_under_wrapped_root(self):
+        model = Model().cuda()
+        ignored_modules = list(model.layer1.children())[1:]
+        model.layer1 = FSDP(
+            model.layer1,
+            sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            ignored_modules=ignored_modules,
+        )
+        model.layer3 = FSDP(
+            model.layer3,
+            ignored_modules=ignored_modules,
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+        self._train_model(model, optim, 3)
+
 
 
 instantiate_parametrized_tests(TestFSDPIgnoredModules)
