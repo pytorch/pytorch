@@ -129,6 +129,9 @@ class ComptimeVariable(VariableTracker):
                 tuple(),
             )
             func(ComptimeContext(tx))
+        else:
+            raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
+
         return variables.ConstantVariable(None)
 
 
