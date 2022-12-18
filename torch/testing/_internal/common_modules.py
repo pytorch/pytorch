@@ -253,7 +253,9 @@ def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, t
 
 
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, training, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    def make_input(shape, device=device, dtype=dtype, requires_grad=requires_grad):
+        return make_tensor(shape, device=device, dtype=dtype,
+                           requires_grad=False).log_softmax(dim=1).requires_grad_(requires_grad)
     make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     cases: List[Tuple[str, dict]] = [
@@ -278,7 +280,7 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, tr
 
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(make_input((15, 10)).log_softmax(dim=1),
+                        forward_input=FunctionInput(make_input((15, 10)),
                                                     torch.empty(15, device=device).uniform_().mul(10).floor().long()),
                         desc=desc,
                         reference_fn=reference_fn)
