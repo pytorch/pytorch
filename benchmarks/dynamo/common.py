@@ -83,6 +83,27 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
+CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
+    *CI_SKIP_AOT_EAGER_TRAINING,
+    "drq",  # assert type(inner_out) == type(user_out)
+    "hf_T5_base",  # fp64_OOM
+    "mobilenet_v2_quantized_qat",  # setStorage
+    "resnet50_quantized_qat",  # setStorage
+    "soft_actor_critic",  # assert type(inner_out) == type(user_out)
+    "tacotron2",  # aten._thnn_fused_lstm_cell.default
+    "tts_angular",  # _VF.lstm
+    "AllenaiLongformerBase",  # assert type(inner_out) == type(user_out)
+    "DebertaV2ForQuestionAnswering",  # OOM
+    "botnet26t_256",  # assert type(inner_out) == type(user_out)
+    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
+    "eca_botnext26ts_256",  # assert type(inner_out) == type(user_out)
+    "eca_halonext26ts",  # assert type(inner_out) == type(user_out)
+    "hrnet_w18",  # torch._C._nn.upsample_nearest2d
+    "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
+    "sebotnet33ts_256",  # assert type(inner_out) == type(user_out)
+    "twins_pcpvt_base",  # timeout
+]
+
 CI_SKIP_INDCUTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
@@ -126,6 +147,15 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "levit_128",  # fp64_OOM
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
+
+
+CI_SKIP_OPTIMIZER = {
+    # TIMM
+    "convmixer_768_32",  # accuracy
+    "sebotnet33ts_256",  # accuracy
+    "tf_mixnet_l",  # This model is non-deterministic with same input + weights,
+    # but without optimizing over multiple iterations, this still passes
+}
 
 
 def model_specified_by_path(path_and_class_str):
@@ -872,6 +902,7 @@ class BenchmarkRunner:
         self.use_amp = False
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
+        self.optimizer = None
         self._args = None
 
     def setup_amp(self):
@@ -900,16 +931,11 @@ class BenchmarkRunner:
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
 
-    def init_optimizer(self, device, params):
-        self.optimizer = None
-        # TODO - Currently, optimizers are used incorrectly. Fix optimizers with
-        # https://github.com/pytorch/pytorch/pull/87492
-        # param_list = list(params)
-        # if device == "cuda" and len(param_list) != 0:
-        #     # capturable is only supported on cuda at the moment
-        #     self.optimizer = torch.optim.Adam(param_list, capturable=True)
-        # else:
-        #     self.optimizer = None
+    def init_optimizer(self, name, device, params):
+        if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
+            self.optimizer = torch.optim.SGD(params, lr=0.01)
+        else:
+            self.optimizer = None
 
     @property
     def args(self):
@@ -1061,6 +1087,10 @@ class BenchmarkRunner:
         2) Checks if eager itself has variations.
         """
 
+        with open("in1.txt", "w") as f:
+            print(example_inputs, file=f)
+            print(list(model.parameters()), file=f)
+
         def record_status(accuracy_status):
             """
             Records the status in the csv file
@@ -1092,12 +1122,14 @@ class BenchmarkRunner:
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
-            fp64_outputs = self.run_n_iterations(
-                *cast_to_fp64(
-                    deepcopy_and_maybe_ddp(model),
-                    clone_inputs(example_inputs),
-                )
+            model_fp64, inputs_fp64 = cast_to_fp64(
+                deepcopy_and_maybe_ddp(model),
+                clone_inputs(example_inputs),
             )
+            self.init_optimizer(name, current_device, model_fp64.parameters())
+            fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
+            with open("out1.txt", "w") as f:
+                print(fp64_outputs, file=f)
         except Exception:
             log.warning(
                 f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
@@ -1118,14 +1150,18 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
+            model_copy = deepcopy_and_maybe_ddp(model)
+            self.init_optimizer(name, current_device, model_copy.parameters())
             correct_result = self.run_n_iterations(
-                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+                model_copy, clone_inputs(example_inputs)
             )
 
             # Rerun native pytorch
             reset_rng_state()
+            model_copy = deepcopy_and_maybe_ddp(model)
+            self.init_optimizer(name, current_device, model_copy.parameters())
             correct_rerun_result = self.run_n_iterations(
-                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+                model_copy, clone_inputs(example_inputs)
             )
             if not same(
                 correct_result,
@@ -1141,11 +1177,11 @@ class BenchmarkRunner:
             reset_rng_state()
             torch._dynamo.reset()
             try:
+                model_copy = deepcopy_and_maybe_ddp(model)
+                self.init_optimizer(name, current_device, model_copy.parameters())
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
 
-                new_result = optimized_model_iter_fn(
-                    deepcopy_and_maybe_ddp(model), example_inputs
-                )
+                new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 accuracy_status = "fail_to_run"
                 print(
@@ -1193,6 +1229,7 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
+        self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
@@ -1669,13 +1706,18 @@ def run(runner, args, original_dir=None):
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
+    if args.dynamic_shapes:
+        torch._dynamo.config.dynamic_shapes = True
+        torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
         if args.backend == "aot_eager":
             args.exclude = (
-                CI_SKIP_AOT_EAGER_TRAINING
+                CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
+                if args.training and args.dynamic_shapes
+                else CI_SKIP_AOT_EAGER_TRAINING
                 if args.training
                 else CI_SKIP_AOT_EAGER_INFERENCE
             )
