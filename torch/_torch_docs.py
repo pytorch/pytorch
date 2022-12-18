@@ -1252,15 +1252,9 @@ passed then the default floating point datatype is used, instead.) The returned 
 will have the specified datatype (or default floating point datatype if none is specified)
 and, by default, be on the CPU device and share memory with the buffer.
 
-When :attr:`obj` is none of the above but a NumPy scalar, a scalar or a sequence of scalars then the
+When :attr:`obj` is none of the above but a Python or NumPy scalar, or a sequence of scalars then the
 returned tensor will, by default, infer its datatype from the scalar values, be on the
 CPU device, and not share its memory.
-
-.. note::
-
-    NumPy scalars also implement the buffer protocol. However, NumPy scalars are
-    prioritized over buffer protocols. In other words, if :attr:`obj` is a NumPy scalar,
-    it will not share memory, and its type will be inferred.
 
 .. seealso::
 
