@@ -1,6 +1,7 @@
 #include <ATen/SavedTensorHooks.h>
 #include <c10/util/Exception.h>
 #include <stack>
+#include <utility>
 
 namespace at {
 
@@ -76,7 +77,7 @@ std::stack<std::pair<PyObject*, PyObject*>> SavedTensorDefaultHooks::get_stack()
 }
 
 void SavedTensorDefaultHooks::set_stack(std::stack<std::pair<PyObject*, PyObject*>> stack_) {
-  tls.stack = stack_;
+  tls.stack = std::move(stack_);
 }
 
 }
