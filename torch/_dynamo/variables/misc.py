@@ -14,6 +14,7 @@ from ..source import AttrSource
 from ..utils import identity, proxy_args_kwargs
 from .base import VariableTracker
 from .functions import (
+    NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrappedUserFunctionVariable,
@@ -87,7 +88,7 @@ class UnknownVariable(VariableTracker):
     """
 
 
-class CompTimeVariable(VariableTracker):
+class ComptimeVariable(VariableTracker):
     """
     This variable is special, it lets you execute arbitrary code at
     Dynamo compile time
@@ -99,10 +100,35 @@ class CompTimeVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from ..comptime import ComptimeContext
+
+        # TODO: support an expression form as well
+
         assert not kwargs
         assert len(args) == 1
-        assert isinstance(args[0], UserFunctionVariable)
-        args[0].get_function()(tx)
+        fn = args[0]
+        if isinstance(fn, UserFunctionVariable):
+            fn.get_function()(ComptimeContext(tx))
+        elif isinstance(fn, NestedUserFunctionVariable):
+            # We have to manually bind the freevars ourselves
+            code = fn.get_code()
+            assert not fn.closure, (
+                "comptime function must not have free variables, "
+                f"but these variables were free: {code.co_freevars}"
+            )
+            func = types.FunctionType(
+                code,
+                fn.f_globals,
+                fn.fn_name.as_python_constant(),
+                tuple(fn.defaults.items) if fn.defaults else None,
+                # We could automatically promote free variables into
+                # ComptimeVar but this is confusing if you access
+                # a free variable that we actually DO have the runtime
+                # value for
+                # tuple(make_cell(ComptimeVar(i)) for i in fn.closure.items)
+                tuple(),
+            )
+            func(ComptimeContext(tx))
         return variables.ConstantVariable(None)
 
 
@@ -322,32 +348,22 @@ class GradModeVariable(ContextWrappingVariable):
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(target_values, kwargs):
-        values = target_values
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
         # cache_enabled : Optional[bool] = None):cache_enabled
-        assert "device_type" in kwargs
-        values.append(kwargs["device_type"])
-        del kwargs["device_type"]
+        bound_args = inspect.signature(torch.autocast).bind(*target_values, **kwargs)
+        bound_args.apply_defaults()
+        target_values = []
+        kwargs.clear()
 
-        if "dtype" in kwargs:
-            values.append(kwargs["dtype"])
-            del kwargs["dtype"]
-        else:
-            values.append(variables.ConstantVariable(None))
-
-        if "enabled" in kwargs:
-            values.append(kwargs["enabled"])
-            del kwargs["enabled"]
-        else:
-            values.append(variables.ConstantVariable(True))
-
-        if "cache_enabled" in kwargs:
-            values.append(kwargs["cache_enabled"])
-            del kwargs["cache_enabled"]
-        else:
-            values.append(variables.ConstantVariable(None))
+        for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
+            if isinstance(bound_args.arguments[key], VariableTracker):
+                target_values.append(bound_args.arguments[key])
+            else:
+                target_values.append(
+                    variables.ConstantVariable(bound_args.arguments[key])
+                )
 
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
