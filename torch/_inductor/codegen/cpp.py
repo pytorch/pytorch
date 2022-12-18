@@ -19,6 +19,7 @@ from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
+    CSEVariable,
     DeferredIndentedBuffer,
     ExprPrinter,
     IndentedBuffer,
@@ -901,8 +902,47 @@ class CppVecKernelChecker(CppVecKernel):
                 self.fast_vec_list.append(k)
         self.exit_stack = contextlib.ExitStack()
 
+        # Cache all the load result
+        self.load_results: list[CSEVariable] = []
+        self.load_supported_dtypes: list[torch.dtype] = [
+            torch.float,
+            torch.float32,
+            torch.bool,
+            torch.uint8,
+            torch.long,
+        ]
+        self.store_supported_dtypes: list[torch.dtype] = [torch.float, torch.float32]
+        # Cache the dtypes of the store operation. If the store is mixing dtypes, the
+        # vectorization would not support it as it is hard to determin the vec dtype
+        self.store_dtypes: list[torch.dtype] = []
+        # The dtype is used for vectorization
+        self.vec_dtype: torch.dtype = torch.float32
+
+    def decide_vec_dtype(self):
+        n_store_dtypes = len(self.store_dtypes)
+        if n_store_dtypes == 1:
+            self.vec_dtype = self.store_dtypes[0]
+
+        return self.vec_dtype
+
+    def is_indirect_indexing(self, index: sympy.Expr):
+        for _load_res in self.load_results:
+            # The index expression cotains a value that loads from memory
+            if index.count(sympy_symbol(_load_res.name)) > 0:
+                return True
+        return False
+
     def is_legal_data_access(self, var: sympy.Symbol, index: sympy.Expr):
-        return self.is_var_irrevelant(var, index) or self.is_single_step_var(var, index)
+        _indirect_indexing = not self.is_indirect_indexing(index)
+        if _indirect_indexing:
+            return False
+
+        _loop_var_irrevelant = self.is_var_irrevelant(var, index)
+        _single_step = self.is_single_step_var(var, index)
+        if not _single_step and not _loop_var_irrevelant:
+            return False
+
+        return True
 
     def could_vec(self, name: str, index: sympy.Expr):
         assert self.itervars is not None
@@ -914,21 +954,22 @@ class CppVecKernelChecker(CppVecKernel):
         return self.is_legal_data_access(most_inner_var, index)
 
     def load(self, name: str, index: sympy.Expr):
-        if not V.graph.get_dtype(name) in [
-            torch.float,
-            torch.float32,
-            torch.bool,
-            torch.uint8,
-        ]:
+        var = self.cse.newvar()
+        self.load_results.append(var)
+
+        if not V.graph.get_dtype(name) in self.load_supported_dtypes:
             self.simd_vec = False
-            return self.simd_vec
+            return var
 
         index = self.rename_indexing(index)
         self.simd_vec = self.simd_vec and self.could_vec(name, index)
-        return self.simd_vec
+        return var
 
     def store(self, name, index, value, mode=None):
-        if not V.graph.get_dtype(name) in [torch.float, torch.float32]:
+        store_dtype = V.graph.get_dtype(name)
+        store_dtype = torch.float if store_dtype == torch.float32 else store_dtype
+        self.store_dtypes.append(store_dtype)
+        if store_dtype not in [torch.float, torch.float32]:
             self.simd_vec = False
             return self.simd_vec
 
