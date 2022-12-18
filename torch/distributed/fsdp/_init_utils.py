@@ -588,7 +588,7 @@ def _get_ignored_params(
             # This is useful when user apply FSDP manually to different
             # submodules with the same global set of ignored parameters.
             warnings.warn(
-                f"Paramter {name} is in the ignored modules passed to FSDP, "
+                f"Parameter {name} is in the ignored modules passed to FSDP, "
                 "but it's not under the root module wrapped by FSDP."
             )
             continue

@@ -5,8 +5,10 @@ import sys
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.api import ShardingStrategy
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -233,11 +235,14 @@ class TestFSDPIgnoredModules(FSDPTest):
         ignored_modules = list(model.layer1.children())[1:]
         model.layer1 = FSDP(
             model.layer1,
+            # sharding_strategy shouldn't matter here.
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             ignored_modules=ignored_modules,
         )
         model.layer3 = FSDP(
             model.layer3,
+            # the ignored_modules contains submodule under model.layer1, which
+            # is out of the the local root model.layer3.
             ignored_modules=ignored_modules,
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
