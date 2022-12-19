@@ -2298,6 +2298,7 @@ aot_autograd_module_failures = set({
 })
 
 symbolic_aot_autograd_module_failures = {
+    torch.nn.GRU,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.TransformerEncoderLayer,  # RuntimeError: tried to get Double out of SymFloat
     torch.nn.TransformerDecoderLayer,  # RuntimeError: tried to get Double out of SymFloat
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
