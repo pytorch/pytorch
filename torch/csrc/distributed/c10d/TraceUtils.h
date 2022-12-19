@@ -159,7 +159,7 @@ inline std::string dumpSnapshot(TraceMap& traceMap) {
 }
 
 inline bool parseTraceValue(
-    c10::intrusive_ptr<Store>& store,
+    const c10::intrusive_ptr<Store>& store,
     const std::string& key,
     uint64_t& seq,
     std::string& col) {
@@ -177,7 +177,7 @@ inline bool parseTraceValue(
 }
 
 inline std::string retrieveDesyncReport(
-    c10::intrusive_ptr<Store>& store,
+    const c10::intrusive_ptr<Store>& store,
     const std::string& pgName,
     int myRank,
     int worldSize) {
