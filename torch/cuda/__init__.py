@@ -70,10 +70,13 @@ if hasattr(torch._C, '_CudaDeviceProperties'):
 else:
     _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore[assignment, misc]
 
-if hasattr(torch._C, '_cuda_DeviceGuard'):
-    _DeviceGuard = torch._C._cuda_DeviceGuard
+if hasattr(torch._C, '_cuda_exchangeDevice'):
+    _exchange_device = torch._C._cuda_exchangeDevice
 else:
-    _DeviceGuard = _dummy_type('_DeviceGuard')  # type: ignore[assignment, misc]
+    def _exchange_device(idx: int) -> int:
+        if idx < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled with CUDA support")
 
 
 # Global variables dynamically populated by native code
@@ -286,7 +289,20 @@ def check_error(res: int) -> None:
         raise CudaError(res)
 
 
-class device(_DeviceGuard):
+class _DeviceGuard:
+    def __init__(self, index: int):
+        self.idx = index
+        self.prev_idx = -1
+
+    def __enter__(self):
+        self.prev_idx = torch.cuda._exchange_device(self.idx)
+
+    def __exit__(self, type: Any, value: Any, traceback: Any) -> bool:
+        torch.cuda._exchange_device(self.prev_idx)
+        return False
+
+
+class device(object):
     r"""Context-manager that changes the selected device.
 
     Args:
@@ -295,8 +311,22 @@ class device(_DeviceGuard):
     """
 
     def __init__(self, device: Any):
-        idx = _get_device_index(device, optional=True)
-        super().__init__(idx)
+        self.idx = _get_device_index(device, optional=True)
+        self.prev_idx = -1
+
+    def __enter__(self):
+        if self.idx == -1:
+            return
+        self.prev_idx = torch.cuda.current_device()
+        if self.prev_idx != self.idx:
+            torch.cuda.set_device(self.idx)
+        if not torch.jit.is_scripting():
+            _lazy_init()
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        if self.prev_idx != self.idx:
+            torch.cuda.set_device(self.prev_idx)
+        return False
 
 
 class device_of(device):

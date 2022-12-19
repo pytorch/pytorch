@@ -91,6 +91,20 @@ RegisterOperators const reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
+        "cuda::_exchange_device(int64_t index) -> int",
+        [](Stack& stack) {
+          int64_t idx = -1;
+          pop(stack, idx);
+          if (idx < 0) {
+            push(stack, -1);
+            return;
+          }
+          auto prev_idx = c10::cuda::current_device();
+          c10::cuda::set_device(static_cast<c10::DeviceIndex>(idx));
+          push(stack, static_cast<int>(prev_idx));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "cuda::_set_device(int64_t val) -> ()",
         [](Stack& stack) {
           int64_t idx = -1;

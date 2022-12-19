@@ -23,7 +23,6 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
-#include <torch/csrc/cuda/DeviceGuard.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/python_headers.h>
@@ -82,6 +81,24 @@ PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   THCPModule_setDevice(device);
 
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
+  int64_t device = THPUtils_unpackLong(arg);
+  if (device < 0) {
+    return THPUtils_packInt32(-1);
+  }
+
+  torch::utils::cuda_lazy_init();
+  auto current_device = c10::cuda::current_device();
+  if (current_device != device) {
+    THCPModule_setDevice(device);
+  }
+
+  return THPUtils_packInt32(static_cast<int>(current_device));
   END_HANDLE_TH_ERRORS
 }
 
@@ -1110,6 +1127,7 @@ PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
 static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_init", THCPModule_initExtension, METH_NOARGS, nullptr},
     {"_cuda_setDevice", THCPModule_setDevice_wrap, METH_O, nullptr},
+    {"_cuda_exchangeDevice", THCPModule_exchangeDevice, METH_O, nullptr},
     {"_cuda_getDevice", THCPModule_getDevice_wrap, METH_NOARGS, nullptr},
     {"_cuda_getDeviceCount",
      THCPModule_getDeviceCount_wrap,
@@ -1262,7 +1280,6 @@ void initModule(PyObject* module) {
 #endif
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
-  initDeviceGuard(module);
 }
 
 } // namespace cuda
