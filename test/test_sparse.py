@@ -3421,6 +3421,12 @@ class TestSparse(TestSparseBase):
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
         """
 
+        def check_is_coalesced(s):
+            self.assertTrue(s.is_coalesced())
+            sc = s.to_dense().to_sparse()
+            self.assertEqual(s.indices(), sc.indices())
+            self.assertEqual(s.values(), sc.values())
+
         def ref_sparse_mm(a, b):
             return a.to_dense() @ b.to_dense()
 
@@ -3462,6 +3468,7 @@ class TestSparse(TestSparseBase):
             # cpp implementation
             r2 = torch.sparse.mm(a, b)
             self.assertEqual(r1, r2.to_dense())
+            check_is_coalesced(r2)
 
             if dtype in [torch.double, torch.cdouble]:
                 a.requires_grad_(True)
