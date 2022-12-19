@@ -131,3 +131,8 @@ class TorchXLAReuseGraphTest(unittest.TestCase):
     test_matmul = make_reuse_graph_test(MatmulModule)
     test_linear = make_reuse_graph_test(LinearModule)
     test_inplace_update = make_reuse_graph_test(ModuleInplaceUpdate)
+
+
+if __name__ == "__main__":
+    test = unittest.main()
+    sys.exit(0 if test.result.wasSuccessful() else 1)

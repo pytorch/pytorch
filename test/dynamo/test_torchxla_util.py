@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import functools
-import os
 import unittest
 
 
@@ -11,12 +10,14 @@ def should_run_torchxla_tests():
     """
     has_torch_xla = True
     try:
-        import torch_xla  # noqa: F401
+        import torch_xla.core.xla_model as xm
     except ImportError:
         has_torch_xla = False
-
-    gpu_device_specified = int(os.environ.get("GPU_NUM_DEVICES", "0")) > 0
-    return has_torch_xla and gpu_device_specified
+    try:
+        device = xm.xla_device()
+    except RuntimeError:
+        device = None
+    return has_torch_xla and device
 
 
 def maybe_skip_torchxla_test(test_case):
