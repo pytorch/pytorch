@@ -6,7 +6,7 @@ import sys
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable import checkpoint, fully_shard
+from torch.distributed._composable import checkpoint, fully_shard, replicate
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
@@ -161,6 +161,33 @@ class TestFSDPCheckpoint(FSDPTest):
         test_model.u2.seq = checkpoint(test_model.u2.seq, use_reentrant=False)
         test_model = fully_shard(test_model, strategy=ShardingStrategy.NO_SHARD)
 
+        self.run_subtests(
+            {
+                "base_model": [base_model],
+                "test_model": [test_model],
+                "x": [torch.randn(2, 100, device="cuda")],
+                "grad_to_none": [True, False],
+            },
+            self._test_parity,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_composable_fsdp_replicate(self):
+        # Verify how the APIs can be composed, e.g. if both `fully_shard` and
+        # `replicate` are applied on the same module, it should raise exception.
+        model = CompositeModel(device=torch.device("cpu"))
+        fully_shard(model.l1)
+        with self.assertRaisesRegex(AssertionError, "Cannot apply .*replicate"):
+            replicate(model.l1)
+        replicate(model.l2)  # should not raise
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_in_replicate(self):
+        model = CompositeModel(device=torch.device("cuda"))
+        base_model = copy.deepcopy(model)
+        test_model = copy.deepcopy(model)
+        fully_shard(test_model.l1)
+        replicate(test_model)
         self.run_subtests(
             {
                 "base_model": [base_model],

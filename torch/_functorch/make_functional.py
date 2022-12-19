@@ -516,7 +516,7 @@ def combine_weights_for_ensemble(models):
         data = torch.randn(batch_size, 3)
 
         def wrapper(params, buffers, data):
-            return torch.nn.utils.stateless.functional_call(model[0], {**params, **buffers}, data)
+            return functorch.functional_call(model[0], (params, buffers), data)
 
         params, buffers = combine_weights_for_ensemble(models)
         output = vmap(wrapper, (0, 0, None))(params, buffers, data)
@@ -529,13 +529,13 @@ def combine_weights_for_ensemble(models):
         same mode (training vs eval).
     """
     if len(models) == 0:
-        raise RuntimeError('combine_state_for_ensemble: Expected at least one model, got 0.')
+        raise RuntimeError('combine_weights_for_ensemble: Expected at least one model, got 0.')
     if not (all(m.training for m in models) or all(not m.training for m in models)):
-        raise RuntimeError('combine_state_for_ensemble: Expected all models to '
+        raise RuntimeError('combine_weights_for_ensemble: Expected all models to '
                            'have the same training/eval mode.')
     model0_typ = type(models[0])
     if not all(type(m) == model0_typ for m in models):
-        raise RuntimeError('combine_state_for_ensemble: Expected all models to '
+        raise RuntimeError('combine_weights_for_ensemble: Expected all models to '
                            'be of the same class.')
     all_params = [{k: v for k, v in model.named_parameters()} for model in models]
     params = {k: torch.stack(tuple(params[k] for params in all_params)) for k in all_params[0]}

@@ -3,7 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functorch import grad_and_value, vmap, combine_weights_for_ensemble
+from functorch import grad_and_value, vmap, combine_weights_for_ensemble, functional_call
 
 # Adapted from http://willwhitney.com/parallel-training-jax.html , which is a
 # tutorial on Model Ensembling with JAX by Will Whitney.
@@ -72,7 +72,7 @@ model = MLPClassifier().to(DEVICE)
 
 def train_step_fn(weights, batch, targets, lr=0.2):
     def compute_loss(weights, batch, targets):
-        output = torch.nn.utils.stateless.functional_call(model, weights, batch)
+        output = functional_call(model, weights, batch)
         loss = loss_fn(output, targets)
         return loss
 
@@ -93,7 +93,7 @@ def train_step_fn(weights, batch, targets, lr=0.2):
 def step4():
     global weights
     for i in range(2000):
-        loss, weights = train_step_fn({k: v for k, v in model.named_parameters()}, points, labels)
+        loss, weights = train_step_fn(dict(model.named_parameters()), points, labels)
         if i % 100 == 0:
             print(loss)
 
