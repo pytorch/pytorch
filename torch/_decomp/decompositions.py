@@ -1990,6 +1990,154 @@ def get_scale_value(scales, idx):
     return scales[idx]
 
 
+def gather_params(params, has_biases, has_projections):
+    if has_biases and has_projections:
+        group_size = 5
+    elif has_biases:
+        group_size = 4
+    elif has_projections:
+        group_size = 3
+    else:
+        group_size = 2
+
+    assert len(params) % group_size == 0, len(params)
+    return [
+        tuple(params[i : i + group_size]) for i in range(0, len(params), group_size)
+    ]
+
+
+def params_hiddens(params, hiddens, i, bidirectional):
+    if bidirectional:
+        cur_params, cur_hidden = params[2 * i], hiddens[2 * i]
+        bidir_params, bidir_hidden = params[2 * i + 1], hiddens[2 * i + 1]
+    else:
+        cur_params, cur_hidden = params[i], hiddens[i]
+        bidir_params, bidir_hidden = None, None
+
+    return cur_params, cur_hidden, bidir_params, bidir_hidden
+
+
+def one_layer_rnn(inp, hidden, params, has_biases, nonlinearity, reverse=False):
+    ih_weight = params[0]
+    hh_weight = params[1]
+    ih_bias = params[2] if has_biases else None
+    hh_bias = params[3] if has_biases else None
+
+    precomputed_input = F.linear(inp, ih_weight, ih_bias)
+    precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
+    cur_hidden = hidden
+    step_output = []
+    for inp in precomputed_input:
+        cur_hidden = nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + inp)
+        step_output.append(cur_hidden)
+
+    out = torch.stack(step_output, 0)
+
+    return out, cur_hidden
+
+
+def _rnn_helper(
+    input,
+    hidden,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+    layer_fn,
+):
+    input = input.transpose(0, 1) if batch_first else input
+    final_hiddens = []
+
+    for i in range(num_layers):
+        cur_params, cur_hidden, bidir_params, bidir_hidden = params_hiddens(
+            params, hidden, i, bidirectional
+        )
+        dropout = dropout if (train and num_layers < i - 1) else 0.0
+        fwd_inp, fwd_hidden = layer_fn(input, cur_hidden, cur_params, has_biases)
+        final_hiddens.append(fwd_hidden)
+
+        if bidirectional:
+            bwd_inp, bwd_hidden = layer_fn(
+                input, bidir_hidden, bidir_params, has_biases, reverse=True
+            )
+            bwd_inp = bwd_inp.flip(0)
+            final_hiddens.append(bwd_hidden)
+
+        if bidirectional:
+            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)
+        else:
+            input = fwd_inp
+
+        if dropout != 0 and train and i < num_layers - 1:
+            input = torch.dropout(input, dropout, train=True)
+
+    input = input.transpose(0, 1) if batch_first else input
+    return input, final_hiddens
+
+
+@torch.ops.aten.rnn_tanh.input.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.rnn_tanh.input.py_impl(DispatchKey.Autograd)
+def rnn_tanh_input(
+    input,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+):
+    hidden = hx.unbind(0)
+    params = gather_params(params, has_biases, False)
+    out, final_hiddens = _rnn_helper(
+        input,
+        hidden,
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        batch_first,
+        partial(one_layer_rnn, nonlinearity=torch.tanh),
+    )
+    return out, torch.stack(final_hiddens, 0)
+
+
+@torch.ops.aten.rnn_relu.input.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.rnn_relu.input.py_impl(DispatchKey.Autograd)
+def rnn_relu_input(
+    input,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+):
+    hidden = hx.unbind(0)
+    params = gather_params(params, has_biases, False)
+    out, final_hiddens = _rnn_helper(
+        input,
+        hidden,
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        batch_first,
+        partial(one_layer_rnn, nonlinearity=torch.relu),
+    )
+    return out, torch.stack(final_hiddens, 0)
+
+
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
 @torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
