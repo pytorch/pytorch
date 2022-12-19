@@ -13,7 +13,6 @@ from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
 from .vmap import vmap, doesnt_support_saved_tensors_hooks
-from torch._decomp import decomposition_table
 
 from torch._C._functorch import (
     _wrap_for_grad,
@@ -31,6 +30,7 @@ from torch._C._functorch import (
     set_inplace_requires_grad_allowed,
     get_inplace_requires_grad_allowed
 )
+from torch._functorch.utils import exposed_in
 
 argnums_t = Union[int, Tuple[int, ...]]
 
@@ -162,6 +162,7 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, creat
 
 
 # How do we increment and decrement the nesting? I don't think we can.
+@exposed_in("torch.func")
 def vjp(func: Callable, *primals, has_aux: bool = False):
     """
     Standing for the vector-Jacobian product, returns a tuple containing the
@@ -193,16 +194,16 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
 
         >>> x = torch.randn([5])
         >>> f = lambda x: x.sin().sum()
-        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> (_, vjpfunc) = torch.func.vjp(f, x)
         >>> grad = vjpfunc(torch.tensor(1.))[0]
-        >>> assert torch.allclose(grad, functorch.grad(f)(x))
+        >>> assert torch.allclose(grad, torch.func.grad(f)(x))
 
     However, :func:`vjp` can support functions with multiple outputs by
     passing in the cotangents for each of the outputs
 
         >>> x = torch.randn([5])
         >>> f = lambda x: (x.sin(), x.cos())
-        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> (_, vjpfunc) = torch.func.vjp(f, x)
         >>> vjps = vjpfunc((torch.ones([5]), torch.ones([5])))
         >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
 
@@ -210,7 +211,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
 
         >>> x = torch.randn([5])
         >>> f = lambda x: {'first': x.sin(), 'second': x.cos()}
-        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> (_, vjpfunc) = torch.func.vjp(f, x)
         >>> cotangents = {'first': torch.ones([5]), 'second': torch.ones([5])}
         >>> vjps = vjpfunc(cotangents)
         >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
@@ -219,7 +220,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
     respect to each of the ``primals``
 
         >>> x, y = torch.randn([5, 4]), torch.randn([4, 5])
-        >>> (_, vjpfunc) = functorch.vjp(torch.matmul, x, y)
+        >>> (_, vjpfunc) = torch.func.vjp(torch.matmul, x, y)
         >>> cotangents = torch.randn([5, 5])
         >>> vjps = vjpfunc(cotangents)
         >>> assert len(vjps) == 2
@@ -233,7 +234,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
         >>> def f(x, scale=4.):
         >>>   return x * scale
         >>>
-        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> (_, vjpfunc) = torch.func.vjp(f, x)
         >>> vjps = vjpfunc(torch.ones_like(x))
         >>> assert torch.allclose(vjps[0], torch.full(x.shape, 4.))
 
@@ -336,6 +337,7 @@ def _safe_zero_index(x):
     return x[0]
 
 
+@exposed_in("torch.func")
 def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
            chunk_size: Optional[int] = None,
            _preallocate_and_copy=False):
@@ -372,7 +374,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
 
-        >>> from functorch import jacrev
+        >>> from torch.func import jacrev
         >>> x = torch.randn(5)
         >>> jacobian = jacrev(torch.sin)(x)
         >>> expected = torch.diag(torch.cos(x))
@@ -382,7 +384,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     jacobian of the function, use the ``has_aux`` flag to return the output
     as an auxiliary object:
 
-        >>> from functorch import jacrev
+        >>> from torch.func import jacrev
         >>> x = torch.randn(5)
         >>>
         >>> def f(x):
@@ -398,7 +400,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     :func:`jacrev` can be composed with vmap to produce batched
     Jacobians:
 
-        >>> from functorch import jacrev, vmap
+        >>> from torch.func import jacrev, vmap
         >>> x = torch.randn(64, 5)
         >>> jacobian = vmap(jacrev(torch.sin))(x)
         >>> assert jacobian.shape == (64, 5, 5)
@@ -406,7 +408,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     Additionally, :func:`jacrev` can be composed with itself to produce
     Hessians
 
-        >>> from functorch import jacrev
+        >>> from torch.func import jacrev
         >>> def f(x):
         >>>   return x.sin().sum()
         >>>
@@ -418,7 +420,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     input. However, it can compute the Jacboian with respect to a different
     argument by using ``argnums``:
 
-        >>> from functorch import jacrev
+        >>> from torch.func import jacrev
         >>> def f(x, y):
         >>>   return x + y ** 2
         >>>
@@ -430,7 +432,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     Additionally, passing a tuple to ``argnums`` will compute the Jacobian
     with respect to multiple arguments
 
-        >>> from functorch import jacrev
+        >>> from torch.func import jacrev
         >>> def f(x, y):
         >>>   return x + y ** 2
         >>>
@@ -805,6 +807,7 @@ def safe_unpack_dual(dual, strict):
     return primal, tangent
 
 
+@exposed_in("torch.func")
 def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, has_aux: bool = False):
     """
     Standing for the Jacobian-vector product, returns a tuple containing
@@ -837,7 +840,7 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
 
     jvp is useful when you wish to compute gradients of a function R^1 -> R^N
 
-        >>> from functorch import jvp
+        >>> from torch.func import jvp
         >>> x = torch.randn([])
         >>> f = lambda x: x * torch.tensor([1., 2., 3])
         >>> value, grad = jvp(f, (x,), (torch.tensor(1.),))
@@ -847,7 +850,7 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
     :func:`jvp` can support functions with multiple inputs by passing in the
     tangents for each of the inputs
 
-         >>> from functorch import jvp
+         >>> from torch.func import jvp
          >>> x = torch.randn(5)
          >>> y = torch.randn(5)
          >>> f = lambda x, y: (x * y)
@@ -943,6 +946,7 @@ def safe_unflatten(tensor, dim, shape):
     return tensor.unflatten(dim, shape)
 
 
+@exposed_in("torch.func")
 def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
     """
     Computes the Jacobian of ``func`` with respect to the arg(s) at index
@@ -978,7 +982,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
 
-        >>> from functorch import jacfwd
+        >>> from torch.func import jacfwd
         >>> x = torch.randn(5)
         >>> jacobian = jacfwd(torch.sin)(x)
         >>> expected = torch.diag(torch.cos(x))
@@ -987,7 +991,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     :func:`jacfwd` can be composed with vmap to produce batched
     Jacobians:
 
-        >>> from functorch import jacfwd, vmap
+        >>> from torch.func import jacfwd, vmap
         >>> x = torch.randn(64, 5)
         >>> jacobian = vmap(jacfwd(torch.sin))(x)
         >>> assert jacobian.shape == (64, 5, 5)
@@ -996,7 +1000,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     jacobian of the function, use the ``has_aux`` flag to return the output
     as an auxiliary object:
 
-        >>> from functorch import jacfwd
+        >>> from torch.func import jacfwd
         >>> x = torch.randn(5)
         >>>
         >>> def f(x):
@@ -1012,7 +1016,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     Additionally, :func:`jacrev` can be composed with itself or :func:`jacrev`
     to produce Hessians
 
-        >>> from functorch import jacfwd, jacrev
+        >>> from torch.func import jacfwd, jacrev
         >>> def f(x):
         >>>   return x.sin().sum()
         >>>
@@ -1024,7 +1028,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     input. However, it can compute the Jacboian with respect to a different
     argument by using ``argnums``:
 
-        >>> from functorch import jacfwd
+        >>> from torch.func import jacfwd
         >>> def f(x, y):
         >>>   return x + y ** 2
         >>>
@@ -1036,7 +1040,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     Additionally, passing a tuple to ``argnums`` will compute the Jacobian
     with respect to multiple arguments
 
-        >>> from functorch import jacfwd
+        >>> from torch.func import jacfwd
         >>> def f(x, y):
         >>>   return x + y ** 2
         >>>
@@ -1096,6 +1100,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     return wrapper_fn
 
 
+@exposed_in("torch.func")
 def hessian(func, argnums=0):
     """
     Computes the Hessian of ``func`` with respect to the arg(s) at index
@@ -1126,7 +1131,7 @@ def hessian(func, argnums=0):
 
     A basic usage with a R^N -> R^1 function gives a N x N Hessian:
 
-        >>> from functorch import hessian
+        >>> from torch.func import hessian
         >>> def f(x):
         >>>   return x.sin().sum()
         >>>
@@ -1138,6 +1143,7 @@ def hessian(func, argnums=0):
     return jacfwd(jacrev(func, argnums), argnums)
 
 
+@exposed_in("torch.func")
 def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     """
     Returns a function to compute a tuple of the gradient and primal, or
@@ -1217,6 +1223,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
     return wrapper
 
 
+@exposed_in("torch.func")
 def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     """``grad`` operator helps computing gradients of ``func`` with respect to the
     input(s) specified by ``argnums``. This operator can be nested to
@@ -1241,7 +1248,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     Example of using ``grad``:
 
-        >>> from functorch import grad
+        >>> from torch.func import grad
         >>> x = torch.randn([])
         >>> cos_x = grad(lambda x: torch.sin(x))(x)
         >>> assert torch.allclose(cos_x, x.cos())
@@ -1252,8 +1259,8 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     When composed with ``vmap``, ``grad`` can be used to compute per-sample-gradients:
 
-        >>> from functorch import grad
-        >>> from functorch import vmap
+        >>> from torch.func import grad
+        >>> from torch.func import vmap
         >>> batch_size, feature_size = 3, 5
         >>>
         >>> def model(weights, feature_vec):
@@ -1273,7 +1280,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     Example of using ``grad`` with ``has_aux`` and ``argnums``:
 
-        >>> from functorch import grad
+        >>> from torch.func import grad
         >>> def my_loss_func(y, y_pred):
         >>>    loss_per_sample = (0.5 * y_pred - y) ** 2
         >>>    loss = loss_per_sample.mean()
@@ -1345,6 +1352,7 @@ def _unwrap_all_tensors_from_functional(tensor_pytree, *, reapply_views: bool):
     return tree_map(lambda t: _maybe_unwrap_functional_tensor(t, reapply_views=reapply_views), tensor_pytree)
 
 
+@exposed_in("torch.func")
 def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
     """
     functionalize is a transform that can be used to remove (intermediate)
@@ -1387,8 +1395,8 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
     Example::
 
         >>> import torch
-        >>> from functorch import make_fx
-        >>> from functorch.experimental import functionalize
+        >>> from torch.fx.experimental.proxy_tensor import make_fx
+        >>> from torch.func import functionalize
         >>>
         >>> A function that uses mutations and views, but only on intermediate tensors.
         >>> def f(a):
@@ -1467,11 +1475,11 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
 
 
     There are a few "failure modes" for functionalize that are worth calling out:
-      (1) Like other functorch transforms, `functionalize()` doesn't work with functions
+      (1) Like other torch.func transforms, `functionalize()` doesn't work with functions
           that directly use `.backward()`. The same is true for torch.autograd.grad.
           If you want to use autograd, you can compute gradients directly
           with `functionalize(grad(f))`.
-      (2) Like other functorch transforms, `functionalize()` doesn't work with global state.
+      (2) Like other torch.func transforms, `functionalize()` doesn't work with global state.
           If you call `functionalize(f)` on a function that takes views / mutations of
           non-local state, functionalization will simply no-op and pass the view/mutation
           calls directly to the backend.
@@ -1546,20 +1554,3 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
         finally:
             _func_decrement_nesting()
     return wrapped
-
-# use an alternate way to register an operator into the decomposition table
-# _register_jit_decomposition doesn't work for some operators, e.g. addr,
-#  because the Tensor types generated cannot be unioned by torchscript
-# decomp should be type OpOverload
-vmap_decompositions_lib = torch.library.Library("aten", "IMPL", "FuncTorchBatched")
-
-
-def _register_python_decomposition_vmap(decomp):
-    if decomp in decomposition_table:
-        vmap_decompositions_lib.impl(decomp, decomposition_table[decomp])
-    else:
-        raise RuntimeError(f"could not find decomposition for {decomp}")
-
-
-_register_python_decomposition_vmap(torch.ops.aten.mse_loss_backward.default)
-_register_python_decomposition_vmap(torch.ops.aten.addr.default)

@@ -92,6 +92,7 @@ Features described in this documentation are classified by release status:
    torch.distributions <distributions>
    torch._dynamo <_dynamo>
    torch.fft <fft>
+   torch.func <func>
    futures
    fx
    torch.hub <hub>
