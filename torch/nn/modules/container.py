@@ -344,11 +344,11 @@ class ModuleList(Module):
         lines = []
         main_str = self._get_name() + '('
         for (start_id, end_id), b in zip(start_end_indices, repeated_blocks):
-            local_repr = f"({start_id}) {b}"  # default repr
+            local_repr = f"({start_id}): {b}"  # default repr
 
             if start_id != end_id:
                 n = end_id - start_id + 1
-                local_repr = f"({start_id}-{end_id}) {n} x {b}"
+                local_repr = f"({start_id}-{end_id}): {n} x {b}"
 
             local_repr = _addindent(local_repr, 2)
             lines.append(local_repr)
