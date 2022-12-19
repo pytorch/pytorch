@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     is_slow_gradcheck_env,
 )
 import torch.distributed as dist
-from torch.multiprocessing import get_context
+from torch.multiprocessing import current_process, get_context, Process
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -48,6 +48,15 @@ except ImportError:
     print(
         "Unable to import test_selections from tools/testing. Running without test selection stats..."
     )
+
+
+def maybe_set_hip_visible_devies():
+    # Special handling of ROCm GHA runners for parallel (file granularity) tests.
+    if torch.version.hip:
+        p = current_process()
+        if p.name != 'MainProcess':
+            # this is a Process from a parallel Pool, not the MainProcess
+            os.environ['HIP_VISIBLE_DEVICES'] = str(p._identity[0] % NUM_PROCS)
 
 
 def strtobool(s):
@@ -430,6 +439,7 @@ def run_test(
     extra_unittest_args=None,
     env=None,
 ) -> int:
+    maybe_set_hip_visible_devies()
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -1230,6 +1240,8 @@ def get_selected_tests(options):
 
 
 def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
+    maybe_set_hip_visible_devies()
+
     test_module = parse_test_module(test)
 
     # Printing the date here can help diagnose which tests are slow

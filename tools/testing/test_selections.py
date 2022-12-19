@@ -1,11 +1,26 @@
 import os
 import subprocess
+import sys
+import torch
 
 from typing import Callable, Dict, List, Optional, Tuple
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
-NUM_PROCS = 1 if os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1" else 2
+IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
+
+NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
+
+# Special logic for ROCm GHA runners.
+if torch.version.hip is not None and not IS_MEM_LEAK_CHECK:
+    try:
+        # avoid fork poisoning by using a subprocess to determine number of GPUs available
+        cmd = [sys.executable, '-c', 'import torch; print(torch.cuda.device_count())']
+        count_as_string = subprocess.check_output(cmd)
+        NUM_PROCS = int(count_as_string)
+    except subprocess.CalledProcessError as e:
+        # The safe default for ROCm GHA runners is to run tests serially.
+        NUM_PROCS = 1
 
 
 class ShardJob:
