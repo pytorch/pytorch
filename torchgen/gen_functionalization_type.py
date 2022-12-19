@@ -634,7 +634,7 @@ def emit_inplace_functionalization_body(
       if (!({check_all_mutated_args_are_functional})) {{
         // We want to disable this check if there are any XLA tensors.
         // cpu_tensor.copy_(xla_tensor) is valid code.
-        if ((!{check_any_non_mutated_tensors_are_xla}) && ({check_any_non_mutated_args_are_functional})) {{
+        if (!({check_any_non_mutated_tensors_are_xla}) && ({check_any_non_mutated_args_are_functional})) {{
          // case 1: trying to mutate a non functional tensor with a functional tensor is an error
          TORCH_INTERNAL_ASSERT(false,
            "mutating a non-functional tensor with a functional tensor is not allowed.",
