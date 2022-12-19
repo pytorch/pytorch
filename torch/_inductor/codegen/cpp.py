@@ -256,10 +256,6 @@ class CppVecOverrides(OpOverrides):
         return f"{x} >= {y}"
 
     @staticmethod
-    def expm1(x):
-        return f"{x}.expm1()"
-
-    @staticmethod
     def rsqrt(x):
         return f"{x}.rsqrt()"
 
@@ -389,6 +385,14 @@ class CppVecOverrides(OpOverrides):
     def to_dtype(x, dtype):
         assert dtype in [torch.bool], f"{__name__} does not support {dtype}"
         return f"({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"{x}.expm1()"
+
+    @staticmethod
+    def log1p(x):
+        return f"{x}.log1p()"
 
 
 class CppOverrides(OpOverrides):
