@@ -7791,6 +7791,20 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
+    def _test_GroupNorm_cpu_mixed_dtype(self):
+        def helper(self, size, groups, memory_format):
+            channels = size[1]
+            input = torch.empty(size, dtype=torch.bfloat16).cpu().random_(1, 10)
+            input = input.contiguous(memory_format=memory_format)
+            m = nn.GroupNorm(groups, channels).cpu().bfloat16()
+            m2 = deepcopy(m).float()
+            out = m(input)
+            out2 = m2(input)
+            self.assertEqual(out, out2)
+        helper(self, (1, 8, 3, 4), 4, torch.contiguous_format)
+        helper(self, (1, 8, 4, 3), 2, torch.channels_last)
+        helper(self, (1, 9, 3, 4, 5), 3, torch.channels_last_3d)
+
     def _test_module_empty_inputs(self, module, inputs):
         for _inp in inputs:
             _inp.requires_grad_(True)
@@ -8201,6 +8215,9 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_GroupNorm_cuda_half()
+
+        if self.device_type == 'cpu':
+            self._test_GroupNorm_cpu_mixed_dtype()
 
     def test_GroupNorm_raises_error_if_one_value_per_group(self, device):
         x = torch.rand(10)[None, :, None]
@@ -9929,6 +9946,23 @@ class TestNNDeviceType(NNTestCase):
 
             small_image.grad.zero_()
             large_view.grad.zero_()
+
+    @onlyCUDA
+    def test_grid_sample_half_precision(self):
+        def helper(shape_in, shape_out):
+            for mode in ('bilinear', 'nearest', 'bicubic'):
+                if len(shape_in) != 4 and mode == 'bicubic':
+                    continue
+                data = torch.randn(shape_in, device='cuda', dtype=torch.half)
+                grid = torch.rand(shape_out, device='cuda', dtype=torch.half) * 2.0 - 1.0
+
+                out_half = F.grid_sample(data, grid, mode=mode, padding_mode='zeros', align_corners=False)
+                out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros', align_corners=False)
+
+                self.assertEqual(out_half, out_double.half(), msg="grid_sample with mode = {} doesn't match".format(mode))
+
+        helper((32, 64, 16, 16), (32, 8, 8, 2))
+        helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3))
 
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float, device=device)
