@@ -1892,7 +1892,7 @@ class TestJac(TestCase):
             jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
 
         with self.assertRaisesRegex(ValueError, err_msg):
-            jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
+            jacrev(f, argnums=(0, ), chunk_size=-2)(x, y)
 
     @parametrize('_preallocate_and_copy', (True, False))
     def test_chunk_jacrev_composition(self, device, _preallocate_and_copy):
