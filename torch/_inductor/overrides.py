@@ -530,6 +530,9 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
         example_input.device == torch.device("cpu") for example_input in example_inputs
     )
+    is_cuda = all(
+        example_input.device == torch.device("cuda") for example_input in example_inputs
+    )
 
     fake_mode = fake_mode_from_tensors(example_inputs)
 
@@ -542,7 +545,8 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         gm = permute_linear_fusion(gm)
         gm = permute_matmul_fusion(gm)
 
-    gm = type_cast_matmul_fusion(gm)
+    if is_cuda:
+        gm = type_cast_matmul_fusion(gm)
 
     # make sure the autograd is disabled.
     if torch.is_grad_enabled():
@@ -971,7 +975,8 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
 def triton_int_mm(A: torch.Tensor, B: torch.Tensor, output_dtype) -> torch.Tensor:
     from torch._inductor.triton_ops import matmul
-    if A.dtype == torch.int8 and B.dtype == torch.int8 and output_dtype == torch.int32:
+    from torch._inductor.utils import has_triton
+    if has_triton() and A.dtype == torch.int8 and B.dtype == torch.int8 and output_dtype == torch.int32:
         out = A.new_empty(A.size(0), B.size(1), dtype=output_dtype)
         torch._triton_mm(A, B, out)
     else:
