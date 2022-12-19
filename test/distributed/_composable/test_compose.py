@@ -190,21 +190,30 @@ class TestFSDPCheckpoint(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    def test_composable_fsdp_replicate(self):
+        # Verify how the APIs can be composed, e.g. if both `fully_shard` and
+        # `replicate` are applied on the same module, it should raise exception.
+        model = CompositeModel(device=torch.device("cpu"))
+        fully_shard(model.l1)
+        with self.assertRaisesRegex(AssertionError, "Cannot apply .*replicate"):
+            replicate(model.l1)
+        replicate(model.l2)  # should not raise
+
+    @skip_if_lt_x_gpu(2)
     def test_fully_shard_replicate_composability(self):
         """
         Tests composing ``fully_shard`` and ``replicate``. To save unit test
         time, we run the different configs in subtests.
-
-        TODO (awgu): Once https://github.com/pytorch/pytorch/pull/90711/ lands,
-        add "1fm1fm,1r1r,1fm".
         """
         self.run_subtests(
             {
                 "config": [
+                    "1fm,1r",
                     "1r,1fm",
                     "1r,1fa",
                     "1r1fm,1fm",
                     "1r1fa,1fm",
+                    "1fm1fm,1r1r,1fm",
                 ]
             },
             self._test_replicate_in_fully_shard,
@@ -218,7 +227,12 @@ class TestFSDPCheckpoint(FSDPTest):
         """
         # Set the seed to ensure that all ranks initialize the same model
         torch.manual_seed(0)
-        if config == "1r,1fm":
+        if config == "1fm,1r":
+            base_model = CompositeModel(device=torch.device("cuda"))
+            test_model = copy.deepcopy(base_model)
+            fully_shard(test_model.l1)
+            replicate(test_model)
+        elif config == "1r,1fm":
             base_model = CompositeParamModel(torch.device("cuda"))
             test_model = copy.deepcopy(base_model)
             replicate(test_model.u1)
@@ -239,6 +253,14 @@ class TestFSDPCheckpoint(FSDPTest):
             test_model = copy.deepcopy(base_model)
             replicate(test_model.u1)
             fully_shard(test_model.u2, policy=ModuleWrapPolicy({UnitModule}))
+            fully_shard(test_model)
+        elif config == "1fm1fm,1r1r,1fm":
+            base_model = CompositeParamModel(torch.device("cuda"))
+            test_model = copy.deepcopy(base_model)
+            fully_shard(test_model.u1.seq)
+            fully_shard(test_model.u2.seq)
+            replicate(test_model.u1)
+            replicate(test_model.u2)
             fully_shard(test_model)
         else:
             raise ValueError(f"Unknown config: {config}")
