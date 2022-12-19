@@ -111,15 +111,18 @@ def _assert_module_states(
 def _zero_model(
     model: nn.Module,
     zero_buffers: bool = False,
+    summon_full=True,
 ):
     """Zeros the parameters and optionally buffers of ``model`` in place."""
-    for param in model.parameters():
-        with torch.no_grad():
-            param.zero_()
-    if zero_buffers:
-        for buffer in model.buffers():
+    ctx = FSDP.summon_full_params(model) if summon_full else suppress()
+    with ctx:
+        for param in model.parameters():
             with torch.no_grad():
-                buffer.zero_()
+                param.zero_()
+        if zero_buffers:
+            for buffer in model.buffers():
+                with torch.no_grad():
+                    buffer.zero_()
 
 
 def _get_state_dict(model, cpu_offload=False, half=False):

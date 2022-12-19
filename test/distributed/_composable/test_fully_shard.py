@@ -474,7 +474,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
             copy.deepcopy(local_model),
             policy=ModuleWrapPolicy({UnitModule})
         )
-        _zero_model(load_composable)
+        _zero_model(load_composable, summon_full=False)
         for p in load_composable.parameters():
             self.assertEqual(p.sum(), 0)
 
@@ -506,7 +506,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
         # Validate load
         load_composable = copy.deepcopy(local_model)
         load_composable = _create_fully_shard_on_submodules(load_composable)
-        _zero_model(load_composable)
+        _zero_model(load_composable, summon_full=False)
         for p in load_composable.parameters():
             self.assertEqual(0, p.sum())
 
@@ -558,7 +558,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
                     FSDPInitMode.NO_FSDP,
                     CUDAInitMode.CUDA_BEFORE,
                 )
-                _zero_model(load_model, zero_buffers=True)
+                _zero_model(load_model, zero_buffers=True, summon_full=False)
                 fully_shard(
                     load_model,
                     policy=ModuleWrapPolicy({TransformerDecoderLayer, TransformerEncoderLayer}),
