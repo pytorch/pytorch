@@ -410,6 +410,18 @@ std::vector<IndexSelectOp*> getIndexSelectOps(Fusion* fusion) {
   return idx_sel_ops;
 }
 
+std::vector<TorchGatherOp*> getTorchGatherOps(Fusion* fusion) {
+  std::vector<TorchGatherOp*> torch_gather_ops;
+
+  for (auto expr : fusion->exprs()) {
+    if (expr->isA<TorchGatherOp>()) {
+      torch_gather_ops.push_back(expr->as<TorchGatherOp>());
+    }
+  }
+
+  return torch_gather_ops;
+}
+
 std::vector<SelectOp*> getSelectOps(Fusion* fusion) {
   std::vector<SelectOp*> select_ops;
 
@@ -753,22 +765,28 @@ bool isIndexSelectIndicesTv(const TensorView* tv) {
   return false;
 }
 
-IterDomain* getSelectedDomainIfTvIsIndexSelectOutput(const TensorView* tv) {
-  auto tv_def = tv->definition();
-  if (tv_def != nullptr) {
-    if (tv_def->isA<IndexSelectOp>()) {
-      auto idx_sel = tv_def->as<IndexSelectOp>();
-      auto dim = idx_sel->dim();
-      TORCH_INTERNAL_ASSERT(
-          dim < tv->domain()->getRootDomain().size(),
-          "Expect dim of index select is smaller than its output root domain size. But got dim = ",
-          dim,
-          " size = ",
-          tv->domain()->getRootDomain().size());
-      return tv->domain()->getRootDomain()[dim];
+bool isTorchGatherLookupTv(const Val* tv) {
+  for (auto expr : tv->uses()) {
+    if (expr->isA<TorchGatherOp>()) {
+      auto idx_sel = expr->as<TorchGatherOp>();
+      if (idx_sel->lookupTv() == tv) {
+        return true;
+      }
     }
   }
-  return nullptr;
+  return false;
+}
+
+bool isTorchGatherIndicesTv(const Val* tv) {
+  for (auto expr : tv->uses()) {
+    if (expr->isA<TorchGatherOp>()) {
+      auto idx_sel = expr->as<TorchGatherOp>();
+      if (idx_sel->indexTv() == tv) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 std::string varName(const Val* val) {

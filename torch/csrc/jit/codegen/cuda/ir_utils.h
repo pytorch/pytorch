@@ -308,6 +308,8 @@ TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(Fusion* fusion);
 
 TORCH_CUDA_CU_API std::vector<IndexSelectOp*> getIndexSelectOps(Fusion* fusion);
 
+TORCH_CUDA_CU_API std::vector<TorchGatherOp*> getTorchGatherOps(Fusion* fusion);
+
 TORCH_CUDA_CU_API std::vector<SelectOp*> getSelectOps(Fusion* fusion);
 
 // Returns the initialization value of tv or nullptr if not initialized.
@@ -355,9 +357,10 @@ TORCH_CUDA_CU_API bool isIndexSelectLookupTv(const TensorView* tv);
 // Check if the given tv is third argment of index_select(lookup, dim, indices)
 TORCH_CUDA_CU_API bool isIndexSelectIndicesTv(const TensorView* tv);
 
-// Get selected domain if tv is index select's output or return nullptr
-TORCH_CUDA_CU_API IterDomain* getSelectedDomainIfTvIsIndexSelectOutput(
-    const TensorView* tv);
+// Check if the given tv is first/third argment of torch_gather(lookup, dim,
+// indices)
+TORCH_CUDA_CU_API bool isTorchGatherIndicesTv(const Val* tv);
+TORCH_CUDA_CU_API bool isTorchGatherLookupTv(const Val* tv);
 
 TORCH_CUDA_CU_API std::string varName(const Val* val);
 

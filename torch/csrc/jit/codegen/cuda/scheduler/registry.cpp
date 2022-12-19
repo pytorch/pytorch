@@ -34,6 +34,24 @@ std::deque<std::deque<TensorView*>> tvChains(
   return tv_chains;
 }
 
+bool rejectScheduleForTorchGather(
+    TorchGatherOp* torch_gather,
+    ScheduleHeuristic schedule_stragety) {
+  if (!torch_gather->input(0)->isFusionInput()) {
+    scheduler_debug_utils::canScheduleRejectReason(
+        schedule_stragety,
+        "First input of TorchGatherOp must be fusion input.");
+    return true;
+  }
+  if (torch_gather->input(0)->uses().size() > 1) {
+    scheduler_debug_utils::canScheduleRejectReason(
+        schedule_stragety,
+        "First input of TorchGatherOp can only be used by TorchGatherOp");
+    return true;
+  }
+  return false;
+}
+
 class SchedulerTopologyChecker {
  public:
   // Checks if any broadcasts are resolved after a reduction that don't follow
@@ -1247,6 +1265,12 @@ class ReductionScheduler : public SchedulerEntry {
         return false;
       }
     }
+    for (auto torch_gather : ir_utils::getTorchGatherOps(fusion)) {
+      if (rejectScheduleForTorchGather(
+              torch_gather, ScheduleHeuristic::Reduction)) {
+        return false;
+      }
+    }
 
     auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
 
@@ -1448,6 +1472,22 @@ class TransposeScheduler : public SchedulerEntry {
       }
     }
 
+    for (auto torch_gather : ir_utils::getTorchGatherOps(fusion)) {
+      if (rejectScheduleForTorchGather(
+              torch_gather, ScheduleHeuristic::Transpose)) {
+        return false;
+      }
+      auto root = TensorDomain::noReductions(
+          torch_gather->input(0)->as<TensorView>()->getMaybeRFactorDomain());
+      if (torch_gather->dim() == root.size() - 1) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Transpose,
+            "TorchGatherOp on inner dim is not supported by transpose scheduler yet."
+            "In transpose scheduler, we want to leave the select dim alone, instead of creating a tile for it.");
+        return false;
+      }
+    }
+
     if (!hasAtLeastTwoValidGroups(fusion)) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Transpose,
@@ -1551,6 +1591,13 @@ class PointWiseScheduler : public SchedulerEntry {
         scheduler_debug_utils::canScheduleRejectReason(
             ScheduleHeuristic::PointWise,
             "First input of IndexSelectOp can only be used by IndexSelectOp");
+        return false;
+      }
+    }
+
+    for (auto torch_gather : ir_utils::getTorchGatherOps(fusion)) {
+      if (rejectScheduleForTorchGather(
+              torch_gather, ScheduleHeuristic::PointWise)) {
         return false;
       }
     }
@@ -1667,6 +1714,13 @@ class PersistentKernelScheduler : public SchedulerEntry {
         scheduler_debug_utils::canScheduleRejectReason(
             ScheduleHeuristic::Persistent,
             "First input of IndexSelectOp can only be used by IndexSelectOp");
+        return false;
+      }
+    }
+
+    for (auto torch_gather : ir_utils::getTorchGatherOps(fusion)) {
+      if (rejectScheduleForTorchGather(
+              torch_gather, ScheduleHeuristic::Persistent)) {
         return false;
       }
     }

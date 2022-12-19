@@ -41,6 +41,10 @@ std::unordered_map<Val*, Val*> getSimplificationMap(Fusion* fusion) {
       return;
     }
 
+    if (id0->isGatherScatter() || id1->isGatherScatter()) {
+      return;
+    }
+
     auto disjoint_set_0_it = id_to_disjoint_root_set.find(id0);
     auto disjoint_set_1_it = id_to_disjoint_root_set.find(id1);
     bool set_0_found = disjoint_set_0_it != id_to_disjoint_root_set.end();

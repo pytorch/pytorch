@@ -454,7 +454,8 @@ PersistentBufferInfo persistentBuffers(Fusion* fusion) {
 
     for (auto consumer : consumers) {
       if (dynamic_cast<SelectOp*>(consumer->definition()) ||
-          dynamic_cast<IndexSelectOp*>(consumer->definition())) {
+          dynamic_cast<IndexSelectOp*>(consumer->definition()) ||
+          dynamic_cast<TorchGatherOp*>(consumer->definition())) {
         continue;
       }
       bool consumer_mappable = true;
@@ -963,7 +964,9 @@ std::vector<TensorView*> cacheInputs(Fusion* fusion, bool unroll) {
   auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
   for (auto tv : in_tvs) {
     if (tv->uses().empty() || tv->isFusionOutput() ||
-        ir_utils::isSelectInput(tv) || ir_utils::isIndexSelectLookupTv(tv)) {
+        ir_utils::isTorchGatherIndicesTv(tv) ||
+        ir_utils::isTorchGatherLookupTv(tv) || ir_utils::isSelectInput(tv) ||
+        ir_utils::isIndexSelectLookupTv(tv)) {
       // Right now, tensors that are input to the select op can't be cached as
       // they must be in global memory.
       continue;
@@ -1311,7 +1314,9 @@ std::vector<TensorView*> getInputsOutputsWithInnerDim(
        ir_utils::filterByType<TensorView>(reference_tv->fusion()->inputs())) {
     // for index_select(lookup_tv, dim, index_tv) op
     // ignore it's lookup_tv.
-    if (ir_utils::isIndexSelectLookupTv(input_tv)) {
+    if (ir_utils::isTorchGatherLookupTv(input_tv) ||
+        ir_utils::isTorchGatherIndicesTv(input_tv) ||
+        ir_utils::isIndexSelectLookupTv(input_tv)) {
       continue;
     }
     if (hasInnerDim(input_tv, vectorizable_dims, vectorize_pass)) {

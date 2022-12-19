@@ -1339,8 +1339,10 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
 
   // Replay producer to look like consumer so we can index on producer since
   // our loop nests look like consumer
-  auto pairwise_map = PairwiseRootDomainMap(producer_tv, consumer_tv);
-  auto producerAsC =
+  auto pairwise_map =
+      PairwiseRootDomainMap(producer_tv, consumer_tv, false, true);
+
+  TensorDomain* producerAsC =
       TransformReplay::replayPasC(producer_tv, consumer_tv, -1, pairwise_map)
           .first;
 
@@ -1350,7 +1352,7 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   // Map sent to best effort replay needs to match the exact incantation for
   // compute_at_mode.cpp with MappingMode::Index
   auto c2p_root_map =
-      PairwiseRootDomainMap(producer_tv, consumer_tv, true)
+      PairwiseRootDomainMap(producer_tv, consumer_tv, true, true)
           .mapConsumerToProducer(consumer_tv->domain(), producer_tv->domain());
 
   // This replay has to be consistent with compute at index map.
@@ -1359,7 +1361,21 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
       consumer_tv->domain()->domain(),
       c2p_root_map);
 
-  const auto& c2p_map = replay_producer_as_consumer.getReplay();
+  auto c2p_map = replay_producer_as_consumer.getReplay();
+
+  // Make sure at least root domains are mapped even when extents may
+  // be different
+  for (const auto& kv :
+       PairwiseRootDomainMap(producer_tv, consumer_tv, true, false)
+           .mapConsumerToProducer(
+               consumer_tv->domain(), producer_tv->domain())) {
+    auto consumer_root_id = kv.first;
+    auto producer_root_id = kv.second;
+    if (c2p_map.find(consumer_root_id) == c2p_map.end()) {
+      c2p_map.emplace(consumer_root_id, producer_root_id);
+    }
+  }
+
   const auto p2c_map = invertOneToOneMap(c2p_map);
 
   // Forward vectorized IDs to index into producer correctly

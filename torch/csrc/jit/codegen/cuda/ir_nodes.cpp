@@ -180,6 +180,41 @@ std::string IndexSelectOp::toInlineString(int indent_size) const {
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(IndexSelectOp)
 
+TorchGatherOp::TorchGatherOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in,
+    int dim,
+    IterDomain* select_id,
+    Val* indices)
+    : Expr(passkey) {
+  addInput(in);
+  addInput(indices);
+  addOutput(out);
+  addAttribute(select_id);
+  addAttribute(IrBuilder::create<Attribute<int>>(passkey.ir_container_, dim));
+}
+
+std::string TorchGatherOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << output(0)->toString() << "\n";
+  indent_size++;
+  indent(ss, indent_size) << " = torch_gather( ";
+  if (lookupTv()->isA<kir::TensorIndex>()) {
+    ss << lookupTv()->as<kir::TensorIndex>()->view()->toString();
+  } else {
+    ss << lookupTv()->toString();
+  }
+  ss << ", dim = " << dim() << ", " << indexTv()->toString() << " )\n";
+  return ss.str();
+}
+
+std::string TorchGatherOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(TorchGatherOp)
+
 ARangeOp::ARangeOp(
     IrBuilderPasskey passkey,
     Val* out,
@@ -1886,6 +1921,12 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       (outer->getIterType() == IterType::Iteration ||
        inner->getIterType() == IterType::Iteration)) {
     itype = IterType::Iteration;
+  }
+
+  if ((outer->isBroadcast() || inner->isBroadcast()) &&
+      (outer->getIterType() == IterType::GatherScatter ||
+       inner->getIterType() == IterType::GatherScatter)) {
+    itype = IterType::GatherScatter;
   }
 
   Val* expanded_extent = nullptr;

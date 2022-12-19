@@ -308,6 +308,7 @@ enum class IterType {
   Broadcast,
   Gather,
   Stride,
+  GatherScatter,
   VectorComponent
 };
 

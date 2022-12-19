@@ -751,6 +751,8 @@ static const char* iter_type2string(IterType t) {
       return "g";
     case IterType::Stride:
       return "s";
+    case IterType::GatherScatter:
+      return "n";
     case IterType::VectorComponent:
       return "v";
     default:

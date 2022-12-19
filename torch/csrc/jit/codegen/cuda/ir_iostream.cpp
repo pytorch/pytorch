@@ -19,7 +19,7 @@ namespace cuda {
 void checkInlineable(const Expr* expr) {
   for (auto input : expr->inputs()) {
     TORCH_CHECK(
-        input->isScalar() ||
+        input->isScalar() || input->isA<kir::TensorIndex>() ||
             (expr->isA<UnaryOp>() &&
              expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Address),
         "Printing inline computations involving values other than scalars is not currently supported.");

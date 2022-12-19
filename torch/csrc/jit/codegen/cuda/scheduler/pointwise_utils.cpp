@@ -15,6 +15,14 @@ DomainMap::DomainMap(Fusion* fusion) : fusion_(fusion), ca_map_(fusion) {
   for (auto select : ir_utils::getIndexSelectOps(fusion)) {
     select_ids_.emplace(select->getSelectAxis());
   }
+  for (auto select : ir_utils::getTorchGatherOps(fusion)) {
+    TORCH_INTERNAL_ASSERT(select->input(0)->isA<TensorView>());
+    auto inp = select->input(0)->as<TensorView>();
+    auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
+    for (auto id : inp_domain) {
+      select_ids_.emplace(id);
+    }
+  }
 }
 
 // Determine if all IterDomains in input are mapped to the given tensor

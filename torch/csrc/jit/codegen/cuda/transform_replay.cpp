@@ -212,6 +212,42 @@ TensorDomain* TransformReplay::fullSelfReplay(
       new_self_root->contiguity());
 }
 
+namespace {
+
+// Grab all IterDomains of producer or consumer that may not be mapped
+// with consumer or producer, respectively, due to missing root
+// mappings. No root mapping does not always mean dependent IDs are
+// not mapped as there could be broadcast forwarded merges.
+std::unordered_set<IterDomain*> getMaybeUnmappedIDs(
+    const TensorView* tv,
+    bool is_producer,
+    const std::unordered_map<IterDomain*, IterDomain*>& root_id_map) {
+  std::unordered_set<Val*> unmapped_root_ids;
+
+  const auto& root_domain =
+      is_producer ? tv->getMaybeRFactorDomain() : tv->getRootDomain();
+
+  for (auto root_id : root_domain) {
+    if (root_id_map.count(root_id) == 0) {
+      unmapped_root_ids.emplace(root_id);
+    }
+  }
+
+  auto all_unmapped_vals = DependencyCheck::getAllValsBetween(
+      unmapped_root_ids,
+      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
+
+  std::unordered_set<IterDomain*> all_unmapped_ids;
+  std::transform(
+      all_unmapped_vals.begin(),
+      all_unmapped_vals.end(),
+      std::inserter(all_unmapped_ids, all_unmapped_ids.end()),
+      [](Val* val) { return val->as<IterDomain>(); });
+  return all_unmapped_ids;
+}
+
+} // namespace
+
 // Producer could have rfactor axes which consumer may want replayed. We can
 // "replay" them as long as it doesn't modify the root rfactor axes. What we
 // really want to do is validate if we replayed these axes to the ones they
@@ -271,6 +307,11 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
 
   auto producer_leaf_ids(replay_PasC.getUnorderedLeafIDs());
 
+  const auto maybe_unmapped_ids = getMaybeUnmappedIDs(
+      consumer,
+      false,
+      root_map.mapConsumerToProducer(consumer->domain(), producer->domain()));
+
   // Remove all ids from producer_leaf_ids that map within the consumer
   // position, we're going to try to further replay the rest of the producer
   // dimensions based on the producers original transformations. Save all dims
@@ -279,14 +320,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   for (auto c_id : target_consumer_ids) {
     auto it = replay_PasC.getReplay().find(c_id);
     if (it == replay_PasC.getReplay().end()) {
-      // check if c_id depends on selected domain
-      auto selected_domain =
-          ir_utils::getSelectedDomainIfTvIsIndexSelectOutput(consumer);
       TORCH_INTERNAL_ASSERT(
-          c_id->isBroadcast() || c_id->isGather() ||
-              c_id->isVectorComponent() ||
-              (selected_domain &&
-               DependencyCheck::isDependencyOf(selected_domain, c_id)),
+          maybe_unmapped_ids.count(c_id),
           "Could not find axis, ",
           c_id,
           ", requested in replay.");
@@ -386,14 +421,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   for (auto c_id : target_consumer_ids) {
     auto it = replay_PasC.getReplay().find(c_id);
     if (it == replay_PasC.getReplay().end()) {
-      // check if c_id depends on selected domain
-      auto selected_domain =
-          ir_utils::getSelectedDomainIfTvIsIndexSelectOutput(consumer);
       TORCH_INTERNAL_ASSERT(
-          c_id->isBroadcast() || c_id->isGather() ||
-              c_id->isVectorComponent() ||
-              (selected_domain &&
-               DependencyCheck::isDependencyOf(selected_domain, c_id)),
+          maybe_unmapped_ids.count(c_id),
           "Could not find axis, ",
           c_id,
           ", requested in replay.");
@@ -509,15 +538,19 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
 
   auto consumer_leaf_ids(replay_CasP.getUnorderedLeafIDs());
 
+  const auto maybe_unmapped_ids = getMaybeUnmappedIDs(
+      producer,
+      true,
+      root_map.mapProducerToConsumer(producer->domain(), consumer->domain()));
+
   // Remove all ids that map to the compute at axis, we're going to replay the
   // rest, track all dims that are needed to match producer CA dims
   std::vector<IterDomain*> dims_mapped2target;
   for (auto p_id : target_producer_ids) {
     auto it = replay_CasP.getReplay().find(p_id);
     if (it == replay_CasP.getReplay().end()) {
-      // skip squeezed broadcast
       TORCH_INTERNAL_ASSERT(
-          p_id->isBroadcast(),
+          maybe_unmapped_ids.count(p_id),
           "Could not find axis, ",
           p_id,
           ", requested in replaying consumer ",
@@ -612,9 +645,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   for (auto p_id : target_producer_ids) {
     auto it = replay_CasP.getReplay().find(p_id);
     if (it == replay_CasP.getReplay().end()) {
-      // skip squeezed broadcast
       TORCH_INTERNAL_ASSERT(
-          p_id->isBroadcast(),
+          maybe_unmapped_ids.count(p_id),
           "Could not find axis, ",
           p_id,
           ", requested in replay.");

@@ -48,8 +48,12 @@ std::unordered_map<IterDomain*, IterDomain*> RootDomainMap::
 PairwiseRootDomainMap::PairwiseRootDomainMap(
     const TensorView* producer,
     const TensorView* consumer,
-    bool is_exact)
-    : producer_tv_(producer), consumer_tv_(consumer), is_exact_(is_exact) {
+    bool is_exact,
+    bool require_same_extent)
+    : producer_tv_(producer),
+      consumer_tv_(consumer),
+      is_exact_(is_exact),
+      require_same_extent_(require_same_extent) {
   TORCH_INTERNAL_ASSERT(producer != nullptr);
   TORCH_INTERNAL_ASSERT(consumer != nullptr);
   TORCH_INTERNAL_ASSERT(producer->fusion() == consumer->fusion());
@@ -76,6 +80,13 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
   if (consumer_tv_->definition()->isA<TransposeOp>()) {
     return mapTranspose(
         producer, consumer, root_dims_to_map, producer_to_consumer);
+  } else if (
+      consumer_tv_->definition()->isA<TorchGatherOp>() &&
+      consumer_tv_->definition()->as<TorchGatherOp>()->lookupTv() ==
+          producerTv() &&
+      require_same_extent_) {
+    // Nothing to map when having same extent is required
+    return {};
   }
 
   std::vector<bool> broadcast_flags;
@@ -90,13 +101,20 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
   }
 
   IterDomain* selected_id = nullptr;
-  IterDomain* idx_selected_id = nullptr;
+  bool select_skip_consumer = true;
   if (SelectOp* sop = dynamic_cast<SelectOp*>(consumer_tv_->definition())) {
     selected_id = sop->getSelectAxis();
+    select_skip_consumer = false;
   } else if (
       IndexSelectOp* sop =
           dynamic_cast<IndexSelectOp*>(consumer_tv_->definition())) {
-    idx_selected_id = sop->getSelectAxis();
+    selected_id = sop->getSelectAxis();
+    select_skip_consumer = true;
+  } else if (
+      TorchGatherOp* gop =
+          dynamic_cast<TorchGatherOp*>(consumer_tv_->definition())) {
+    selected_id = gop->getSelectAxis();
+    select_skip_consumer = true;
   }
 
   std::unordered_map<IterDomain*, IterDomain*> dom_map;
@@ -108,14 +126,13 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
     IterDomain* producer_id = producer_root[itp];
     IterDomain* consumer_id = consumer_root[itc];
 
-    // When the producer ID is the dim of a SelectOp, there is no
+    // When the producer ID is the dim of a select-like op, there is no
     // mapping for it.
     if (producer_id == selected_id) {
       itp++;
-      continue;
-    } else if (producer_id == idx_selected_id) {
-      itp++;
-      itc++;
+      if (select_skip_consumer) {
+        itc++;
+      }
       continue;
     }
 
@@ -197,8 +214,9 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::
 
 std::string PairwiseRootDomainMap::toString() const {
   std::stringstream ss;
-  ss << "{producer: " << producer() << ", consumer: " << consumer();
-  auto p2c = mapProducerToConsumer(producer()->domain(), consumer()->domain());
+  ss << "{producer: " << producerTv() << ", consumer: " << consumerTv();
+  auto p2c =
+      mapProducerToConsumer(producerTv()->domain(), consumerTv()->domain());
   for (auto pair : p2c) {
     ss << ", " << pair.first->toString() << " -> " << pair.second->toString();
   }
@@ -1103,6 +1121,28 @@ void ComputeAtRootDomainMapBuilder::handle(GatherOp* op) {
   // mapping root domains
   for (const auto it : c10::irange(in_root.size(), out_root.size())) {
     root_map_.window_axes_.insert(out_root[it]);
+  }
+}
+
+void ComputeAtRootDomainMapBuilder::handle(TorchGatherOp* op) {
+  const TensorDomain* idx_td = op->indexTv()->as<TensorView>()->domain();
+  const TensorDomain* out_td = op->output(0)->as<TensorView>()->domain();
+  const auto idx_root =
+      TensorDomain::noReductions(idx_td->getMaybeRFactorDomain());
+  const auto& out_root = out_td->getRootDomain();
+  TORCH_INTERNAL_ASSERT(
+      idx_root.size() == out_root.size(),
+      "\nExpression: ",
+      op,
+      "\nInput root domain: ",
+      idx_root,
+      "\nOutput root domain: ",
+      out_root);
+
+  // Only maps the index root axes. Do not map the input axes due to non-equal
+  // size problem.
+  for (const auto it : c10::irange(idx_root.size())) {
+    setMaybeMapped(idx_td, idx_root[it], out_td, out_root[it]);
   }
 }
 
