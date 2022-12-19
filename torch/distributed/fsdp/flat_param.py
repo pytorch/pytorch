@@ -1009,6 +1009,16 @@ class FlatParamHandle:
     def _free_low_precision_sharded_param(self):
         """Frees the low precision sharded flattened parameter."""
         self._check_low_precision_shard()
+        # `_mp_shard` is allocated in the pre-unshard stream, consumed in the
+        # unshard stream for sharded strategies, and consumed in both the
+        # unshard and default streams for `NO_SHARD`. For sharded strategies,
+        # the current stream here is the unshard stream, and for `NO_SHARD`,
+        # it is the default stream. For `NO_SHARD`, only recording for the
+        # default stream suffices since the default stream waits for the
+        # unshard stream.
+        _no_dispatch_record_stream(
+            self.flat_param._mp_shard, torch.cuda.current_stream()
+        )
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
     @torch.no_grad()
