@@ -358,7 +358,8 @@ std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
   for (auto& it : tensor_map) {
     auto* value = it.second.ptr();
     if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(value)) {
-      out.push_back({py::cast<std::string>(it.first), toTensorMetadata(value)});
+      out.emplace_back(
+          py::cast<std::string>(it.first), toTensorMetadata(value));
     }
   }
   return out;
