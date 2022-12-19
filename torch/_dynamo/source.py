@@ -258,3 +258,15 @@ class ConstantSource(Source):
 
     def make_guard(self, fn, is_volatile=False):
         raise NotImplementedError()
+
+
+# This is a synthetic source that is associated with the singleton
+# shape env guard we always register for all frames.  We get the actual
+# guard contents from the ambient ShapeEnv
+@dataclasses.dataclass
+class ShapeEnvSource(Source):
+    def name(self):
+        return ""
+
+    def guard_source(self):
+        return GuardSource.SHAPE_ENV

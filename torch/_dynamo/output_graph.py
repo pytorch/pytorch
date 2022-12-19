@@ -40,7 +40,7 @@ from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, LocalSource, Source
+from .source import ConstantSource, LocalSource, ShapeEnvSource, Source
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,
@@ -201,6 +201,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             shape_env=ShapeEnv() if config.dynamic_shapes else None,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
+        if config.dynamic_shapes:
+            # Register a SHAPE_ENV guard to make sure we setup shape guards
+            # that show up in ShapeEnv
+            self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
