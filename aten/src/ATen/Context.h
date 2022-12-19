@@ -288,7 +288,7 @@ class TORCH_API Context {
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
-  bool allow_bf16_reduction_cublas = false;
+  bool allow_bf16_reduction_cublas = true;
   bool enabled_mkldnn = true;
   at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
 #ifdef C10_MOBILE

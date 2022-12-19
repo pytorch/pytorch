@@ -184,11 +184,12 @@ A similar flag (as above) exists for BFloat16 GEMMs. Note that this switch is
 set to `False` by default for BF16 as we have observed numerical instability in
 PyTorch CI tests (e.g., test/test_matmul_cuda.py).
 
-If reduced precision reductions are desired, users can disable reduced precision reductions in bf16 GEMMs with:
+If reduced precision reductions are not desired, users can disable reduced
+precision reductions in bf16 GEMMs with:
 
 .. code:: python
 
-  torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
+  torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 
 To toggle the reduced precision reduction flags in C++, one can do
 

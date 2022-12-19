@@ -104,9 +104,9 @@ Half-precision GEMM operations are typically done with intermediate accumulation
 If reduced-precision reductions are problematic, they can be turned off with
 ``torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False``
 
-A similar flag exists for BF16 GEMM operations and is turned on by default. If
-reduced-precision reductions are desired for BF16, they can be turn on with
-``torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True``
+A similar flag exists for BF16 GEMM operations and is turned off by default. If BF16
+reduced-precision reductions are problematic, they can be turned off with
+``torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False``
 
 For more information see :ref:`allow_fp16_reduced_precision_reduction<fp16reducedprecision>` and :ref:`allow_bf16_reduced_precision_reduction<bf16reducedprecision>`
 
