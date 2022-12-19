@@ -1566,7 +1566,7 @@ def _local_scalar_dense(data):
     return ir.DynamicScalar()
 
 
-def _full(fill_value, device, dtype, size, memory_format):
+def _full(fill_value, device, dtype, size, memory_format=None):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
