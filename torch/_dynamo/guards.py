@@ -568,7 +568,6 @@ class CheckFunctionManager:
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
-
         code_parts.extend(local_builder.shape_env_code)
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
