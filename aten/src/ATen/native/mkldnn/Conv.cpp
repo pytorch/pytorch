@@ -677,7 +677,7 @@ Tensor _mkldnn_convolution_transpose(
 
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias);
-    ideep::convolution_transpose_forward::compute(
+    ideep::convolution_transpose_forward::compute_v2(
         x,
         w,
         b,
@@ -688,9 +688,14 @@ Tensor _mkldnn_convolution_transpose(
         padding_r(padding, output_padding),
         dilation.vec(),
         groups,
+        ideep::scale_t(),
+        ideep::scale_t(),
+        ideep::scale_t(),
+        ideep::zero_point_t(),
+        ideep::zero_point_t(),
         op_attr);
   } else {
-    ideep::convolution_transpose_forward::compute(
+    ideep::convolution_transpose_forward::compute_v2(
         x,
         w,
         output_sizes,
@@ -700,6 +705,11 @@ Tensor _mkldnn_convolution_transpose(
         padding_r(padding, output_padding),
         dilation.vec(),
         groups,
+        ideep::scale_t(),
+        ideep::scale_t(),
+        ideep::scale_t(),
+        ideep::zero_point_t(),
+        ideep::zero_point_t(),
         op_attr);
   }
   if (input.is_mkldnn()) {
