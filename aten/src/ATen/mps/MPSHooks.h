@@ -1,3 +1,5 @@
+//  Copyright © 2022 Apple Inc.
+
 #pragma once
 
 #include <ATen/detail/MPSHooksInterface.h>

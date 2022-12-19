@@ -1,3 +1,5 @@
+//  Copyright © 2022 Apple Inc.
+
 #pragma once
 
 #include <c10/core/Allocator.h>
@@ -15,7 +17,7 @@ class Context;
 namespace at {
 
 struct TORCH_API MPSHooksInterface {
-  virtual ~MPSHooksInterface() {}
+  virtual ~MPSHooksInterface() = default;
 
   // Initialize the MPS library state
   virtual void initMPS() const {

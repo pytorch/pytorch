@@ -1,14 +1,7 @@
+//  Copyright © 2022 Apple Inc.
+
 #include <ATen/mps/MPSHooks.h>
-
-#include <ATen/Context.h>
 #include <ATen/mps/MPSDevice.h>
-#include <ATen/detail/MPSHooksInterface.h>
-#include <c10/util/irange.h>
-
-#include <sstream>
-#include <cstddef>
-#include <functional>
-#include <memory>
 
 namespace at {
 namespace mps {

@@ -8,8 +8,8 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
-#include <ATen/detail/ORTHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
+#include <ATen/detail/ORTHooksInterface.h>
 #include <c10/core/QEngine.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/CallOnce.h>
