@@ -791,7 +791,6 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                breakpoint()
                 log.warning(f"Similarity score={score.cpu().detach().item()}")
             return score >= 0.99
         else:
