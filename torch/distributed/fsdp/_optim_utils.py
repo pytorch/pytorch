@@ -1265,6 +1265,9 @@ def _optim_state_dict(
 
     # Iterate in rank 0's flattened parameter ID order to ensure aligned
     # all-gathers across ranks
+    import logging
+    import time
+    logging.warning(f"DEBUGZ {all_optim_state_keys}")
     for optim_state_key in all_optim_state_keys:
         param_id = optim_state_key_to_param_id.get(optim_state_key, -1)
         assert param_id >= 0 or (optim_state_key.is_fsdp_managed and use_orig_params), (
@@ -1274,6 +1277,7 @@ def _optim_state_dict(
             "can return -1. Both assert conditions failed, some unexpected "
             "corner case happens."
         )
+        logging.warning(f"DEBUG0 {optim_state_key.unflat_param_names}")
         if optim_state_key.is_fsdp_managed:
             # If there are multiple unflat_param_names (not use_orig_params),
             # they share the same FSDPParamInfo. So the first unflat_param_name
@@ -1396,7 +1400,7 @@ def _gather_orig_param_state(
     ]
     import logging
     import time
-    logging.warning(f"DEBUG0 {fsdp_state.rank} {len(object_list)} {time.time()}.")
+    logging.warning(f"DEBUG1 {fsdp_state.rank} {fqn} {len(object_list)} {time.time()}.")
     dist.all_gather_object(object_list, state_objects)
     orig_state: Dict[str, Any] = {}
     for state in object_list:
@@ -1431,6 +1435,7 @@ def _gather_orig_param_state(
             )
         value = value.cpu()
         orig_state[state_name] = value
+    logging.warning(f"DEBUG1 {fsdp_state.rank} {fqn} {len(object_list)} {time.time()} done.")
     return orig_state
 
 
