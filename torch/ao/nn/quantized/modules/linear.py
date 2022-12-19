@@ -9,7 +9,7 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 
 from typing import Optional
 
-from .utils import _quantize_weight, hide_packed_params_repr, WeightedQuantizedModule
+from .utils import _quantize_weight, _hide_packed_params_repr, WeightedQuantizedModule
 
 __all__ = ['LinearPackedParams', 'Linear']
 
@@ -161,7 +161,7 @@ class Linear(WeightedQuantizedModule):
         )
 
     def __repr__(self):
-        return hide_packed_params_repr(self, LinearPackedParams)
+        return _hide_packed_params_repr(self, LinearPackedParams)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.ops.quantized.linear(
@@ -289,7 +289,7 @@ class Linear(WeightedQuantizedModule):
             ref_qlinear (Module): a reference quantized linear module, either produced by torch.ao.quantization
                           utilities or provided by the user
             output_scale (float): scale for output Tensor
-            zero_point (int): zero point for output Tensor
+            output_zero_point (int): zero point for output Tensor
         """
         qlinear = cls(
             ref_qlinear.in_features,

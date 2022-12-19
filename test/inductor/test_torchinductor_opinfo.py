@@ -238,7 +238,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     "tril": {f16},
     "triu": {f16},
@@ -337,7 +336,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
@@ -365,8 +363,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.local_response_norm": {f16},
     "outer": {f16},
     "quantile": {f32, f64},
-    "scatter_reduce.amax": {f16, f32, f64},
-    "scatter_reduce.amin": {f16, f32, f64},
     "tanh": {f16},
 }
 
