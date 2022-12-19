@@ -30,8 +30,7 @@ import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, jacfwd, grad_and_value, hessian,
     jvp, make_functional, make_functional_with_buffers,
-    combine_state_for_ensemble, make_fx, functional_call,
-    params_and_buffers_no_grad_tracking
+    combine_state_for_ensemble, make_fx, functional_call
 )
 from torch._functorch.make_functional import (
     functional_init, functional_init_with_buffers
@@ -45,6 +44,8 @@ import torch.autograd.forward_ad as fwAD
 
 # NB: numpy is a testing dependency!
 import numpy as np
+
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 USE_TORCHVISION = False
 try:
@@ -151,24 +152,23 @@ def _get_weights_and_functional_call(net, mechanism):
     if mechanism == "make_functional":
         return make_functional(net)
     else:
+        assert mechanism == "functional_call"
         # this makes it so the function from make_functional and this call have the same signature
         def net_func(weights, data):
             return functional_call(net, weights, (data,))
 
-        weights = {k: v for k, v in net.named_parameters()}
-        return net_func, weights
+        return net_func, dict(net.named_parameters())
 
 def _get_weights_and_functional_call_with_buffers(net, mechanism):
     if mechanism == "make_functional":
         return make_functional_with_buffers(net)
     else:
+        assert mechanism == "functional_call"
         # this makes it so the function from make_functional and this call have the same signature
         def net_func(weights, buffers, data):
             return functional_call(net, {**weights, **buffers}, (data,))
 
-        weights = {k: v for k, v in net.named_parameters()}
-        buffers = {k: v for k, v in net.named_buffers()}
-        return net_func, weights, buffers
+        return net_func, dict(net.named_parameters()), dict(net.named_buffers())
 
 
 class TestGradTransform(TestCase):
@@ -1180,10 +1180,13 @@ class TestAutogradFunctionVmapAPI(TestCase):
             @staticmethod
             def vmap(info, in_dims, input):
                 self.assertEqual(info.batch_size, batch_size)
+                self.assertEqual(info.randomness, randomness)
                 return input, in_dims[0]
 
         x = torch.randn(batch_size, 3, device=device)
-        vmap(Id.apply)(x)
+
+        for randomness in ('error', 'different', 'same'):
+            vmap(Id.apply, randomness=randomness)(x)
 
     @_set_autograd_function_extension_enabled()
     def test_in_dims_single_input(self, device):
@@ -2863,7 +2866,8 @@ class TestMakeFunctional(TestCase):
         for param in params:
             self.assertEqual(param.requires_grad, not disable_autograd_tracking)
 
-    def test_params_and_buffers_no_grad_tracking(self):
+    @parametrize('detach_params', [True, False])
+    def test_using_detach_functional_call(self, detach_params):
         class Foo(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2875,12 +2879,15 @@ class TestMakeFunctional(TestCase):
                 x = x + self.buffer
                 return x
 
+        def params_dict(mod):
+            named_params = mod.named_parameters()
+            return {k: v.detach() for k, v in named_params} if detach_params else dict(named_params)
+
         mod = Foo()
-        params, buffers = params_and_buffers_no_grad_tracking(mod)
-        self.assertEqual(len(params), 2)
-        self.assertEqual(len(buffers), 1)
-        for param in params.values():
-            self.assertEqual(param.requires_grad, False)
+        x = torch.randn(3, 3)
+        d = (params_dict(mod), dict(mod.named_buffers()))
+        out = functional_call(mod, d, x)
+        self.assertEqual(out.grad_fn is None, detach_params)
 
     def test_parameter_tying_grad(self):
         class Foo(nn.Module):
@@ -3022,6 +3029,7 @@ class TestMakeFunctional(TestCase):
             if mechanism == "make_functional":
                 return make_functional(mod)
             else:
+                assert mechanism == "functional_call"
                 return mod, dict(mod.named_parameters())
 
         mod = Net()
@@ -3039,6 +3047,7 @@ class TestMakeFunctional(TestCase):
         if mechanism == "make_functional":
             func_mod(params, x)
         else:
+            assert mechanism == "functional_call"
             functional_call(func_mod, params, x)
 
         mod = func_mod.stateless_model if mechanism == "make_functional" else func_mod
@@ -3056,6 +3065,7 @@ class TestExamplesCorrectness(TestCase):
         if mechanism == "make_functional":
             return [(params[i] - alpha * grads[i]) for i in range(len(params))]
         else:
+            assert mechanism == "functional_call"
             return {k: params[k] - alpha * grads[k] for k in params}
 
     @parametrize("mechanism", ["make_functional", "functional_call"])
@@ -3117,10 +3127,9 @@ class TestExamplesCorrectness(TestCase):
                 grads = grad(inner_loss)(params, x1, y1)
             else:
                 loss = inner_loss(params, x1, y1)
-                grad_params = params if mechanism == "make_functional" else params.values()
+                grad_params, spec = tree_flatten(params)
                 grads = torch.autograd.grad(loss, grad_params, create_graph=True)
-                if mechanism == "functional_call":
-                    grads = {k: v for k, v in zip(params.keys(), grads)}
+                grads = tree_unflatten(grads, spec)
 
             new_params = self._update_params(params, grads, alpha, mechanism)
 
@@ -3192,10 +3201,9 @@ class TestExamplesCorrectness(TestCase):
                     grads = grad(compute_loss)(new_params, buffers, x_spt, y_spt)
                 else:
                     res = compute_loss(new_params, buffers, x_spt, y_spt)
-                    grad_params = new_params if mechanism == "make_functional" else new_params.values()
+                    grad_params, spec = tree_flatten(new_params)
                     grads = torch.autograd.grad(res, grad_params, create_graph=True)
-                    if mechanism == "functional_call":
-                        grads = {k: v for k, v in zip(new_params.keys(), grads)}
+                    grads = tree_unflatten(grads, spec)
 
                 new_params = self._update_params(new_params, grads, 1e-1, mechanism)
 
@@ -3257,14 +3265,13 @@ class TestExamplesCorrectness(TestCase):
 
         # compute some per sample grads without vmap + grad
         fnet, params, buffers = _get_weights_and_functional_call_with_buffers(transformed_net, mechanism)
-        list_params = params if mechanism == "make_functional" else params.values()
+        flat_params, spec = tree_flatten(params)
         expected_grads = [
-            torch.autograd.grad(compute_loss(x[i], y[i], params, buffers), list_params)
+            torch.autograd.grad(compute_loss(x[i], y[i], params, buffers), flat_params)
             for i in range(num_batches)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
-        if mechanism != "make_functional":
-            expected_grads = {k: v for k, v in zip(params.keys(), expected_grads)}
+        expected_grads = tree_unflatten(expected_grads, spec)
 
         self.assertEqual(result_grads, expected_grads)
 
@@ -3508,14 +3515,13 @@ class TestExamplesCorrectness(TestCase):
 
         result_grads = vmap(grad(compute_loss), in_dims=(None, 0, 0))(weights, images, targets)
 
-        list_weights = weights if mechanism == "make_functional" else list(weights.values())
+        flat_weights, spec = tree_flatten(weights)
         expected_grads = [
-            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), list_weights)
+            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), flat_weights)
             for i in range(batch_size)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
-        if mechanism == "functional_call":
-            expected_grads = {k: v for k, v in zip(weights.keys(), expected_grads)}
+        expected_grads = tree_unflatten(expected_grads, spec)
 
         self.assertEqual(result_grads, expected_grads, atol=1e-3, rtol=1.)
 
