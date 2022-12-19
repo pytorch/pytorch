@@ -56,7 +56,7 @@ target_link_libraries(test_edge_op_registration PRIVATE
 )
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_link_options(test_edge_op_registration PRIVATE
-          "-Wl,-force_load,$<TARGET_FILE:unbox_lib>"
+          "-Wl,--whole-archive,$<TARGET_FILE:unbox_lib>,--no-whole-archive"
           )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
   target_link_options(test_edge_op_registration PRIVATE
