@@ -70,8 +70,12 @@ except (ImportError, AssertionError) as e:
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
+HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_multigpu = functools.partial(
+    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+)
 
 torch._inductor.config.triton.autotune = False  # too slow
 
@@ -1852,53 +1856,6 @@ class CommonTemplate:
                 with torch.no_grad():
                     self.common(mod, (v, other), atol=2e-3, rtol=0.016)
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv_transpose2d unary test")
-    def test_conv_transpose2d_unary(self):
-        test_memory_format = [torch.contiguous_format, torch.channels_last]
-        options = itertools.product(
-            unary_list,
-            [True, False],
-            [1, 3],
-            [1, 2],
-            [1, 4],
-            [0, 1],
-            test_memory_format,
-        )
-
-        for (
-            unary_fn,
-            bias,
-            kernel_size,
-            dilation,
-            groups,
-            padding,
-            memory_format,
-        ) in options:
-            oC = 32 * groups
-            iC = 3 * groups
-            x_shape = (1, iC, 28, 28)
-            mod = torch.nn.Sequential(
-                torch.nn.ConvTranspose2d(
-                    iC,
-                    oC,
-                    kernel_size=kernel_size,
-                    padding=padding,
-                    dilation=dilation,
-                    groups=groups,
-                    bias=bias,
-                ),
-                unary_fn,
-            ).eval()
-
-            v = torch.randn(x_shape, dtype=torch.float32).to(
-                memory_format=memory_format
-            )
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-
     def test_gather1(self):
         def fn(a, b):
             return (
@@ -2048,6 +2005,15 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
             check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
+
+    @requires_multigpu()
+    def test_multi_gpu_device(self):
+        def fn(x, y):
+            r = torch.ops.aten.div(x, y)
+            r = r.to("cuda:1")
+            return 2 * r
+
+        self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
     def test_unbind(self):
         def fn(a):
