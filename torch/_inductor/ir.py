@@ -2307,13 +2307,17 @@ class ConcatKernel(NopKernel):
                     )
             offsets_end.append(new_size[dim])
 
+        with V.graph.fake_mode:
+            x_fake = [ir_node_to_tensor(x, guard_shape=True) for x in inputs]
+            output = torch.ops.aten.cat(x_fake, dim)
+
         kernel = ConcatKernel(
             name=None,
             layout=FixedLayout(
                 device=device,
                 dtype=dtype,
                 size=new_size,
-                stride=FlexibleLayout.contiguous_strides(new_size),
+                stride=output.stride(),
             ),
             inputs=[],
         )
