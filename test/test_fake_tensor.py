@@ -1,6 +1,8 @@
 # Owner(s): ["module: meta tensors"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef, skipIfRocm
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, skipIfCrossRef, skipIfRocm, skipIfTorchDynamo, parametrize,
+    instantiate_parametrized_tests)
 import torch
 import torch._dynamo
 import itertools
@@ -169,7 +171,7 @@ class FakeTensorTest(TestCase):
     def test_fake_mode_error(self):
         x = torch.rand([4, 4])
 
-        with self.assertRaisesRegex(Exception, "non-Fake Tensor inputs"):
+        with self.assertRaisesRegex(Exception, "Please convert all Tensors"):
             with FakeTensorMode():
                 y = x[0]
 
@@ -277,8 +279,10 @@ class FakeTensorTest(TestCase):
             self.assertTrue(mode.in_kernel_invocation)
 
     @skipIfRocm
+    @parametrize("allow_fallback_kernels", [False, True],
+                 lambda a: 'with_fallback' if a else 'without_fallback')
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cudnn_rnn(self):
+    def test_cudnn_rnn(self, allow_fallback_kernels):
         def fn(
             a0,
             b0,
@@ -338,7 +342,7 @@ class FakeTensorTest(TestCase):
                 None,
             )
 
-        mode = FakeTensorMode()
+        mode = FakeTensorMode(allow_fallback_kernels=allow_fallback_kernels)
         for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
             with context():
                 inps = (
@@ -369,6 +373,36 @@ class FakeTensorTest(TestCase):
                     if i == 1:
                         self.assertTrue(isinstance(ten, FakeTensor))
                     self.assertEqual(ten.device.type, 'cuda')
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_lstm(self):
+        # Ensure CUDA (non-cuDNN) impl succeeds with fake tensors.
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                proj_size = 2
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
+                H_out = proj_size if proj_size > 0 else hidden_size
+
+                lstm = torch.nn.LSTM(input_size=H_in, hidden_size=hidden_size,
+                                     num_layers=num_layers, proj_size=proj_size, batch_first=False,
+                                     bias=True, bidirectional=bidir, device='cuda')
+
+                h_0 = torch.randn((num_layers * D, N, H_out), device='cuda')
+                c_0 = torch.randn((num_layers * D, N, hidden_size), device='cuda')
+                inp = torch.randn((L, N, H_in), device='cuda')
+                (output, (h_n, c_n)) = lstm(inp, (h_0, c_0))
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * H_out))
+                self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
+                self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
@@ -557,6 +591,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter(mode, y)
         self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_separate_tensor_storages_non_view(self):
         x = torch.rand(2, 2, 2)
         y = torch.rand(4, 2)
@@ -577,6 +612,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(len(converter.meta_converter.storage_memo), 0)
 
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_dead_weak_ref(self):
         x = torch.rand(2, 2, 2)
         y = x[0]
@@ -589,6 +625,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter(mode, y)
         self.assertEqual(x_conv_storage, torch._C._storage_id(y_conv))
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_dead_key(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()
@@ -617,6 +654,7 @@ class FakeTensorConverterTest(TestCase):
             y = torch.empty(2, 2, device="cpu")
         self.assertRaises(Exception, lambda: x, y)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_no_ref_cycle(self):
         x = torch.rand([4])
         mode = FakeTensorMode()
@@ -754,6 +792,8 @@ class FakeTensorPropTest(TestCase):
                     # AssertionError: tensor's device must be `meta`, got cpu instead
                     failed = True
                 self.assertTrue(failed)
+
+instantiate_parametrized_tests(FakeTensorTest)
 
 if __name__ == "__main__":
     run_tests()
