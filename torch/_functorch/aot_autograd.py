@@ -2349,6 +2349,7 @@ def aot_module_simplified(
     # Just for convenience
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
+    forward.named_buffers = mod.named_buffers
 
     return forward
 

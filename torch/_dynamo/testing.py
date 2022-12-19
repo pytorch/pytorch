@@ -37,6 +37,11 @@ def named_parameters_for_optimized_module(mod):
     return mod._orig_mod.named_parameters
 
 
+def named_buffers_for_optimized_module(mod):
+    assert isinstance(mod, eval_frame.OptimizedModule)
+    return mod._orig_mod.named_buffers
+
+
 def remove_optimized_module_prefix(name):
     prefix = "_orig_mod."
     assert name.startswith(prefix)
