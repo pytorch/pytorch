@@ -181,19 +181,19 @@ static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bo
 
 #define ONEDNN_PARAM_TYPE_CONV 0
 #define ONEDNN_PARAM_TYPE_LINEAR 1
-bool mkldnn_delete_param(int64_t param, int64_t param_type) {
-  if(param != 0) {
+bool mkldnn_delete_param(int64_t param_handle, int64_t param_type) {
+  if(param_handle != 0) {
     switch (param_type) {
       case ONEDNN_PARAM_TYPE_CONV:
         {
-          auto conv_params_ptr = (ideep::convolution_forward_params *) param;
+          auto conv_params_ptr = (ideep::convolution_forward_params *) param_handle;
           delete conv_params_ptr;
           conv_params_ptr = nullptr;
         }
         break;
       case ONEDNN_PARAM_TYPE_LINEAR:
         {
-          auto linear_params_ptr = (ideep::inner_product_forward_params *) param;
+          auto linear_params_ptr = (ideep::inner_product_forward_params *) param_handle;
           delete linear_params_ptr;
           linear_params_ptr = nullptr;
         }
@@ -206,7 +206,7 @@ bool mkldnn_delete_param(int64_t param, int64_t param_type) {
   return true;
 }
 
-int64_t mkldnn_conv_param_generation(
+int64_t mkldnn_create_conv_param(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
@@ -291,7 +291,7 @@ int64_t mkldnn_conv_param_generation(
   return (int64_t) conv_params_ptr;
 }
 
-int64_t mkldnn_conv_param_generation_binary(
+int64_t mkldnn_create_conv_param_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
@@ -996,11 +996,11 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary_));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_conv_param_generation"),
-      TORCH_FN(mkldnn_conv_param_generation));
+      TORCH_SELECTIVE_NAME("mkldnn::_create_conv_param"),
+      TORCH_FN(mkldnn_create_conv_param));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_conv_param_generation_binary"),
-      TORCH_FN(mkldnn_conv_param_generation_binary));
+      TORCH_SELECTIVE_NAME("mkldnn::_create_conv_param_binary"),
+      TORCH_FN(mkldnn_create_conv_param_binary));
 }
 
 TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
@@ -1014,11 +1014,11 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary_));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_conv_param_generation"),
-      TORCH_FN(mkldnn_conv_param_generation));
+      TORCH_SELECTIVE_NAME("mkldnn::_create_conv_param"),
+      TORCH_FN(mkldnn_create_conv_param));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_conv_param_generation_binary"),
-      TORCH_FN(mkldnn_conv_param_generation_binary));
+      TORCH_SELECTIVE_NAME("mkldnn::_create_conv_param_binary"),
+      TORCH_FN(mkldnn_create_conv_param_binary));
 }
 }}  // namespace at::native
 

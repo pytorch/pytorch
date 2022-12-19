@@ -46,9 +46,9 @@ TORCH_LIBRARY(mkldnn, m) {
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn::_convolution_pointwise_.binary(Tensor X, Tensor(a!) other, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups, str binary_attr, Scalar? alpha, str? unary_attr, Scalar?[] unary_scalars, str? unary_algorithm) -> Tensor(a!) Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "mkldnn::_conv_param_generation(Tensor X, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups, str attr, Scalar?[] scalars, str? algorithm) -> int param"));
+      "mkldnn::_create_conv_param(Tensor X, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups, str attr, Scalar?[] scalars, str? algorithm) -> int param"));
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "mkldnn::_conv_param_generation_binary(Tensor X, Tensor other, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups, str binary_attr, Scalar? alpha, str? unary_attr, Scalar?[] unary_scalars, str? unary_algorithm) -> int param"));
+      "mkldnn::_create_conv_param_binary(Tensor X, Tensor other, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups, str binary_attr, Scalar? alpha, str? unary_attr, Scalar?[] unary_scalars, str? unary_algorithm) -> int param"));
 }
 
 TORCH_LIBRARY(mkldnn_prepacked, m) {
