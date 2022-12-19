@@ -34,7 +34,7 @@ add_custom_command(
 )
 add_custom_target(unbox_target DEPENDS ${GEN_COMMAND_sources})
 
-add_library(unbox_lib SHARED
+add_library(unbox_lib STATIC
         ${GEN_COMMAND_sources}
         ${TEST_ROOT}/operator_registry.cpp
         )
@@ -54,7 +54,7 @@ set(TEST_DEPENDENCIES gtest unbox_lib)
 target_link_libraries(test_edge_op_registration PRIVATE
   ${TEST_DEPENDENCIES}
 )
-if(CMAKE_CXX_COMPILER_ID MATCHES "AppleClang|Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_link_options(test_edge_op_registration PRIVATE
           "-Wl,-force_load,$<TARGET_FILE:unbox_lib>"
           )
