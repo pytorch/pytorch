@@ -664,9 +664,9 @@ class TestFloorDiv(TestCase):
                 assert_unsupported_error(func, x, y)
             elif (type(x) is bool or type(y) is bool) and y != 0:
                 # test bools against SymPy ints unless it's a div by zero
-                x = int(x) if type(x) is bool else x
-                y = int(y) if type(y) is bool else y
-                self.assertEqual(func(x, y), other_func(func, x, y))
+                int_x = int(x) if type(x) is bool else x
+                int_y = int(y) if type(y) is bool else y
+                self.assertEqual(func(x, y), other_func(func, int_x, int_y))
             elif (type(x) is float or type(y) is float) and y == 0:
                 # div by zero: float case
                 if func is torch_func:
