@@ -286,11 +286,14 @@ ALLOW_LIST = [
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
     ("aten::_flash_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
     ("aten::_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
+    # Distributed c10d ops are all going to be updated
+    ("c10d::.*", datetime.date(2022, 12, 31)),
     ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_tensor", datetime.date(2022, 10, 15)),
     ("aten::_nested_tensor_layer_norm", datetime.date(2022, 10, 15)),
     ("aten::_torch_cuda_cu_linker_symbol_op", datetime.date(2022, 11, 1)),
+    ("aten::_test_inductor_realize", datetime.date(2023, 1, 1)),
 
     ("aten::upsample_linear1d_backward", datetime.date(2022, 12, 15)),
     ("aten::upsample_bicubic2d_backward", datetime.date(2022, 12, 15)),

@@ -16,6 +16,7 @@ from functorch.experimental.ops import PyOperator
 
 import torch
 
+from torch import SymInt
 from torch._guards import GuardSource
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
@@ -52,7 +53,7 @@ from ..utils import (
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
-    wrap_to_fake_tensor_and_record,
+    wrap_fake_exception,
 )
 
 from .base import MutableLocal, typestr
@@ -76,6 +77,7 @@ from .lists import (
 )
 from .misc import (
     AutogradFunctionVariable,
+    ComptimeVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -225,6 +227,8 @@ class VariableBuilder:
         return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
+        from ..comptime import comptime
+
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
@@ -412,6 +416,8 @@ class VariableBuilder:
                 InspectSignatureVariable.create,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif value is comptime:
+            return ComptimeVariable()
         elif value is dataclasses.fields:
             return LambdaVariable(
                 _dataclasses_fields_lambda,
@@ -653,11 +659,12 @@ class VariableBuilder:
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
             ):
-                # NB: we MUST register this as a GraphArg
                 shape_env = self.tx.output.shape_env
+                sname = self.source.name()
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, sname=self.source.name())
+                    shape_env.create_symbol(value, sname=sname)
                 )
+                self.tx.output.tracked_fakes.append(TrackedFake(wrapped_value, sname))
                 # TODO: Do float
             else:
                 # TODO: Eliminate this case entirely
@@ -742,6 +749,9 @@ def wrap_fx_proxy(tx, proxy, example_value=None, **options):
 def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, ignore_subclass=False, **options
 ):
+    from ..symbolic_convert import InstructionTranslatorBase
+
+    assert isinstance(tx, InstructionTranslatorBase)
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
@@ -772,19 +782,22 @@ def wrap_fx_proxy_cls(
             pass
 
         elif isinstance(example_value, torch.Tensor):
-            # We shouldn't be doing this at all, see
-            # https://github.com/pytorch/torchdynamo/issues/1950
-            # But assuming we're doing it, the legacy behavior for
-            # subclasses was to perform a clone WITHOUT preserving
-            # the subclass.  It's not clear to me that's what you actually
-            # want, but whatever, I wouldn't have this cache at all.
-            with torch._C.DisableTorchFunction():
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+            if tx.export:
+                # The legacy behavior for real value cache with subclasses was
+                # to perform a clone WITHOUT preserving the subclass.  It's
+                # not entirely clear this is what you actually want though.
+                with torch._C.DisableTorchFunction():
+                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
+                        example_value
+                    )
             # NB: If we're ignoring subclass, then the expectation is you will
             # take the returned TensorVariable and wrap it into a more
             # accurate TensorVariable that is able to track subclass-ness;
             # otherwise this is wrong!
-            kwargs = {"ignore_subclass": ignore_subclass}
+            kwargs = {
+                "ignore_subclass": ignore_subclass,
+                "is_tensor": target_cls is TensorVariable,
+            }
             assert "source" in options
             if options["source"] is None:
                 kwargs["static_shapes"] = True
@@ -916,7 +929,40 @@ def wrap_fx_proxy_cls(
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable(proxy, example_value, **options)
     else:
-        raise AssertionError(
+        unimplemented(
             "torch.* op returned non-Tensor "
             + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
         )
+
+
+# Tracks the sources of all fake tensors we wrap in Dynamo.
+# Used by shape guard computation.
+@dataclasses.dataclass
+class TrackedFake:
+    fake: Union[FakeTensor, SymInt]
+    sname: str
+
+
+def wrap_to_fake_tensor_and_record(
+    e, tx, ignore_subclass=False, *, sname: str, static_shapes=False, is_tensor: bool
+):
+    if type(e) in (torch.Tensor, torch.nn.Parameter) or (
+        ignore_subclass and isinstance(e, torch.Tensor)
+    ):
+        static_shapes = static_shapes or config.dynamic_shapes is False
+        if type(e) is torch.nn.Parameter:
+            # Always static for params
+            static_shapes = True
+        fake_e = wrap_fake_exception(
+            lambda: tx.fake_mode.from_tensor(
+                e,
+                static_shapes=static_shapes,
+                ignore_subclass=ignore_subclass,
+                sname=sname,
+            )
+        )
+        if is_tensor:
+            tx.output.tracked_fakes.append(TrackedFake(fake_e, sname))
+        return fake_e
+    else:
+        return e
