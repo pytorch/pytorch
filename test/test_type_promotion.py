@@ -8,7 +8,7 @@ import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
-                                                  numpy_to_torch_dtype_dict)
+                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
@@ -435,6 +435,7 @@ class TestTypePromotion(TestCase):
                          torch.tensor(True, device=device), True),
                          torch.tensor(True, device=device))
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @float_double_default_dtype
     def test_create_bool_tensors(self, device):
         expected = torch.tensor([0], dtype=torch.int64, device=device)
