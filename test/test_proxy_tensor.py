@@ -13,7 +13,7 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
 
 from torch._decomp import decomposition_table
-from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, fx_placeholder_vals
+from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, bind_symbols, fx_placeholder_vals
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
@@ -794,6 +794,42 @@ class TestSymbolicTracing(TestCase):
         return traced_f
 
 
+    def test_debug_interpreter(self):
+        import torch.library
+        from torch.library import Library
+
+        foo = Library("foo", "DEF")
+        foo.define("foo(Tensor self) -> Tensor")
+
+        # Operator where meta and cpu disagree on strides
+        @torch.library.impl(foo, "foo", "CPU")
+        def foo_cpu(x):
+            return x.clone().T
+
+        @torch.library.impl(foo, "foo", "Meta")
+        def foo_meta(x):
+            return x.clone()
+
+        def f(x):
+            return torch.ops.foo.foo.default(x)
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2))
+        from torch._functorch.compilers import DebugInterpreter
+
+        interp = DebugInterpreter(gm)
+
+        # input mismatch is caught (indicates guard problem)
+        self.assertRaisesRegex(
+            AssertionError, r"3 != 1",
+            lambda: interp.run(torch.randn(3, 3).T),
+        )
+
+        # Catch the incorrect meta
+        self.assertRaisesRegex(
+            AssertionError, r"\(3, 1\) != \(1, 3\)",
+            lambda: interp.run(torch.randn(3, 3))
+        )
+
     def test_resize_from_zero(self):
         def f(x, y):
             x.resize_(y.size(0))
@@ -815,6 +851,7 @@ def forward(self, x_1, y_1):
         test_inputs.append([(6, 8)])
         gm = self._test_dynamic(f, [(3, 4)], test_inputs)
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
+        self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
         # TODO: There should eventually be guards for contiguity, but they're
         # not currently being done yet
