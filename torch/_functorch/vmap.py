@@ -495,7 +495,7 @@ def _flat_vmap(func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, r
 # `restore_vmap` is a private helper function. It is vmap but has the following
 # differences:
 # - instead of returning outputs, it returns an (outputs, out_dims) tuple.
-#   out_dims is a pytree of shape shape as outputs and contains Optional[int]
+#   out_dims is a pytree of same shape as outputs and contains Optional[int]
 #   specifying where the vmapped dimension, if it exists, is in the corresponding output.
 # - does no validation on in_dims or inputs (vmap expects at least one Tensor to be vmapped).
 #   restore_vmap allows for no inputs to have the vmap dimension
@@ -503,7 +503,9 @@ def _flat_vmap(func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, r
 #   restore_vmap allows for return of arbitrary outputs (not just Tensors)
 #
 # The TL;DR is that restore_vmap is more general than vmap and has a slightly
-# different API.
+# different API. The relaxations are so that we can "pause" vmap in the middle
+# of its execution and then "restore" it later (this is what we do in
+# the generate_vmap_rule=True implementation of autograd.Function).
 #
 # restore_vmap can be technically used in the implementation of vmap, but doing
 # that refactor is a bit technically challenging because:
