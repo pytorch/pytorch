@@ -3,22 +3,9 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "onnx::Div_0"
-    input: "onnx::Div_1"
-    output: "onnx::Floor_2"
-    name: "Div_0"
-    op_type: "Div"
-  }
-  node {
-    input: "onnx::Floor_2"
-    output: "onnx::Cast_3"
-    name: "Floor_1"
-    op_type: "Floor"
-  }
-  node {
-    input: "onnx::Cast_3"
-    output: "onnx::Mul_4"
-    name: "Cast_2"
+    input: "onnx::Cast_0"
+    output: "onnx::Div_2"
+    name: "Cast_0"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -27,22 +14,68 @@ graph {
     }
   }
   node {
-    input: "onnx::Mul_4"
-    input: "onnx::Div_1"
-    output: "onnx::Sub_5"
-    name: "Mul_3"
+    input: "onnx::Cast_1"
+    output: "onnx::Div_3"
+    name: "Cast_1"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::Div_2"
+    input: "onnx::Div_3"
+    output: "onnx::Cast_4"
+    name: "Div_2"
+    op_type: "Div"
+  }
+  node {
+    input: "onnx::Cast_4"
+    output: "onnx::Floor_5"
+    name: "Cast_3"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::Floor_5"
+    output: "onnx::Cast_6"
+    name: "Floor_4"
+    op_type: "Floor"
+  }
+  node {
+    input: "onnx::Cast_6"
+    output: "onnx::Mul_7"
+    name: "Cast_5"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::Mul_7"
+    input: "onnx::Cast_1"
+    output: "onnx::Sub_8"
+    name: "Mul_6"
     op_type: "Mul"
   }
   node {
-    input: "onnx::Div_0"
-    input: "onnx::Sub_5"
-    output: "6"
-    name: "Sub_4"
+    input: "onnx::Cast_0"
+    input: "onnx::Sub_8"
+    output: "9"
+    name: "Sub_7"
     op_type: "Sub"
   }
   name: "torch_jit"
   input {
-    name: "onnx::Div_0"
+    name: "onnx::Cast_0"
     type {
       tensor_type {
         elem_type: 1
@@ -61,7 +94,7 @@ graph {
     }
   }
   input {
-    name: "onnx::Div_1"
+    name: "onnx::Cast_1"
     type {
       tensor_type {
         elem_type: 1
@@ -80,7 +113,7 @@ graph {
     }
   }
   output {
-    name: "6"
+    name: "9"
     type {
       tensor_type {
         elem_type: 1

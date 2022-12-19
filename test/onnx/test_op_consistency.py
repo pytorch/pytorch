@@ -36,7 +36,6 @@ from typing import (
 )
 
 import onnx_test_common
-import onnxruntime.capi.onnxruntime_pybind11_state
 
 import torch
 from torch.onnx import _constants
