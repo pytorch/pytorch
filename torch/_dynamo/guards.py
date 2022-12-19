@@ -15,7 +15,13 @@ import sympy
 
 import torch
 
-from torch._guards import Guard, GuardBuilderBase, GuardSource
+from torch._guards import (
+    DuplicateInputs,
+    Guard,
+    GuardBuilderBase,
+    GuardEnvExpr,
+    GuardSource,
+)
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -536,6 +542,32 @@ class CheckFunctionManager:
                 tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
+
+        aotautograd_guards: List[GuardEnvExpr] = (
+            self.output_graph.tracing_context.guards_context.aotautograd_guards
+            if self.output_graph
+            else []
+        )
+        for guard in aotautograd_guards:
+            if isinstance(guard, DuplicateInputs):
+                pos_a = guard.input_pos_a
+                pos_b = guard.input_pos_b
+                assert pos_b < len(self.output_graph.graphargs) and pos_a < len(
+                    self.output_graph.graphargs
+                ), "Deduped args out of bounds"
+                assert self.output_graph.graphargs[
+                    pos_a
+                ].is_tensor, "Deduped arg must be a tensor"
+                assert self.output_graph.graphargs[
+                    pos_b
+                ].is_tensor, "Deduped arg must be a tensor"
+
+                code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
+                code_parts.append(code_part)
+                verbose_code_parts.append(code_part)
+            else:
+                raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
+
 
         code_parts.extend(local_builder.shape_env_code)
         verbose_code_parts.extend(local_builder.shape_env_code)
