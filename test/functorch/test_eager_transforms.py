@@ -155,6 +155,7 @@ def _get_weights_and_functional_call(net, mechanism):
     else:
         assert mechanism == "functional_call"
         # this makes it so the function from make_functional and this call have the same signature
+
         def net_func(weights, data):
             return functional_call(net, weights, (data,))
 
@@ -165,6 +166,7 @@ def _get_weights_and_functional_call_with_buffers(net, mechanism):
         return make_functional_with_buffers(net)
     else:
         assert mechanism == "functional_call"
+
         # this makes it so the function from make_functional and this call have the same signature
         def net_func(weights, buffers, data):
             return functional_call(net, {**weights, **buffers}, (data,))
