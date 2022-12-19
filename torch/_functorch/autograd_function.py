@@ -28,7 +28,7 @@ class CustomFunctionPyOperator(PyOperator):
     def __init__(self):
         super().__init__('custom_function_call')
 
-    def __call__(self, autograd_function, generate_vmap_rule, *args, **kwargs):
+    def __call__(self, autograd_function, *args, **kwargs):
         # When custom_function_call is done dispatching through functorch,
         # it should just invoke the autograd.Function. This is consistent
         # with the autograd.Function behavior of being invoked before the
@@ -41,7 +41,7 @@ class CustomFunctionPyOperator(PyOperator):
         # (because autograd.Function happens before the Python dispatch key)
         # and only traces the forward pass.
         if torch._C._are_functorch_transforms_active():
-            return super().__call__(autograd_function, generate_vmap_rule, *args, **kwargs)
+            return super().__call__(autograd_function, *args, **kwargs)
         return autograd_function.apply(*args, **kwargs)
 
 
@@ -82,14 +82,14 @@ custom_function_call = CustomFunctionPyOperator()
 # and apply it.
 @custom_function_call.py_impl(TransformType.Grad)
 @custom_function_call.py_impl(TransformType.Jvp)
-def custom_function_call_grad(interpreter, autograd_function, generate_vmap_rule, *operands):
-    Generated = generate_single_level_function(interpreter, autograd_function, generate_vmap_rule)
+def custom_function_call_grad(interpreter, autograd_function, *operands):
+    Generated = generate_single_level_function(interpreter, autograd_function)
     with enable_autograd_function():
         flat_out = Generated.apply(*operands)
     return flat_out
 
 
-def generate_single_level_function(interpreter, autograd_function, generate_vmap_rule):
+def generate_single_level_function(interpreter, autograd_function):
     level = interpreter.level()
 
     def forward(*operands):
@@ -101,7 +101,7 @@ def generate_single_level_function(interpreter, autograd_function, generate_vmap
         # the transform. _SingleLevelFunction will turn off both fwd and bwd
         # gradient computation and we need to turn it back on here.
         with torch.enable_grad(), _set_fwd_grad_enabled(True), interpreter.lower():
-            output = custom_function_call(autograd_function, generate_vmap_rule, *unwrapped_operands)
+            output = custom_function_call(autograd_function, *unwrapped_operands)
 
         return pytree.tree_map_only(
             torch.Tensor,
@@ -207,8 +207,8 @@ class VmapInfo(NamedTuple):
 
 
 @custom_function_call.py_impl(TransformType.Vmap)
-def custom_function_call_vmap(interpreter, autograd_function, generate_vmap_rule, *operands):
-    if generate_vmap_rule:
+def custom_function_call_vmap(interpreter, autograd_function, *operands):
+    if getattr(autograd_function, 'generate_vmap_rule', False):
         if hasattr(autograd_function, "vmap"):
             # TODO: link docs when they're ready.
             # https://github.com/pytorch/pytorch/issues/90224
@@ -239,7 +239,7 @@ def custom_function_call_vmap(interpreter, autograd_function, generate_vmap_rule
     # their vmap staticmethod (and is consistent with our C++ batching rule API)
     if pytree.tree_all(lambda dim: dim is None, in_dims):
         with interpreter.lower():
-            return custom_function_call(autograd_function, generate_vmap_rule, *operands)
+            return custom_function_call(autograd_function, *operands)
 
     with interpreter.lower():
         unwrapped_output, out_dims = autograd_function.vmap(info, in_dims, *unwrapped_operands)
@@ -258,9 +258,7 @@ def custom_function_call_vmap_generate_rule(interpreter, autograd_function, *ope
         autograd_function, in_dims, interpreter.batch_size(), interpreter.randomness())
 
     with interpreter.lower():
-        output = custom_function_call(vmapped_function,
-                                      True,  # generate_vmap_rule
-                                      *unwrapped_operands)
+        output = custom_function_call(vmapped_function, *unwrapped_operands)
 
     out_dims = get_out_dims()
     return wrap_batched(output, out_dims, interpreter.level())
@@ -413,48 +411,50 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 # have shape [4]). Performing vmap over setup_context means the shape
 # saved has shape [4] and leads to a correct result shape for gx.
 
-# Wraps ctx to create a new ctx object that overrides saved_tensors.
-properties = ('_pt_inner_ctx', '_pt_new_saved_tensors')
+# Wraps a ctx object. Forwards all attr accesses to the underlying object
+# except for the attrs in _pt_attrs
+class WrappedCtx:
+    _pt_reserved_attrs = ('_pt_reserved_attrs', '_pt_inner_ctx')
 
-class CtxWithSavedTensors:
-    def __init__(self, ctx, new_saved_tensors):
-        if not isinstance(ctx, CtxWithSavedTensors):
-            for name in properties:
+    def __init__(self, ctx):
+        if not isinstance(ctx, WrappedCtx):
+            reserved_attrs = type(self)._pt_reserved_attrs
+            for name in reserved_attrs:
                 if not hasattr(ctx, name):
                     continue
                 raise RuntimeError(
-                    f'PyTorch reserves the {properties} field on ctx. '
+                    f'PyTorch reserves the {reserved_attrs} field on ctx. '
                     'Please name your fields on ctx something else to avoid name '
                     'collision.')
         self._pt_inner_ctx = ctx
+
+    def __getattr__(self, name):
+        return getattr(self._pt_inner_ctx, name)
+
+    def __setattr__(self, name, value):
+        if name in type(self)._pt_reserved_attrs:
+            self.__dict__[name] = value
+            return
+        return setattr(self._pt_inner_ctx, name, value)
+
+# Wraps ctx to create a new ctx object that overrides saved_tensors.
+class CtxWithSavedTensors(WrappedCtx):
+    _pt_reserved_attrs = ('_pt_new_saved_tensors', *WrappedCtx._pt_reserved_attrs)
+
+    def __init__(self, ctx, new_saved_tensors):
+        super().__init__(ctx)
         self._pt_new_saved_tensors = new_saved_tensors
 
     @property
     def saved_tensors(self):
         return self._pt_new_saved_tensors
 
-    def __getattr__(self, name):
-        return getattr(self._pt_inner_ctx, name)
+class CtxCustomSave(WrappedCtx):
+    _pt_reserved_attrs = ('_pt_saved_tensors_bdims', '_pt_current_level',
+                          *WrappedCtx._pt_reserved_attrs)
 
-    def __setattr__(self, name, value):
-        if name in properties:
-            self.__dict__[name] = value
-            return
-        return setattr(self._pt_inner_ctx, name, value)
-
-ctx_custom_save_properties = ('_pt_inner_ctx', '_pt_saved_tensors_bdims', '_pt_current_level')
-
-class CtxCustomSave:
     def __init__(self, ctx, current_level):
-        if isinstance(ctx, torch.autograd.function.FunctionCtx):
-            for name in ctx_custom_save_properties:
-                if not hasattr(ctx, name):
-                    continue
-                raise RuntimeError(
-                    f'PyTorch reserves the {ctx_custom_save_properties} field on ctx. '
-                    'Please name your fields on ctx something else to avoid name '
-                    'collision.')
-        self._pt_inner_ctx = ctx
+        super().__init__(ctx)
         self._pt_saved_tensors_bdims = ()
         self._pt_current_level = current_level
 
@@ -462,15 +462,6 @@ class CtxCustomSave:
         unwrapped_tensors, bdims = unwrap_batched(tensors, self._pt_current_level)
         self._pt_inner_ctx.save_for_backward(*unwrapped_tensors)
         self._pt_saved_tensors_bdims = bdims
-
-    def __getattr__(self, attr):
-        return getattr(self._pt_inner_ctx, attr)
-
-    def __setattr__(self, attr, value):
-        if attr in ctx_custom_save_properties:
-            self.__dict__[attr] = value
-            return
-        return setattr(self._pt_inner_ctx, attr, value)
 
 
 def reductify(grad_input, grad_input_bdim, input_bdim, input_shape_without_bdim, batch_size):

@@ -432,8 +432,7 @@ class Function(_SingleLevelFunction):
                 '(vmap, grad, jvp, jacrev, ...), it must have a setup_context ',
                 'staticmethod.')
 
-        return custom_function_call(
-            cls, getattr(cls, 'generate_vmap_rule', False), *args, **kwargs)
+        return custom_function_call(cls, *args, **kwargs)
 
 def once_differentiable(fn):
 
