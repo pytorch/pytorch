@@ -15,7 +15,7 @@ from torch._functorch.vmap import (
     restore_vmap,
 )
 from torch.autograd.forward_ad import _set_fwd_grad_enabled
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Tuple
 
 # autograd.Function technically runs before the regular PyTorch dispatcher.
 # This is how features like autocast and torch_dispatch (e.g. PythonTLSSnapshot)
@@ -414,7 +414,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 # Wraps a ctx object. Forwards all attr accesses to the underlying object
 # except for the attrs in _pt_attrs
 class WrappedCtx:
-    _pt_reserved_attrs = ('_pt_reserved_attrs', '_pt_inner_ctx')
+    _pt_reserved_attrs: Tuple[str, ...] = ('_pt_reserved_attrs', '_pt_inner_ctx')
 
     def __init__(self, ctx):
         if not isinstance(ctx, WrappedCtx):
