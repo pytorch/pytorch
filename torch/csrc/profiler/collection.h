@@ -169,6 +169,7 @@ struct ExtraFields<EventType::Backend> {
 template <>
 struct ExtraFields<EventType::Vulkan> {
   using raw_event_t = std::pair<approx_time_t, vulkan_id_t>;
+  std::string name_;
   int64_t duration_ns_{0};
 };
 
