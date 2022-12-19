@@ -328,19 +328,25 @@ class ModuleList(Module):
     def __repr__(self):
         """A custom repr for ModuleList that compresses repeated module representations"""
         list_of_reprs = [repr(item) for item in self]
-        repeats = [1]
+        start_end_indices = [[0, 0]]
         repeated_blocks = [list_of_reprs[0]]
-        for r in list_of_reprs[1:]:
+        for i, r in enumerate(list_of_reprs[1:], 1):
             if r == repeated_blocks[-1]:
-                repeats[-1] += 1
-            else:
-                repeats.append(1)
-                repeated_blocks.append(r)
+                start_end_indices[-1][1] += 1
+                continue
+
+            start_end_indices.append([i, i])
+            repeated_blocks.append(r)
 
         lines = []
         main_str = self._get_name() + '('
-        for n, b in zip(repeats, repeated_blocks):
-            local_repr = f"{n} x {b}"
+        for (start_id, end_id), b in zip(start_end_indices, repeated_blocks):
+            local_repr = f"({start_id}) {b}"  # default repr
+
+            if start_id != end_id:
+                n = end_id - start_id + 1
+                local_repr = f"({start_id}-{end_id}) {n} x {b}"
+
             local_repr = _addindent(local_repr, 2)
             lines.append(local_repr)
 
