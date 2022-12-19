@@ -96,7 +96,7 @@ def init_model(
     return model, fsdp_pg
 
 
-class Test2dModelStateCheckpoint(DTensorTestBase):
+class Test2dOptimStateCheckpoint(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
@@ -120,6 +120,7 @@ class Test2dModelStateCheckpoint(DTensorTestBase):
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
             state_dict = {
                 "model": model.state_dict(),
+                "optim": FSDP.sharded_optim_state_dict(model, optim),
             }
 
             dist_cp.save_state_dict(
