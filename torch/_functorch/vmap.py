@@ -13,7 +13,6 @@ from .pytree_hacks import tree_map_
 from functools import partial
 import os
 import sys
-from torch._decomp import decomposition_table
 
 from torch._C._functorch import (
     _add_batch_dim,
@@ -220,6 +219,7 @@ def lazy_load_decompositions():
     global VMAP_DECOMPOSITIONS_LIB
     VMAP_DECOMPOSITIONS_LIB = torch.library.Library("aten", "IMPL", "FuncTorchBatched")
 
+    from torch._decomp import decomposition_table
 
     def _register_python_decomposition_vmap(decomp):
         if decomp in decomposition_table:

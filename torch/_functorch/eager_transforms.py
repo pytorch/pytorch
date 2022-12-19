@@ -21,8 +21,6 @@ from torch._C._functorch import (
     _grad_decrement_nesting,
     _jvp_increment_nesting,
     _jvp_decrement_nesting,
-    set_fwd_grad_enabled,
-    get_fwd_grad_enabled,
     _wrap_functional_tensor,
     _unwrap_functional_tensor,
     _func_decrement_nesting,
@@ -647,16 +645,6 @@ def noop():
     yield
 
 
-@contextlib.contextmanager
-def enable_fwd_grad(enabled=True):
-    prev_state = get_fwd_grad_enabled()
-    set_fwd_grad_enabled(enabled)
-    try:
-        yield
-    finally:
-        set_fwd_grad_enabled(prev_state)
-
-
 def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
     if not isinstance(elts, tuple):
         raise RuntimeError(
@@ -828,7 +816,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     try:
         global JVP_NESTING
         JVP_NESTING += 1
-        with enable_fwd_grad():
+        with fwAD._set_fwd_grad_enabled(True):
             ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
             with ctx():
                 flat_duals = tuple(fwAD.make_dual(p, t)
