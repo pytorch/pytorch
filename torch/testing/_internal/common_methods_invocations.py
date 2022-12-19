@@ -2811,18 +2811,20 @@ def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **k
 def error_inputs_adaptive_avg_pool1d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
-    # error inputs for size overflow
+    # error inputs for overflow
+    # when testing with UBSAN: `integer multiplication overflow`
+    # when testing without UBSAN: `Storage size calculation overflowed`
     # 0x0x3fffffffffffffff * 2 * 2 = 0xfffffffffffffffc = -4 as int64_t
     # Tensor::numel() return int64_t, so following check that negative allocs are correctly handled
-    yield ErrorInput(SampleInput(make_arg((2, 2, 2)), kwargs={'output_size': 0x3fffffffffffffff}),
+    yield ErrorInput(SampleInput(make_arg((2, 2, 2)), output_size=0x3fffffffffffffff),
                      error_regex="overflow")
 
     # error inputs for empty output
-    yield ErrorInput(SampleInput(make_arg((1, 2, 3)), kwargs={'output_size': ()}),
+    yield ErrorInput(SampleInput(make_arg((1, 2, 3)), output_size=()),
                      error_regex="'output_size' should contain one int")
 
     # error inputs for output_size lesser than 0
-    yield ErrorInput(SampleInput(make_arg((1, 1, 1)), kwargs={'output_size': (-1,)}),
+    yield ErrorInput(SampleInput(make_arg((1, 1, 1)), output_size=(-1,)),
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -2849,15 +2851,15 @@ def error_inputs_adaptive_avg_pool2d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # error inputs for incorrect input dimension
-    yield ErrorInput(SampleInput(make_arg((2, 2)), kwargs={'output_size': (2, 2)}),
+    yield ErrorInput(SampleInput(make_arg((2, 2)), output_size=(2, 2)),
                      error_type=ValueError, error_regex="Input dimension should be at least 3")
 
     # error inputs for empty output
-    yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), kwargs={'output_size': ()}),
+    yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
                      error_regex="output_size must be 2")
 
     # error inputs for output_size lesser than 0
-    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), kwargs={'output_size': (-1, 0)}),
+    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(-1, 0)),
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -2885,15 +2887,15 @@ def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # error inputs for incorrect input dimension
-    yield ErrorInput(SampleInput(make_arg((2, 2, 2)), kwargs={'output_size': (2, 2, 2)}),
+    yield ErrorInput(SampleInput(make_arg((2, 2, 2)), output_size=(2, 2, 2)),
                      error_type=ValueError, error_regex="Input dimension should be at least 4")
 
     # error inputs for empty output
-    yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), kwargs={'output_size': ()}),
+    yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
                      error_regex="output_size must be 3")
 
     # error inputs for output_size lesser than 0
-    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), kwargs={'output_size': (-1, 0, 2)}),
+    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), output_size=(-1, 0, 2)),
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -2919,11 +2921,11 @@ def error_inputs_adaptive_max_pool1d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # error inputs for empty output
-    yield ErrorInput(SampleInput(make_arg((1, 2, 3)), kwargs={'output_size': ()}),
+    yield ErrorInput(SampleInput(make_arg((1, 2, 3)), output_size=()),
                      error_regex="'output_size' should contain one int")
 
     # error inputs for output_size lesser than 0
-    yield ErrorInput(SampleInput(make_arg((1, 1, 1)), kwargs={'output_size': (-1,)}),
+    yield ErrorInput(SampleInput(make_arg((1, 1, 1)), output_size=(-1,)),
                      error_regex="Trying to create tensor with negative dimension")
 
 def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
@@ -2951,11 +2953,15 @@ def error_inputs_adaptive_max_pool2d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # error inputs for incorrect input dimension
-    yield ErrorInput(SampleInput(make_arg((2, 2)), kwargs={'output_size': (2, 2)}),
+    yield ErrorInput(SampleInput(make_arg((2, 2)), output_size=(2, 2)),
                      error_type=ValueError, error_regex="Input dimension should be at least 3")
 
+    # error inputs for empty output
+    yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
+                     error_regex="internal error")
+
     # error inputs for output_size lesser than 0
-    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), kwargs={'output_size': (-1, 0)}),
+    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(-1, 0)),
                      error_regex="Trying to create tensor with negative dimension")
 
 
@@ -2983,11 +2989,15 @@ def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # error inputs for incorrect input dimension
-    yield ErrorInput(SampleInput(make_arg((2, 2, 2)), kwargs={'output_size': (2, 2, 2)}),
+    yield ErrorInput(SampleInput(make_arg((2, 2, 2)), output_size=(2, 2, 2)),
                      error_type=ValueError, error_regex="Input dimension should be at least 4")
 
+    # error inputs for empty output
+    yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
+                     error_regex="internal error")
+
     # error inputs for output_size lesser than 0
-    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), kwargs={'output_size': (-1, 0, 2)}),
+    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), output_size=(-1, 0, 2)),
                      error_regex="Trying to create tensor with negative dimension")
 
 

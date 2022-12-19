@@ -1115,11 +1115,6 @@ torch.cuda.synchronize()
 
         y.backward(grad)
 
-    def test_pooling_size_empty(self, device):
-        t = torch.rand([1, 2, 3, 4], device=device)
-        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool2d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool3d(t, []))
-
     def _test_maxpool_indices(self, num_dim, adaptive=False, device="cpu", dtype=torch.float):
         def expected_indices(dim, dtype):
             if dim == 1:
