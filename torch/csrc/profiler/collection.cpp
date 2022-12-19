@@ -377,7 +377,8 @@ void materialize_vulkan(
         ExtraFields<EventType::Vulkan>{
             /*name_=*/std::get<0>(name_and_duration_ns),
             /*duration_ns_=*/
-            static_cast<int64_t>(std::get<1>(name_and_duration_ns))}));
+            static_cast<int64_t>(std::get<1>(name_and_duration_ns)),
+            /*in_tree_building_=*/false}));
   }
 }
 
@@ -479,7 +480,8 @@ int64_t Result::endTimeNS() const {
   auto end_time_ns = visit(c10::overloaded(
       ATTRIBUTE(TorchOp, torchOpEndNS(e, finished_, parent_)),
       ATTRIBUTE(Backend, e.end_time_us_ * 1000),
-      ATTRIBUTE(Vulkan, start_time_ns_ + e.duration_ns_),
+      ATTRIBUTE(
+          Vulkan, start_time_ns_ + (e.in_tree_building_ ? 0 : e.duration_ns_)),
       ATTRIBUTE(Allocation, start_time_ns_),
       ATTRIBUTE(OutOfMemory, start_time_ns_),
       ATTRIBUTE(Kineto, start_time_ns_ + e.duration_us_ * 1000),
@@ -881,7 +883,23 @@ struct ResultGreater {
   }
 };
 
+void set_in_tree_building(
+    std::vector<result_ptr_t>& results,
+    const bool value) {
+  for (result_ptr_t& r : results) {
+    r->visit(c10::overloaded(
+        [value](ExtraFields<EventType::Vulkan>& i) {
+          i.in_tree_building_ = value;
+        },
+        [&](auto&) {
+          // pass
+        }));
+  }
+}
+
 void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
+  set_in_tree_building(sorted_events, true);
+
   using op_fields = ExtraFields<EventType::TorchOp>;
   ska::flat_hash_map<uint64_t, std::shared_ptr<Result>> stacks;
   std::priority_queue<result_ptr_t, std::vector<result_ptr_t>, ResultGreater>
@@ -970,6 +988,8 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     pop_event(end_events_.top());
     end_events_.pop();
   }
+
+  set_in_tree_building(sorted_events, false);
 }
 } // namespace
 
