@@ -164,6 +164,7 @@ class TestTensorCreation(TestCase):
                     self.assertEqual(x, torch.tensor([n] * numel, dtype=dt, device=device))
                     self.assertEqual(dt, x.dtype)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_roll(self, device):
         numbers = torch.arange(1, 9, device=device)
 
@@ -920,6 +921,7 @@ class TestTensorCreation(TestCase):
             expected = np.dstack(np_input)
             self.assertEqual(actual, expected)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @dtypes(torch.int32, torch.int64)
     def test_large_linspace(self, device, dtype):
         start = torch.iinfo(dtype).min
@@ -1175,6 +1177,7 @@ class TestTensorCreation(TestCase):
 
     # TODO: update to work on CUDA, too?
     @onlyCPU
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_simple_scalar_cast(self, device):
         ok = [torch.tensor([1.5]), torch.zeros(1, 1, 1, 1)]
         ok_values = [1.5, 0]
@@ -1428,6 +1431,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(c1, expected)
         self.assertEqual(c2, expected)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @skipMeta
     def test_linlogspace_mem_overlap(self, device):
         x = torch.rand(1, device=device).expand(10)
@@ -2222,6 +2226,7 @@ class TestTensorCreation(TestCase):
             self.assertNotEqual(torch.tensor(n, device='cuda'), n_astensor)
 
     # TODO: this test should be updated
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @suppress_warnings
     def test_range(self, device):
         res1 = torch.range(0, 1, device=device)
@@ -2250,6 +2255,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
     # TODO: this test should be updated
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_range_warning(self, device):
         with warnings.catch_warnings(record=True) as w:
             torch.range(0, 10, device=device)
@@ -2390,6 +2396,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(d.shape[0], 800)
 
     # TODO: this test should be updated
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     @onlyCPU
     def test_arange_inference(self, device):
         saved_dtype = torch.get_default_dtype()
@@ -2557,11 +2564,13 @@ class TestTensorCreation(TestCase):
         for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
             test_fn(torch.linspace, np.linspace, steps)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @dtypes(torch.complex64)
     def test_linspace_vs_numpy_complex(self, device, dtype):
         self._test_linspace_logspace_complex_helper(torch.linspace, np.linspace,
                                                     device, dtype)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @dtypes(torch.complex64)
     def test_logspace_vs_numpy_complex(self, device, dtype):
         self._test_linspace_logspace_complex_helper(torch.logspace, np.logspace,
@@ -2654,6 +2663,7 @@ class TestTensorCreation(TestCase):
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @dtypes(torch.float, torch.double, torch.long)
     @parametrize("window", ['hann', 'hamming', 'bartlett', 'blackman'])
     def test_signal_window_functions(self, device, dtype, window):
@@ -2662,6 +2672,7 @@ class TestTensorCreation(TestCase):
     @onlyNativeDeviceTypes
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
     @dtypes(torch.float, torch.double, torch.long)
     def test_kaiser_window(self, device, dtype):
@@ -2849,10 +2860,12 @@ class TestTensorCreation(TestCase):
 
             self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_linspace_deduction(self, device):
         # Test deduction from input parameters.
         self._test_linspace_logspace_deduction_helper(torch.linspace, device)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_logspace_deduction(self, device):
         # Test deduction from input parameters.
         self._test_linspace_logspace_deduction_helper(torch.logspace, device)
