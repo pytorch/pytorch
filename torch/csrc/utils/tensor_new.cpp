@@ -1680,9 +1680,9 @@ Tensor tensor_fromDLPack(PyObject* data) {
   // too.
   // HACK: Ensure that we hold the GIL here just in case the
   // managed tensor originating from a buggy NumPy build.
-  auto atensor = not torch::utils::is_numpy_dlpack_deleter_bugged()
-      ? at::fromDLPack(dlMTensor)
-      : at::fromDLPack(dlMTensor, std::move(deleter_with_gil));
+  auto atensor = torch::utils::is_numpy_dlpack_deleter_bugged()
+      ? at::fromDLPack(dlMTensor, std::move(deleter_with_gil))
+      : at::fromDLPack(dlMTensor);
 
   // Make sure this capsule will never be used again.
   PyCapsule_SetName(data, "used_dltensor");
