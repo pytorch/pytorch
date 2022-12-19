@@ -61,6 +61,7 @@ constant_fold_functions = [
     torch.device,
     torch.distributed.is_available,
     torch.finfo,
+    torch.get_default_dtype,
     torch.iinfo,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
@@ -315,6 +316,25 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
+        elif self.value is torch.backends.cudnn.is_acceptable:
+            # is_acceptable(tensor) returns true if
+            #   (a) tensor dtype/device are supported by cudnn
+            #   (b) cudnn is available
+            #   (c) some initialization has completed
+            # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
+            assert (
+                len(args) == 1 or "tensor" in kwargs
+            ), "Expect 1 input to cudnn.is_acceptable"
+            tensor_variable = args[0] if len(args) > 0 else kwargs["tensor"]
+            assert isinstance(
+                tensor_variable, TensorVariable
+            ), "Expect input to cudnn.is_acceptable to be a tensor"
+            tensor_inp = torch.tensor(
+                0, dtype=tensor_variable.dtype, device=tensor_variable.device
+            )
+            return ConstantVariable(
+                torch.backends.cudnn.is_acceptable(tensor_inp), **options
+            )
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")

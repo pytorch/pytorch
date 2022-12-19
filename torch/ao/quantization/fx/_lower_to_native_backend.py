@@ -3,8 +3,8 @@ from torch.fx import map_arg, Node
 from torch.fx.graph import Graph
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
@@ -253,6 +253,10 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 #   2) The replacement static quantized module class for lowering
 STATIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
     nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU),
+    # TODO: LinearLeakyReLU is registered as global but it is only fused and
+    # lowered when ondnn's backend config is used. Maybe need to separate
+    # registration and lowering functions for different backends in the future.
+    nni.LinearLeakyReLU: (nnqr.Linear, nniq.LinearLeakyReLU),
     nni.ConvReLU1d: (nnqr.Conv1d, nniq.ConvReLU1d),
     nni.ConvReLU2d: (nnqr.Conv2d, nniq.ConvReLU2d),
     nni.ConvReLU3d: (nnqr.Conv3d, nniq.ConvReLU3d),
