@@ -413,7 +413,7 @@ class TestDecomp(TestCase):
     @modules(module_db)
     def test_module(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
-        is_python_dispatcher_decomp = module_cls == torch.nn.RNN
+        is_python_dispatcher_decomp = module_cls in (torch.nn.RNN, torch.nn.LSTM)
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True, training=training)
         for module_input in module_inputs:

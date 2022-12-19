@@ -2138,6 +2138,73 @@ def rnn_relu_input(
     return out, torch.stack(final_hiddens, 0)
 
 
+def one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
+    ih_weight = params[0]
+    hh_weight = params[1]
+    ih_bias = params[2] if has_biases else None
+    hh_bias = params[3] if has_biases else None
+    hr_weight = (
+        params[4] if len(params) == 5 else params[2] if len(params) == 3 else None
+    )
+
+    hx = hidden[0]
+    cx = hidden[1]
+
+    precomputed_input = F.linear(inp, ih_weight, ih_bias)
+    precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
+    step_output = []
+    for inp in precomputed_input:
+        gates = F.linear(hx, hh_weight, hh_bias) + inp
+        chunked_gates = gates.chunk(4, 1)
+        in_gate = chunked_gates[0].sigmoid()
+        forget_gate = chunked_gates[1].sigmoid()
+        cell_gate = chunked_gates[2].tanh()
+        out_gate = chunked_gates[3].sigmoid()
+        cy = forget_gate * cx + (in_gate * cell_gate)
+        hy = out_gate * cy.tanh()
+        hy = hy if hr_weight is None else hy @ hr_weight.t()
+
+        step_output.append(hy)
+        hx = hy
+        cx = cy
+
+    out = torch.stack(step_output, 0)
+
+    return out, (hx, cx)
+
+
+@torch.ops.aten.lstm.input.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.lstm.input.py_impl(DispatchKey.Autograd)
+def lstm_impl(
+    input,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+):
+    assert len(hx) == 2, "lstm expects two hidden states"
+    params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
+    hidden = list(zip(hx[0], hx[1]))
+    out, final_hiddens = _rnn_helper(
+        input,
+        hidden,
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        batch_first,
+        one_layer_lstm,
+    )
+    final_hiddens = list(zip(*final_hiddens))
+    return out, torch.stack(final_hiddens[0], 0), torch.stack(final_hiddens[1], 0)
+
+
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
 @torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
