@@ -219,7 +219,7 @@ class RendezvousHandlerRegistry:
         Args:
             backend:
                 The name of the backend.
-            creater:
+            creator:
                 The callback to invoke to construct the
                 :py:class:`RendezvousHandler`.
         """
