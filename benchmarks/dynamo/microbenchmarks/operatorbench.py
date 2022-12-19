@@ -124,8 +124,6 @@ def skip_operator(operator):
     if isinstance(operator, torch._ops.OpOverload):
         op_impls.append(operator.overloadpacket)
 
-    return False
-
     if any(op in fallbacks for op in op_impls):
         print(f"Skipping {operator}, no inductor impl")
         return True
