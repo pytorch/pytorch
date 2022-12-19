@@ -4,6 +4,7 @@ import sys
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import ReduceOp
+from unittest import skip, SkipTest
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -14,7 +15,11 @@ from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import (
+    TestCase,
+    run_tests,
+    IS_SANDCASTLE,
+)
 
 DEFAULT_WORLD_SIZE = 4
 
@@ -39,7 +44,7 @@ class TestCollectivesWithWrapper(TestCase):
 
             dist.all_gather(output_tensors, input_tensor)  # perform 2nd all gather
 
-        with self.assertRaisesRegex(AssertionError, "Mimic real test failure."):
+        with self.assertRaises(RuntimeError):
             _test_method(self)
 
     def test_collective_error_on_rank_non_zero(self):
@@ -54,7 +59,7 @@ class TestCollectivesWithWrapper(TestCase):
 
             dist.all_gather(output_tensors, input_tensor)  # perform 2nd all gather
 
-        with self.assertRaisesRegex(AssertionError, "Mimic real test failure."):
+        with self.assertRaises(RuntimeError):
             _test_method(self)
 
     def test_collective_error_on_rank_non_zero_all(self):
@@ -69,8 +74,18 @@ class TestCollectivesWithWrapper(TestCase):
 
             dist.all_gather(output_tensors, input_tensor)  # perform 2nd all gather
 
-        with self.assertRaisesRegex(AssertionError, "Mimic real test failure."):
+        with self.assertRaises(RuntimeError):
             _test_method(self)
+
+    def test_skip(self):
+        @spawn_threads_and_init_comms(world_size=4)
+        @skip("check if skip exception can be captured correctly.")
+        def _test_method(self):
+            pass
+
+        if not IS_SANDCASTLE:
+            with self.assertRaises(SkipTest):
+                _test_method(self)
 
 class TestCollectivesWithBaseClass(MultiThreadedTestCase):
     @property
