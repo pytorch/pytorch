@@ -277,10 +277,13 @@ def prelu_backward(
         cur_weight = cur_weight.unsqueeze(-1)
     input_grad = torch.where(self > 0, grad_output, cur_weight * grad_output)
     weight_grad_collector = torch.where(self > 0, 0.0, self * grad_output)
-    out = weight_grad_collector.sum_to_size(cur_weight.shape)
+    if len(self.shape) == 0:
+        out = weight_grad_collector.view(cur_weight.shape)
+    else:
+        out = weight_grad_collector.sum_to_size(cur_weight.shape)
     while out.dim() > weight.dim():
         out = out.squeeze(-1)
-    return (input_grad, out)
+    return (input_grad.view_as(self), out)
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)
@@ -1329,7 +1332,15 @@ def native_batch_norm_helper(
     new_running_mean = running_mean
     new_running_var = running_var
     if training:
-        output, mean, rstd = normalize(input, reduction_dims, eps)
+        computation_dtype = utils.get_computation_dtype(input.dtype)
+        input_acc = input.to(dtype=computation_dtype)
+        biased_var = torch.var(
+            input_acc, dim=reduction_dims, unbiased=False, keepdim=True
+        )
+        mean = torch.mean(input_acc, dim=reduction_dims, keepdim=True)
+        rstd = torch.rsqrt(biased_var + eps)
+
+        output = (input - mean) * rstd
 
         save_mean = _squeeze_multiple(mean, reduction_dims)
         save_rstd = _squeeze_multiple(rstd, reduction_dims)
@@ -1342,9 +1353,8 @@ def native_batch_norm_helper(
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
-                n / (n - 1)
-            )
+            squeezed_var = _squeeze_multiple(biased_var, reduction_dims)
+            unbiased_var = squeezed_var * (n / (n - 1))
             new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
             if not functional:
                 running_var.copy_(new_running_var)
@@ -1523,9 +1533,10 @@ def _to_copy(
 ):
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
-    assert device is not None or dtype is not None or memory_format is not None
+    if device is None and dtype is None and memory_format is None:
+        return x.clone()
     dtype_converted = False
-    if device is not None and device != x.get_device():
+    if device is not None and device != x.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
             x = torch._prims.convert_element_type(x, dtype)
@@ -1535,7 +1546,7 @@ def _to_copy(
         x = torch._prims.convert_element_type(x, dtype)
     if memory_format is not None:  # no ref/prim for memory format
         out = torch.empty_like(x, memory_format=memory_format)
-        out.copy_(x)
+        out = torch.ops.aten.copy.default(out, x)
         return out  # type: ignore[call-overload]
     return x
 

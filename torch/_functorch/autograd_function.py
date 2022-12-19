@@ -2,12 +2,18 @@ import torch
 from torch._ops import PyOperator
 from torch._C._functorch import TransformType
 from torch._functorch.utils import enable_autograd_function
-from torch.autograd.function import _SingleLevelFunction
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
     _wrap_for_grad,
     _unwrap_for_grad,
+    _unwrap_batched,
 )
+from torch._functorch.vmap import (
+    _broadcast_to_and_flatten,
+    _create_batched_inputs,
+)
+from torch.autograd.forward_ad import _set_fwd_grad_enabled
+from typing import NamedTuple
 
 # autograd.Function technically runs before the regular PyTorch dispatcher.
 # This is how features like autocast and torch_dispatch (e.g. PythonTLSSnapshot)
@@ -74,42 +80,63 @@ custom_function_call = CustomFunctionPyOperator()
 # To "set up the autograd graph", we generate a _SingleLevelFunction
 # and apply it.
 @custom_function_call.py_impl(TransformType.Grad)
+@custom_function_call.py_impl(TransformType.Jvp)
 def custom_function_call_grad(interpreter, autograd_function, *operands):
-    maybe_interpreter = interpreter
-    level = maybe_interpreter.level()
-
-    # TODO: The name of the grad_fn is GeneratedBackward. This isn't a great UX,
-    # but in theory functorch users shouldn't be peeking at the grad_fn.
-    # We should try to generate a better name for this.
-    # https://github.com/pytorch/pytorch/issues/90224
-    class Generated(_SingleLevelFunction):
-        @staticmethod
-        def forward(*operands):
-            unwrapped_operands = pytree.tree_map_only(
-                torch.Tensor,
-                lambda x: _unwrap_for_grad(x, level),
-                operands)
-            with torch.enable_grad(), maybe_interpreter.lower():
-                output = custom_function_call(autograd_function, *unwrapped_operands)
-
-            return pytree.tree_map_only(
-                torch.Tensor,
-                lambda x: _wrap_for_grad(x, level),
-                output)
-
-        @staticmethod
-        def setup_context(ctx, outputs, *operands):
-            ctx.mark_dirty = mark_dirty_error
-            return autograd_function.setup_context(ctx, outputs, *operands)
-
-        @staticmethod
-        def backward(ctx, *grads):
-            result = autograd_function.backward(ctx, *grads)
-            return result
-
+    Generated = generate_single_level_function(interpreter, autograd_function)
     with enable_autograd_function():
         flat_out = Generated.apply(*operands)
     return flat_out
+
+
+def generate_single_level_function(interpreter, autograd_function):
+    level = interpreter.level()
+
+    def forward(*operands):
+        unwrapped_operands = pytree.tree_map_only(
+            torch.Tensor,
+            lambda x: _unwrap_for_grad(x, level),
+            operands)
+        # Both enable_grad() and _set_fwd_grad_enabled() are necessary no matter
+        # the transform. _SingleLevelFunction will turn off both fwd and bwd
+        # gradient computation and we need to turn it back on here.
+        with torch.enable_grad(), _set_fwd_grad_enabled(True), interpreter.lower():
+            output = custom_function_call(autograd_function, *unwrapped_operands)
+
+        return pytree.tree_map_only(
+            torch.Tensor,
+            lambda x: _wrap_for_grad(x, level),
+            output)
+
+    def setup_context(ctx, outputs, *operands):
+        ctx.mark_dirty = mark_dirty_error
+        return autograd_function.setup_context(ctx, outputs, *operands)
+
+    # backward is only used if the transform is TransformType.Grad
+    def backward(ctx, *grads):
+        result = autograd_function.backward(ctx, *grads)
+        return result
+
+    # jvp is only used if the transform is TransformType.Jvp
+    def jvp(ctx, *tangents):
+        result = autograd_function.jvp(ctx, *tangents)
+        return result
+
+    # This is the sequence of magic words to dynamically generate a Subclass with
+    # a given name. A Tensor's .grad_fn field has a class name that is the original
+    # autograd.Function's name + Backward, so we do this to generate some
+    # meaningful name.
+    name = f'{autograd_function.__name__}Generated'
+    Generated = type(
+        name,
+        (torch.autograd.function._SingleLevelFunction,),
+        {
+            'forward': staticmethod(forward),
+            'backward': staticmethod(backward),
+            'jvp': staticmethod(jvp),
+            'setup_context': staticmethod(setup_context),
+        },
+    )
+    return Generated
 
 
 # https://github.com/pytorch/pytorch/issues/90225
@@ -173,14 +200,62 @@ def mark_dirty_error(*args, **kwargs):
 # the unwrapping to be consistent with regular PyTorch dispatcher operations.
 
 
+class VmapInfo(NamedTuple):
+    batch_size: int
+    randomness: str
+
+
 @custom_function_call.py_impl(TransformType.Vmap)
 def custom_function_call_vmap(interpreter, autograd_function, *operands):
-    raise RuntimeError("NYI: vmap rule for custom_function_call")
+    if not hasattr(autograd_function, "vmap"):
+        # TODO: link docs when they're ready.
+        # https://github.com/pytorch/pytorch/issues/90224
+        raise RuntimeError(
+            f"You tried to vmap over {autograd_function.__name__}, but "
+            f"it does not have a vmap rule defined. Please add a vmap "
+            f"staticmethod to it.")
+
+    current_level = interpreter.level()
+    info = VmapInfo(
+        batch_size=interpreter.batch_size(),
+        randomness=interpreter.randomness(),
+    )
+    unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
+
+    # If none of the tensors are batched at the current level, then we skip the
+    # current level. This saves the user from needing to handle this case in
+    # their vmap staticmethod (and is consistent with our C++ batching rule API)
+    if pytree.tree_all(lambda dim: dim is None, in_dims):
+        with interpreter.lower():
+            return custom_function_call(autograd_function, *operands)
+
+    with interpreter.lower():
+        unwrapped_output, out_dims = autograd_function.vmap(info, in_dims, *unwrapped_operands)
+
+    output = wrap_batched(unwrapped_output, out_dims, current_level)
+    return output
 
 
-@custom_function_call.py_impl(TransformType.Jvp)
-def custom_function_call_jvp(interpreter, autograd_function, *operands):
-    raise RuntimeError("NYI: jvp rule for custom_function_call")
+def unwrap_batched(args, level):
+    flat_args, spec = pytree.tree_flatten(args)
+    if len(flat_args) == 0:
+        return args, ()
+    result = [_unwrap_batched(arg, level) if isinstance(arg, torch.Tensor)
+              else (arg, None) for arg in flat_args]
+    output, bdims = zip(*result)
+    return pytree.tree_unflatten(output, spec), pytree.tree_unflatten(bdims, spec)
+
+
+def wrap_batched(args, bdims, level):
+    # TODO: raise better error message to the user when they don't follow the API.
+    # Should probably mimic the logic of _process_batched_inputs,
+    # but that one is hyperspecialized on error messages.
+    # https://github.com/pytorch/pytorch/issues/90224
+    flat_args, spec = pytree.tree_flatten(args)
+    flat_bdims = _broadcast_to_and_flatten(bdims, spec)
+    assert flat_bdims is not None
+    result = _create_batched_inputs(flat_bdims, flat_args, level, spec)
+    return result
 
 
 @custom_function_call.py_impl(TransformType.Functionalize)
