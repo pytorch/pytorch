@@ -239,10 +239,10 @@ def _single_tensor_sgd(params: List[Tensor],
             buf = momentum_buffer_list[i]
 
             if buf is None:
-                buf = torch.clone(d_p).detach()
+                buf = torch.zeros_like(d_p)
                 momentum_buffer_list[i] = buf
-            else:
-                buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+
+            buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
 
             if nesterov:
                 d_p = d_p.add(buf, alpha=momentum)
@@ -294,10 +294,10 @@ def _multi_tensor_sgd(params: List[Tensor],
             bufs = []
             for i in range(len(momentum_buffer_list)):
                 if momentum_buffer_list[i] is None:
-                    buf = momentum_buffer_list[i] = torch.clone(grads[i]).detach()
-                else:
-                    buf = momentum_buffer_list[i]
-                    buf.mul_(momentum).add_(grads[i], alpha=1 - dampening)
+                    momentum_buffer_list[i] = torch.zeros_like(grads[i])
+
+                buf = momentum_buffer_list[i]
+                buf.mul_(momentum).add_(grads[i], alpha=1 - dampening)
 
                 bufs.append(buf)
 
