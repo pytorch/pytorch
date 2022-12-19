@@ -271,6 +271,7 @@ class WrapperCodeGen(CodeGen):
                 from ctypes import c_void_p, c_long
                 import torch
                 import random
+                import threading
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
 
@@ -385,24 +386,18 @@ class WrapperCodeGen(CodeGen):
                     self.clear()
 
             param_cache = mkldnn_param_cache()
-            def get_mkldnn_conv_param(op_id, src, weight, bias, padding, stride, dilation, groups, attr, scalars, algo):
+            param_cache_lock = threading.Lock()
+            def get_mkldnn_param(op_id, torch_func, *param_args):
                 if param_cache.check_param(op_id):
                     conv_param = param_cache.get_param(op_id)
                 else:
-                    conv_param = torch.ops.mkldnn._conv_param_generation(src, weight, bias, padding, stride, dilation,
-                                                                         groups, attr, scalars, algo)
+                    param_cache_lock.acquire()
+                    if param_cache.check_param(op_id):
+                        param_cache_lock.release()
+                        return param_cache.get_param(op_id)
+                    conv_param = torch_func(*param_args)
                     param_cache.add_param(op_id, conv_param, 0)
-                return conv_param
-            def get_mkldnn_conv_param_binary(op_id, src, other, weight, bias, padding, stride, dilation, groups,
-                                             binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm):
-                if param_cache.check_param(op_id):
-                    conv_param = param_cache.get_param(op_id)
-                else:
-                    conv_param = torch.ops.mkldnn._conv_param_generation_binary(src, other, weight, bias, padding,
-                                                                                stride, dilation, groups, binary_attr,
-                                                                                alpha, unary_attr, unary_scalars,
-                                                                                unary_algorithm)
-                    param_cache.add_param(op_id, conv_param, 0)
+                    param_cache_lock.release()
                 return conv_param
             """
         )
