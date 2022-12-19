@@ -1394,6 +1394,9 @@ def _gather_orig_param_state(
     object_list: List[Dict[str, Any]] = [
         {} for _ in range(cast(int, fsdp_state.world_size))
     ]
+    import logging
+    import time
+    logging.warning(f"DEBUG0 {fsdp_state.rank} {len(object_list)} {time.time()}.")
     dist.all_gather_object(object_list, state_objects)
     orig_state: Dict[str, Any] = {}
     for state in object_list:
