@@ -165,26 +165,26 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, creat
 def vjp(func: Callable, *primals, has_aux: bool = False):
     """
     Standing for the vector-Jacobian product, returns a tuple containing the
-    results of :attr:`func` applied to :attr:`primals` and a function that, when
-    given ``cotangents``, computes the reverse-mode Jacobian of :attr:`func` with
-    respect to :attr:`primals` times ``cotangents``.
+    results of ``func`` applied to ``primals`` and a function that, when
+    given ``cotangents``, computes the reverse-mode Jacobian of ``func`` with
+    respect to ``primals`` times ``cotangents``.
 
     Args:
         func (Callable): A Python function that takes one or more arguments. Must
             return one or more Tensors.
-        primals (Tensors): Positional arguments to :attr:`func` that must all be
+        primals (Tensors): Positional arguments to ``func`` that must all be
             Tensors. The returned function will also be computing the
             derivative with respect to these arguments
-        has_aux (bool): Flag indicating that :attr:`func` returns a
+        has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
             the function to be differentiated and the second element is
             other auxiliary objects that will not be differentiated.
             Default: False.
 
     Returns:
-        Returns a ``(output, vjp_fn)`` tuple containing the output of :attr:`func`
-        applied to :attr:`primals` and a function that computes the vjp of
-        :attr:`func` with respect to all :attr:`primals` using the cotangents passed
+        Returns a ``(output, vjp_fn)`` tuple containing the output of ``func``
+        applied to ``primals`` and a function that computes the vjp of
+        ``func`` with respect to all ``primals`` using the cotangents passed
         to the returned function. If ``has_aux is True``, then instead returns a
         ``(output, vjp_fn, aux)`` tuple.
         The returned ``vjp_fn`` function will return a tuple of each VJP.
@@ -216,7 +216,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
         >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
 
     The function returned by :func:`vjp` will compute the partials with
-    respect to each of the :attr:`primals`
+    respect to each of the ``primals``
 
         >>> x, y = torch.randn([5, 4]), torch.randn([4, 5])
         >>> (_, vjpfunc) = functorch.vjp(torch.matmul, x, y)
@@ -226,7 +226,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
         >>> assert torch.allclose(vjps[0], torch.matmul(cotangents, y.transpose(0, 1)))
         >>> assert torch.allclose(vjps[1], torch.matmul(x.transpose(0, 1), cotangents))
 
-    :attr:`primals` are the positional arguments for :attr:`f`. All kwargs use their
+    ``primals`` are the positional arguments for ``f``. All kwargs use their
     default value
 
         >>> x = torch.randn([5])
@@ -340,8 +340,8 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
            chunk_size: Optional[int] = None,
            _preallocate_and_copy=False):
     """
-    Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
-    :attr:`argnum` using reverse mode autodiff
+    Computes the Jacobian of ``func`` with respect to the arg(s) at index
+    ``argnum`` using reverse mode autodiff
 
     Args:
         func (function): A Python function that takes one or more arguments,
@@ -349,7 +349,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         argnums (int or Tuple[int]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
-        has_aux (bool): Flag indicating that :attr:`func` returns a
+        has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
             the function to be differentiated and the second element is
             auxiliary objects that will not be differentiated.
@@ -363,11 +363,11 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             the jacobian, please try to specify a non-None chunk_size.
 
     Returns:
-        Returns a function that takes in the same inputs as :attr:`func` and
-        returns the Jacobian of :attr:`func` with respect to the arg(s) at
-        :attr:`argnums`. If ``has_aux is True``, then the returned function
+        Returns a function that takes in the same inputs as ``func`` and
+        returns the Jacobian of ``func`` with respect to the arg(s) at
+        ``argnums``. If ``has_aux is True``, then the returned function
         instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
-        is the Jacobian and ``aux`` is auxiliary objects returned by :attr:`func`.
+        is the Jacobian and ``aux`` is auxiliary objects returned by ``func``.
 
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
@@ -416,7 +416,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 
     By default, :func:`jacrev` computes the Jacobian with respect to the first
     input. However, it can compute the Jacboian with respect to a different
-    argument by using :attr:`argnums`:
+    argument by using ``argnums``:
 
         >>> from functorch import jacrev
         >>> def f(x, y):
@@ -427,7 +427,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         >>> expected = torch.diag(2 * y)
         >>> assert torch.allclose(jacobian, expected)
 
-    Additionally, passing a tuple to :attr:`argnums` will compute the Jacobian
+    Additionally, passing a tuple to ``argnums`` will compute the Jacobian
     with respect to multiple arguments
 
         >>> from functorch import jacrev
@@ -814,13 +814,13 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
     Args:
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
-        primals (Tensors): Positional arguments to :attr:`func` that must all be
+        primals (Tensors): Positional arguments to ``func`` that must all be
             Tensors. The returned function will also be computing the
             derivative with respect to these arguments
         tangents (Tensors): The "vector" for which Jacobian-vector-product is
             computed. Must be the same structure and sizes as the inputs to
             ``func``.
-        has_aux (bool): Flag indicating that :attr:`func` returns a
+        has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
             the function to be differentiated and the second element is
             other auxiliary objects that will not be differentiated.
@@ -945,8 +945,8 @@ def safe_unflatten(tensor, dim, shape):
 
 def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
     """
-    Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
-    :attr:`argnum` using forward-mode autodiff
+    Computes the Jacobian of ``func`` with respect to the arg(s) at index
+    ``argnum`` using forward-mode autodiff
 
     Args:
         func (function): A Python function that takes one or more arguments,
@@ -954,7 +954,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         argnums (int or Tuple[int]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
-        has_aux (bool): Flag indicating that :attr:`func` returns a
+        has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
             the function to be differentiated and the second element is
             auxiliary objects that will not be differentiated.
@@ -964,11 +964,11 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
             Default: "error"
 
     Returns:
-        Returns a function that takes in the same inputs as :attr:`func` and
-        returns the Jacobian of :attr:`func` with respect to the arg(s) at
-        :attr:`argnums`. If ``has_aux is True``, then the returned function
+        Returns a function that takes in the same inputs as ``func`` and
+        returns the Jacobian of ``func`` with respect to the arg(s) at
+        ``argnums``. If ``has_aux is True``, then the returned function
         instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
-        is the Jacobian and ``aux`` is auxiliary objects returned by :attr:`func`.
+        is the Jacobian and ``aux`` is auxiliary objects returned by ``func``.
 
     .. note::
         You may see this API error out with "forward-mode AD not implemented
@@ -1022,7 +1022,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
 
     By default, :func:`jacfwd` computes the Jacobian with respect to the first
     input. However, it can compute the Jacboian with respect to a different
-    argument by using :attr:`argnums`:
+    argument by using ``argnums``:
 
         >>> from functorch import jacfwd
         >>> def f(x, y):
@@ -1033,7 +1033,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         >>> expected = torch.diag(2 * y)
         >>> assert torch.allclose(jacobian, expected)
 
-    Additionally, passing a tuple to :attr:`argnums` will compute the Jacobian
+    Additionally, passing a tuple to ``argnums`` will compute the Jacobian
     with respect to multiple arguments
 
         >>> from functorch import jacfwd
@@ -1098,8 +1098,8 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
 
 def hessian(func, argnums=0):
     """
-    Computes the Hessian of :attr:`func` with respect to the arg(s) at index
-    :attr:`argnum` via a forward-over-reverse strategy.
+    Computes the Hessian of ``func`` with respect to the arg(s) at index
+    ``argnum`` via a forward-over-reverse strategy.
 
     The forward-over-reverse strategy (composing ``jacfwd(jacrev(func))``) is
     a good default for good performance. It is possible to compute Hessians
@@ -1114,9 +1114,9 @@ def hessian(func, argnums=0):
             Default: 0.
 
     Returns:
-        Returns a function that takes in the same inputs as :attr:`func` and
-        returns the Hessian of :attr:`func` with respect to the arg(s) at
-        :attr:`argnums`.
+        Returns a function that takes in the same inputs as ``func`` and
+        returns the Hessian of ``func`` with respect to the arg(s) at
+        ``argnums``.
 
     .. note::
         You may see this API error out with "forward-mode AD not implemented
@@ -1145,24 +1145,24 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
 
     Args:
         func (Callable): A Python function that takes one or more arguments.
-            Must return a single-element Tensor. If specified :attr:`has_aux`
+            Must return a single-element Tensor. If specified ``has_aux``
             equals ``True``, function can return a tuple of single-element
             Tensor and other auxiliary objects: ``(output, aux)``.
         argnums (int or Tuple[int]): Specifies arguments to compute gradients
-            with respect to. :attr:`argnums` can be single integer or tuple of
+            with respect to. ``argnums`` can be single integer or tuple of
             integers. Default: 0.
-        has_aux (bool): Flag indicating that :attr:`func` returns a tensor and
+        has_aux (bool): Flag indicating that ``func`` returns a tensor and
             other auxiliary objects: ``(output, aux)``. Default: False.
 
     Returns:
         Function to compute a tuple of gradients with respect to its inputs
         and the forward computation. By default, the output of the function is
         a tuple of the gradient tensor(s) with respect to the first argument
-        and the primal computation. If specified :attr:`has_aux` equals
+        and the primal computation. If specified ``has_aux`` equals
         ``True``, tuple of gradients and tuple of the forward computation with
-        output auxiliary objects is returned. If :attr:`argnums` is a tuple of
+        output auxiliary objects is returned. If ``argnums`` is a tuple of
         integers, a tuple of a tuple of the output gradients with respect to
-        each :attr:`argnums` value and the forward computation is returned.
+        each ``argnums`` value and the forward computation is returned.
 
     See :func:`grad` for examples
     """
@@ -1218,26 +1218,26 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
 
 
 def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
-    """``grad`` operator helps computing gradients of :attr:`func` with respect to the
-    input(s) specified by :attr:`argnums`. This operator can be nested to
+    """``grad`` operator helps computing gradients of ``func`` with respect to the
+    input(s) specified by ``argnums``. This operator can be nested to
     compute higher-order gradients.
 
     Args:
         func (Callable): A Python function that takes one or more arguments.
-            Must return a single-element Tensor. If specified :attr:`has_aux` equals ``True``,
+            Must return a single-element Tensor. If specified ``has_aux`` equals ``True``,
             function can return a tuple of single-element Tensor and other auxiliary objects:
             ``(output, aux)``.
         argnums (int or Tuple[int]): Specifies arguments to compute gradients with respect to.
-            :attr:`argnums` can be single integer or tuple of integers. Default: 0.
-        has_aux (bool): Flag indicating that :attr:`func` returns a tensor and other
+            ``argnums`` can be single integer or tuple of integers. Default: 0.
+        has_aux (bool): Flag indicating that ``func`` returns a tensor and other
             auxiliary objects: ``(output, aux)``. Default: False.
 
     Returns:
         Function to compute gradients with respect to its inputs. By default, the output of
         the function is the gradient tensor(s) with respect to the first argument.
-        If specified :attr:`has_aux` equals ``True``, tuple of gradients and output auxiliary objects
-        is returned. If :attr:`argnums` is a tuple of integers, a tuple of output gradients with
-        respect to each :attr:`argnums` value is returned.
+        If specified ``has_aux`` equals ``True``, tuple of gradients and output auxiliary objects
+        is returned. If ``argnums`` is a tuple of integers, a tuple of output gradients with
+        respect to each ``argnums`` value is returned.
 
     Example of using ``grad``:
 
@@ -1271,7 +1271,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         >>> inputs = (weights, examples, targets)
         >>> grad_weight_per_example = vmap(grad(compute_loss), in_dims=(None, 0, 0))(*inputs)
 
-    Example of using ``grad`` with :attr:`has_aux` and :attr:`argnums`:
+    Example of using ``grad`` with ``has_aux`` and ``argnums``:
 
         >>> from functorch import grad
         >>> def my_loss_func(y, y_pred):
@@ -1374,7 +1374,7 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
 
     Returns:
         Returns a new "functionalized" function. It takes the same inputs as
-        :attr:`func`, and has the same behavior, but any mutations
+        ``func``, and has the same behavior, but any mutations
         (and optionally aliasing) performed on intermeidate tensors
         in the function will be removed.
 
