@@ -187,6 +187,7 @@ class TimmRunnner(BenchmarkRunner):
 
         retries = 1
         success = False
+        model = None
         while not success and retries < 4:
             try:
                 model = create_model(
@@ -209,6 +210,9 @@ class TimmRunnner(BenchmarkRunner):
                 wait = retries * 30
                 time.sleep(wait)
                 retries += 1
+
+        if model is None:
+            raise RuntimeError(f"Failed to load model '{model_name}'")
 
         model.to(
             device=device,
