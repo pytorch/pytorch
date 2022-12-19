@@ -5,12 +5,15 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
     TransformType,
+    RandomnessType,
     CInterpreter,
     CGradInterpreterPtr,
     CVmapInterpreterPtr,
+    CJvpInterpreterPtr,
     pop_dynamic_layer_stack,
     push_dynamic_layer_stack,
 )
+from torch.autograd.forward_ad import _set_fwd_grad_enabled
 
 """
 This file contains the functorch integration with PyDispatcher.
@@ -92,6 +95,24 @@ class VmapInterpreter(FuncTorchInterpreter):
     def batch_size(self):
         return self._cptr.batchSize()
 
+    def randomness(self):
+        typ = self._cptr.randomness()
+        if typ == RandomnessType.Error:
+            return "error"
+        elif typ == RandomnessType.Same:
+            return "same"
+        elif typ == RandomnessType.Different:
+            return "different"
+        raise RuntimeError(f"Unknown RandomnessType: {typ}")
+
+
+@contextlib.contextmanager
+def nested(*contexts):
+    with contextlib.ExitStack() as stack:
+        for ctx in contexts:
+            stack.enter_context(ctx)
+        yield contexts
+
 
 class GradInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
@@ -115,11 +136,40 @@ class GradInterpreter(FuncTorchInterpreter):
     def lower(self):
         prev_grad_mode = self.prev_grad_mode()
         if not self.prev_grad_mode:
-            return contextlib.nested(torch.no_grad(), super().lower())
+            return nested(torch.no_grad(), super().lower())
         return super().lower()
 
     def prev_grad_mode(self):
         return self._cptr.prevGradMode()
+
+
+class JvpInterpreter(FuncTorchInterpreter):
+    def __init__(self, cdata: CInterpreter):
+        assert cdata.key() == TransformType.Jvp
+        # See NOTE: [Interpreter cdata vs cptr]
+        self._cdata = cdata
+        self._cptr = CJvpInterpreterPtr(cdata)
+
+    def lift(self, args, kwargs):
+        args, kwargs = pytree.tree_map_only(torch.Tensor, self._cptr.lift, [args, kwargs])
+        return args, kwargs
+
+    def process(self, op, args, kwargs):
+        kernel = op.functorch_table[TransformType.Jvp]
+        args, kwargs = self.lift(args, kwargs)
+        return kernel(self, *args, **kwargs)
+
+    # Jvp has custom lower because of the no_fwd_grad interaction
+    # See NOTE [grad and vjp interaction with no_grad] for related info.
+    # This logic is mirrored from C++ JvpInterpreterPtr::sendToNextInterpreter
+    def lower(self):
+        prev_fwd_grad_mode = self.prev_fwd_grad_mode()
+        if not self.prev_fwd_grad_mode:
+            return nested(_set_fwd_grad_enabled(False), super().lower())
+        return super().lower()
+
+    def prev_fwd_grad_mode(self):
+        return self._cptr.prevFwdGradMode()
 
 
 def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
@@ -128,6 +178,8 @@ def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
         return GradInterpreter(cinterpreter)
     if key == TransformType.Vmap:
         return VmapInterpreter(cinterpreter)
+    if key == TransformType.Jvp:
+        return JvpInterpreter(cinterpreter)
     raise RuntimeError(f"NYI: PyDispatcher has not implemented support for {key}")
 
 
