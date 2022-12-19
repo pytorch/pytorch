@@ -2,6 +2,7 @@
 import contextlib
 import dataclasses
 import functools
+import glob
 import importlib
 import itertools
 import os
@@ -39,7 +40,7 @@ try:
     importlib.import_module("filelock")
 
     import torch._inductor.config
-    from functorch.compile import config as functorch_config
+    from functorch.compile import config as functorch_config, get_graph_being_compiled
     from torch._decomp import get_decompositions
     from torch._inductor import codecache, config, metrics, test_operators
     from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
@@ -5969,33 +5970,100 @@ if HAS_CUDA:
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
 
-        def test_optimize_indexing_dtype(self):
+        @staticmethod
+        def run_and_get_triton_code(fn, args):
             from torch._inductor.debug import DebugContext
             from torch._inductor.virtualized import V
 
             torch._dynamo.reset()
 
             context = DebugContext()
+
+            name_orig = get_graph_being_compiled()
+            # dir name is different for some reason
+            name_orig = name_orig.replace("___", "__")
+
             with patch.object(
                 config.trace, "enabled", True
             ), context, V.set_debug_handler(context):
+
+                fn(*args)
+
                 assert context._path is not None
-
-                dir_name = "/".join(context._path.split("/")[:-1])
-                name = "model__0_inference_0.1/output_code.py"
-                full_name = os.path.join(dir_name, name)
-
-                @torch._dynamo.optimize("inductor")
-                def fn(x: torch.Tensor) -> torch.Tensor:
-                    return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
-
-                fn(torch.randn(2, 4, 16, 16).cuda())
+                dir_name = "/".join(context._path.split("/")[:-1]) + "/"
+                dir_dbg = list(
+                    filter(
+                        os.path.isdir, glob.glob(dir_name + name_orig + "*inference*")
+                    )
+                )
+                assert len(dir_dbg) == 1
+                full_name = os.path.join(dir_dbg[0], "output_code.py")
 
                 with open(full_name, "r") as f:
-                    code = f.read()
-                    breakpoint()
-                    self.assertTrue("to(tl.int32)" in code)
-                    self.assertFalse("to(tl.int64)" in code)
+                    return f.read()
+
+        def test_optimize_indexing_dtype(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
+
+            fn_opt = torch._dynamo.optimize("inductor")(fn)
+            inps = [torch.randn(2, 4, 16, 16).cuda()]
+            code = self.run_and_get_triton_code(fn_opt, inps)
+            self.assertTrue("to(tl.int32)" in code)
+            self.assertFalse("to(tl.int64)" in code)
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_cant_optimize_compute(self):
+            def ones():
+                return torch.ones([4], device="cuda")
+
+            def suffix(inp):
+                return (inp.to(torch.int64) + 1).to(torch.float64)
+
+            ten = torch.rand([4], device="cuda")
+
+            for foo in (
+                lambda x: x + 2147483657,
+                lambda x: torch.where(x < 0, ones(), ones() - 2) * (-(2 ** (40))),
+                lambda x: x + ten,
+                lambda x: x + ten.sum(),
+            ):
+
+                def fn():
+                    return suffix(foo(ones()))
+
+                fn_opt = torch._dynamo.optimize("inductor")(fn)
+                code = self.run_and_get_triton_code(fn_opt, [])
+
+                # this cannot be optimized away, value too large
+                self.assertTrue("to(tl.int64)" in code)
+                self.assertEqual(fn_opt(), fn())
+
+        def test_optimize_compute(self):
+            def ones():
+                return torch.ones([4], device="cuda")
+
+            def suffix(inp):
+                return (inp.to(torch.int64) + 1).to(torch.float64)
+
+            for foo in (
+                lambda x: x + 500,
+                lambda x: torch.where(x < 0, ones(), ones() - 2) * (-(2 ** (20))),
+                lambda x: x / 30,
+            ):
+
+                def fn():
+                    return suffix(foo(ones()))
+
+                fn_opt = torch._dynamo.optimize("inductor")(fn)
+                code = self.run_and_get_triton_code(fn_opt, [])
+
+                # this can be optimized away, value too large
+                self.assertTrue("to(tl.int64)" not in code)
+                self.assertTrue("to(tl.int32)" in code)
+
+                self.assertEqual(fn_opt(), fn())
 
 
 class ExprPrinterTests(TestCase):

@@ -34,7 +34,7 @@ class ValueRanges(object):
     @classmethod
     def checked_unary_map(cls, x, fn):
         "check the max and min of computed upper and lower bound for the output"
-        out = cls.map(x, fn)
+        out = cls.unary_map(x, fn)
         return ValueRanges(min(out.lower, out.upper), max(out.lower, out.upper))
 
     @classmethod
@@ -126,11 +126,11 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def truediv(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.div)
+        return ValueRanges.binary_map_products(a, b, operator.truediv)
 
     @staticmethod
     def div(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.div)
+        return ValueRanges.binary_map_products(a, b, operator.truediv)
 
     @staticmethod
     def add(a, b):
@@ -454,7 +454,13 @@ class OptimizeIndexing(object):
             return ValueRanges(-math.inf, math.inf)
 
 
-def indexing_dtype_strength_reduction(loop_body, indices):
+def indexing_dtype_strength_reduction(
+    loop_body: LoopBody, indices: Dict[sympy.Symbol, int]
+):
+    """ "
+    Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
+    intermediaries from int64 to int32
+    """
     index = list(indices.keys())
     assert len(index) == len(loop_body.var_ranges), (index, loop_body.var_ranges)
     assert all(v not in loop_body.var_ranges for v in index)

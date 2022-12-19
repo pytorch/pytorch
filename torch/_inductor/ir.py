@@ -4074,21 +4074,6 @@ class LoopBody:
         self.indexing = None
         return result
 
-    def indexing_dtype_strength_reduction(self, indices):
-        index = list(indices.keys())
-        assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        assert all(v not in self.var_ranges for v in index)
-        replacements = dict(zip(self.var_ranges.keys(), index))
-        self.indexing = {
-            name: sympy_subs(expr, replacements)
-            for name, expr in self.indexing_exprs.items()
-        }
-        result = torch._inductor.optimize_indexing.indexing_dtype_strength_reduction(
-            self.root_block, indices, self.indexing
-        )
-        self.indexing = None
-        return result
-
 
 class LoopBodyBlock:
     """
