@@ -29,7 +29,8 @@ if sys.version_info < (3, 9):
         @classmethod
         def _init_pg_ucc(cls, rank, filename, world_size):
             store = c10d.FileStore(filename, world_size)
-            return c10d.ProcessGroupUCC(store, rank, world_size)
+            c10d.init_process_group(backend="ucc", store=store, rank=rank, world_size=world_size)
+            return c10d.distributed_c10d._get_default_group()
 
         @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
         @sandcastle_skip_if(NO_UCC, "UCC needed")

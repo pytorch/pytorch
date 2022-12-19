@@ -7,10 +7,10 @@ toq = torch.ops.quantized
 
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.intrinsic.qat as nniqat
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.qat as nnqat
 import torch.ao.nn.qat.dynamic as nnqatd
 from torch.ao.quantization.backend_config import get_native_backend_config
@@ -601,6 +601,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.LinearReLU,
         nniqat.LinearBn1d,
         nniqd.LinearReLU,
+        nni.LinearLeakyReLU,
     ])
 
     MODS_IO_TYPE_INT8: Set[NSNodeTargetType] = set([
@@ -631,6 +632,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniq.ConvReLU2d,
         nniq.ConvReLU3d,
         nniq.LinearReLU,
+        nniq.LinearLeakyReLU,
     ])
 
     MODS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = set([

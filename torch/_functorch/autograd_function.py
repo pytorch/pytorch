@@ -244,31 +244,41 @@ def custom_function_call_functionalize(interpreter, autograd_function, *operands
     raise RuntimeError("NYI: Functionalize rule for custom_function_call")
 
 
-# Wraps ctx to create a new ctx object that overrides saved_tensors.
-properties = ('_pt_inner_ctx', '_pt_new_saved_tensors')
+# Wraps a ctx object. Forwards all attr accesses to the underlying object
+# except for the attrs in _pt_attrs
+class WrappedCtx:
+    _pt_reserved_attrs = ('_pt_reserved_attrs', '_pt_inner_ctx')
 
-class CtxWithSavedTensors:
-    def __init__(self, ctx, new_saved_tensors):
-        if not isinstance(ctx, CtxWithSavedTensors):
-            for name in properties:
+    def __init__(self, ctx):
+        if not isinstance(ctx, WrappedCtx):
+            reserved_attrs = type(self)._pt_reserved_attrs
+            for name in reserved_attrs:
                 if not hasattr(ctx, name):
                     continue
                 raise RuntimeError(
-                    f'PyTorch reserves the {properties} field on ctx. '
+                    f'PyTorch reserves the {reserved_attrs} field on ctx. '
                     'Please name your fields on ctx something else to avoid name '
                     'collision.')
         self._pt_inner_ctx = ctx
-        self._pt_new_saved_tensors = new_saved_tensors
-
-    @property
-    def saved_tensors(self):
-        return self._pt_new_saved_tensors
 
     def __getattr__(self, name):
         return getattr(self._pt_inner_ctx, name)
 
     def __setattr__(self, name, value):
-        if name in properties:
+        if name in type(self)._pt_reserved_attrs:
             self.__dict__[name] = value
             return
         return setattr(self._pt_inner_ctx, name, value)
+
+
+# Wraps ctx to create a new ctx object that overrides saved_tensors.
+class CtxWithSavedTensors(WrappedCtx):
+    _pt_reserved_attrs = ('_pt_new_saved_tensors', *WrappedCtx._pt_reserved_attrs)
+
+    def __init__(self, ctx, new_saved_tensors):
+        super().__init__(ctx)
+        self._pt_new_saved_tensors = new_saved_tensors
+
+    @property
+    def saved_tensors(self):
+        return self._pt_new_saved_tensors
