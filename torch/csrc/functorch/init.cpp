@@ -503,6 +503,12 @@ void initFuncTorchBindings(PyObject* module) {
       .def("level", &GradInterpreterPtr::level)
       .def("lift", &GradInterpreterPtr::lift)
       .def("prevGradMode", &GradInterpreterPtr::prevGradMode);
+  py::class_<JvpInterpreterPtr>(m, "CJvpInterpreterPtr")
+      .def(py::init<const Interpreter*>())
+      .def("key", &JvpInterpreterPtr::key)
+      .def("level", &JvpInterpreterPtr::level)
+      .def("lift", &JvpInterpreterPtr::lift)
+      .def("prevFwdGradMode", &JvpInterpreterPtr::prevFwdGradMode);
   py::class_<VmapInterpreterPtr>(m, "CVmapInterpreterPtr")
       .def(py::init<const Interpreter*>())
       .def("key", &VmapInterpreterPtr::key)
