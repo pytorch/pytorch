@@ -66,8 +66,8 @@ struct CUDAPluggableAllocator
 
   void* malloc(size_t size, int device, cudaStream_t stream);
 
-  c10::DataPtr allocate(size_t size) const;
-  c10::DeleterFnPtr raw_deleter() const;
+  c10::DataPtr allocate(size_t size) const override;
+  c10::DeleterFnPtr raw_deleter() const override;
 
   virtual void* raw_alloc(size_t nbytes) override;
   virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream)
