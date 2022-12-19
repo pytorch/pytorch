@@ -152,7 +152,7 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
                 ),
             )
 
-        model_2 = init_model()[0]
+        model_2 = init_model(fsdp_pg=fsdp_pg)[0]
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
         # Ensure the parameters are different before loading
@@ -222,13 +222,13 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_2d_fsdp_dt_checkpoint_no_resharding(self, fsdp_pg=None) -> None:
+    def test_2d_fsdp_dt_checkpoint_no_resharding(self) -> None:
         self._test_fsdp_dt_checkpoint()
 
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_2d_fsdp_dt_checkpoint_resharding(self, fsdp_pg=None) -> None:
+    def test_2d_fsdp_dt_checkpoint_resharding(self) -> None:
         self._test_fsdp_dt_checkpoint(fsdp_pg=create_new_dist_group())
 
 
