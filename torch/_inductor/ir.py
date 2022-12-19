@@ -3,7 +3,6 @@ import dataclasses
 import functools
 import itertools
 import logging
-import random
 import re
 import textwrap
 from collections import OrderedDict
@@ -3489,15 +3488,15 @@ class ConvolutionUnary(ExternKernelAlloc):
             if not wrapper.mkldnn_param_utils_gen:
                 wrapper.mkldnn_param_utils_gen = True
                 wrapper.write_mkldnn_param_gen_utils()
-            wrapper.writeline(f"{self.get_name()}_id = {random.getrandbits(32)}")
             wrapper.writeline(f"param_args = [{', '.join(self.codegen_args())}]")
             wrapper.writeline(
-                f"{self.get_name()}_param = get_mkldnn_param({self.get_name()}_id, \
+                f"{self.get_name()}_param = get_mkldnn_param({wrapper.mkldnn_param_count}, \
 torch.ops.mkldnn._create_conv_param, *param_args)"
             )
             wrapper.writeline(
                 f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args()) + ', ' + self.get_name() + '_param'})"
             )
+            wrapper.mkldnn_param_count += 1
         else:
             wrapper.writeline(
                 f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args()) + ', None'})"
@@ -3551,15 +3550,15 @@ class ConvolutionBinary(ExternKernelAlloc):
             if not wrapper.mkldnn_param_utils_gen:
                 wrapper.mkldnn_param_utils_gen = True
                 wrapper.write_mkldnn_param_gen_utils()
-            wrapper.writeline(f"{self.get_name()}_id = {random.getrandbits(32)}")
             wrapper.writeline(f"param_args = [{', '.join(self.codegen_args())}]")
             wrapper.writeline(
-                f"{self.get_name()}_param = get_mkldnn_param({self.get_name()}_id, \
+                f"{self.get_name()}_param = get_mkldnn_param({wrapper.mkldnn_param_count}, \
 torch.ops.mkldnn._create_conv_param_binary, *param_args)"
             )
             wrapper.writeline(
                 f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args()) + ', ' + self.get_name() + '_param'})"
             )
+            wrapper.mkldnn_param_count += 1
         else:
             wrapper.writeline(
                 f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args()) + ', None'})"

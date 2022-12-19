@@ -266,6 +266,7 @@ class WrapperCodeGen(CodeGen):
         self.kernels = {}
         self.lines = []
         self.mkldnn_param_utils_gen = False
+        self.mkldnn_param_count = 0
         self.header.splice(
             f"""
                 from ctypes import c_void_p, c_long
