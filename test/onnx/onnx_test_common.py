@@ -7,6 +7,7 @@ import os
 from typing import Any, Mapping, Type
 
 import onnxruntime
+import onnxruntime.capi.onnxruntime_pybind11_state
 import pytorch_test_common
 
 import torch
@@ -99,25 +100,28 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         verbose=False,
     ):
         def _run_test(m, remained_onnx_input_idx, flatten=True, ignore_none=True):
-            return run_model_test(
-                self,
-                m,
-                input_args=input_args,
-                input_kwargs=input_kwargs,
-                rtol=rtol,
-                atol=atol,
-                do_constant_folding=do_constant_folding,
-                dynamic_axes=dynamic_axes,
-                additional_test_inputs=additional_test_inputs,
-                input_names=input_names,
-                output_names=output_names,
-                fixed_batch_size=fixed_batch_size,
-                training=training,
-                remained_onnx_input_idx=remained_onnx_input_idx,
-                flatten=flatten,
-                ignore_none=ignore_none,
-                verbose=verbose,
-            )
+            try:
+                return run_model_test(
+                    self,
+                    m,
+                    input_args=input_args,
+                    input_kwargs=input_kwargs,
+                    rtol=rtol,
+                    atol=atol,
+                    do_constant_folding=do_constant_folding,
+                    dynamic_axes=dynamic_axes,
+                    additional_test_inputs=additional_test_inputs,
+                    input_names=input_names,
+                    output_names=output_names,
+                    fixed_batch_size=fixed_batch_size,
+                    training=training,
+                    remained_onnx_input_idx=remained_onnx_input_idx,
+                    flatten=flatten,
+                    ignore_none=ignore_none,
+                    verbose=verbose,
+                )
+            except onnxruntime.capi.onnxruntime_pybind11_state.NotImplemented as e:
+                self.skipTest(f"ONNX Runtime does not implement an op: {e}")
 
         if isinstance(remained_onnx_input_idx, dict):
             scripting_remained_onnx_input_idx = remained_onnx_input_idx["scripting"]

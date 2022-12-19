@@ -3,24 +3,87 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "onnx::Reshape_11"
+    output: "onnx::Floor_16"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
       name: "value"
       t {
-        dims: 2
-        data_type: 7
-        raw_data: "\001\000\000\000\000\000\000\000\030\000\000\000\000\000\000\000"
+        data_type: 1
+        raw_data: "\000\000\300A"
       }
       type: TENSOR
     }
   }
   node {
+    input: "onnx::Floor_16"
+    output: "onnx::Cast_6"
+    name: "Floor_1"
+    op_type: "Floor"
+  }
+  node {
+    input: "onnx::Cast_6"
+    output: "onnx::Unsqueeze_7"
+    name: "Cast_2"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 7
+      type: INT
+    }
+  }
+  node {
+    output: "onnx::Concat_17"
+    name: "Constant_3"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Unsqueeze_10"
+    name: "Constant_4"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Unsqueeze_7"
+    input: "onnx::Unsqueeze_10"
+    output: "onnx::Concat_11"
+    name: "Unsqueeze_5"
+    op_type: "Unsqueeze"
+  }
+  node {
+    input: "onnx::Concat_17"
+    input: "onnx::Concat_11"
+    output: "onnx::Reshape_12"
+    name: "Concat_6"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
     input: "onnx::Reshape_0"
-    input: "onnx::Reshape_11"
-    output: "8"
-    name: "Reshape_1"
+    input: "onnx::Reshape_12"
+    output: "13"
+    name: "Reshape_7"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -52,16 +115,16 @@ graph {
     }
   }
   output {
-    name: "8"
+    name: "13"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
-            dim_value: 1
+            dim_param: "Reshape13_dim_0"
           }
           dim {
-            dim_value: 24
+            dim_param: "Reshape13_dim_1"
           }
         }
       }

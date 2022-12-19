@@ -414,64 +414,95 @@ def _div_rounding_mode(g: jit_utils.GraphContext, self, other, rounding_mode):
         )
 
 
+def _determine_division_output_type(
+    self, other, possible_int_output=True
+) -> _type_utils.JitScalarType:
+    """Determines the output type of div.
+
+    Args:
+        self: The self value.
+        other: The other value.
+        possible_int_output: Whether the output can be integer. If false, the output
+            type is at least torch.get_default_dtype().
+    """
+    # - If both self's and other's types are known, promote type based on torch's rules
+    # - If one of the types is not known, assume it is int and run type promotion
+    # - The output type defaults to default_dtype()
+    self_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    )
+    other_type = _type_utils.JitScalarType.from_value(
+        other, _type_utils.JitScalarType.UNDEFINED
+    )
+
+    if (
+        self_type != _type_utils.JitScalarType.UNDEFINED
+        and other_type != _type_utils.JitScalarType.UNDEFINED
+    ):
+        out_type = torch.promote_types(self_type.dtype(), other_type.dtype())
+        if not possible_int_output and not out_type in {
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+        }:
+            # Convert int types to the default float type.
+            out_type = torch.promote_types(out_type, torch.get_default_dtype())
+        return _type_utils.JitScalarType.from_dtype(out_type)
+    elif (
+        self_type != _type_utils.JitScalarType.UNDEFINED
+        and other_type == _type_utils.JitScalarType.UNDEFINED
+    ):
+        return _type_utils.JitScalarType.from_dtype(
+            torch.promote_types(
+                self_type.dtype(),
+                torch.int8 if possible_int_output else torch.get_default_dtype(),
+            )
+        )
+    elif (
+        self_type == _type_utils.JitScalarType.UNDEFINED
+        and other_type != _type_utils.JitScalarType.UNDEFINED
+    ):
+        return _type_utils.JitScalarType.from_dtype(
+            torch.promote_types(
+                torch.int8 if possible_int_output else torch.get_default_dtype(),
+                other_type.dtype(),
+            )
+        )
+
+    return _type_utils.JitScalarType.from_dtype(torch.get_default_dtype())
+
+
 @_beartype.beartype
 def _trunc_divide(g: jit_utils.GraphContext, self, other):
+    # Matching PyTorch's behavior:
+    output_type = _determine_division_output_type(self, other, possible_int_output=True)
+
+    self = g.op("Cast", self, to_i=output_type.onnx_type())
+    other = g.op("Cast", other, to_i=output_type.onnx_type())
+
     quotient = g.op("Div", self, other)
+
+    # FIXME(justinchuby): Use Where
     # the correct operation is truncate, which is not supported in ONNX,
     # we cannot call floor since it will behave differently for negative numbers
     # (eg. -0.1 should become -0 )
-    # - if scalar_type information are not available, assume that
-    # we need to call floor (treat as float)
+
     casted = g.op("Cast", quotient, to_i=_C_onnx.TensorProtoDataType.INT64)
 
-    # Matching PyTorch's behavior:
-    # - if self is fp the output's type is self's type
-    # - if self is not fp and other is fp, the output is of type JitScalarType.FLOAT
-    # - self is not fp and other is not fp, the output's type is self's output type
-    # - the output type defaults to Float
-    scalar_type = _type_utils.JitScalarType.from_value(
-        self, _type_utils.JitScalarType.UNDEFINED
-    )
-    if scalar_type != _type_utils.JitScalarType.UNDEFINED:
-        if not symbolic_helper._is_fp(self) and symbolic_helper._is_fp(other):
-            return g.op("Cast", casted, to_i=_C_onnx.TensorProtoDataType.FLOAT)
-
-        return g.op(
-            "Cast",
-            casted,
-            to_i=scalar_type.onnx_type(),
-        )
-    return g.op("Cast", casted, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+    return g.op("Cast", casted, to_i=output_type.onnx_type())
 
 
+@_onnx_symbolic("aten::floordiv")
 @_onnx_symbolic("aten::floor_divide")
 @_beartype.beartype
 def floor_divide(g: jit_utils.GraphContext, self, other):
     quotient = true_divide(g, self, other)
     floor = g.op("Floor", quotient)
-    self_type = _type_utils.JitScalarType.from_value(
-        self, default=_type_utils.JitScalarType.UNDEFINED
-    )
-    other_type = _type_utils.JitScalarType.from_value(
-        other, default=_type_utils.JitScalarType.UNDEFINED
-    )
-    if (
-        self_type is not _type_utils.JitScalarType.UNDEFINED
-        and other_type is not _type_utils.JitScalarType.UNDEFINED
-    ):
-        output_torch_type = torch.promote_types(self_type.dtype(), other_type.dtype())
-        return g.op(
-            "Cast",
-            floor,
-            to_i=_type_utils.JitScalarType.from_dtype(output_torch_type).onnx_type(),
-        )
-    return floor
 
+    output_type = _determine_division_output_type(self, other, possible_int_output=True)
 
-@_onnx_symbolic("aten::floordiv")
-@_beartype.beartype
-def floordiv(g: jit_utils.GraphContext, self, other):
-    return floor_divide(g, self, other)
+    return g.op("Cast", floor, to_i=output_type.onnx_type())
 
 
 @_onnx_symbolic("aten::true_divide")
@@ -479,29 +510,18 @@ def floordiv(g: jit_utils.GraphContext, self, other):
 def true_divide(g: jit_utils.GraphContext, self, other):
     """Division where both inputs are cast to floating types
 
-    If both inputs are floating, performs div as usual
-    If only one input is a floating type, the other input is cast to its type
-    If neither input is a floating type, both inputs are cast to the default scalar type
+    - Run torch.promote_types() if both types are known.
+    - If one of the types is not known, assume it is the default scalar type and run type promotion
+    - If neither input is a floating type, both inputs are cast to the default scalar type
     """
+    output_type = _determine_division_output_type(
+        self, other, possible_int_output=False
+    )
 
-    # Case 1: either values are floating
-    # Performs div as usual.
-    # Implicit casting will be handled in scalar type analysis pass.
-    if symbolic_helper._is_fp(self) or symbolic_helper._is_fp(other):
-        return g.op("Div", self, other)
-
-    # Case 2: neither is floating
-    # Casts both inputs to the default scalar type
-    scalar_type = torch.get_default_dtype()
-    assert scalar_type is torch.float or scalar_type is torch.double
-    if scalar_type is torch.double:
-        onnx_scalar_type = _C_onnx.TensorProtoDataType.DOUBLE
-    else:
-        onnx_scalar_type = _C_onnx.TensorProtoDataType.FLOAT
-
-    self = g.op("Cast", self, to_i=onnx_scalar_type)
-    other = g.op("Cast", other, to_i=onnx_scalar_type)
-    return g.op("Div", self, other)
+    self = g.op("Cast", self, to_i=output_type.onnx_type())
+    other = g.op("Cast", other, to_i=output_type.onnx_type())
+    result = g.op("Div", self, other)
+    return g.op("Cast", result, to_i=output_type.onnx_type())
 
 
 @_onnx_symbolic("aten::reciprocal")

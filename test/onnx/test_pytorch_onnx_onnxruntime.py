@@ -10107,7 +10107,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             rtol=1e-3,
             atol=1e-5,
         )
-        self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.EVAL)
+        self.run_test(
+            model_export,
+            (x,),
+            training=torch.onnx.TrainingMode.EVAL,
+            atol=3e-7,
+            rtol=0.003,
+        )
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_nms(self):

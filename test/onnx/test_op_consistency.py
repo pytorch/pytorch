@@ -36,6 +36,7 @@ from typing import (
 )
 
 import onnx_test_common
+import onnxruntime.capi.onnxruntime_pybind11_state
 
 import torch
 from torch.onnx import _constants
@@ -325,23 +326,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
         "ceil", dtypes=BOOL_TYPES + INT_TYPES,
         reason=reason_onnx_does_not_support("Ceil")
     ),
-    fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
-    fixme(
-        "div", variant_name="no_rounding_mode", dtypes=[torch.uint8, torch.int8, torch.int16, torch.float64],
-        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16", "f64"])
-    ),
-    fixme(
-        "div", variant_name="floor_rounding", dtypes=[torch.uint8, torch.int8, torch.int16, torch.float64],
-        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16", "f64"])
-    ),
-    fixme(
-        "div", variant_name="trunc_rounding", dtypes=[torch.uint8, torch.int8, torch.int16, torch.float64],
-        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16", "f64"])
-    ),
-    fixme("floor_divide", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
-    fixme("remainder", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
     dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
-    fixme("true_divide", dtypes=[torch.float64], reason="float64 output is return as float32"),
 )
 # fmt: on
 
