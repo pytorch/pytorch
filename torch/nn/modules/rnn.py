@@ -456,8 +456,9 @@ class RNN(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if self._weights_have_changed():
-            self._init_flat_weights()
+        if not torch.jit.is_scripting():
+            if self._weights_have_changed():
+                self._init_flat_weights()
 
         orig_input = input
         if isinstance(orig_input, PackedSequence):
@@ -749,8 +750,9 @@ class LSTM(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if self._weights_have_changed():
-            self._init_flat_weights()
+        if not torch.jit.is_scripting():
+            if self._weights_have_changed():
+                self._init_flat_weights()
 
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
@@ -944,8 +946,9 @@ class GRU(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if self._weights_have_changed():
-            self._init_flat_weights()
+        if not torch.jit.is_scripting():
+            if self._weights_have_changed():
+                self._init_flat_weights()
 
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
