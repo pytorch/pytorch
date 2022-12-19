@@ -131,7 +131,7 @@ def _get_state_dict_2d_layout(
                 shard.metadata.shard_offsets,
                 shard.metadata.shard_sizes,
             )
-            dp_pg = shard.tensor._process_group
+            dp_pg = shard.tensor._process_group  # type: ignore
 
     return (
         specs,
