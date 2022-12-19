@@ -129,17 +129,6 @@ class Adam(Optimizer):
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
-        
-        # The fused implementation is fastest but is only available when the parameters are floats on CUDA.
-        # The foreach implementation is faster than the default on CUDA. 
-        # Both are not differentiable (whereas the default implementation is)
-        if not differentiable and all(
-                p.is_cuda and torch.is_floating_point(p)
-                for pg in self.param_groups for p in pg['params']
-            ):
-            fused = True
-        elif not differentiable and all(p.is_cuda for pg in self.param_groups for p in pg['params']):
-            foreach = True
 
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
@@ -147,7 +136,18 @@ class Adam(Optimizer):
                         differentiable=differentiable, fused=fused)
         super(Adam, self).__init__(params, defaults)
 
-        if fused:
+        # The fused implementation is fastest but is only available when the parameters are floats on CUDA.
+        # The foreach implementation is faster than the default on CUDA.
+        # Both are not differentiable (whereas the default implementation is)
+        if not differentiable and all(
+            p.is_cuda and torch.is_floating_point(p)
+            for pg in self.param_groups for p in pg['params']
+        ):
+            self.fused = True
+        elif not differentiable and all(p.is_cuda for pg in self.param_groups for p in pg['params']):
+            self.foreach = True
+
+        if self.fused:
             if differentiable:
                 raise RuntimeError("`fused` cannot be `differentiable`")
             self._step_supports_amp_scaling = True
