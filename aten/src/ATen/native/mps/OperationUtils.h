@@ -80,7 +80,7 @@ class Placeholder {
  public:
   Placeholder() : _placeholder(nullptr), _value(nullptr), _tensor(Tensor()) {}
   Placeholder(MPSGraphTensor* mpsGraphTensor) : _placeholder(mpsGraphTensor), _value(nullptr), _tensor(Tensor()) {}
-  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr, bool gatherTensorData = true, MPSDataType* dataType = nullptr);
+  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr, bool gatherTensorData = true, MPSDataType dataType = MPSDataTypeInvalid);
   MPSGraphTensor* getMPSGraphTensor() {
     return _placeholder;
   }
