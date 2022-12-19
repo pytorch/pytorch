@@ -209,12 +209,12 @@ def vmap(
         randomness: str = 'error') -> Callable:
     """
     vmap is the vectorizing map; ``vmap(func)`` returns a new function that
-    maps :attr:`func` over some dimension of the inputs. Semantically, vmap
-    pushes the map into PyTorch operations called by :attr:`func`, effectively
+    maps ``func`` over some dimension of the inputs. Semantically, vmap
+    pushes the map into PyTorch operations called by ``func``, effectively
     vectorizing those operations.
 
     vmap is useful for handling batch dimensions: one can write a function
-    :attr:`func` that runs on examples and then lift it to a function that can
+    ``func`` that runs on examples and then lift it to a function that can
     take batches of examples with ``vmap(func)``. vmap can also be used to
     compute batched gradients when composed with autograd.
 
@@ -222,12 +222,12 @@ def vmap(
         func (function): A Python function that takes one or more arguments.
             Must return one or more Tensors.
         in_dims (int or nested structure): Specifies which dimension of the
-            inputs should be mapped over. :attr:`in_dims` should have a
-            structure like the inputs. If the :attr:`in_dim` for a particular
+            inputs should be mapped over. ``in_dims`` should have a
+            structure like the inputs. If the ``in_dim`` for a particular
             input is None, then that indicates there is no map dimension.
             Default: 0.
         out_dims (int or Tuple[int]): Specifies where the mapped dimension
-            should appear in the outputs. If :attr:`out_dims` is a Tuple, then
+            should appear in the outputs. If ``out_dims`` is a Tuple, then
             it should have one element per output. Default: 0.
         randomness (str): Specifies whether the randomness in this
             vmap should be the same or different across batches. If 'different',
@@ -239,17 +239,17 @@ def vmap(
 
     Returns:
         Returns a new "batched" function. It takes the same inputs as
-        :attr:`func`, except each input has an extra dimension at the index
-        specified by :attr:`in_dims`. It takes returns the same outputs as
-        :attr:`func`, except each output has an extra dimension at the index
-        specified by :attr:`out_dims`.
+        ``func``, except each input has an extra dimension at the index
+        specified by ``in_dims``. It takes returns the same outputs as
+        ``func``, except each output has an extra dimension at the index
+        specified by ``out_dims``.
 
     .. warning:
         :func:`vmap` works best with functional-style code. Please do not
-        perform any side-effects in :attr:`func`, with the exception of
+        perform any side-effects in ``func``, with the exception of
         in-place PyTorch operations. Examples of side-effects include mutating
         Python data structures and assigning values to variables not captured
-        in :attr:`func`.
+        in ``func``.
 
     One example of using :func:`vmap` is to compute batched dot products. PyTorch
     doesn't provide a batched ``torch.dot`` API; instead of unsuccessfully
@@ -305,7 +305,7 @@ def vmap(
         >>> x, y = torch.randn(2, 3, 5), torch.randn(2, 3, 5)
         >>> batched_dot(x, y) # tensor of size [2, 3]
 
-    If the inputs are not batched along the first dimension, :attr:`in_dims` specifies
+    If the inputs are not batched along the first dimension, ``in_dims`` specifies
     the dimension that each inputs are batched along as
 
         >>> torch.dot                            # [N], [N] -> []
@@ -314,14 +314,14 @@ def vmap(
         >>> batched_dot(x, y)   # output is [5] instead of [2] if batched along the 0th dimension
 
     If there are multiple inputs each of which is batched along different dimensions,
-    :attr:`in_dims` must be a tuple with the batch dimension for each input as
+    ``in_dims`` must be a tuple with the batch dimension for each input as
 
         >>> torch.dot                            # [D], [D] -> []
         >>> batched_dot = functorch.vmap(torch.dot, in_dims=(0, None))  # [N, D], [D] -> [N]
         >>> x, y = torch.randn(2, 5), torch.randn(5)
         >>> batched_dot(x, y) # second arg doesn't have a batch dim because in_dim[1] was None
 
-    If the input is a Python struct, :attr:`in_dims` must be a tuple containing a struct
+    If the input is a Python struct, ``in_dims`` must be a tuple containing a struct
     matching the shape of the input:
 
         >>> f = lambda dict: torch.dot(dict['x'], dict['y'])
@@ -331,7 +331,7 @@ def vmap(
         >>> batched_dot(input)
 
     By default, the output is batched along the first dimension. However, it can be batched
-    along any dimension by using :attr:`out_dims`
+    along any dimension by using ``out_dims``
 
         >>> f = lambda x: x ** 2
         >>> x = torch.randn(2, 5)
@@ -381,12 +381,12 @@ def chunk_vmap(
         func (function): A Python function that takes one or more arguments.
             Must return one or more Tensors.
         in_dims (int or nested structure): Specifies which dimension of the
-            inputs should be mapped over. :attr:`in_dims` should have a
-            structure like the inputs. If the :attr:`in_dim` for a particular
+            inputs should be mapped over. ``in_dims`` should have a
+            structure like the inputs. If the ``in_dim`` for a particular
             input is None, then that indicates there is no map dimension.
             Default: 0.
         out_dims (int or Tuple[int]): Specifies where the mapped dimension
-            should appear in the outputs. If :attr:`out_dims` is a Tuple, then
+            should appear in the outputs. If ``out_dims`` is a Tuple, then
             it should have one element per output. Default: 0.
         randomness (str): Specifies whether the randomness in this
             vmap should be the same or different across batches. If 'different',
@@ -400,10 +400,10 @@ def chunk_vmap(
 
     Returns:
         Returns a new "batched" function. It takes the same inputs as
-        :attr:`func`, except each input has an extra dimension at the index
-        specified by :attr:`in_dims`. It takes returns the same outputs as
-        :attr:`func`, except each output has an extra dimension at the index
-        specified by :attr:`out_dims`.
+        ``func``, except each input has an extra dimension at the index
+        specified by ``in_dims``. It takes returns the same outputs as
+        ``func``, except each output has an extra dimension at the index
+        specified by ``out_dims``.
     """
     _check_randomness_arg(randomness)
 
