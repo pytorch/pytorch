@@ -1566,7 +1566,7 @@ def _local_scalar_dense(data):
     return ir.DynamicScalar()
 
 
-def _full(fill_value, device, dtype, size):
+def _full(fill_value, device, dtype, size, memory_format):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
@@ -1582,12 +1582,20 @@ def _full(fill_value, device, dtype, size):
         def inner_fn(index):
             return value_loader([])
 
-    return Pointwise.create(
+    pointwise = Pointwise.create(
         device=device,
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=list(size),
     )
+    if memory_format is None or memory_format == torch.contiguous_format:
+        return pointwise
+    elif (
+        memory_format == torch.channels_last or memory_format == torch.channels_last_3d
+    ):
+        return ir.ExternKernel.require_channels_last(pointwise)
+    else:
+        raise RuntimeError("unsupported memory format")
 
 
 @register_lowering(aten.full_like, type_promotion_kind=None)
@@ -1604,18 +1612,17 @@ def tensor_constructor(fill_value):
         device=None,
         layout=0,
         pin_memory=False,
-        memory_format=None,
+        memory_format=torch.contiguous_format,
     ):
         assert names is None
         assert not pin_memory
         assert layout in (0, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
             size = tuple(size[0])
         size = [sympy.expand(s) for s in size]
-        return _full(fill_value, device, dtype, size)
+        return _full(fill_value, device, dtype, size, memory_format)
 
     return inner
 
@@ -1631,7 +1638,13 @@ def create_tensor_like(creation_fn):
     """
 
     def _constant_like(
-        x, *, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
+        x,
+        *,
+        dtype=None,
+        device=None,
+        layout=0,
+        pin_memory=False,
+        memory_format=torch.preserve_format,
     ):
         assert not pin_memory
         assert layout in (0, torch.strided)
@@ -1641,8 +1654,27 @@ def create_tensor_like(creation_fn):
             dtype = decode_dtype(dtype)
         device = device or x.get_device()
         size = list(x.get_size())
+
+        if memory_format == torch.preserve_format:
+            if not ir.is_storage_and_layout(x):
+                x = ir.ExternKernel.copy_input(x)
+                ir.as_storage_and_layout(x, freeze=True)
+            if x.get_layout().is_channels_last_stride_ordered():
+                memory_format = (
+                    torch.channels_last if len(size) == 4 else torch.channels_last_3d
+                )
+            elif x.get_layout().is_contiguous():
+                memory_format = torch.contiguous_format
+            else:
+                raise RuntimeError("Unsupported memory format")
+
         return creation_fn(
-            size, dtype=dtype, device=device, layout=layout, pin_memory=pin_memory
+            size,
+            dtype=dtype,
+            device=device,
+            layout=layout,
+            pin_memory=pin_memory,
+            memory_format=memory_format,
         )
 
     return _constant_like

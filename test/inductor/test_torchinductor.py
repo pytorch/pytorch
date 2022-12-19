@@ -4954,6 +4954,59 @@ class CommonTemplate:
             assert callable(func), "not a callable"
             func()
 
+    def test_memory_format1(self):
+        def fn(shape, memory_format):
+            return torch.empty(shape, memory_format=memory_format)
+
+        opt = torch._dynamo.optimize("inductor")(fn)
+        for (shape, memory_format) in [
+            ((10, 3, 8, 8, 8), torch.contiguous_format),
+            ((10, 3, 8, 8), torch.channels_last),
+            ((10, 3, 8, 8, 8), torch.channels_last_3d),
+        ]:
+            x = opt(shape, memory_format)
+            self.assertTrue(x.is_contiguous(memory_format=memory_format))
+
+    def test_memory_format2(self):
+        def fn(x, memory_format):
+            return torch.empty_like(x, memory_format=memory_format)
+
+        opt = torch._dynamo.optimize("inductor")(fn)
+        for (shape, memory_format, target_format) in [
+            (
+                torch.empty((10, 3, 8, 8), memory_format=torch.contiguous_format),
+                torch.preserve_format,
+                torch.contiguous_format,
+            ),
+            (
+                torch.empty((10, 3, 8, 8), memory_format=torch.contiguous_format),
+                torch.channels_last,
+                torch.channels_last,
+            ),
+            (
+                torch.empty((10, 3, 8, 8), memory_format=torch.channels_last),
+                torch.preserve_format,
+                torch.channels_last,
+            ),
+            (
+                torch.empty((10, 3, 8, 8), memory_format=torch.channels_last),
+                torch.contiguous_format,
+                torch.contiguous_format,
+            ),
+            (
+                torch.empty((10, 3, 8, 8, 8), memory_format=torch.channels_last_3d),
+                torch.preserve_format,
+                torch.channels_last_3d,
+            ),
+            (
+                torch.empty((10, 3, 8, 8, 8), memory_format=torch.contiguous_format),
+                torch.channels_last_3d,
+                torch.channels_last_3d,
+            ),
+        ]:
+            x = opt(shape, memory_format)
+            self.assertTrue(x.is_contiguous(memory_format=target_format))
+
 
 if HAS_CPU:
 

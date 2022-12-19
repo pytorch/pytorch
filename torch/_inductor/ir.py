@@ -1623,6 +1623,17 @@ class Layout(IRNode):
 
     __repr__ = __str__
 
+    @classmethod
+    def construct_contiguous_stride_order(cls, dim):
+        return list(reversed(range(dim)))
+
+    @classmethod
+    def construct_channels_last_stride_order(cls, dim):
+        assert dim == 4 or dim == 5, "channels_last format is NCHW or NCDHW"
+        order = [0] + list(reversed(range(1, dim - 1)))
+        order = [len(order)] + order
+        return order
+
     def is_contiguous(self):
         for left, right, size in zip(
             self.stride, FlexibleLayout.contiguous_strides(self.size), self.size
@@ -1655,8 +1666,9 @@ class Layout(IRNode):
 
     def is_channels_last_stride_ordered(self):
         # create channels_last order(NCHW, NCDHW, the C is the first order).
-        order = [0] + list(reversed(range(1, len(self.stride) - 1)))
-        order = [len(order)] + order
+        if len(self.stride) != 4 and len(self.stride) != 5:
+            return False
+        order = Layout.construct_channels_last_stride_order(len(self.stride))
         return self.is_stride_ordered(order)
 
     def as_fixed(self):
@@ -2560,7 +2572,13 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_contiguous(cls, x):
-        return cls.require_stride_order(x, list(reversed(range(len(x.get_size())))))
+        order = Layout.construct_contiguous_stride_order(len(x.get_size()))
+        return cls.require_stride_order(x, order)
+
+    @classmethod
+    def require_channels_last(cls, x):
+        order = Layout.construct_channels_last_stride_order(len(x.get_size()))
+        return cls.require_stride_order(x, order)
 
     def apply_constraint(self):
         pass
