@@ -354,8 +354,13 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             the function to be differentiated and the second element is
             auxiliary objects that will not be differentiated.
             Default: False.
-        chunk_size (None or int): If specified, controls the maximum size of chunk for computing
-            Jacobian. Default: None.
+        chunk_size (None or int): If None (default), use the maximum chunk size
+            (equivalent to doing a single vmap over vjp to compute the jacobian).
+            If not None, then compute the jacobian :attr:`chunk_size` rows at a time
+            (equivalent to doing multiple vmap over vjp).
+            Note that :attr:`chunk_size=1` is equivalent to computing the jacobian
+            row-by-row with a for-loop. If you run into memory issues computing
+            the jacobian, please try to specify a non-None chunk_size.
 
     Returns:
         Returns a function that takes in the same inputs as :attr:`func` and
