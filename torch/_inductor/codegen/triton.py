@@ -1353,6 +1353,9 @@ class TritonScheduling:
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
 
+    def codegen_sync(self):
+        V.graph.wrapper_code.writeline("torch.cuda.synchronize()")
+
     @staticmethod
     @functools.lru_cache(32)
     def candidate_tilings(node):
