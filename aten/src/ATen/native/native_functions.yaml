@@ -12897,6 +12897,7 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_inv_ex_out
+    MPS: linalg_inv_ex_out_mps
 
 - func: linalg_inv(Tensor A) -> Tensor
   python_module: linalg
