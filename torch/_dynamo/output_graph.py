@@ -76,6 +76,7 @@ CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 class OutputGraphState(NamedTuple):
     graphargs: List[GraphArg]
+    tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     side_effects: SideEffects
@@ -279,6 +280,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         state = OutputGraphState(
             list(self.graphargs),
+            list(self.tracked_fakes),
             guards_graph_state,
             dict(self.nn_modules),
             self.side_effects.clone(),
@@ -292,6 +294,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             self.graphargs,
+            self.tracked_fakes,
             guards_state,
             self.nn_modules,
             self.side_effects,
