@@ -328,6 +328,9 @@ class ModuleList(Module):
     def __repr__(self):
         """A custom repr for ModuleList that compresses repeated module representations"""
         list_of_reprs = [repr(item) for item in self]
+        if len(list_of_reprs) == 0:
+            return self._get_name() + '()'
+
         start_end_indices = [[0, 0]]
         repeated_blocks = [list_of_reprs[0]]
         for i, r in enumerate(list_of_reprs[1:], 1):
