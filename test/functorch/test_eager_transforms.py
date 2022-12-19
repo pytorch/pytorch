@@ -1883,11 +1883,11 @@ class TestJac(TestCase):
                             chunk_size=chunk_size,
                             _preallocate_and_copy=_preallocate_and_copy)(x, y)
             self.assertEqual(actual, expected)
-        
+
         err_msg = "jacrev: `chunk_size` should be greater than 0."
         with self.assertRaisesRegex(ValueError, err_msg):
             jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
-        
+
         with self.assertRaisesRegex(ValueError, err_msg):
             jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
 
