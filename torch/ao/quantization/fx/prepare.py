@@ -15,6 +15,7 @@ from ..quantize import (
 )
 from ..observer import (
     ObserverBase,
+    _is_activation_post_process
 )
 from ..qconfig import (
     _is_reuse_input_qconfig,
@@ -77,7 +78,6 @@ from .utils import (
 )
 
 from torch.ao.quantization.quantize import (
-    is_activation_post_process,
     convert
 )
 
@@ -102,6 +102,8 @@ from .custom_config import (
     StandaloneModuleConfigEntry,
 )
 
+from torch._subclasses import FakeTensor
+
 from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
 from collections import defaultdict
 
@@ -118,7 +120,7 @@ _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
 def _is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
-        is_activation_post_process(modules[str(node.target)])
+        _is_activation_post_process(modules[str(node.target)])
 
 def _is_input_arg_dtype_supported_by_backend(
     arg: Argument,
@@ -1179,11 +1181,17 @@ def insert_observers_for_model(
             equalization_qconfig = equalization_config_map.get(node.name, None)
 
             this_node_dtype_info = node_name_to_target_dtype_info[node.name]
-            output_not_a_tensor = this_node_dtype_info is None
+            if hasattr(node, "meta") and "val" in node.meta:
+                output_is_a_tensor = (
+                    this_node_dtype_info is not None and
+                    isinstance(node.meta["val"], FakeTensor)
+                )
+            else:
+                output_is_a_tensor = this_node_dtype_info is not None
 
             skip_inserting_observers = (
                 (qconfig is None) or
-                output_not_a_tensor
+                not output_is_a_tensor
             ) and (
                 not node.op == 'output'
             )
