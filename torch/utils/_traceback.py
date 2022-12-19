@@ -1,9 +1,9 @@
 import traceback
-import sys
 from types import TracebackType
 import tempfile
 import contextlib
 import inspect
+from typing import Any, Dict
 
 # This file contains utilities for ensuring dynamically compile()'d
 # code fragments display their line numbers in backtraces.
@@ -100,7 +100,7 @@ def f(x):
     raise RuntimeError()  # HEYA
 '''
 
-            out = {}
+            out: Dict[str, Any] = {}
             scope = {"__compile_source__": source}
             exec(source, scope, out)
 
