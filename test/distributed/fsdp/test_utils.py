@@ -160,10 +160,10 @@ class TestGetSubmoduleToStates(TestCase):
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return self.seq2(self.lin(self.seq1(x)))  # equivalent to one matmul
 
-    def test_module_wrap_policy(self):
+    def test_get_fully_sharded_module_to_states(self):
         """
-        Tests the module wrap policy on a nested model with buffers and a
-        shared parameter.
+        Tests the helper function ``_get_fully_sharded_module_states()`` that
+        performs the pseudo-auto-wrapping for the non-wrapper path.
 
         NOTE: This test is hard coded against ``Model``.
         """
