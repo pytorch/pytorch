@@ -1364,14 +1364,19 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   auto c2p_map = replay_producer_as_consumer.getReplay();
 
   // Make sure at least root domains are mapped even when extents may
-  // be different
+  // be different. This mapping is important for the indexing of torch.gather
+  // operator. Note that when the consumer has swizzle, the swizzle are skipped,
+  // for this case, we should allow the root unmapped, otherwise the c2p_map
+  // might no longer be injective.
+  const auto p2c_map_ = invertOneToOneMap(c2p_map);
   for (const auto& kv :
        PairwiseRootDomainMap(producer_tv, consumer_tv, true, false)
            .mapConsumerToProducer(
                consumer_tv->domain(), producer_tv->domain())) {
     auto consumer_root_id = kv.first;
     auto producer_root_id = kv.second;
-    if (c2p_map.find(consumer_root_id) == c2p_map.end()) {
+    if (c2p_map.find(consumer_root_id) == c2p_map.end() &&
+        p2c_map_.find(producer_root_id) == p2c_map_.end()) {
       c2p_map.emplace(consumer_root_id, producer_root_id);
     }
   }
