@@ -336,7 +336,9 @@ def _safe_zero_index(x):
     return x[0]
 
 
-def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
+def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
+           chunk_size: Optional[int] = None,
+           _preallocate_and_copy=False):
     """
     Computes the Jacobian of ``func`` with respect to the arg(s) at index
     ``argnum`` using reverse mode autodiff
@@ -352,6 +354,13 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             the function to be differentiated and the second element is
             auxiliary objects that will not be differentiated.
             Default: False.
+        chunk_size (None or int): If None (default), use the maximum chunk size
+            (equivalent to doing a single vmap over vjp to compute the jacobian).
+            If not None, then compute the jacobian :attr:`chunk_size` rows at a time
+            (equivalent to doing multiple vmap over vjp).
+            Note that :attr:`chunk_size=1` is equivalent to computing the jacobian
+            row-by-row with a for-loop. If you run into memory issues computing
+            the jacobian, please try to specify a non-None chunk_size.
 
     Returns:
         Returns a function that takes in the same inputs as ``func`` and
@@ -452,6 +461,9 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         outer one. This is because ``jacrev`` is a "function transform": its result
         should not depend on the result of a context manager outside of ``f``.
     """
+    if not (chunk_size is None or chunk_size > 0):
+        raise ValueError("jacrev: `chunk_size` should be greater than 0.")
+
     @wraps(func)
     def wrapper_fn(*args):
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -466,22 +478,73 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         # NB: vjp already checks that all outputs are tensors
         # Step 1: Construct grad_outputs by splitting the standard basis
         flat_output_numels = tuple(out.numel() for out in flat_output)
-        flat_basis = _construct_standard_basis_for(flat_output, flat_output_numels)
-        basis = tree_unflatten(flat_basis, output_spec)
-
-        results = vmap(vjp_fn)(basis)
 
         primals = _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
-        flat_results, results_spec = tree_flatten(results)
+
+        def compute_jacobian_stacked():
+            # Helper function to compute chunked Jacobian
+            # The intermediate chunked calculation are only
+            # scoped at this function level.
+            chunked_results = []
+            for flat_basis_chunk in _chunked_standard_basis_for_(flat_output,
+                                                                 flat_output_numels,
+                                                                 chunk_size=chunk_size):
+                basis = tree_unflatten(flat_basis_chunk, output_spec)
+                chunked_result = vmap(vjp_fn)(basis)
+                flat_results, _ = tree_flatten(chunked_result)
+                chunked_results.append(flat_results)
+
+            if len(chunked_results) == 1:
+                # Short-circuit if we used a single chunk
+                return chunked_results[0]
+
+            # Concatenate chunks.
+            flat_results = []
+            # Iterate and concat the jacobians of different
+            # inputs.
+            for idx in range(len(flat_primals)):
+                r = tuple(map(lambda r_: r_[idx], chunked_results))
+                flat_results.append(torch.cat(r, 0))
+
+            return flat_results
+
+        def compute_jacobian_preallocate_and_copy():
+            # Helper function to compute chunked Jacobian
+            # The intermediate chunked calculation are only
+            # scoped at this function level.
+            out_vec_size = sum(flat_output_numels)
+
+            # Don't pre-allocate if we have a single chunk.
+            if not (chunk_size is None or chunk_size >= out_vec_size):
+                stacked_results = [primal.new_zeros(out_vec_size, *primal.shape) for primal in flat_primals]
+            for idx, flat_basis_chunk in enumerate(_chunked_standard_basis_for_(flat_output,
+                                                                                flat_output_numels,
+                                                                                chunk_size=chunk_size)):
+                basis = tree_unflatten(flat_basis_chunk, output_spec)
+                chunked_result = vmap(vjp_fn)(basis)
+                flat_results, _ = tree_flatten(chunked_result)
+                if chunk_size is None or chunk_size >= out_vec_size:
+                    # Short-circuit if we have a single chunk.
+                    return flat_results
+
+                for r, sr in zip(flat_results, stacked_results):
+                    sr[idx * chunk_size: (idx + 1) * chunk_size].copy_(r)
+
+            return stacked_results
+
+        if _preallocate_and_copy:
+            flat_jacobians_per_input = compute_jacobian_preallocate_and_copy()
+        else:
+            flat_jacobians_per_input = compute_jacobian_stacked()
 
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
-        flat_results = [result.split(flat_output_numels, dim=0) for result in flat_results]
+        flat_jacobians_per_input = [result.split(flat_output_numels, dim=0) for result in flat_jacobians_per_input]
         flat_input_flat_output = [
             tuple(split.view(out.shape + primal.shape)
                   for split, out in zip(splits, flat_output))
-            for splits, primal in zip(flat_results, flat_primals)
+            for splits, primal in zip(flat_jacobians_per_input, flat_primals)
         ]
 
         # Step 3: Right now, `jacobian` is a List[List[Tensor]].
@@ -547,7 +610,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 # - one of shape [   3] for the second output
 
 
-def _construct_standard_basis_for(tensors, tensor_numels):
+def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
     # This function:
     # - constructs a N=sum(tensor_numels) standard basis. i.e. an NxN identity matrix.
     # - Splits the identity matrix into chunks with each chunk size determined by `tensor_numels`.
@@ -565,17 +628,37 @@ def _construct_standard_basis_for(tensors, tensor_numels):
     #
     # See NOTE: [Computing jacobian with vmap and grad for multiple tensors]
     # for context behind this function.
+    # NOTE: Argument `chunk_size` is used to generate chunked basis instead of
+    #       one huge basis matrix. `chunk_size` dictates the maximum size of the
+    #       basis matrix along dim=0.
     assert len(tensors) == len(tensor_numels)
     assert len(tensors) > 0
+    assert chunk_size is None or chunk_size > 0
     total_numel = sum(tensor_numels)
+    if chunk_size and chunk_size < total_numel:
+        n_chunks = total_numel // chunk_size
+        chunk_numels = [chunk_size] * n_chunks
+        # remainder chunk
+        chunk_numels.append(total_numel % chunk_size)
+    else:  # chunk_size is None or chunk_size >= total_numel
+        chunk_size = total_numel
+        chunk_numels = [total_numel]
+
     diag_start_indices = (0, *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind())
-    chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
-                   for tensor, tensor_numel in zip(tensors, tensor_numels))
-    for chunk, diag_start_idx in zip(chunks, diag_start_indices):
-        chunk.diagonal(diag_start_idx).fill_(1)
-    chunks = tuple(chunk.view(total_numel, *tensor.shape)
-                   for chunk, tensor in zip(chunks, tensors))
-    return chunks
+
+    for chunk_idx, total_numel in enumerate(chunk_numels):
+        chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
+                       for tensor, tensor_numel in zip(tensors, tensor_numels))
+
+        for chunk, diag_start_idx in zip(chunks, diag_start_indices):
+            chunk.diagonal(diag_start_idx + chunk_idx * chunk_size).fill_(1)
+        chunks = tuple(chunk.view(total_numel, *tensor.shape)
+                       for chunk, tensor in zip(chunks, tensors))
+        yield chunks
+
+def _construct_standard_basis_for(tensors, tensor_numels):
+    for basis in _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
+        return basis
 
 
 def _validate_and_wrap_argnum(argnum, num_args):
