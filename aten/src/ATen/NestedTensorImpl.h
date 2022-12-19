@@ -9,12 +9,14 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/irange.h>
+#include <c10/core/SymNodeImpl.h>
 
 namespace at {
 namespace native {
 struct NestedTensorImpl;
+class NestedSymIntNodeImpl;
 inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt);
-
+using NestedSymDimVector = std::vector<NestedSymIntNodeImpl>;
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(
       Storage storage,
@@ -152,6 +154,11 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // to TensorImpl.
   void refresh_dim();
 
+  // We should already have a sym_int array of sizes on tensorimpl
+  // but for iteration purposes lets creat our own
+  NestedSymDimVector sym_nested_sizes_;
+  NestedSymDimVector sym_nested_strides_;
+
   const at::Tensor nested_size_tensor_, nested_stride_tensor_;
   // The starting positions of the underlying tensors in contiguous buffer
   // i.e. the buffer memory offsets to get the underlying tensors
@@ -278,6 +285,52 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
 inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_nested_size_tensor();
 }
+
+class TORCH_API NestedSymIntNodeImpl : public c10::SymNodeImpl {
+    // # number of rows in this column
+    int64_t n_tensor_components_;
+    bool is_consistent_;
+    // If is consistent than this will be one int
+    c10::variant<int64_t,std::vector<int64_t>> sizes_;
+    c10::variant<int64_t, at::Tensor> extent;
+
+
+public:
+  NestedSymIntNodeImpl(std::vector<int64_t> vals, int64_t n_tensor_components)
+    : n_tensor_components_(n_tensor_components), is_consistent_(n_tensor_components == 1) {
+      if (is_consistent_) {
+        sizes_ = vals[0];
+      } else {
+        sizes_ = vals;
+      }
+    }
+
+  // For now lets assume if you are using the tensor constructor you are not consistent
+  NestedSymIntNodeImpl(at::Tensor nested_extents)
+    : n_tensor_components_(nested_extents.size(0)), is_consistent_(false) {
+      TORCH_CHECK(nested_extents.dim() == 1, "NestedSymIntNodeImpl::NestedSymIntNodeImpl() nested_extents must be a 1D tensor.");
+      extent = nested_extents;
+      const auto* nested_extents_data = nested_extents.data_ptr<int64_t>();
+      std::vector<int64_t> vals;
+      vals.reserve(n_tensor_components_);
+      for (const auto i: c10::irange(n_tensor_components_)) {
+        vals.push_back(nested_extents_data[i]);
+      }
+      sizes_ = std::move(vals);
+    }
+  bool is_consistent() const {
+    return is_consistent_;
+  }
+  int64_t get_n_tensor_components() const {
+    return n_tensor_components_;
+  }
+  int64_t get_size(){
+    TORCH_CHECK(is_consistent_, "NestedSymIntNodeImpl::get_size() is only supported for consistent NestedSymIntNodeImpls.");
+    return c10::get<int64_t>(sizes_);
+  }
+
+  // ArrayRef<int64_t> vals() { return vals_; }
+};
 
 } // namespace native
 } // namespace at

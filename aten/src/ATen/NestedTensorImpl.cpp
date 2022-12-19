@@ -11,6 +11,7 @@
 
 #include <numeric>
 #include <functional>
+#include "c10/util/DimVector.h"
 
 namespace {
 inline void validate_nested_tensor_metadata(
@@ -154,11 +155,19 @@ inline std::vector<int64_t> construct_offsets(const at::Tensor& sizes) {
   const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
   offsets[0] = 0;
   for (const auto i : c10::irange(ntensors - 1)) {
-    const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies<int64_t>());
+    const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies<>());
     offsets[i + 1] = offsets[i] + row_product;
     sizes_ptr += orig_dim;
   }
   return offsets;
+}
+inline NestedSymDimVector construct_sym_nested_size_stride(const at::Tensor& sizes) {
+  NestedSymDimVector nested_extent;
+  nested_extent.reserve(sizes.size(1));
+  for (const auto dim : c10::irange(sizes.size(1))) {
+    nested_extent.emplace_back(sizes.select(1, dim));
+  }
+  return nested_extent;
 }
 
 NestedTensorImpl::NestedTensorImpl(
@@ -169,10 +178,12 @@ NestedTensorImpl::NestedTensorImpl(
     at::Tensor nested_stride_tensor,
     std::vector<int64_t>&& offsets)
     : TensorImpl(std::move(storage), key_set, data_type),
+      sym_nested_sizes_(construct_sym_nested_size_stride(nested_size_tensor)),
+      sym_nested_strides_(construct_sym_nested_size_stride(nested_stride_tensor)),
       nested_size_tensor_(std::move(nested_size_tensor)),
       nested_stride_tensor_(std::move(nested_stride_tensor)),
       storage_offsets_(std::move(offsets)),
-      opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
+      opt_sizes_(construct_opt_sizes(nested_size_tensor_)){
   C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
