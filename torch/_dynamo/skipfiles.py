@@ -127,6 +127,15 @@ FILENAME_ALLOWLIST = {
     external_utils.__file__,  # This is a dynamo file (!)
 }
 
+# Include optimizer code for tracing
+FILENAME_ALLOWLIST |= set(
+    [
+        inspect.getfile(obj)
+        for obj in torch.optim.__dict__.values()
+        if inspect.isclass(obj)
+    ]
+)
+FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {
