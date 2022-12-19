@@ -97,6 +97,14 @@ class ComptimeVariable(VariableTracker):
     def reconstruct(self, codegen):
         raise NotImplementedError("comptime is special form")
 
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from ..comptime import comptime
+
+        # To support the comptime.print_graph convenience accessors
+        from .functions import UserFunctionVariable
+
+        return UserFunctionVariable(getattr(comptime, name))
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":

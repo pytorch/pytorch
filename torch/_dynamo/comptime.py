@@ -108,11 +108,12 @@ class ComptimeContext:
     def __init__(self, tx):
         self.__tx = tx
 
-    def get_local(self, name: str) -> ComptimeVar:
+    def get_local(self, name: str, *, stacklevel=0) -> ComptimeVar:
         """
         Retrieve the compile-time known information about a local.
         """
-        return ComptimeVar(self.__tx.symbolic_locals[name])
+        tx = self.__get_tx(stacklevel)
+        return ComptimeVar(tx.symbolic_locals[name])
 
     def graph_break(self, msg="ComptimeContext.graph_break"):
         """
@@ -136,47 +137,55 @@ class ComptimeContext:
             self.__tx.output.graph.python_code("self", verbose=verbose).src, file=file
         )
 
-    def print_disas(self, *, file=None):
+    def __get_tx(self, stacklevel):
+        tx = self.__tx
+        for _ in range(stacklevel):
+            tx = tx.parent
+        return tx
+
+    def print_disas(self, *, file=None, stacklevel=0):
         """
         Print the current series of opcodes being executed (not including
         parent frames), including where you are in the particular opcode
         stream.
         """
+        tx = self.__get_tx(stacklevel)
         print(
             dis.Bytecode(
-                self.__tx.f_code,
-                current_offset=self.__tx.instructions[
-                    self.__tx.instruction_pointer
-                ].offset,
+                tx.f_code,
+                current_offset=tx.instructions[tx.instruction_pointer].offset,
             ).dis(),
             file=file,
         )
 
-    def print_stack(self, *, file=None):
+    def print_value_stack(self, *, file=None, stacklevel=0):
         """
-        Print the current Python bytecode interpreter stack.  Note that
-        this is NOT the same as the traceback; use print_bt() to print
-        that.  Note that this will typically be empty, as comptime
-        cannot currently be used in an expression context where there
-        would be intermediates on the stack.  If you would find this
-        useful, please file a bug at https://github.com/pytorch/pytorch/
+        Print the current Python value stack.  Note that this is NOT the same
+        as the traceback; use print_bt() to print that.  Note that at
+        stacklevel=0, this will typically be empty, as comptime cannot
+        currently be used in an expression context where there would be
+        intermediates on the stack.  If you would find this useful, please
+        file a bug at https://github.com/pytorch/pytorch/
+
+        NB: Stack grows downwards in our print
         """
-        # TODO: improve
-        # TODO: without an expression level comptime this is not very useful
-        for s in self.__tx.stack:
+        # TODO: improve printing
+        tx = self.__get_tx(stacklevel)
+        for s in tx.stack:
             print(f"- {s}", file=file)
 
-    def print_locals(self, *, file=None):
+    def print_locals(self, *, file=None, stacklevel=0):
         """
         Print all of the locals available in the current context.
         By default this view is very limited; you can get more information
         about any individual local using get_local().
         """
         # TODO: improve by improving the VariableTracker printing
-        for k, v in self.__tx.symbolic_locals.items():
+        tx = self.__get_tx(stacklevel)
+        for k, v in tx.symbolic_locals.items():
             print(f"{k} = {v}", file=file)
 
-    def print_bt(self, *, file=None):
+    def print_bt(self, *, file=None, stacklevel=0):
         """
         Print the user code backtrace, starting at the beginning of the
         frame Dynamo started evaluating.  Note that this MAY NOT go all
@@ -186,7 +195,7 @@ class ComptimeContext:
         file a bug at https://github.com/pytorch/pytorch/
         """
         stack = []
-        tx = self.__tx
+        tx = self.__get_tx(stacklevel)
         while tx is not None:
             stack.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
@@ -217,3 +226,77 @@ class ComptimeContext:
         you rely on it.
         """
         return self.__tx
+
+
+# Convenience wrappers that are more compact to use
+
+
+def graph_break():
+    comptime(lambda ctx: ctx.graph_break())
+
+
+def print_graph():
+    comptime(lambda ctx: ctx.print_graph())
+
+
+def print_disas(*, stacklevel=0):
+    comptime(
+        lambda ctx: ctx.print_disas(
+            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+        )
+    )
+
+
+def print_value_stack(*, stacklevel=0):
+    comptime(
+        lambda ctx: ctx.print_value_stack(
+            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+        )
+    )
+
+
+# This is a more useful variant of print_value_stack that can be used
+# in an expression context; e.g., x + print_value_stack_and_return(y + z),
+# you will see x on the stack prior to the addition operation
+def print_value_stack_and_return(e, *, stacklevel=0):
+    comptime(
+        lambda ctx: ctx.print_value_stack(
+            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+        )
+    )
+    return e
+
+
+def print_locals(*, stacklevel=0):
+    comptime(
+        lambda ctx: ctx.print_locals(
+            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+        )
+    )
+
+
+def print_bt(*, stacklevel=0):
+    comptime(
+        lambda ctx: ctx.print_bt(
+            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+        )
+    )
+
+
+def print_guards():
+    comptime(lambda ctx: ctx.print_guards())
+
+
+def comptime(fn):
+    """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
+    return
+
+
+comptime.graph_break = graph_break
+comptime.print_graph = print_graph
+comptime.print_disas = print_disas
+comptime.print_value_stack = print_value_stack
+comptime.print_value_stack_and_return = print_value_stack_and_return
+comptime.print_locals = print_locals
+comptime.print_bt = print_bt
+comptime.print_guards = print_guards

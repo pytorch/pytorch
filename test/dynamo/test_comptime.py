@@ -5,7 +5,7 @@ from io import StringIO
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.eval_frame import comptime
+from torch._dynamo.comptime import comptime
 
 # Because we don't support free variables in comptime at the moment,
 # we have to communicate via globals.  This also means these tests cannot
@@ -19,8 +19,9 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
     def test_print_graph(self):
         global FILE
         FILE = StringIO()
+        cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize("eager")
+        @torch._dynamo.optimize(cnt)
         def f(x):
             y = x * 2
 
@@ -28,9 +29,14 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
             def _(ctx):
                 ctx.print_graph(verbose=False, file=FILE)
 
+            # Test the compact notation doesn't error or graph break;
+            # you'll have to visually inspect to see that it printed
+            comptime.print_graph()
+
             return y + 3
 
         f(torch.randn(2))
+        self.assertEqual(cnt.frame_count, 1)
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
@@ -41,14 +47,17 @@ def forward(self, x : torch.Tensor):
     def test_print_disas(self):
         global FILE
         FILE = StringIO()
+        cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize("eager")
+        @torch._dynamo.optimize(cnt)
         def f(x):
             y = x * 2
 
             @comptime
             def _(ctx):
                 ctx.print_disas(file=FILE)
+
+            comptime.print_disas()
 
             return y + 3
 
@@ -61,6 +70,7 @@ def forward(self, x : torch.Tensor):
             )
 
         f(torch.randn(2))
+        self.assertEqual(cnt.frame_count, 1)
         out = FILE.getvalue()
         # Check that the instruction offset is working
         self.assertIn("-->", out)
@@ -68,11 +78,39 @@ def forward(self, x : torch.Tensor):
         self.assertIn("STORE_FAST", out)
         self.assertIn("BINARY_MULTIPLY", out)
 
+    def test_print_value_stack(self):
+        global FILE
+        FILE = StringIO()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def g(x):
+            @comptime
+            def _(ctx):
+                ctx.print_value_stack(file=FILE, stacklevel=1)
+
+            return x
+
+        @torch._dynamo.optimize(cnt)
+        def f(x):
+            y = x + g(x)
+
+            return y + comptime.print_value_stack_and_return(y * 2)
+
+        f(torch.randn(2))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertExpectedInline(
+            FILE.getvalue(),
+            """\
+- TensorVariable()
+""",
+        )
+
     def test_print_locals(self):
         global FILE
         FILE = StringIO()
+        cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize("eager")
+        @torch._dynamo.optimize(cnt)
         def f(x):
             y = x * 2
 
@@ -80,9 +118,12 @@ def forward(self, x : torch.Tensor):
             def _(ctx):
                 ctx.print_locals(file=FILE)
 
+            comptime.print_locals()
+
             return y + 3
 
         f(torch.randn(2))
+        self.assertEqual(cnt.frame_count, 1)
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
@@ -94,15 +135,18 @@ y = TensorVariable()
     def test_print_bt(self):
         global FILE
         FILE = StringIO()
+        cnt = torch._dynamo.testing.CompileCounter()
 
         def g(x):
             @comptime
             def _(ctx):
                 ctx.print_bt(file=FILE)
 
+            comptime.print_bt()
+
             return x + 3
 
-        @torch._dynamo.optimize("eager")
+        @torch._dynamo.optimize(cnt)
         def f(x):
             y = x * 2
             y = g(y)
@@ -112,15 +156,16 @@ y = TensorVariable()
             return re.sub(r'File "[^"]+", line \d+', 'File "X", line X', s)
 
         f(torch.randn(2))
+        self.assertEqual(cnt.frame_count, 1)
         bt = FILE.getvalue()
         self.assertIn("y = g(y)", bt)
-        self.assertIn("def _(ctx):", bt)
 
     def test_print_guards(self):
         global FILE
         FILE = StringIO()
+        cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize("eager")
+        @torch._dynamo.optimize(cnt)
         def f(x):
             y = x * 2
 
@@ -128,9 +173,12 @@ y = TensorVariable()
             def _(ctx):
                 ctx.print_guards(file=FILE)
 
+            comptime.print_guards()
+
             return y + 3
 
         f(torch.randn(2))
+        self.assertEqual(cnt.frame_count, 1)
         self.assertExpectedInline(
             FILE.getvalue().rstrip(),
             """\
@@ -169,17 +217,22 @@ y = TensorVariable()
             def _(ctx):
                 ctx.graph_break()
 
-            return y + 3
+            y = y + 2
+
+            comptime.graph_break()
+
+            return y * 3
 
         g(torch.randn(2))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_get_local(self):
         global SELF, FILE
         SELF = self
         FILE = StringIO()
+        cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize("eager")
+        @torch._dynamo.optimize(cnt)
         def f(x):
             y = x * 2
             lit = 2
@@ -201,6 +254,7 @@ y = TensorVariable()
             return y + 3
 
         f(torch.randn(2))
+        self.assertEqual(cnt.frame_count, 1)
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\

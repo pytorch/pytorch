@@ -227,7 +227,7 @@ class VariableBuilder:
         return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
-        from ..eval_frame import comptime
+        from ..comptime import comptime
 
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
