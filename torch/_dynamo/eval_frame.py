@@ -298,10 +298,11 @@ class DisableContext(_TorchDynamoContext):
     def __init__(self):
         super().__init__(callback=None)
 
-
-def catch_errors_wrapper(callback, hooks: Hooks):
-    @functools.wraps(callback)
-    def catch_errors(frame, cache_size):
+class _catch_errors:
+    def __init__(self, _torchdynamo_orig_callable, hooks):
+        self._torchdynamo_orig_callable = _torchdynamo_orig_callable
+        self.hooks = hooks
+    def __call__(self, frame, cache_size):
         if (
             frame.f_lasti >= 0
             or skipfiles.check(frame.f_code.co_filename)
@@ -327,12 +328,11 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         hooks=hooks,
                     )
                     return hijacked_callback(frame, cache_size, hooks)
-
         with compile_lock:
-            return callback(frame, cache_size, hooks)
+            return self._torchdynamo_orig_callable(frame, cache_size, hooks)
 
-    catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
-    return catch_errors
+def catch_errors_wrapper(callback, hooks: Hooks):
+    return _catch_errors(callback)
 
 
 def _optimize_catch_errors(

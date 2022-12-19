@@ -6,7 +6,7 @@ import traceback
 import types
 import weakref
 from traceback import FrameSummary
-from typing import cast, Dict, List, Optional, Set
+from typing import cast, Dict, List, Optional, Set, Callable
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -469,15 +469,15 @@ def _compile(
         exception_handler(e, code, frame)
         raise InternalTorchDynamoError() from e
 
+class _convert_frame:
+    def __init__(self, inner_convert: Callable, _torchdynamo_orig_callable: Callable):
+        self._torchdynamo_orig_callable = _torchdynamo_orig_callable
+        self.inner_convert = inner_convert
 
-def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
-    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
-
-    def _convert_frame(frame: types.FrameType, cache_size: int, hooks: Hooks):
+    def __call__(self, frame: types.FrameType, cache_size: int, hooks: Hooks):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size, hooks)
+            result = self.inner_convert(frame, cache_size, hooks)
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):
@@ -488,8 +488,10 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             logging.info("converting frame raised error, suppressing error")
         return None
 
-    _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
-    return _convert_frame
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
+    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
+    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+    return  _convert_frame(inner_convert, compiler_fn)
 
 
 # TODO mlazos: add support for same args, or record them
