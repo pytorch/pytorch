@@ -1879,85 +1879,28 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = compiled_f(*inputs)
         res[0].sum().backward()
 
-    def _test_aot_module_simplified_fake_tensor_gm_raises(self, debug):
+    def test_aot_module_simplified_fake_tensor_gm_raises(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        real_x = torch.randn(4, requires_grad=True)
+        fake_x = fake_mode.from_tensor(real_x)
+        real_z = torch.randn(4)
+        fake_z = fake_mode.from_tensor(real_z)
+
         class MockModule(torch.nn.Module):
-            def __init__(self, y):
+            def __init__(self):
                 super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.y = y
 
             def forward(self, x):
-                z = self.linear(x)
-                z = z + self.y
-                z = z.relu()
-                return (z, )
-
-
-        real_x = torch.randn(4)
-        real_y = torch.randn(4)
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake_y = fake_mode.from_tensor(real_y)
-
-        tracer = torch.fx.Tracer()
-        tracer.record_stack_traces = True
-
-        # This test uses tracing to lift the fake_y into a constant buffer,
-        # so we have a contrived trace example.
-        # For a traceless example closer to how dynamo would call us, see
-        # test_aot_module_deepcopy_fake_tensor_gm_raises below.
-        graph = tracer.trace(MockModule(fake_y))
-        mod_fake = torch.fx.GraphModule(tracer.root, graph)
-
-        if debug:
-            inner_message = "FAKE TENSOR CREATION TRACEBACK:"
-        else:
-            inner_message = "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
-
-        message = f"""Unexpected fake buffer y {inner_message}"""
+                # Accessing a free variable fake tensor will look like a
+                # constant to make_fx, and result in the tensor being traced
+                # into the graph, which is an error condition.  Make sure we
+                # report adequately in this case.
+                return (x + fake_z, )
 
         with self.assertRaisesRegex(
-            AssertionError, message
+            AssertionError, "Unexpected fake buffer"
         ):
-            aot_module_simplified(mod_fake, (real_x,), nop)
-
-        # Counterfactual to ensure that the raise is only due to real vs fake
-        # Run the same exact thing except with a real buffer.
-        graph = tracer.trace(MockModule(real_y))
-        mod_real = torch.fx.GraphModule(tracer.root, graph)
-        aot_module_simplified(MockModule(real_y), (real_x,), nop)
-
-    @patch("torch._subclasses.fake_tensor.FakeTensorConfig.debug", True)
-    def test_aot_module_simplified_fake_tensor_gm_raises_debug_enabled(self):
-        self._test_aot_module_simplified_fake_tensor_gm_raises(debug=True)
-
-    @patch("torch._subclasses.fake_tensor.FakeTensorConfig.debug", False)
-    def test_aot_module_simplified_fake_tensor_gm_raises_no_debug_enabled(self):
-        self._test_aot_module_simplified_fake_tensor_gm_raises(debug=False)
-
-    def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
-        class MockModule(torch.nn.Module):
-            def __init__(self, y):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.linear.bias = torch.nn.Parameter(torch.ones(4))
-
-            def forward(self, x):
-                z = self.linear(x)
-                z = z.relu()
-                return (z, )
-
-
-        real_x = torch.randn(4)
-        real_y = torch.randn(4)
-
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
-
-        with self.assertRaisesRegex(
-            AssertionError,
-            """Unexpected fake param linear.weight"""
-        ):
-            aot_module_simplified(mod_fake, (real_x,), nop)
+            aot_module_simplified(MockModule(), (fake_x,), nop)
 
 
 # entries in here don't work and need to be fixed.
@@ -1986,6 +1929,12 @@ aot_autograd_failures = {
 
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
+
+    # Worked with real but not with fake
+    xfail('cholesky_inverse'),
+    xfail('segment_reduce', 'lengths'),
+    xfail('nn.functional.embedding_bag'),
+    skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc
     xfail('to_sparse'),
