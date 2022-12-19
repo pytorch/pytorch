@@ -26,7 +26,7 @@ class LKJCholesky(Distribution):
     factors of correlation matrices.::
 
         L ~ LKJCholesky(dim, concentration)
-        X = L @ L' ~ LKJCorr(dim, concentration)
+        X = L @ L\' ~ LKJCorr(dim, concentration)
 
     Note that this distribution samples the
     Cholesky factor of correlation matrices and not the correlation matrices
