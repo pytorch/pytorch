@@ -139,7 +139,7 @@ def non_compute_operator(op):
     # skip constructors
     if not any(contains_tensor_types(arg.type) for arg in schema.arguments):
         return True
-    if "_like" in op.name:
+    if "_like" in op.name():
         return True
 
     # allow in place writes
