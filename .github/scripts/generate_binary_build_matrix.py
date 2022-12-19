@@ -195,6 +195,9 @@ def generate_wheels_matrix(os: str,
             arches += CUDA_ARCHES + ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
+            # skip 11.8 builds for Windows
+            if "11.8" in arches:
+                arches.remove("11.8")
 
     ret: List[Dict[str, str]] = []
     for python_version in python_versions:
