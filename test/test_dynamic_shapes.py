@@ -635,6 +635,8 @@ class TestFloorDiv(TestCase):
             torch_func,
         )
 
+        # Note: we do not check error messages on the Python side to avoid
+        # depending on an interpreter version.
         for func, (x, y) in itertools.product(funcs, itertools.chain(
             itertools.product(values, values),
             itertools.product(neg_values, values),
@@ -646,14 +648,13 @@ class TestFloorDiv(TestCase):
                     # makes sure we use the SymPy types
                     x = sympy.sympify(x)
                     y = sympy.sympify(y)
-                err = (
-                    rf"unsupported operand type\(s\) for //: "
-                    rf"'{type(x).__name__}' and '{type(y).__name__}'"
-                )
-                if func is torch_func:
-                    # we try to provide more context since arguments can be
-                    # arbitrary exprs
-                    err += ", expected integer or real"
+                    err = (
+                        rf"unsupported operand type\(s\) for //: "
+                        rf"'{type(x).__name__}' and '{type(y).__name__}'"
+                        rf", expected integer or real"
+                    )
+                else:
+                    err = ""
                 self.assertRaisesRegex(TypeError, err, lambda: func(x, y))
 
             if type(x) is complex or type(y) is complex:
@@ -667,19 +668,12 @@ class TestFloorDiv(TestCase):
                 int_x = int(x) if type(x) is bool else x
                 int_y = int(y) if type(y) is bool else y
                 self.assertEqual(func(x, y), other_func(func, int_x, int_y))
-            elif (type(x) is float or type(y) is float) and y == 0:
-                # div by zero: float case
+            elif y == 0:
+                # div by zero
                 if func is torch_func:
                     err = "division by zero"
                 else:
-                    err = "float floor division by zero"
-                self.assertRaisesRegex(ZeroDivisionError, err, lambda: func(x, y))
-            elif (type(x) in (int, bool) or type(y) in (int, bool)) and y == 0:
-                # div by zero: int and bool case
-                if func is torch_func:
-                    err = "division by zero"
-                else:
-                    err = "integer division or modulo by zero"
+                    err = ""
                 self.assertRaisesRegex(ZeroDivisionError, err, lambda: func(x, y))
             else:
                 # otherwise, compare results
