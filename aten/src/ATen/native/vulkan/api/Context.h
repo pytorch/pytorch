@@ -84,6 +84,10 @@ class Context final {
     enable_op_profiling_ = true;
   }
 
+  inline void disable_op_profiling() {
+    enable_op_profiling_ = false;
+  }
+
   inline bool op_profiling_enabled() {
     return enable_op_profiling_;
   }
