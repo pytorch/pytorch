@@ -22,10 +22,11 @@ from .functions import (
 
 
 class SuperVariable(VariableTracker):
-    def __init__(self, typevar, objvar=None, **kwargs):
+    def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
         super(SuperVariable, self).__init__(**kwargs)
         self.typevar = typevar
         self.objvar = objvar
+        self.specialized = specialized  # directly get attr from self.typevar if true
 
     def reconstruct(self, codegen):
         codegen(variables.BuiltinVariable(super))
@@ -38,6 +39,8 @@ class SuperVariable(VariableTracker):
 
     def const_getattr(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
+        if self.specialized:
+            return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
         # We default to the python type of the object. However,
@@ -300,32 +303,22 @@ class GradModeVariable(ContextWrappingVariable):
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(target_values, kwargs):
-        values = target_values
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
         # cache_enabled : Optional[bool] = None):cache_enabled
-        assert "device_type" in kwargs
-        values.append(kwargs["device_type"])
-        del kwargs["device_type"]
+        bound_args = inspect.signature(torch.autocast).bind(*target_values, **kwargs)
+        bound_args.apply_defaults()
+        target_values = []
+        kwargs.clear()
 
-        if "dtype" in kwargs:
-            values.append(kwargs["dtype"])
-            del kwargs["dtype"]
-        else:
-            values.append(variables.ConstantVariable(None))
-
-        if "enabled" in kwargs:
-            values.append(kwargs["enabled"])
-            del kwargs["enabled"]
-        else:
-            values.append(variables.ConstantVariable(True))
-
-        if "cache_enabled" in kwargs:
-            values.append(kwargs["cache_enabled"])
-            del kwargs["cache_enabled"]
-        else:
-            values.append(variables.ConstantVariable(None))
+        for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
+            if isinstance(bound_args.arguments[key], VariableTracker):
+                target_values.append(bound_args.arguments[key])
+            else:
+                target_values.append(
+                    variables.ConstantVariable(bound_args.arguments[key])
+                )
 
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
@@ -592,6 +585,16 @@ class GetAttrVariable(VariableTracker):
 
         if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
             return self.obj.call_apply(tx, args, kwargs).add_options(self)
+        # calling parent class‘s non classmethod from child class
+        # https://github.com/pytorch/pytorch/issues/90558
+        elif (
+            isinstance(self.obj, variables.UserDefinedClassVariable)
+            and len(args) > 0
+            and issubclass(args[0].python_type(), self.obj.value)
+        ):
+            return SuperVariable(self.obj, args[0], True).call_method(
+                tx, self.name, args[1:], kwargs
+            )
         return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
 
     def call_method(
