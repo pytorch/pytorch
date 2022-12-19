@@ -48,6 +48,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
 
   c10::SymIntArrayRef sym_sizes_custom() const override;
   c10::SymIntArrayRef sym_strides_custom() const override;
+  c10::SymInt sym_numel_custom() const override;
 
  private:
   void setup_size_properties();

@@ -41,7 +41,7 @@ try:
     import torch._inductor.config
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
-    from torch._inductor import codecache, config, metrics
+    from torch._inductor import codecache, config, metrics, test_operators
     from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
     from torch._inductor.codegen.triton import texpr
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
@@ -51,6 +51,7 @@ try:
         linear_transpose,
         permute_linear_fusion,
         permute_matmul_fusion,
+        sink_cat_after_pointwise,
         transpose_linear,
         transpose_matmul,
     )
@@ -69,8 +70,12 @@ except (ImportError, AssertionError) as e:
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
+HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_multigpu = functools.partial(
+    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+)
 
 torch._inductor.config.triton.autotune = False  # too slow
 
@@ -143,13 +148,18 @@ def chain_passes(*passes: PassFunc) -> PassFunc:
     return parent_pass
 
 
-def count_call_function(module: torch.fx.GraphModule, target_op: Any) -> int:
+def count_call(module: torch.fx.GraphModule, op: str, target_op: Any) -> int:
     return sum(
-        [
-            1 if (n.op == "call_function" and n.target == target_op) else 0
-            for n in module.graph.nodes
-        ]
+        [1 if (n.op == op and n.target == target_op) else 0 for n in module.graph.nodes]
     )
+
+
+def count_call_function(module: torch.fx.GraphModule, target_op: Any) -> int:
+    return count_call(module, "call_function", target_op)
+
+
+def count_call_method(module: torch.fx.GraphModule, target_op: Any) -> int:
+    return count_call(module, "call_method", target_op)
 
 
 class TestCase(TorchTestCase):
@@ -761,14 +771,14 @@ class CommonTemplate:
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
-            b = torch._test_inductor_realize(a * 2)
+            b = test_operators.realize(a * 2)
             return (b * 2,)
 
         self.common(fn, (torch.randn(10),))
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
 
     def test_scheduler_vertical_fusion1(self):
-        realize = torch._test_inductor_realize
+        realize = test_operators.realize
 
         def fn(sa, ct, p):
             # From torchbench.pyhpc_equation_of_state
@@ -1475,6 +1485,26 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_shape_prop_torch_ones(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, attention_scores):
+                extended_attention_mask = torch.ones(
+                    8, 1, 1, 512, device=attention_scores.device
+                )
+                attention_scores = attention_scores + extended_attention_mask
+
+                return attention_scores
+
+        mod = Model().eval()
+        with torch.no_grad():
+            self.common(
+                mod,
+                (torch.randn(8, 12, 512, 512),),
+            )
+
     # For gpu path, there has a accurcy issue,
     @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_bn_fuse(self):
@@ -1685,13 +1715,13 @@ class CommonTemplate:
             def __init__(
                 self,
                 binary_fn,
+                unary_fn,
                 in_channels,
                 out_channels,
                 dilation,
                 groups,
                 padding,
                 bias,
-                has_relu,
                 **kwargs,
             ):
                 super(M, self).__init__()
@@ -1716,17 +1746,17 @@ class CommonTemplate:
                     )
                 )
                 self.binary_fn = binary_fn
-                self.relu = torch.nn.ReLU() if has_relu else torch.nn.Identity()
+                self.unary_fn = unary_fn
 
             def forward(self, x):
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
-                return self.relu(self.binary_fn(x1, x2))
+                return self.unary_fn(self.binary_fn(x1, x2))
 
         test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(
             binary_list,
-            [True, False],
+            unary_list[:2],
             [True, False],
             [1, 3],
             [1, 2],
@@ -1737,7 +1767,7 @@ class CommonTemplate:
 
         for (
             binary_fn,
-            has_relu,
+            unary_fn,
             bias,
             kernel_size,
             dilation,
@@ -1750,13 +1780,13 @@ class CommonTemplate:
             x_shape = (1, iC, 112, 112)
             mod = M(
                 binary_fn,
+                unary_fn,
                 iC,
                 oC,
                 dilation,
                 groups,
                 padding,
                 bias,
-                has_relu,
                 kernel_size=kernel_size,
             ).eval()
             mod = mod.to(memory_format=memory_format)
@@ -1979,6 +2009,15 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
             check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
+
+    @requires_multigpu()
+    def test_multi_gpu_device(self):
+        def fn(x, y):
+            r = torch.ops.aten.div(x, y)
+            r = r.to("cuda:1")
+            return 2 * r
+
+        self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
     def test_unbind(self):
         def fn(a):
@@ -4893,10 +4932,20 @@ class CommonTemplate:
         device = "cpu"
         for name in [
             "test_as_strided",  # buffer reuse
+            "test_bitwise",  # int32
+            "test_bmm1",
+            "test_bmm2",
             "test_cat",  # alias
+            "test_linear1",
+            "test_linear2",
+            "test_lowmem_dropout1",  # None as output
+            "test_mm_views",
             "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
+            "test_reduction1",  # Reduction
             "test_relu",  # multiple inputs
             "test_silu",  # single input, single output
+            "test_sum_dtype",  # float64
+            "test_sum_int",  # bool, int64, int8, uint8
             "test_transpose",  # multiple outputs, buffer clear
         ]:
             test_name = f"{name}_{device}"
@@ -5140,6 +5189,17 @@ if HAS_CPU:
                 assert same(real_out, compiled_out, equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count >= 1
 
+        def test_load_same_bool_tensor_twice(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a, b):
+                x = torch.masked_fill(a, b, -33.0)
+                y = torch.masked_fill(a, b, -33.0)
+                return x, y
+
+            value = torch.randn((2, 17))
+            mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8).to(torch.bool)
+            fn(value, mask)
+
         def test_cpu_vec_cosim(self):
             cpp_vec_op_list = []
             cpp_op_list = []
@@ -5151,15 +5211,26 @@ if HAS_CPU:
                 if isinstance(v, staticmethod):
                     cpp_op_list.append(k)
 
-            self.assertEqual(cpp_op_list.sort(), cpp_vec_op_list.sort())
+            diff = [
+                "index_expr",
+                "signbit",
+                "isinf",
+                "mod",
+                "masked",
+                "randn",
+                "isnan",
+                "rand",
+            ]
+            union = {*cpp_vec_op_list, *diff}
+            self.assertTrue(set(cpp_op_list).issubset(union))
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
-        def test_erf_cpu_only(self):
+        def test_new_vec_op_cpu_only(self):
             def fn(x):
-                return (torch.erf(x),)
+                return (torch.log1p(torch.expm1(torch.erf(x))),)
 
             x = torch.randn((2, 9))
             x[0, 0] = torch.nan
@@ -5260,7 +5331,7 @@ if HAS_CPU:
                 traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 1
+                assert metrics.generated_cpp_vec_kernel_count == 0
 
                 torch._dynamo.reset()
                 metrics.reset()
@@ -5315,6 +5386,21 @@ if HAS_CUDA:
             self.common(
                 fn, (torch.randn(2, 3, 10, 5, 6, device="cuda")[:, :, 2::2, :, :],)
             )
+
+        def test_sink_cat_after_pointwise(self):
+            class TestModule(torch.nn.Module):
+                def forward(self, x, y):
+                    return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+
+            trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
+            inputs = [
+                torch.randn(8, 8, device="cuda"),
+                torch.randn(8, 8, device="cuda"),
+            ]
+            module = TestModule()
+            traced = trace_func(module, inputs)
+            self.assertTrue(torch.allclose(module(*inputs), traced(*inputs)))
+            self.assertEqual(count_call_method(traced, "tanh"), 2)
 
         def test_linear_permute_fusion(self):
             class TestModule(torch.nn.Module):

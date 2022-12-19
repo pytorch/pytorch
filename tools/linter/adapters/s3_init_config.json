@@ -22,7 +22,7 @@
         },
         "Linux": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/clang-tidy",
-            "hash": "49343a448fcb75cd1e0fb9d6b1f6c2ef4b008b6f91d6ff899d4ac6060f5e52a5"
+            "hash": "e4a1537ee997aa486a67bcc06d050b1aa6cfb14aa3073c08f19123ac990ab2f7"
         }
     },
     "actionlint": {

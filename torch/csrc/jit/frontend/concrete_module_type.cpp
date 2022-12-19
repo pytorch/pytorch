@@ -274,8 +274,7 @@ void ConcreteModuleTypeBuilder::addBuiltinFunction(
 void ConcreteModuleTypeBuilder::addModule(
     std::string name,
     std::shared_ptr<ConcreteModuleType> meta) {
-  modules_.emplace_back(
-      ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), std::move(meta)});
+  modules_.emplace_back(std::move(name), std::move(meta));
 }
 
 void ConcreteModuleTypeBuilder::addForwardHook(py::object hook) {
@@ -368,8 +367,9 @@ std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>>
 ConcreteModuleType::getModulesPy() const {
   std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>> ret;
 
+  ret.reserve(data_.modules_.size());
   for (const auto& info : data_.modules_) {
-    ret.emplace_back(std::make_pair(info.name_, info.meta_));
+    ret.emplace_back(info.name_, info.meta_);
   }
   return ret;
 }
