@@ -1,6 +1,7 @@
 import dataclasses
 import functools
 import itertools
+import logging
 import math
 import operator
 from typing import Dict, Iterable, Union
@@ -11,6 +12,8 @@ import torch
 from .ir import IndexingDiv, InterpreterShim, LoopBody, ModularIndexing
 from .utils import sympy_subs
 from .virtualized import V
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -27,19 +30,19 @@ class ValueRanges(object):
 
     @classmethod
     def unary_map(cls, x, fn):
-        "map lower and upper bound with fn"
+        """map lower and upper bound with fn"""
         x = cls.wrap(x)
         return ValueRanges(fn(x.lower), fn(x.upper))
 
     @classmethod
     def checked_unary_map(cls, x, fn):
-        "check the max and min of computed upper and lower bound for the output"
+        """check the max and min of computed upper and lower bound for the output"""
         out = cls.unary_map(x, fn)
         return ValueRanges(min(out.lower, out.upper), max(out.lower, out.upper))
 
     @classmethod
     def binary_map(cls, x, y, fn):
-        "map upper and lower bounds accessing corresponding values of inputs"
+        """map upper and lower bounds accessing corresponding values of inputs"""
         x, y = cls.wrap(x), cls.wrap(y)
 
         return ValueRanges(
@@ -49,7 +52,7 @@ class ValueRanges(object):
 
     @classmethod
     def binary_map_products(cls, a, b, fn):
-        "compute the product of all lower and upper bounds and take min and max"
+        """compute the product of all lower and upper bounds and take min and max"""
         a, b = cls.wrap(a), cls.wrap(b)
         products = [
             fn(x, y)
@@ -84,6 +87,12 @@ class ValueRangeAnalysis(object):
             sympy.logic.boolalg.BooleanFalse, sympy.logic.boolalg.BooleanTrue
         )
 
+    @staticmethod
+    def default_handler(*args, **kwargs):
+        # many ops are unlikely to show up in optimizable indexing compute,
+        # so we dont have full coverage
+        return ValueRanges(-math.inf, math.inf)
+
     def load(self, name: str, index: sympy.Expr):
         return ValueRanges(-math.inf, math.inf)
 
@@ -99,6 +108,13 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
+        x = ValueRanges.wrap(x)
+        if x.lower.is_Boolean:
+            assert x.upper.is_Boolean
+            if dtype.is_floating_point:
+                return ValueRanges(sympy.Float(0.0), sympy.Float(1.0))
+            else:
+                return ValueRanges(sympy.Integer(0), sympy.Integer(1))
         return ValueRanges.wrap(x)
 
     @staticmethod
@@ -108,13 +124,9 @@ class ValueRangeAnalysis(object):
         if math.isnan(value):
             return ValueRanges(-math.inf, math.inf)
         if isinstance(value, int):
-            return ValueRanges(
-                sympy.core.numbers.Integer(value), sympy.core.numbers.Integer(value)
-            )
+            return ValueRanges(sympy.Integer(value), sympy.xInteger(value))
         else:
-            return ValueRanges(
-                sympy.core.numbers.Float(value), sympy.core.numbers.Float(value)
-            )
+            return ValueRanges(sympy.Float(value), sympy.Float(value))
 
     @staticmethod
     def reciprocal(x):
@@ -123,6 +135,10 @@ class ValueRangeAnalysis(object):
     @staticmethod
     def abs(x):
         return ValueRanges.checked_unary_map(x, abs)
+
+    @staticmethod
+    def neg(x):
+        return ValueRanges.checked_unary_map(x, lambda x: -x)
 
     @staticmethod
     def truediv(a, b):
@@ -153,8 +169,16 @@ class ValueRangeAnalysis(object):
         return ValueRanges.checked_unary_map(x, lambda y: y * y)
 
     @staticmethod
+    def log(x):
+        return ValueRanges.checked_unary_map(x, lambda y: sympy.log(y))
+
+    @staticmethod
     def sqrt(x):
         return ValueRanges.unary_map(x, sympy.sqrt)
+
+    @staticmethod
+    def pow(a, b):
+        return ValueRanges.binary_map_products(a, b, operator.pow)
 
     @staticmethod
     def minimum(a, b):
@@ -175,6 +199,10 @@ class ValueRangeAnalysis(object):
     @staticmethod
     def ceil(x):
         return ValueRanges.unary_map(x, sympy.functions.elementary.integers.ceiling)
+
+    def __getattr__(self, name):
+        log.warning(f"unhandled ValueRange op {name}")
+        return self.default_handler
 
 
 def dominated_nodes(
@@ -198,9 +226,9 @@ def dominated_nodes(
 
 
 def val_expressable_in_32_bits(val):
-    if isinstance(val, sympy.Number):
+    if isinstance(val, sympy.Expr):
         assert val.is_constant()
-        if isinstance(val, sympy.Integer):
+        if val.is_Integer or val.is_Boolean:
             val = int(val)
         else:
             val = float(val)
@@ -265,7 +293,7 @@ class OptimizeIndexing(object):
         )
 
     def run(self):
-        "Compute Value Ranges and try reduce precision of 'to_dtype' nodes to int32 where possible"
+        """Compute Value Ranges and try reduce precision of 'to_dtype' nodes to int32 where possible"""
 
         for node in self.tensor_values_set:
             # we need to evaluate masked_subblock to recurse, and we need to set indirect values
@@ -323,10 +351,14 @@ class OptimizeIndexing(object):
                     if indirect_var in indirect_vals:
                         index_val = self.replacement_vals[index]
 
+                        if math.isinf(index_val.lower) or math.isinf(index_val.upper):
+                            return
+
                         # all indices are integers, so make sure that we
                         # use the bounds of integers instead of floats.
                         # TODO - not sure if we should be doing int/float casts while tracing,
                         # might interfere with sympy.
+
                         index_val_int = ValueRanges(
                             int(index_val.lower), int(index_val.upper)
                         )
@@ -457,7 +489,7 @@ class OptimizeIndexing(object):
 def indexing_dtype_strength_reduction(
     loop_body: LoopBody, indices: Dict[sympy.Symbol, int]
 ):
-    """ "
+    """
     Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
     intermediaries from int64 to int32
     """
