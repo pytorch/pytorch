@@ -36,7 +36,7 @@ class _OptimizerHookState(object):
 
 
 @dataclass
-class OptimInBackwardHookState:
+class _OptimInBackwardHookState:
     optim_stream: torch.cuda.Stream
     wait_for_optim_stream_enqueued: bool
 
@@ -49,7 +49,7 @@ def _apply_optim_in_backward_hook(
     optimizer with backward pass, DDP will run the below hook to run optimizer
     step for parameters after gradient communication has taken place.
     """
-    optim_in_bwd_state = OptimInBackwardHookState(
+    optim_in_bwd_state = _OptimInBackwardHookState(
         optim_stream=torch.cuda.Stream(),
         wait_for_optim_stream_enqueued=False,
     )
