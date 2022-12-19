@@ -21,6 +21,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._dynamo import bytecode_transformation, graph_break
+from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
     requires_static_shapes,
@@ -2672,7 +2673,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 b_float32 = torch.rand((8, 8), device="cuda")
                 d_float32 = torch.rand((8, 8), device="cuda")
 
-                with torch.autocast(device_type="cuda"):
+                with torch.autocast("cuda"):
                     e_float64 = torch.mm(a_float32, b_float32)
                     f_float64 = torch.mm(d_float32, e_float64)
                 return f_float64
@@ -2911,6 +2912,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         gm = torch.fx.symbolic_trace(optimized)
         self.assertTrue(same(gm(input), real))
 
+    def test_not_dynamic_scope(self):
+        def f(y):
+            x = 1
+
+            def g():
+                x = 2
+                return lambda: x
+
+            return y + g()()
+
+        input = torch.zeros(1)
+        real = f(input)
+        optimized = torch._dynamo.optimize("eager")(f)
+        opt = optimized(input)
+        self.assertTrue(same(opt, real))
+
     def test_inference_mode(self):
         @torch.inference_mode()
         def func(x, y):
@@ -2966,6 +2983,47 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    def test_torch_cudnn_is_acceptable(self):
+        def fn(x):
+            if torch.backends.cudnn.is_acceptable(tensor=x):
+                return x + 1
+            return x
+
+        x = torch.rand(4).cuda()
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    def test_torch_cudnn_is_acceptable_bad_inputs(self):
+        def fn1(x):
+            if torch.backends.cudnn.is_acceptable("invalid"):
+                return x + 1
+            return x
+
+        def fn2(x):
+            if torch.backends.cudnn.is_acceptable(x, 3.14):
+                return x + 1
+            return x
+
+        with self.assertRaisesRegex(
+            AssertionError, "Expect input to cudnn.is_acceptable to be a tensor"
+        ):
+            x1 = torch.rand(4).cuda()
+            opt_fn1 = torch._dynamo.optimize("eager", nopython=True)(fn1)
+            res1 = opt_fn1(x1)
+
+        with self.assertRaisesRegex(
+            AssertionError, "Expect 1 input to cudnn.is_acceptable"
+        ):
+            x2 = torch.rand(4).cuda()
+            opt_fn2 = torch._dynamo.optimize("eager", nopython=True)(fn2)
+            res = opt_fn2(x2)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_get_device(self):
@@ -3068,6 +3126,119 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 guard_failure[0],
                 "tensor 'x' size mismatch at index 0. expected 2, actual 3",
             )
+
+    def test_restore_graphstate(self):
+        # This function does some guard accumulation,
+        # and then rolls back due to control flow.
+        # The idea is that if one were printing guards as they appear,
+        # they would see this insert a guard that does not show up in the final set of
+        # guards as we rolled back from it.
+        def nested_fn(s):
+            if x[0] < 10:
+                return s * s
+            return s
+
+        def fn(x, y):
+            x = x + 1
+            y = nested_fn(y)
+            y = y + 10
+            return x * y
+
+        all_guards = []
+
+        def guard_export_print(guards):
+            nonlocal all_guards
+            all_guards.extend(guards)
+
+        opt_fn = torch._dynamo.optimize("eager", guard_export_fn=guard_export_print)(fn)
+
+        x = torch.tensor([0.5, 0.5])
+        y = torch.tensor([1.0, 1.0])
+        opt_fn(x, y)
+
+        if torch._dynamo.config.dynamic_shapes:
+            self.assertEqual(len(all_guards), 13)
+        else:
+            self.assertEqual(len(all_guards), 9)
+        for guard in all_guards:
+            # This guard was created
+            self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
+
+    # Note - here be mild dragons.
+    # This test relies a ton on internal implementation. Future refactor efforts
+    # are welcome to delete it if necessary, rewriting this test constantly is a chore, not
+    # a feature. We kept it around with some amount of saddness, as it was extremely useful in debugging.
+    def test_restore_graphstate_internals(self):
+        def fn(x, y):
+            x = x + 1
+            y = y + 1
+            return x * y
+
+        _, guards = torch._dynamo.export(
+            fn, torch.tensor([0.25, 0.25]), torch.tensor([0.25, 0.25])
+        )
+        # Dummy ctor
+        graph = OutputGraph(
+            f_globals={}, code_options={}, compiler_fn=None, root_tx=None
+        )
+        # Contrived property so as not to have it be None
+        graph.nn_modules = {}
+        # Contrived generation timestamp
+        graph.timestamp = 4
+        # Contrived guards
+        graph.tracing_context.guards_context.dynamo_guards = guards
+
+        # Save the state
+        state = graph.copy_graphstate()
+        # Saving increments the generation
+        self.assertEqual(graph.timestamp, 5)
+
+        # Assure that the saved state is valid
+        self.assertEqual(state.timestamp, 4)
+
+        # Ensure that the guards reflect the expected state
+        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
+        self.assertEqual(graph.guards, guards)
+
+        # Mess around with the state
+        graph.tracing_context.guards_context.dynamo_guards = set()
+        self.assertEqual(graph.guards, set())
+
+        # Restore the state
+        graph.restore_graphstate(state)
+
+        # Make sure it restored correctly
+        self.assertEqual(graph.timestamp, 4)
+        self.assertEqual(graph.guards, guards)
+        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
+
+    def test_call_parent_non_class_methods_from_child(self):
+        class A(object):
+            def add(self, x):
+                return x + 10
+
+            def mul(self, x):
+                return x * 0.1
+
+        class B(A):
+            def add(self, x):
+                return x + 20
+
+            def mul(self, x):
+                return x * 0.2
+
+        class C(B):
+            def add(self, x):
+                y = A.add(self, x)
+                z = B.mul(self, y)
+                return z + 30
+
+        x = torch.rand(4)
+        fn = C().add
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
 
 
 class CustomFunc1(torch.autograd.Function):
