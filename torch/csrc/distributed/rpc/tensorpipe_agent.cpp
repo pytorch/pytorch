@@ -882,7 +882,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
     {
       std::unique_lock<std::mutex> lock(timeoutMapMutex_);
       auto& timeoutFuturesVector = timeoutMap_[expirationTime];
-      messageIdToTimeout_.emplace(std::make_pair(messageId, expirationTime));
+      messageIdToTimeout_.emplace(messageId, expirationTime);
       timeoutFuturesVector.emplace_back(
           messageId, futureResponseMessage, timeout);
     }

@@ -1747,7 +1747,7 @@ int nnc_lowerings_lazy_registration() {
               int64_t i = 0;
               for (const auto& a : axes) {
                 if (i++ != dim) {
-                  indices.emplace_back(ExprHandle(a.node()));
+                  indices.emplace_back(a.node());
                 }
               }
 

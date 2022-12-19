@@ -297,7 +297,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(OPN): {
             INST_GUARD;
-            stack.push_back(inst.N);
+            stack.emplace_back(inst.N);
 #ifndef NDEBUG
             size_t init_size = stack.size();
 #endif

@@ -185,8 +185,8 @@ static int TensorGuards_init(
       PyErr_SetString(PyExc_TypeError, "expected Tensor()");
       return -1;
     }
-    checks.emplace_back(TensorCheck(
-        state, Py_TYPE(item), THPVariable_Unpack(item), dynamic_shapes));
+    checks.emplace_back(
+        state, Py_TYPE(item), THPVariable_Unpack(item), dynamic_shapes);
   }
   return 0;
 }

@@ -1445,7 +1445,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   std::vector<ExprHandle> te_sizes;
   te_sizes.reserve(sizes.size());
   for (auto s : sizes) {
-    te_sizes.push_back(s);
+    te_sizes.emplace_back(s);
   }
   BufPtr buf = alloc<Buf>(
       "const_" + sanitizeName(v->debugName()),

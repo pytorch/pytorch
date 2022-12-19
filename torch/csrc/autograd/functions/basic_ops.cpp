@@ -46,7 +46,7 @@ auto UndefinedGradBackward::apply(variable_list&& output_grads)
   output_grads.reserve(input_grads.size());
   for (auto& grad : output_grads) {
     (void)grad; // Suppress unused variable warning
-    input_grads.emplace_back(at::Tensor());
+    input_grads.emplace_back();
   }
   return input_grads;
 }

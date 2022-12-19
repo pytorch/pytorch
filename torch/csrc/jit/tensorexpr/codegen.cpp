@@ -144,7 +144,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     // it, and there are no future reuses on its memory).
     // TODO: reuse memory for bufs with dynamic shapes
     if (!bufSize(buf)) {
-      buf_allocs.emplace_back(std::make_pair(buf, buf));
+      buf_allocs.emplace_back(buf, buf);
       continue;
     }
 
@@ -193,7 +193,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     // it.
     if (!allocated) {
       buf_mem_map[buf] = buf;
-      buf_allocs.emplace_back(std::make_pair(buf, buf));
+      buf_allocs.emplace_back(buf, buf);
     }
   }
 

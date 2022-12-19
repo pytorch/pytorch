@@ -179,8 +179,8 @@ OptionalType::OptionalType(TypePtr contained)
   } else if (contained == NumberType::get() || is_numbertype) {
     contained_ = NumberType::get();
     types_.clear();
-    types_.push_back(NumberType::get());
-    types_.push_back(NoneType::get());
+    types_.emplace_back(NumberType::get());
+    types_.emplace_back(NoneType::get());
   } else {
     std::vector<TypePtr> to_subtract{NoneType::get()};
     auto without_none = subtractTypeSetFrom(to_subtract, types_);

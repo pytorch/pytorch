@@ -2486,7 +2486,7 @@ bool LoopNest::flatten(const std::vector<ForPtr>& loops, ForPtr* flattened) {
     auto curr_loop = normalized_loops[idx];
     ExprPtr div = alloc<Div>(flat_var, stop);
     ExprPtr sub_expr = idx == 0 ? div : alloc<Mod>(div, curr_loop->stop());
-    var_mapping.push_back(std::make_pair(curr_loop->var(), sub_expr));
+    var_mapping.emplace_back(curr_loop->var(), sub_expr);
     stop = alloc<Mul>(curr_loop->stop(), stop);
   }
   auto flattened_body =
@@ -3197,8 +3197,8 @@ void LoopNest::computeAt(StmtPtr s, ForPtr f) {
   }
 
   for (const auto i : c10::irange(prod_indices.size())) {
-    rewrite_indices_map.push_back(
-        {prod_indices[i], alloc<Add>(temp_indices[i], offsets[i])});
+    rewrite_indices_map.emplace_back(
+        prod_indices[i], alloc<Add>(temp_indices[i], offsets[i]));
   }
 
   // Construct the temp statement

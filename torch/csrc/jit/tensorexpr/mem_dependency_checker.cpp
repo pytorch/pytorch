@@ -1043,9 +1043,8 @@ void MemDependencyChecker::insertBuffers(
     VarPtr var = b->base_handle();
     IndexBounds bounds;
     for (const auto& d : b->dims()) {
-      bounds.push_back(
-          {immLike(d, 0),
-           IRSimplifier::simplify(alloc<Sub>(d, immLike(d, 1)))});
+      bounds.emplace_back(
+          immLike(d, 0), IRSimplifier::simplify(alloc<Sub>(d, immLike(d, 1))));
     }
     auto info =
         std::make_shared<AccessInfo>(nextAccess_++, type, nullptr, var, bounds);
@@ -1135,7 +1134,7 @@ void MemDependencyChecker::visit(AllocatePtr v) {
   ExprPtr flat_size = buf_flat_size(v->buf());
   flat_size =
       IRSimplifier::simplify(alloc<Sub>(flat_size, immLike(flat_size, 1)));
-  bounds.push_back({immLike(flat_size, 0), flat_size});
+  bounds.emplace_back(immLike(flat_size, 0), flat_size);
 
   auto info = std::make_shared<AccessInfo>(
       nextAccess_++, AccessType::Alloc, nullptr, var, bounds);
@@ -1235,7 +1234,7 @@ void MemDependencyChecker::updateWriteHistory(
   }
 
   if (insert && isWrite) {
-    writeHistory.emplace_back(std::make_pair(info->bounds(), info));
+    writeHistory.emplace_back(info->bounds(), info);
   }
 }
 
