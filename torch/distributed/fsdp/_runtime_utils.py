@@ -362,8 +362,8 @@ def _pre_forward(
     # Recursively convert args and kwargs to specified precision.
     input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
     if state.mixed_precision.cast_forward_inputs:
-        args, kwargs = _prepare_forward_inputs(
-            state.compute_device, input_dtype, *args, **kwargs
+        args, kwargs = _cast_forward_inputs(
+            input_dtype, *args, **kwargs
         )
     return args, kwargs
 
@@ -447,7 +447,8 @@ def _post_forward_reshard(
 def _root_pre_forward(
     state: _FSDPState,
     module: nn.Module,
-    unused_args: Any,
+    args,
+    kwargs,
 ) -> None:
     """
     Runs pre-forward logic specific to the root FSDP instance, which should run
@@ -462,7 +463,7 @@ def _root_pre_forward(
     _lazy_init(state, module)
     p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
-        return
+        return args, kwargs
     if state.forward_prefetch:
         handles_keys = []
         if _is_composable(state):
@@ -481,24 +482,25 @@ def _root_pre_forward(
     )
     _clear_grads_if_needed(_all_handles(state))
 
+    # Prepares the forward inputs by moving them to ``compute_device``
+    # TODO: Do not use the side stream for tensor copies for now; investigate
+    # the perf with/without it.
+    args_tuple, kwargs_tuple = _to_kwargs(args, kwargs, state.compute_device.index, False)
+    args = args_tuple[0]
+    kwargs = kwargs_tuple[0]
 
-def _prepare_forward_inputs(
-    device: torch.device,
+    return args, kwargs
+
+
+def _cast_forward_inputs(
     input_dtype: Optional[torch.dtype],
     *args: Any,
     **kwargs: Any,
 ) -> Tuple[Any, Any]:
     """
-    Prepares the forward inputs by moving them to ``device`` and casting them
-    to ``input_dtype`` if it is not ``None``.
+    Prepares the forward inputs by casting them to ``input_dtype`` if it is not ``None``.
     """
-    # TODO: Do not use the side stream for tensor copies for now; investigate
-    # the perf with/without it.
-    # TODO: For mixed precision, move the inputs to the compute device and cast
-    # to reduced-precision in a single `to()` call.
-    args_tuple, kwargs_tuple = _to_kwargs(args, kwargs, device.index, False)
-    args = args_tuple[0]
-    kwargs = kwargs_tuple[0]
+    # TODO: For mixed precision, cast to reduced-precision in a single `to()` call.
     if input_dtype is not None:
         args, kwargs = _cast_fp_inputs_to_dtype(input_dtype, *args, **kwargs)
     return args, kwargs
@@ -1084,7 +1086,7 @@ def _register_root_pre_forward_hook(
     state._root_pre_forward_handles.clear()
     hook = functools.partial(_root_pre_forward, state)
     state._root_pre_forward_handles.append(
-        module.register_forward_pre_hook(hook, prepend=True)
+        module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
     )
 
 
