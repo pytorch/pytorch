@@ -195,6 +195,34 @@ class Guard:
 T = TypeVar("T")
 
 """
+Parent structure for guard env expressions.
+A GuardEnvExpr can have any subtype.
+Note: All subtypes must be handled exhaustively in
+torch._dynamo.guards._parse_guard_env_guards to avoid a RuntimeError.
+"""
+
+
+@dataclasses.dataclass
+class GuardEnvExpr:
+    pass
+
+
+"""
+A class representing a pair of duplicate inputs.
+input_pos_a and input_pos_b are input positions we have deduped.
+"""
+
+
+@dataclasses.dataclass
+class DuplicateInputs(GuardEnvExpr):
+    input_pos_a: int
+    input_pos_b: int
+
+    def __post_init__(self):
+        assert self.input_pos_a != self.input_pos_b
+
+
+"""
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
 copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot of any type that
@@ -256,6 +284,7 @@ prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
+        self.aotautograd_guards: List[GuardEnvExpr] = []
 
     def copy_graphstate(self):
         return GuardsCheckpointState(set(self.dynamo_guards))
