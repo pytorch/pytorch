@@ -295,6 +295,7 @@ class OpOverload(PyOperatorABC):
         return self._schema.name.split("::")[0]
 
     def decompose(self, *args, **kwargs):
+        return NotImplemented
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
         if dk in self.py_kernels:
             # NB: This branch is not too necessary anymore, because we can
