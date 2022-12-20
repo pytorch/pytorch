@@ -25,7 +25,8 @@ from .backend_config import (
 from ..fuser_method_mappings import (
     _sequential_wrapper2,
 )
-
+import operator
+from torch.ao.quantization.utils import MatchAllNode
 
 # ===================
 # |  DTYPE CONFIGS  |
@@ -102,10 +103,80 @@ def _fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
 # ======================
 # |  CONFIGS FOR CONV  |
 # ======================
+observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
 
 conv_dtype_configs = [onednn_weighted_op_int8_dtype_config]
 conv_configs = _get_conv_configs(conv_dtype_configs)
 
+# (1) Conv2d + Add
+# conv2d   Y
+#   \   /
+#    add
+
+# include:
+# conv2d conv2d
+#   \   /
+#    add
+
+def fuse_conv_add_right(is_qat, add, conv, _):
+    return nni.ConvAdd2d(add, conv)
+
+def conv_add_root_node_getter_right(pattern):
+    _, conv, _ = pattern
+    return conv
+
+def conv_add_extra_inputs_getter_right(pattern):
+    """ get inputs pattern for extra inputs, inputs for root node
+    are assumed to be copied over from root node to the fused node
+    """
+    _, conv, extra_input = pattern
+    return [extra_input]
+
+for add_op in [torch.add, operator.add]:
+    conv_configs.append(
+        BackendPatternConfig()
+            ._set_pattern_complex_format((add_op, nn.Conv2d, MatchAllNode))
+            .set_observation_type(observation_type)
+            .set_dtype_configs(conv_dtype_configs)
+            .set_fuser_method(fuse_conv_add_right)
+            ._set_root_node_getter(conv_add_root_node_getter_right)
+            ._set_extra_inputs_getter(conv_add_extra_inputs_getter_right)
+            .set_fused_module(nni.ConvAdd2d))
+
+#  Y    conv
+#   \   /
+#    add
+def fuse_conv_add(is_qat, add, _, conv):
+    return nni.ConvAdd2d(add, conv)
+
+def conv_add_root_node_getter(pattern):
+    add, _, conv = pattern
+    return conv
+
+def conv_add_extra_inputs_getter(pattern):
+    """ get inputs pattern for extra inputs, inputs for root node
+    are assumed to be copied over from root node to the fused node
+    """
+    _, extra_input, conv = pattern
+    return [extra_input]
+
+for add_op in [torch.add, operator.add]:
+    conv_configs.append(
+        BackendPatternConfig()
+            ._set_pattern_complex_format((add_op, MatchAllNode, nn.Conv2d))
+            .set_observation_type(observation_type)
+            .set_dtype_configs(conv_dtype_configs)
+            .set_fuser_method(fuse_conv_add)
+            ._set_root_node_getter(conv_add_root_node_getter)
+            ._set_extra_inputs_getter(conv_add_extra_inputs_getter)
+            .set_fused_module(nni.ConvAdd2d))
+
+conv_configs.append(
+    BackendPatternConfig(nni.ConvAdd2d)
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(conv_dtype_configs)
+        .set_root_module(nn.Conv2d)
+        .set_reference_quantized_module(nnqr.Conv2d))
 
 # ========================
 # |  CONFIGS FOR LINEAR  |
@@ -115,7 +186,6 @@ linear_dtype_configs = [
     onednn_weighted_op_int8_dtype_config,
     onednn_dynamic_int8_dtype_config,
 ]
-observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
 linear_configs = _get_linear_configs(linear_dtype_configs)
 
 # (1) Linear + leaky_relu
