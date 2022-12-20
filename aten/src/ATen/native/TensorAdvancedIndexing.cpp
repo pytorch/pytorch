@@ -881,24 +881,27 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
         result.scalar_type() != ScalarType::ComplexHalf) {
       std::vector<int64_t> ep_sizes(result.sizes().size());
       std::vector<int64_t> ep_strides(source.sizes().size());
-      ep_sizes[dim] = numel;
-      ep_strides[dim] = 1;
 
       // Check whether result and source are matched apart from the dimension dim.
       // Note that the broadcast case:
       // source.select(dim, i) is broadcast for result.select(dim, index_data[i])
       // The broadcast case is not applicable for scatter_add
-      auto check_sizes = [&ep_sizes, &ep_strides](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
-        if (a.size() != b.size())
+      auto check_sizes = [&ep_sizes, &ep_strides, &numel](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
+        if (a.size() != b.size()) {
           return false;
-        int64_t ndim = a.size();
-        for (int64_t i = ndim - 1; i >= 0; --i) {
-          if (i != dim){
-            if (a[i] != b[i])
-              return false;
-            ep_sizes[i] = a[i];
-            ep_strides[i] = 0;
+        }
+
+        ep_sizes[dim] = numel;
+        ep_strides[dim] = 1;
+        for (const auto i : c10::irange(a.size())) {
+          if (i == dim) { continue; }
+
+          if (a[i] != b[i]) {
+            return false;
           }
+          ep_sizes[i] = a[i];
+          ep_strides[i] = 0;
+
         }
         return true;
       };
@@ -907,7 +910,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
         auto ep_index = index_contig.as_strided(ep_sizes, ep_strides);
         result.scatter_add_(dim, ep_index, source);
         return;
-      };
+      }
 
     }
 
