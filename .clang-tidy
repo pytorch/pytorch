@@ -38,7 +38,7 @@ performance-*,
 -performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
 '
-HeaderFilterRegex: 'torch/csrc/(?!deploy/interpreter/cpython).*'
+HeaderFilterRegex: '(c10/(?!test)/|torch/csrc/(?!deploy/interpreter/cpython)).*'
 AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
 CheckOptions:

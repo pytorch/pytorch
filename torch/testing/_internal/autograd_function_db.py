@@ -34,11 +34,22 @@ class NumpyCube(torch.autograd.Function):
     @staticmethod
     def setup_context(ctx, inputs, outputs):
         ctx.save_for_backward(inputs[0], outputs[1])
+        ctx.save_for_forward(inputs[0], outputs[1])
 
     @staticmethod
     def backward(ctx, grad_output, grad_saved):
         input, dinput = ctx.saved_tensors
         return NumpyMul.apply(grad_output, dinput) + 6 * NumpyMul.apply(grad_saved, input)
+
+    @staticmethod
+    def vmap(info, in_dims, input):
+        result = NumpyCube.apply(input)
+        return result, (in_dims[0], in_dims[0])
+
+    @staticmethod
+    def jvp(ctx, input_tangent):
+        input, dinput = ctx.saved_tensors
+        return NumpyMul.apply(input_tangent, dinput), 6 * NumpyMul.apply(input_tangent, input)
 
 def sample_inputs_numpy_cube(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -72,6 +83,7 @@ class NumpyMul(torch.autograd.Function):
     @staticmethod
     def setup_context(ctx, inputs, outputs):
         ctx.save_for_backward(*inputs)
+        ctx.save_for_forward(*inputs)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -84,11 +96,24 @@ class NumpyMul(torch.autograd.Function):
             gy = NumpyMul.apply(grad_output, x)
         return gx, gy
 
+    @staticmethod
+    def vmap(info, in_dims, x, y):
+        x_bdim, y_bdim = in_dims
+        x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+        y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+        result = NumpyMul.apply(x, y)
+        result = result.movedim(-1, 0)
+        return result, 0
+
+    @staticmethod
+    def jvp(ctx, x_tangent, y_tangent):
+        x, y = ctx.saved_tensors
+        return x_tangent * y + y_tangent * x
 
 def sample_inputs_numpy_mul(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     # Broadcasting
-    yield SampleInput(make_arg(2, low=0.9, high=2), args=(make_arg(3, 2, low=0.9, high=2),))
+    yield SampleInput(make_arg(4, low=0.9, high=2), args=(make_arg(3, 4, low=0.9, high=2),))
 
 
 class NumpyExp_(torch.autograd.Function):
@@ -103,12 +128,24 @@ class NumpyExp_(torch.autograd.Function):
         x, = inputs
         ctx.mark_dirty(x)
         ctx.save_for_backward(outputs)
+        ctx.save_for_forward(outputs)
 
     @staticmethod
     def backward(ctx, grad_output):
         output, = ctx.saved_tensors
         return NumpyMul.apply(grad_output, output)
 
+    @staticmethod
+    def vmap(info, in_dims, x):
+        NumpyExp_.apply(x)
+        return x, in_dims[0]
+
+    @staticmethod
+    def jvp(ctx, x_tangent):
+        # Doesn't call numpy operations because I didn't want to write NumpyMul_
+        output, = ctx.saved_tensors
+        x_tangent.mul_(output)
+        return x_tangent
 
 class NumpySort(torch.autograd.Function):
     @staticmethod
@@ -130,6 +167,7 @@ class NumpySort(torch.autograd.Function):
         _, ind, ind_inv = outputs
         ctx.mark_non_differentiable(ind, ind_inv)
         ctx.save_for_backward(ind, ind_inv)
+        ctx.save_for_forward(ind, ind_inv)
         ctx.dim = dim
 
     @staticmethod
@@ -137,6 +175,18 @@ class NumpySort(torch.autograd.Function):
         ind, ind_inv = ctx.saved_tensors
         return NumpyTake.apply(grad_output, ind_inv, ind, ctx.dim), None
 
+    @staticmethod
+    def vmap(info, in_dims, x, dim):
+        x_bdim, _ = in_dims
+        x = x.movedim(x_bdim, 0)
+        # wrap dim
+        dim = dim if dim >= 0 else dim + x.dim() - 1
+        return NumpySort.apply(x, dim + 1), (0, 0, 0)
+
+    @staticmethod
+    def jvp(ctx, x_tangent, _):
+        ind, ind_inv = ctx.saved_tensors
+        return NumpyTake.apply(x_tangent, ind, ind_inv, ctx.dim), None, None
 
 def sample_inputs_numpy_sort(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -155,6 +205,7 @@ class NumpyTake(torch.autograd.Function):
     def setup_context(ctx, inputs, outputs):
         x, ind, ind_inv, dim = inputs
         ctx.save_for_backward(ind, ind_inv)
+        ctx.save_for_forward(ind, ind_inv)
         ctx.dim = dim
 
     @staticmethod
@@ -163,6 +214,31 @@ class NumpyTake(torch.autograd.Function):
         result = NumpyTake.apply(grad_output, ind_inv, ind, ctx.dim)
         return result, None, None, None
 
+    @staticmethod
+    def vmap(info, in_dims, x, ind, ind_inv, dim):
+        x_bdim, ind_bdim, ind_inv_bdim, _ = in_dims
+
+        # wrap dim
+        logical_dim = x.dim() if x_bdim is None else x_bdim - 1
+        dim = dim if dim >= 0 else dim + logical_dim
+
+        def expand_bdim(x, x_bdim):
+            if x_bdim is None:
+                return x.expand(info.batch_size, *x.shape)
+            return x.movedim(x_bdim, 0)
+
+        x = expand_bdim(x, x_bdim)
+        ind = expand_bdim(ind, ind_bdim)
+        ind_inv = expand_bdim(ind_inv, ind_inv_bdim)
+
+        return NumpyTake.apply(x, ind, ind_inv, dim + 1), 0
+
+    @staticmethod
+    def jvp(ctx, x_tangent, ind_tangent, ind_inv_tangent, _):
+        assert ind_tangent is None
+        assert ind_inv_tangent is None
+        ind, ind_inv = ctx.saved_tensors
+        return NumpyTake.apply(x_tangent, ind, ind_inv, ctx.dim)
 
 class Select(torch.autograd.Function):
     @staticmethod
@@ -181,6 +257,16 @@ class Select(torch.autograd.Function):
         result[ctx.idx] = grad_output
         return result, None
 
+    @staticmethod
+    def vmap(info, in_dims, x, idx):
+        x_bdim, _ = in_dims
+        x = x.movedim(x_bdim, 1)
+        return Select.apply(x, idx), 0
+
+    @staticmethod
+    def jvp(ctx, x_tangent, _):
+        return Select.apply(x_tangent, ctx.idx)
+
 
 def sample_inputs_select(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -191,8 +277,8 @@ autograd_function_db = [
     OpInfo(
         'NumpyCubeAutogradFunction',
         op=NumpyCube.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_cube,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
@@ -201,8 +287,8 @@ autograd_function_db = [
         'NumpyExpMarkDirtyAutogradFunction',
         op=lambda x: NumpyExp_.apply(x.clone()),
         inplace_variant=NumpyExp_.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_cube,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
@@ -210,8 +296,8 @@ autograd_function_db = [
     OpInfo(
         'NumpyMulAutogradFunction',
         op=NumpyMul.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_mul,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
@@ -238,8 +324,8 @@ autograd_function_db = [
     OpInfo(
         'SelectAutogradFunction',
         op=Select.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_select,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
