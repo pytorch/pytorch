@@ -6608,9 +6608,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         elif weight_layout == torch.sparse_csc:
             module.weight = nn.Parameter(module.weight.to_sparse_csc())
         elif weight_layout == torch.sparse_bsr:
-            module.weight = nn.Parameter(module.weight.to_sparse_bsr(2, 2))
+            module.weight = nn.Parameter(module.weight.to_sparse_bsr((2, 2)))
         elif weight_layout == torch.sparse_bsc:
-            module.weight = nn.Parameter(module.weight.to_sparse_bsc(2, 2))
+            module.weight = nn.Parameter(module.weight.to_sparse_bsc((2, 2)))
         elif weight_layout == torch.sparse_coo:
             module.weight = nn.Parameter(module.weight.to_sparse_coo())
         else:

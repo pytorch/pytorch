@@ -2879,8 +2879,8 @@ class TestSparseCSR(TestCase):
         # adjust this block as support is added
         supports_batched_from_sparse = (torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr, torch.sparse_csc)
         supports_batched_to_sparse = (torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr, torch.sparse_csc)
-        supports_hybrid_from_sparse = ()
-        supports_hybrid_to_sparse = ()
+        supports_hybrid_from_sparse = (torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr, torch.sparse_csc)
+        supports_hybrid_to_sparse = (torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr, torch.sparse_csc)
 
         blocked_layouts = (torch.sparse_bsr, torch.sparse_bsc)
 
@@ -2909,9 +2909,41 @@ class TestSparseCSR(TestCase):
             else:
                 self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
-        def _check_hybrid_matrix(pt_matrix, dense, **kwargs):
-            # no support for dense dims, all layouts should skip before this failure
-            self.assertTrue(False, "not implemented")
+        def _check_hybrid_matrix(pt_matrix, dense, blocksize, **kwargs):
+            # Calculate COO indices for sparse matrix.
+            compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
+            compressed_indices = compressed_indices_mth(pt_matrix)
+            plain_indices = plain_indices_mth(pt_matrix)
+            coo_indices = torch._convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
+            row_indices, col_indices = {
+                torch.sparse_csr: (coo_indices[0, ], coo_indices[1, ]),
+                torch.sparse_csc: (coo_indices[1, ], coo_indices[0, ]),
+                torch.sparse_bsr: (coo_indices[0, ], coo_indices[1, ]),
+                torch.sparse_bsc: (coo_indices[1, ], coo_indices[0, ]),
+            }[pt_matrix.layout]
+
+            # If sparse matrix layout blocked, rearrange dense matrix
+            # so that the shape past first two dimensions match the
+            # shape of sparse matrix values.
+            dense_to_check = dense
+            if blocksize:
+                dense_shape = dense.shape
+                dense_to_check_shape = (dense.shape[0] // blocksize[0],
+                                        blocksize[0],
+                                        dense.shape[1] // blocksize[1],
+                                        blocksize[1]) + dense.shape[2:]
+                dense_to_check = dense_to_check.reshape(dense_to_check_shape).transpose(1, 2)
+
+            # Verify that non-zero values of the sparse matrix are
+            # equal to corresponding values of the dense matrix.
+            self.assertEqual(pt_matrix.values(), dense_to_check[row_indices, col_indices])
+
+            # Verify that the remaining elements of the dense matrix
+            # are 0, i.e. that dense are sparse matrix are fully
+            # equal.
+            mask = torch.ones_like(dense_to_check, dtype=torch.bool)
+            mask[row_indices, col_indices] = False
+            self.assertTrue(torch.all(torch.masked_select(dense_to_check, mask) == 0))
 
         def _check_batched(pt_tensor, dense, check_batch=None, batch_shape=(), blocksize=(), **kwargs):
             self.assertEqual(layout, pt_tensor.layout)
@@ -2920,7 +2952,10 @@ class TestSparseCSR(TestCase):
             for batch_index in np.ndindex(batch_shape):
                 pt_matrix = pt_tensor[batch_index]
                 dense_matrix = dense[batch_index]
-                dense_matrix_pt = dense_matrix.to_sparse(layout=layout, blocksize=blocksize or None)
+                n_dense_dim = pt_matrix.dim() - 2
+                dense_matrix_pt = dense_matrix.to_sparse(layout=layout,
+                                                         blocksize=blocksize or None,
+                                                         n_dense_dim=n_dense_dim)
                 # sanity check, selecting batch of to_<layout> and dense[batch].to_<layout> should give the same result
                 self.assertEqual(pt_matrix, dense_matrix_pt)
                 check_batch(pt_matrix, dense_matrix, blocksize, **kwargs)
@@ -2963,23 +2998,23 @@ class TestSparseCSR(TestCase):
         blocksizes = [(2, 2), (1, 1), (1, 2)] if layout in blocked_layouts else [()]
         batch_sizes = [(3,), (1, 3), (2, 1, 3)] if batched else [()]
         hybrid_sizes = [(4, ), (2, 2)] if hybrid else [()]
-        if not hybrid:
-            # general cases, always run, hybrid excluded until dense->sparse api exists
-            for sparse_shape, blocksize, batch_shape, hybrid_shape in itertools.product(
-                    sparse_sizes, blocksizes, batch_sizes, hybrid_sizes):
-                dense = _generate_subject(sparse_shape, batch_shape, hybrid_shape)
-                if expect_to_layout_support:
-                    sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None)
-                    check_content(sparse, dense, blocksize=blocksize, batch_shape=batch_shape, hybrid_shape=hybrid_shape)
-                    if expect_from_layout_support:
-                        dense_back = sparse.to_dense()
-                        self.assertEqual(dense, dense_back)
-                    else:
-                        with self.assertRaises(RuntimeError):
-                            sparse.to_dense()
+
+        # general cases, always run
+        for sparse_shape, blocksize, batch_shape, hybrid_shape in itertools.product(
+                sparse_sizes, blocksizes, batch_sizes, hybrid_sizes):
+            dense = _generate_subject(sparse_shape, batch_shape, hybrid_shape)
+            if expect_to_layout_support:
+                sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None, n_dense_dim=len(hybrid_shape))
+                check_content(sparse, dense, blocksize=blocksize, batch_shape=batch_shape, hybrid_shape=hybrid_shape)
+                if expect_from_layout_support:
+                    dense_back = sparse.to_dense()
+                    self.assertEqual(dense, dense_back)
                 else:
                     with self.assertRaises(RuntimeError):
-                        dense.to_sparse(layout=layout, blocksize=blocksize or None)
+                        sparse.to_dense()
+            else:
+                with self.assertRaises(RuntimeError):
+                    dense.to_sparse(layout=layout, blocksize=blocksize or None, n_dense_dim=len(hybrid_shape))
 
         # special cases for batched tensors
         if batched and expect_to_layout_support:
@@ -2997,7 +3032,6 @@ class TestSparseCSR(TestCase):
                 # if we are blocked the mask is genereated for the block valued elemetns
                 batch_mask_shape = sparse_shape[0] // blocksize[0], sparse_shape[1] // blocksize[1]
 
-
             # random bool vector w/ length equal to max possible nnz for the sparse_shape
             mask_source = make_tensor(batch_mask_shape, dtype=torch.bool, device=device).flatten()
             n_batch = functools.reduce(lambda x, y: x * y, batch_shape, 1)
@@ -3011,9 +3045,12 @@ class TestSparseCSR(TestCase):
                 mask = mask.view(mask_shape + (1, 1))
                 mask = mask.expand(mask_shape + blocksize)
                 mask = mask.transpose(-3, -2)
-                mask = mask.reshape_as(dense)
+                mask = mask.flatten(-4, -3).flatten(-2, -1)
+            mask_shape = mask.shape
+            mask = mask.view(mask_shape + (1,) * len(hybrid_shape))
+            mask = mask.expand(mask_shape + hybrid_shape)
             dense = dense * mask
-            sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None)
+            sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None, n_dense_dim=len(hybrid_shape))
             check_content(sparse, dense, blocksize=blocksize, batch_shape=batch_shape, hybrid_shape=hybrid_shape)
 
             if expect_from_layout_support:
@@ -3039,23 +3076,6 @@ class TestSparseCSR(TestCase):
             msg = f"to_sparse_{layout_code}: Expected product of batch dimensions to be non-zero."
             with self.assertRaisesRegex(RuntimeError, msg):
                 dense.to_sparse(layout=layout, blocksize=blocksize or None)
-
-        if hybrid:
-            # conversion from sparse -> dense should be blocked with dense dims
-            sparse_shape = sparse_sizes[0]
-            hybrid_shape = hybrid_sizes[0]
-            batch_shape = batch_sizes[0]
-            blocksize = blocksizes[0]
-            sparse_hybrid = self.genSparseCompressedTensor(batch_shape + sparse_shape + hybrid_shape,
-                                                           nnz=4,
-                                                           layout=layout,
-                                                           device=device,
-                                                           dtype=torch.float,
-                                                           index_dtype=torch.int64,
-                                                           blocksize=blocksize,
-                                                           dense_dims=len(hybrid_shape))
-            with self.assertRaises(RuntimeError):
-                sparse_hybrid.to_dense()
 
         # special cases for hybrid tensors
         # todo: figure out what these are
