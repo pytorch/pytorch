@@ -49,8 +49,14 @@ def supported_activities():
 def optimizer_post_hook(optimizer, args, kwargs):
     KinetoStepTracker.increment_step("Optimizer")
 
-if os.environ["USE_KINETO_DAEMON"]:
-    handle = register_optimizer_step_post_hook(optimizer_post_hook)
+
+def trace_using_dynolog():
+    """
+    To enable tracing via dynolog we register a global optimizer step post
+    hook. Requires the 'USE_KINETO_DAEMON' environment variable to be set.
+    """
+    if os.environ["USE_KINETO_DAEMON"]:
+        handle = register_optimizer_step_post_hook(optimizer_post_hook)
 
 
 class _KinetoProfile(object):

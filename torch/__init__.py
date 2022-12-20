@@ -1245,3 +1245,6 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 import torch.fx.experimental.symbolic_shapes
 
 from torch import func as func
+
+# Enable trace collection through dynolog
+from torch.profiler.profiler import trace_using_dynolog
