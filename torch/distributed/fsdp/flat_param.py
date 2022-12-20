@@ -1478,8 +1478,13 @@ class FlatParamHandle:
             ):
                 param.grad = None
             return
-        self._check_unsharded(self.flat_param.grad)
-        views = self._get_unflat_views(self.flat_param, self.flat_param.grad)
+        unsharded_grad = (
+            self.flat_param.grad
+            if self.uses_sharded_strategy or not self._offload_params
+            else self.flat_param._cpu_grad
+        )
+        self._check_unsharded(unsharded_grad)
+        views = self._get_unflat_views(self.flat_param, unsharded_grad)
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
         ):
@@ -1517,7 +1522,11 @@ class FlatParamHandle:
             )  # did not save FQN info in `_shared_param_infos`
             param = getattr(module, param_name)
             prim_param = getattr(prim_module, prim_param_name)
-            if param.shape != prim_param.grad.shape:
+            if (
+                param.shape != prim_param.grad.shape
+                or param.dtype != prim_param.grad.dtype
+                or param.device != prim_param.grad.device
+            ):
                 # NOTE: This is the same hack to use `.data` to side step the
                 # size check.
                 if param.grad is None:
