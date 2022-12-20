@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import operator
 import logging
+import sys
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
@@ -53,7 +54,7 @@ class TestDeepModule(torch.nn.Module):
         o = o + 1.0
 
         # testing to avoid DFS uses in passes. Since Python has 1000 max recursion depth.
-        for _ in range(1001):
+        for _ in range(sys.getrecursionlimit()+1):
             o = o - c
 
         return o

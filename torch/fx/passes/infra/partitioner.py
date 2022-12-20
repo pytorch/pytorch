@@ -1,4 +1,4 @@
-from typing import Dict, List, Set, Iterable, Sequence, Optional
+from typing import Dict, List, Set, Iterable, Sequence, Optional, Deque
 
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
@@ -9,6 +9,7 @@ from torch.fx.passes.operator_support import OperatorSupportBase
 import logging
 import itertools
 from copy import copy
+from collections import deque
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
@@ -73,12 +74,12 @@ class CapabilityBasedPartitioner:
             # the set.
             visited: Set[Node] = set()
 
-            def iter_find_cycle(root_node):
-                stack : List[Node] = []
+            def dfs_iter_find_cycle(root_node):
+                stack : Deque[Node] = deque()
                 stack.append(root_node)
 
-                while len(stack) != 0:
-                    node = stack.pop(0)
+                while stack:
+                    node = stack.pop()
 
                     if node in visited:
                         continue
@@ -106,7 +107,7 @@ class CapabilityBasedPartitioner:
             # check if merge would create cyclic dependency.
             for node in merged_nodes:
                 for user_node in node.users:
-                    if user_node not in merged_nodes and iter_find_cycle(user_node):
+                    if user_node not in merged_nodes and dfs_iter_find_cycle(user_node):
                         # return false indicating cyclic dependency found and
                         # merge is aborted
                         return False
