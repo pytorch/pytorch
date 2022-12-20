@@ -4247,7 +4247,7 @@ class TestSparseAny(TestCase):
         if (from_layout, to_layout) == (torch.sparse_csr, torch.sparse_bsr):
             # See gh-90910
             t = torch.tensor([[0, 0, 1, 0], [0, 1, 0, 0]], dtype=dtype, device=device).to_sparse_csr()
-            r = t.to_sparse_bsr(2, 2)
+            r = t.to_sparse_bsr((2, 2))
             torch._validate_sparse_compressed_tensor_args(r.crow_indices(), r.col_indices(), r.values(), r.shape, r.layout)
             self.assertEqual(r, t)
 

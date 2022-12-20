@@ -298,8 +298,8 @@ class SerializationMixin(object):
         _test_serialization(lambda x: x.to_sparse())
         _test_serialization(lambda x: x.to_sparse_csr())
         _test_serialization(lambda x: x.to_sparse_csc())
-        _test_serialization(lambda x: x.to_sparse_bsr(1, 1))
-        _test_serialization(lambda x: x.to_sparse_bsc(1, 1))
+        _test_serialization(lambda x: x.to_sparse_bsr((1, 1)))
+        _test_serialization(lambda x: x.to_sparse_bsc((1, 1)))
 
     def test_serialization_sparse(self):
         self._test_serialization(False)
