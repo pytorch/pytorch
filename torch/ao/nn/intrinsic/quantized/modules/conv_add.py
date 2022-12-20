@@ -4,8 +4,6 @@ import torch.ao.nn.intrinsic.qat
 import torch.nn.functional as F
 import torch.ao.nn.quantized as nnq
 
-from torch.nn.utils import fuse_conv_bn_weights
-
 _reverse_repeat_padding = nnq.modules.conv._reverse_repeat_padding
 
 class ConvAdd2d(nnq.Conv2d):
