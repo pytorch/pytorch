@@ -1,7 +1,6 @@
 import math
 import warnings
 import numbers
-import weakref
 from typing import List, Tuple, Optional, overload
 
 import torch
@@ -57,7 +56,6 @@ class RNNBase(Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.proj_size = proj_size
-        self._flat_weight_refs: List[Optional[weakref.ReferenceType["Parameter"]]] = []
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -130,9 +128,7 @@ class RNNBase(Module):
         self.reset_parameters()
 
     def _init_flat_weights(self):
-        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
-        self._flat_weight_refs = [weakref.ref(w) if w is not None else None
-                                  for w in self._flat_weights]
+        self._flat_weights = [getattr(self, wn, None) for wn in self._flat_weights_names]
         self.flatten_parameters()
 
     def __setattr__(self, attr, value):
@@ -239,9 +235,9 @@ class RNNBase(Module):
         # Returns True if the weight tensors have changed since the last forward pass.
         # This is the case when used with stateless.functional_call(), for example.
         weights_changed = False
-        for ref, name in zip(self._flat_weight_refs, self._flat_weights_names):
-            weight = getattr(self, name) if hasattr(self, name) else None
-            if weight is not None and ref is not None and ref() is not weight:
+        for flat_weight, name in zip(self._flat_weights, self._flat_weights_names):
+            weight = getattr(self, name, None)
+            if weight is not flat_weight:
                 weights_changed = True
                 break
         return weights_changed
@@ -274,12 +270,6 @@ class RNNBase(Module):
             s += ', bidirectional={bidirectional}'
         return s.format(**self.__dict__)
 
-    def __getstate__(self):
-        # Don't serialize the weight references.
-        state = self.__dict__.copy()
-        del state['_flat_weight_refs']
-        return state
-
     def __setstate__(self, d):
         super(RNNBase, self).__setstate__(d)
         if 'all_weights' in d:
@@ -290,32 +280,33 @@ class RNNBase(Module):
         if 'proj_size' not in d:
             self.proj_size = 0
 
-        if not isinstance(self._all_weights[0][0], str):
-            num_layers = self.num_layers
-            num_directions = 2 if self.bidirectional else 1
-            self._flat_weights_names = []
-            self._all_weights = []
-            for layer in range(num_layers):
-                for direction in range(num_directions):
-                    suffix = '_reverse' if direction == 1 else ''
-                    weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}',
-                               'bias_hh_l{}{}', 'weight_hr_l{}{}']
-                    weights = [x.format(layer, suffix) for x in weights]
-                    if self.bias:
-                        if self.proj_size > 0:
-                            self._all_weights += [weights]
-                            self._flat_weights_names.extend(weights)
-                        else:
-                            self._all_weights += [weights[:4]]
-                            self._flat_weights_names.extend(weights[:4])
+        if isinstance(self._all_weights[0][0], str):
+            return
+        num_layers = self.num_layers
+        num_directions = 2 if self.bidirectional else 1
+        self._flat_weights_names = []
+        self._all_weights = []
+        for layer in range(num_layers):
+            for direction in range(num_directions):
+                suffix = '_reverse' if direction == 1 else ''
+                weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}',
+                           'bias_hh_l{}{}', 'weight_hr_l{}{}']
+                weights = [x.format(layer, suffix) for x in weights]
+                if self.bias:
+                    if self.proj_size > 0:
+                        self._all_weights += [weights]
+                        self._flat_weights_names.extend(weights)
                     else:
-                        if self.proj_size > 0:
-                            self._all_weights += [weights[:2]] + [weights[-1:]]
-                            self._flat_weights_names.extend(weights[:2] + [weights[-1:]])
-                        else:
-                            self._all_weights += [weights[:2]]
-                            self._flat_weights_names.extend(weights[:2])
-        self._init_flat_weights()
+                        self._all_weights += [weights[:4]]
+                        self._flat_weights_names.extend(weights[:4])
+                else:
+                    if self.proj_size > 0:
+                        self._all_weights += [weights[:2]] + [weights[-1:]]
+                        self._flat_weights_names.extend(weights[:2] + [weights[-1:]])
+                    else:
+                        self._all_weights += [weights[:2]]
+                        self._flat_weights_names.extend(weights[:2])
+        self._flat_weights = [getattr(self, wn, None) for wn in self._flat_weights_names]
 
     @property
     def all_weights(self) -> List[List[Parameter]]:
