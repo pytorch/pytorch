@@ -1,7 +1,6 @@
 import os
 import subprocess
 import sys
-import torch
 
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -12,12 +11,18 @@ IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
 
 # Special logic for ROCm GHA runners.
-if torch.version.hip is not None and not IS_MEM_LEAK_CHECK:
+# torch.version.hip was not available to check if this was a ROCm self-hosted runner.
+# Must check for ROCm runner in another way. We look for /opt/rocm directory.
+if os.path.exists('/opt/rocm') and not IS_MEM_LEAK_CHECK:
     try:
-        # avoid fork poisoning by using a subprocess to determine number of GPUs available
-        cmd = [sys.executable, '-c', 'import torch; print(torch.cuda.device_count())']
-        count_as_string = subprocess.check_output(cmd)
-        NUM_PROCS = int(count_as_string)
+        # This is the same logic used in GHA health check, see .github/templates/common.yml.j2
+        lines = subprocess.check_output(['rocminfo'], encoding='ascii').strip().split('\n')
+        count = 0
+        for line in lines:
+            if ' gfx' in line:
+                count += 1
+        assert count > 0  # there must be at least 1 GPU
+        NUM_PROCS = count
     except subprocess.CalledProcessError as e:
         # The safe default for ROCm GHA runners is to run tests serially.
         NUM_PROCS = 1
