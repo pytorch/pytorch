@@ -46,7 +46,7 @@ RUN chmod +x ~/miniconda.sh && \
 FROM dev-base as submodule-update
 WORKDIR /opt/pytorch
 COPY . .
-RUN git submodule update --init --recursive --jobs 0
+RUN git submodule update --init --recursive
 
 FROM conda as build
 WORKDIR /opt/pytorch
