@@ -6670,6 +6670,7 @@ for shape in [(1,), ()]:
 
             @staticmethod
             def jvp(ctx, x_tangent, y_tangent):
+                self.assertTrue(y_tangent is None)
                 return x_tangent, None
 
         with fwAD.dual_level():
