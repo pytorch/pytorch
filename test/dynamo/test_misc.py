@@ -3261,6 +3261,26 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             )
         )
 
+    def test_builder_for_class_with_metaclass(self):
+        class ExampleMeta(type):
+            pass
+
+        class MyClass(metaclass=ExampleMeta):
+            pass
+
+        def fn(x, y):
+            if isinstance(y, MyClass):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand([4, 4])
+        y = MyClass()
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod

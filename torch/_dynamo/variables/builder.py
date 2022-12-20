@@ -8,7 +8,6 @@ import numbers
 import operator
 import re
 import types
-from abc import ABCMeta
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -445,12 +444,6 @@ class VariableBuilder:
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif istype(value, (type, ABCMeta)):
-            # TODO(whc) the following seems preferable but breaks some tests, debug
-            # elif inspect.isclass(value):
-            return UserDefinedClassVariable(
-                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
         elif value in tensor_dunder_fns:
             return TorchVariable(
                 value,
@@ -512,6 +505,12 @@ class VariableBuilder:
             return TorchVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif issubclass(type(value), type):
+            # TODO(whc) the following seems preferable but breaks some tests, debug
+            # elif inspect.isclass(value):
+            return UserDefinedClassVariable(
+                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         else:
             result = UserDefinedObjectVariable(
@@ -761,11 +760,6 @@ def wrap_fx_proxy_cls(
         tx.output.guards.update(options["guards"])
 
     assert "example_value" not in proxy.node.meta
-    if not config.dynamic_propagation:
-        # TODO: This probably doesn't handle subclass correctly
-        if isinstance(example_value, torch.Tensor):
-            options.update(target_cls.specialize(example_value))
-        return target_cls(proxy, **options)
 
     initial_example_value = example_value
 
