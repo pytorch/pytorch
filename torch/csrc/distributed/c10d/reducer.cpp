@@ -2122,7 +2122,7 @@ void verify_params_across_processes(
 
   // Allgather and verify parameter size.
   std::vector<std::vector<at::Tensor>> param_size_output_tensors;
-  param_size_output_tensors.emplace_back(std::vector<at::Tensor>{});
+  param_size_output_tensors.emplace_back();
   auto world_size = process_group->getSize();
   for (size_t i = 0; i < world_size; ++i) {
     param_size_output_tensors.front().emplace_back(

@@ -21,9 +21,6 @@ from torch.distributed.algorithms.join import (
 )
 
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
-    _apply_optim_in_backward_hook
-)
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -719,6 +716,11 @@ class DistributedDataParallel(Module, Joinable):
 
             # Need a weakref to the reducer in order to run all_reduce.
             reducer_weakref = weakref.ref(self.reducer)
+            # Note: importing in function, otherwise this will cause a circular
+            # import.
+            from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
+                _apply_optim_in_backward_hook
+            )
             self.register_comm_hook(
                 (reducer_weakref, self.process_group),
                 _apply_optim_in_backward_hook(
