@@ -6276,6 +6276,51 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
             fn(a, b)
 
+    def test_custom_function_mark_dirty_not_differentiable(self):
+        def get_custom_fn(jvp_err):
+            class InplaceMul(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    result = x.mul_(2)
+                    ctx.mark_dirty(result)
+                    return result
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    pass
+
+                @staticmethod
+                def jvp(ctx, x_t):
+                    if jvp_err:
+                        return x_t
+                    else:
+                        return x_t.mul_(2)
+            return InplaceMul
+
+        for requires_grad, jvp_err in product([True, False], repeat=2):
+            InplaceMul = get_custom_fn(jvp_err)
+            # Make sure that tensor is always returned as-is if marked dirty
+            z = torch.tensor(1., requires_grad=requires_grad)
+            x = z.clone()
+            y = InplaceMul.apply(x)
+            self.assertTrue(x is y)
+            self.assertEqual(x, z * 2)
+
+            # jvp must properly modify the input grad if mark_dirty is set
+            with fwAD.dual_level():
+                x_tangent = torch.ones_like(x)
+                x_dual = fwAD.make_dual(x, x_tangent)
+
+                if jvp_err:
+                    bad_mark_dirty_err = "jvp function must modify the corresponding gradient inplace"
+                    with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
+                        InplaceMul.apply(x_dual)
+                else:
+                    out_dual = InplaceMul.apply(x_dual)
+                    _, out_tangent = fwAD.unpack_dual(out_dual)
+                    self.assertTrue(out_dual is x_dual)
+                    self.assertTrue(out_tangent is x_tangent)
+
     def test_named_tensor_for_complex_views(self):
         names = ["batch", "height", "width", "complex"]
         z = torch.ones((5, 12, 14, 2), requires_grad=True)
