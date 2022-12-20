@@ -11,6 +11,8 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/cpu/moments_utils.h>
+#include <ATen/native/cpu/mixed_data_type.h>
+#include <ATen/OpMathType.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -24,7 +26,7 @@ namespace native {
 
 namespace {
 
-template <typename T>
+template <typename T, typename PT>
 void GroupNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
@@ -43,16 +45,16 @@ void GroupNormKernelImplInternal(
   const int64_t G = group;
   const int64_t D = C / G;
   const T* X_data = X.data_ptr<T>();
-  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-  const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
+  const PT* gamma_data = gamma.defined() ? gamma.data_ptr<PT>() : nullptr;
+  const PT* beta_data = beta.defined() ? beta.data_ptr<PT>() : nullptr;
   T* Y_data = Y.data_ptr<T>();
-  T* mean_data = mean.data_ptr<T>();
-  T* rstd_data = rstd.data_ptr<T>();
+  PT* mean_data = mean.data_ptr<PT>();
+  PT* rstd_data = rstd.data_ptr<PT>();
   const bool gamma_null = (gamma_data == nullptr);
   const bool beta_null = beta_data == nullptr;
   const int64_t inner_size = D * HxW;
 
-  using T_ACC = vec::vec_scalar_t<T>;
+  using T_ACC = at::opmath_type<T>;
 
   at::parallel_for(0, N * G, 1, [&](int64_t start, int64_t end) {
     for (const auto i : c10::irange(start, end)) {
@@ -70,8 +72,8 @@ void GroupNormKernelImplInternal(
         const int64_t g = i % G;
         for (const auto j : c10::irange(D)) {
           const int64_t c = g * D + j;
-          const T_ACC scale = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
-          const T_ACC bias = -scale * mean_val + (beta_null ? T(0) : beta_data[c]);
+          const T_ACC scale = rstd_val * (gamma_null ? PT(1) : gamma_data[c]);
+          const T_ACC bias = -scale * mean_val + (beta_null ? PT(0) : beta_data[c]);
           X_ptr = X_data + (i * D + j) * HxW;
           T* Y_ptr = Y_data + (i * D + j) * HxW;
           for (const auto k : c10::irange(HxW)) {
@@ -109,9 +111,8 @@ std::tuple<T, T> ColumnwiseMoments(
       acc1_vec += x_vec * x_vec;
     }
   }
-  // TODO: use fast path
-  T mean_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc0_vec, Vec::size());
-  T rstd_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc1_vec, Vec::size());
+  T mean_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc0_vec);
+  T rstd_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc1_vec);
   return std::tuple<T, T>(mean_val, rstd_val);
 }
 
@@ -151,13 +152,12 @@ std::tuple<float, float> ColumnwiseMoments(
       }
     }
   }
-  // TODO: use fast path
-  float mean_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc0_fvec, fVec::size());
-  float rstd_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc1_fvec, fVec::size());
+  float mean_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc0_fvec);
+  float rstd_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc1_fvec);
   return std::tuple<float, float>(mean_val, rstd_val);
 }
 
-template <typename T>
+template <typename T, typename PT>
 void GroupNormKernelImplChannelsLastInternal(
     const Tensor& X,
     const Tensor& gamma,
@@ -176,13 +176,13 @@ void GroupNormKernelImplChannelsLastInternal(
   const int64_t G = group;
   const int64_t D = C / G;
   const T* X_data = X.data_ptr<T>();
-  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-  const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
+  const PT* gamma_data = gamma.defined() ? gamma.data_ptr<PT>() : nullptr;
+  const PT* beta_data = beta.defined() ? beta.data_ptr<PT>() : nullptr;
   T* Y_data = Y.data_ptr<T>();
-  T* mean_data = mean.data_ptr<T>();
-  T* rstd_data = rstd.data_ptr<T>();
+  PT* mean_data = mean.data_ptr<PT>();
+  PT* rstd_data = rstd.data_ptr<PT>();
 
-  using T_ACC = vec::vec_scalar_t<T>;
+  using T_ACC = at::opmath_type<T>;
   using Vec = vec::Vectorized<T_ACC>;
 
   const T s = T_ACC(1) / static_cast<T_ACC>(D * HxW);
@@ -241,8 +241,8 @@ void GroupNormKernelImplChannelsLastInternal(
         T* bias_ptr = scale_ptr + D;
         for (const auto d : c10::irange(D)) {
           const int64_t c = g * D + d;
-          scale_ptr[d] = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
-          bias_ptr[d] = -scale_ptr[d] * mean_val + (beta_null ? T(0) : beta_data[c]);
+          scale_ptr[d] = rstd_val * (gamma_null ? PT(1) : gamma_data[c]);
+          bias_ptr[d] = -scale_ptr[d] * mean_val + (beta_null ? PT(0) : beta_data[c]);
         }
 
         // step-3: apply scale and bias
@@ -348,8 +348,8 @@ void GroupNormKernelImplChannelsLastInternal(
         T rstd_val = rstd_data[n * G + g];
         for (const auto d : c10::irange(D)) {
           const int64_t c = g * D + d;
-          scale_ptr[c] = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
-          bias_ptr[c] = -scale_ptr[c] * mean_val + (beta_null ? T(0) : beta_data[c]);
+          scale_ptr[c] = rstd_val * (gamma_null ? PT(1) : gamma_data[c]);
+          bias_ptr[c] = -scale_ptr[c] * mean_val + (beta_null ? PT(0) : beta_data[c]);
         }
       }
     }
@@ -393,19 +393,32 @@ void GroupNormKernelImpl(
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
+  const bool mixed_type = is_mixed_type(X, gamma, beta);
   switch (X.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
-        GroupNormKernelImplInternal<scalar_t>(
-            X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
+        using param_t = at::opmath_type<scalar_t>;
+        if (mixed_type) {
+          GroupNormKernelImplInternal<scalar_t, param_t>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
+        } else {
+          GroupNormKernelImplInternal<scalar_t, scalar_t>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
+        }
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast:
     case at::MemoryFormat::ChannelsLast3d: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
-        GroupNormKernelImplChannelsLastInternal<scalar_t>(
-            X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
+        using param_t = at::opmath_type<scalar_t>;
+        if (mixed_type) {
+          GroupNormKernelImplChannelsLastInternal<scalar_t, param_t>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
+        } else {
+          GroupNormKernelImplChannelsLastInternal<scalar_t, scalar_t>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
+        }
       });
       break;
     }
