@@ -522,9 +522,14 @@ class FlatParamHandle:
         is ``None``, in which case we assume the gradient reduction dtype
         matches the forward/backward parameter dtype.
         """
-        low_prec_param_dtype_specified = mp_param_dtype is not None
-        low_prec_reduce_dtype_specified = mp_reduce_dtype is not None
-        if low_prec_param_dtype_specified and not low_prec_reduce_dtype_specified:
+        # Save whether these dtypes were specified so that we permit the
+        # parameter dtype to change up until the lazy initialization
+        self._low_prec_param_dtype_specified = mp_param_dtype is not None
+        self._low_prec_reduce_dtype_specified = mp_reduce_dtype is not None
+        if (
+            self._low_prec_param_dtype_specified
+            and not self._low_prec_reduce_dtype_specified
+        ):
             # Special case: infer gradient reduction mixed precision
             self._fwd_bwd_param_dtype = mp_param_dtype
             self._reduce_dtype = self._fwd_bwd_param_dtype
@@ -770,6 +775,24 @@ class FlatParamHandle:
         reshard methods in this class for the allocation and free pattern.
         """
         flat_param = self.flat_param
+        if flat_param.dtype != self._orig_param_dtype:
+            # Entering this branch means that the user changed the parameter
+            # dtype after FSDP initialization, in which case we may need to
+            # refresh some saved dtype attributes (dtypes specified as a part
+            # of mixed precision take precedence).
+            if not self._low_prec_param_dtype_specified:
+                self._fwd_bwd_param_dtype = flat_param.dtype
+            # For `reduce_dtype`, require `param_dtype` was not specified since
+            # then we infer the `reduce_dtype` from the specified `param_dtype`
+            if (
+                not self._low_prec_reduce_dtype_specified
+                and not self._low_prec_param_dtype_specified
+            ):
+                self._reduce_dtype = flat_param.dtype
+            self._orig_param_dtype = flat_param.dtype
+        # Delete since they are no longer needed
+        delattr(self, "_low_prec_param_dtype_specified")
+        delattr(self, "_low_prec_reduce_dtype_specified")
         cpu_device = torch.device("cpu")
         if self._offload_params:
             p_assert(
@@ -1552,7 +1575,7 @@ class FlatParamHandle:
                 # Allow the original data to be freed via garbage collection
                 param.data = torch.empty(
                     0,
-                    dtype=param.dtype,
+                    dtype=self.flat_param.dtype,  # in case `flat_param` changed dtype
                     device=self.flat_param.device,
                     requires_grad=False,
                 )
