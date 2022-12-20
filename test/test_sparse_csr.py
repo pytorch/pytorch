@@ -2081,6 +2081,38 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(torch.mul, 100, [100, 1])
         _test_spadd_shape(torch.mul, 100, [1, 100])
 
+    @parametrize('enable_hybrid', [True, False])
+    @all_sparse_compressed_layouts()
+    @dtypes(*all_types_and_complex_and())
+    def test_mul_scalar(self, layout, device, dtype, enable_hybrid):
+        for sparse in self.generate_simple_inputs(
+                layout, device=device, dtype=dtype, index_dtype=torch.int32, enable_hybrid=enable_hybrid):
+            for scalar_dtype in all_types_and_complex_and():
+                scalar_t = torch.tensor(2, dtype=scalar_dtype)
+                for scalar in (scalar_t, scalar_t.item()):
+                    res_out = sparse.mul(scalar)
+                    self.assertEqual(res_out, scalar * sparse)
+
+                    # TODO: enable hybrid once to_dense supports it.
+                    if not enable_hybrid:
+                        res_dense_out = sparse.to_dense().mul(scalar)
+                        # BUG: dispatcher ignores mul.Scalar(Tensor, Scalar)
+                        if type(scalar) is not torch.Tensor:
+                            common_dtype = torch.result_type(res_out, res_dense_out)
+                            self.assertEqual(res_out.to_dense().to(common_dtype), res_dense_out.to(common_dtype))
+                        else:
+                            self.assertEqual(res_out.to_dense(), res_dense_out)
+
+                    # TODO: enable hybrid once to_dense supports it.
+                    if dtype == torch.result_type(sparse, scalar) and not enable_hybrid:
+                        res_in_dense = sparse.to_dense().mul_(scalar)
+                        res_in = sparse.mul_(scalar)
+                        self.assertEqual(res_in.to_dense(), res_in_dense)
+                    else:
+                        res_in = res_out
+
+                    self.assertEqual(res_out, res_in)
+
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):

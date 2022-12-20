@@ -73,6 +73,7 @@
 #include <ATen/ops/log1p.h>
 #include <ATen/ops/log1p_native.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
 #include <ATen/ops/mul_native.h>
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
@@ -217,6 +218,92 @@ namespace native {
 using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
+
+Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
+  // // TODO: Use a specialized CSR kernel for performance if needed
+  if (t_.is_sparse_csr() && src_.layout() == kStrided) {
+    return mul_out_sparse_csr(t_, src_.sparse_mask(t_), r);
+  }
+  if (t_.layout() == kStrided && src_.is_sparse_csr()) {
+    return mul_out_sparse_csr(t_.sparse_mask(src_), src_, r);
+  }
+  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
+  Tensor t = t_.to_sparse();
+  Tensor src = src_.to_sparse();
+  Tensor tmp_result = t.mul(src);
+  auto r_sparse_csr = tmp_result.to_sparse_csr();
+  r.resize_as_sparse_(r_sparse_csr);
+  r.copy_(r_sparse_csr);
+  return r;
+}
+
+template <typename op_t>
+Tensor binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
+  // NOTE: binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
+  const auto result_values = op(sparse.values(), scalar.squeeze());
+  const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
+  Tensor compressed_indices, plain_indices;
+  std::tie(compressed_indices, plain_indices) = getCompressedPlainIndices(sparse);
+  return at::native::_sparse_compressed_tensor_unsafe(
+      compressed_indices.clone(),
+      plain_indices.clone(),
+      result_values,
+      result_sizes,
+      result_values.scalar_type(),
+      sparse.layout(),
+      result_values.device());
+}
+
+template <typename op_t>
+Tensor& binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const string& op_name, const op_t& op) {
+  // NOTE: binary_op_with_wrapped_scalar_ assumes scalar.numel() == 1.
+  const auto broadcasted_shape = infer_size(sparse.sizes(), scalar.sizes());
+  if (sparse.sizes() != broadcasted_shape) {
+    TORCH_CHECK(false, op_name, "(): output with shape ", sparse.sizes(), " does not match ",
+        "the broadcast shape ", broadcasted_shape);
+  }
+  auto values = sparse.values();
+  // Safe to use squeeze here, we already know that scalar safely broadcasts.
+  op(values, scalar.squeeze());
+  return sparse;
+}
+
+Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
+  // Check if either of the arguments is a wrapped Scalar
+  if (self.layout() == kStrided && self.dim() == 0) {
+    return binary_op_with_wrapped_scalar(other, self, [](const Tensor& a, const Tensor& b) -> Tensor {
+        return a.mul(b);
+    });
+  }
+  if (other.layout() == kStrided && other.dim() == 0) {
+    return binary_op_with_wrapped_scalar(self, other, [](const Tensor& a, const Tensor& b) -> Tensor {
+        return a.mul(b);
+    });
+  }
+
+  if (self.is_sparse_csr() && other.layout() == kStrided) {
+    return mul_sparse_csr(self, other.sparse_mask(self));
+  }
+  if (self.layout() == kStrided && other.is_sparse_csr()) {
+    return mul_sparse_csr(self.sparse_mask(other), other);
+  }
+
+  auto commonDtype = at::result_type(self, other);
+  auto result_options = self.options().dtype(commonDtype);
+  // CSR is 2d!
+  Tensor result = at::empty({0, 0}, result_options);
+  return at::mul_out(result, self, other); // redispatch!
+}
+
+Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
+  if (other.layout() == kStrided && other.dim() == 0) {
+    return binary_op_with_wrapped_scalar_(self, other, "mul_", [](Tensor& a, const Tensor& b) -> Tensor& {
+        return a.mul_(b);
+    });
+  }
+  return at::mul_out(self, self, other); // redispatch!
+}
+
 
 namespace {
 
