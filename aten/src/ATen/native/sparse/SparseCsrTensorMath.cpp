@@ -544,6 +544,13 @@ Tensor& addmm_out_sparse_compressed_cpu(
   }
 
   if (result.numel() == 0) {
+    // If result gets resized and is sparse compressed,
+    // it's compressed_indices tensor will contain junk values
+    // so the whole tensor is not a valid compressed tensor.
+    // To combat that, result needs to get zeroed out.
+    if (at::sparse_csr::is_sparse_compressed(result)) {
+      result.zero_();
+    }
     return result;
   }
 
@@ -643,22 +650,15 @@ Tensor& _sparse_csr_mm_out(
     const Tensor& mat1,
     const Tensor& mat2,
     Tensor& result) {
-  Tensor zero;
-  if (result.is_sparse_csr()) {
-    // TODO: replace with at::zeros when it's implemented for sparse csr
-    zero = at::empty({mat1.size(0), mat2.size(1)}, mat2.options());
-  } else {
-    zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
-  }
+  auto zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
   return at::addmm_out(result, zero, mat1, mat2, 0.0, 1.0);
 }
 
 Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr()) {
     // Return sparse
-    // TODO: replace with at::zeros when it's implemented for sparse csr
     return at::addmm(
-        at::empty({mat1.size(0), mat2.size(1)}, mat2.options()),
+        at::zeros({mat1.size(0), mat2.size(1)}, mat2.options()),
         mat1,
         mat2,
         0.0,
