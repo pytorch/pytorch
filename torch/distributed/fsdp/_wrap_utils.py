@@ -5,6 +5,7 @@ from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple
 
 import torch
 import torch.nn as nn
+from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
 from torch.distributed.fsdp._utils import (
     _contains_batchnorm,
     _override_batchnorm_mixed_precision,
@@ -141,7 +142,7 @@ def _get_fully_sharded_module_to_states(
         while len(queue) > 0:
             module, prefix = queue.popleft()
             for param_name, param in module.named_parameters(recurse=False):
-                if param not in visited_params:
+                if param not in visited_params and not _is_fsdp_flattened(param):
                     params.append(param)
                     visited_params.add(param)
                     param_names.append(prefix + param_name)

@@ -39,6 +39,7 @@ class _FSDPState(_State):
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._is_root: Optional[bool] = None
+        self._handles: List[flat_param_file.FlatParamHandle] = []
         self.rank: int = -1
 
 
@@ -72,6 +73,17 @@ def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
     return fsdp_states
 
 
+def _get_fsdp_handles(module: nn.Module) -> List:
+    """
+    Returns all ``FlatParamHandle`` s in the module tree rooted at ``module``.
+    """
+    return [
+        handle
+        for fsdp_state in _get_fsdp_states(module)
+        for handle in fsdp_state._handles
+    ]
+
+
 class TrainingState(Enum):
     """
     An enum that indicates the state of a ``FullyShardedDataParallel` instance.
@@ -97,18 +109,6 @@ class HandleTrainingState(Enum):
 def _is_composable(state: _FSDPState):
     # TODO: This is a temporary hack for differentiate between code paths.
     return not isinstance(state, nn.Module)
-
-
-@no_type_check
-def _all_handles(state: _FSDPState) -> List:
-    """
-    Returns all ``FlatParamHandle`` s managed by ``state``.
-    """
-    return (
-        state._handles
-        if _is_composable(state)
-        else state._fsdp_handles(state)  # `FullyShardedDataParallel`
-    )
 
 
 @no_type_check

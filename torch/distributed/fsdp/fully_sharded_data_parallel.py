@@ -29,6 +29,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
+    _get_fsdp_handles,
     _get_fsdp_states,
     _get_param_to_fqns,
     FSDP_PREFIX,
@@ -477,11 +478,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Returns all nested FSDP instances' handles in the module hierarchy
         rooted at ``module``.
         """
-        return [
-            handle
-            for fsdp_module in _get_fsdp_states(module)
-            for handle in fsdp_module._handles
-        ]
+        return _get_fsdp_handles(module)
 
     def apply(self, fn: Callable[[nn.Module], None]) -> "FullyShardedDataParallel":
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
@@ -686,7 +683,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 )
             output = self._fsdp_wrapped_module(*args, **kwargs)
             return _post_forward(
-                self, self._handles, reshard_fn, unused, unused, output
+                self, self._handles, reshard_fn, self, unused, output
             )
 
     @staticmethod

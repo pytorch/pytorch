@@ -17,8 +17,8 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 from torch.distributed.fsdp._common_utils import (
-    _all_handles,
     _FSDPState,
+    _get_fsdp_handles,
     _has_fsdp_params,
     _is_composable,
     _module_handles,
@@ -130,7 +130,7 @@ def _common_pre_state_dict_hook(
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-        _clear_grads_if_needed(_all_handles(fsdp_state))
+        _clear_grads_if_needed(_get_fsdp_handles(module))
 
 
 def _common_unshard_pre_state_dict_hook(
