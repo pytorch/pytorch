@@ -603,6 +603,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqd.LinearReLU,
         nni.LinearLeakyReLU,
         nni.ConvAdd2d,
+        nni.ConvAddReLU2d,
     ])
 
     MODS_IO_TYPE_INT8: Set[NSNodeTargetType] = set([
@@ -635,6 +636,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniq.LinearReLU,
         nniq.LinearLeakyReLU,
         nniq.ConvAdd2d,
+        nniq.ConvAddReLU2d,
     ])
 
     MODS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = set([

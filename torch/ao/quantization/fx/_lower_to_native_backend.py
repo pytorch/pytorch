@@ -258,6 +258,7 @@ STATIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type
     # registration and lowering functions for different backends in the future.
     nni.LinearLeakyReLU: (nnqr.Linear, nniq.LinearLeakyReLU),
     nni.ConvAdd2d: (nnqr.Conv2d, nniq.ConvAdd2d),
+    nni.ConvAddReLU2d: (nnqr.Conv2d, nniq.ConvAddReLU2d),
     nni.ConvReLU1d: (nnqr.Conv1d, nniq.ConvReLU1d),
     nni.ConvReLU2d: (nnqr.Conv2d, nniq.ConvReLU2d),
     nni.ConvReLU3d: (nnqr.Conv3d, nniq.ConvReLU3d),
