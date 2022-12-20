@@ -617,7 +617,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             options = itertools.product(
                 ["zeros", "reflect"],  # pad_mode
                 [True, False],  # use_bias
-                [False],  # fused_with_relu
+                [True, False],  # fused_with_relu
                 [True, False],  # use_channelwise
             )
             for pad_mode, use_bias, fused_with_relu, use_channelwise in options:
@@ -652,6 +652,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 Y_zero_point = 4
                 # use_fused -> quantized class
                 class_map = {
+                    True: (nniq.ConvAddReLU2d, "QuantizedConvAddReLU2d"),
                     False: (nniq.ConvAdd2d, "QuantizedConvAdd2d")
                 }
 
@@ -714,6 +715,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 X2_q = torch.quantize_per_tensor(
                     X2, scale=X2_scale, zero_point=X2_zero_point, dtype=torch.quint8)
                 Y_exp += X2
+                if fused_with_relu:
+                    Y_exp = torch.nn.ReLU()(Y_exp)
 
                 Y_exp = torch.quantize_per_tensor(
                     Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)

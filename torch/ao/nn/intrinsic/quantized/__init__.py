@@ -9,4 +9,5 @@ __all__ = [
     'LinearReLU',
     'LinearLeakyReLU',
     'ConvAdd2d',
+    'ConvAddReLU2d',
 ]

@@ -4,7 +4,7 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 
 __all__ = ['ConvReLU1d', 'ConvReLU2d', 'ConvReLU3d', 'LinearReLU', 'ConvBn1d', 'ConvBn2d',
            'ConvBnReLU1d', 'ConvBnReLU2d', 'ConvBn3d', 'ConvBnReLU3d', 'BNReLU2d', 'BNReLU3d',
-           'LinearBn1d', 'LinearLeakyReLU', 'ConvAdd2d']
+           'LinearBn1d', 'LinearLeakyReLU', 'ConvAdd2d', 'ConvAddReLU2d']
 # Used for identifying intrinsic modules used in quantization
 class _FusedModule(torch.nn.Sequential):
     pass
@@ -145,3 +145,24 @@ class ConvAdd2d(_FusedModule):
 
     def forward(self, x1, x2):
         return self.add(self[0](x1), x2)
+
+class ConvAdd2d(_FusedModule):
+    r"""This is a sequential container which calls the Conv2d modules with extra Add.
+    During quantization this will be replaced with the corresponding fused module."""
+    def __init__(self, add, conv):
+        super().__init__(conv)
+        self.add = add
+
+    def forward(self, x1, x2):
+        return self.add(self[0](x1), x2)
+
+class ConvAddReLU2d(_FusedModule):
+    r"""This is a sequential container which calls the Conv2d, add, Relu.
+    During quantization this will be replaced with the corresponding fused module."""
+    def __init__(self, relu, add, conv):
+        super().__init__(conv)
+        self.add = add
+        self.relu = relu
+
+    def forward(self, x1, x2):
+        return self.relu(self.add(self[0](x1), x2))
