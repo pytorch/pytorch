@@ -38,32 +38,6 @@ The following source file implements a sparse linear operator using cusparseLt
     }                                                                                            \
   }
 
-#define CUDA_CHECK(status)                                              \
-  {                                                                     \
-    cudaError_t error = status;                                         \
-    if (error != cudaSuccess) {                                         \
-      std::cerr << "Got bad cuda status: " << cudaGetErrorString(error) \
-                << " at line: " << __LINE__ << std::endl;               \
-      exit(EXIT_FAILURE);                                               \
-    }                                                                   \
-  }
-
-
-
-
-/**
-Please check example 07, 08 and 17 for the basics of dense tensor op gemm kernels.  NVIDIA Ampere
-architecture also supports structured sparse tensor op for tf32, fp16, int8 and int4.
-
-Sparse GEMM kernels needs to takes an additional E matrix which stores the meta data.  The format of
-meta data is different for every data types.   CUTLASS templates can automatically infer it based on
-input A and B.  Check code below.
-
-Moreover, matrix E needs to be preprocessed so that it can use ldmatrix to load into the registers
-efficiently.
-*/
-
-
 // The code section below describes datatype for input, output matrices and computation between
 // elements in input matrices, which will all be used as template parameters for cutlass::gemm::device::SparseGemm
 using ElementInputA = cutlass::half_t;             // <- data type of elements in input matrix A
