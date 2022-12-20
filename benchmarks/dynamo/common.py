@@ -1094,10 +1094,6 @@ class BenchmarkRunner:
         2) Checks if eager itself has variations.
         """
 
-        with open("in1.txt", "w") as f:
-            print(example_inputs, file=f)
-            print(list(model.parameters()), file=f)
-
         def record_status(accuracy_status):
             """
             Records the status in the csv file
@@ -1135,8 +1131,6 @@ class BenchmarkRunner:
             )
             self.init_optimizer(name, current_device, model_fp64.parameters())
             fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
-            with open("out1.txt", "w") as f:
-                print(fp64_outputs, file=f)
         except Exception:
             log.warning(
                 f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
@@ -1181,21 +1175,36 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
-            reset_rng_state()
-            torch._dynamo.reset()
-            try:
-                model_copy = deepcopy_and_maybe_ddp(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+            # Sometime CI fails with random triton compilation failure which disappears after retry
+            # TODO: revisit this after switching to new Triton runtime
+            retries = 2 if self.args.ci else 0
+            for i in range(retries + 1):
+                reset_rng_state()
+                torch._dynamo.reset()
+                try:
+                    model_copy = deepcopy_and_maybe_ddp(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
 
-                new_result = optimized_model_iter_fn(model_copy, example_inputs)
-            except Exception as e:
-                accuracy_status = "fail_to_run"
-                print(
-                    "TorchDynamo optimized model failed to run because of following error"
-                )
-                log.exception(e)
-                return record_status(accuracy_status)
+                    new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                    break
+                except Exception as e:
+                    print(
+                        "TorchDynamo optimized model failed to run because of following error"
+                    )
+                    log.exception(e)
+                    if i < retries and (
+                        (
+                            isinstance(e, RuntimeError)
+                            and str(e).startswith("Internal Triton PTX codegen error")
+                        )
+                        or (isinstance(e, KeyError) and str(e) == "'cubin'")
+                    ):
+                        time.sleep((i + 1) * 30)
+                        print("Retrying...")
+                    else:
+                        accuracy_status = "fail_to_run"
+                        return record_status(accuracy_status)
 
             if not same(
                 correct_result,
