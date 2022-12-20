@@ -1527,7 +1527,6 @@ class FlatParamHandle:
             if (
                 param.shape != prim_param.grad.shape
                 or param.dtype != prim_param.grad.dtype
-                or param.device != prim_param.grad.device
             ):
                 # NOTE: This is the same hack to use `.data` to side step the
                 # size check.
