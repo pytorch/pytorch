@@ -548,6 +548,11 @@ def bernoulli_(self, p=0.5):
     return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
 
 
+@register_extra_random_decomp([aten.normal_])
+def normal_(self, mean=0, std=1):
+    return self.copy_(std * torch.randn_like(self) + mean)
+
+
 @functools.lru_cache(None)
 def fast_random_decomps():
     return {**decompositions, **extra_random_decomps}

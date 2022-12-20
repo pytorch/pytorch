@@ -1643,6 +1643,7 @@ zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(zeros))
 ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
 if not config.fallback_random:
     rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+    randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
 
 register_lowering(aten.zero)(zeros_like)
 
