@@ -60,13 +60,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
   target_link_options(test_edge_op_registration PRIVATE
           "-Wl,-force_load,$<TARGET_FILE:unbox_lib>"
           )
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   target_link_options(test_edge_op_registration PRIVATE
           "-Wl,--whole-archive,$<TARGET_FILE:unbox_lib>,--no-whole-archive"
-          )
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-  target_link_options(test_edge_op_registration PRIVATE
-          "-Wl,--no-as-needed,$<TARGET_FILE:unbox_lib>,--as-needed"
           )
 endif()
 if(INSTALL_TEST)
