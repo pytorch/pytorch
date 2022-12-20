@@ -119,7 +119,7 @@ function install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive --quiet https://github.com/pytorch/xla.git
+    git clone --recursive -b dec2 --quiet https://github.com/ManfeiBai/PyTorchXLA.git
     pushd xla
     # pin the xla hash so that we don't get broken by changes to xla
     git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
