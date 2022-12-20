@@ -25,6 +25,21 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class FsdpOptimStateCheckpoint(DTensorTestBase):
+    def _create_new_dist_group(self):
+        world_size = dist.get_world_size()
+        group1 = [i for i in range(world_size) if i % 2 == 0]
+        group2 = [i for i in range(world_size) if i % 2 != 0]
+
+        # create new fsdp group for resharding
+        fsdp_0 = dist.new_group(ranks=group1)
+        fsdp_1 = dist.new_group(ranks=group2)
+        if dist.get_rank() % 2 == 0:
+            my_fsdp = fsdp_0
+        else:
+            my_fsdp = fsdp_1
+
+        return my_fsdp
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
@@ -53,7 +68,10 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
             )
 
         # now load the model and ensure the values are the same
-        model_2 = FSDP(torch.nn.Linear(8, 8, device="meta"))
+        model_2 = FSDP(
+            torch.nn.Linear(8, 8, device="meta"),
+            process_group=self._create_new_dist_group(),
+        )
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
         with FSDP.summon_full_params(model):
