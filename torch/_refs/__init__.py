@@ -4721,9 +4721,7 @@ def _uniform_helper(
     return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
 
 
-@register_decomposition(
-    [aten.masked_fill.Scalar, aten.masked_fill.Tensor]
-)
+@register_decomposition([aten.masked_fill.Scalar, aten.masked_fill.Tensor])
 def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
     python_type = utils.dtype_to_type(a.dtype)
     if isinstance(value, Number):
