@@ -320,7 +320,8 @@ void insertTypeGuard(
       continue;
     }
     inputs_to_check.push_back(input);
-    guard_types.push_back(type_converter(input->type()->expect<TensorType>()));
+    guard_types.emplace_back(
+        type_converter(input->type()->expect<TensorType>()));
   }
   if (!inputs_to_check.size()) {
     return;

@@ -146,6 +146,27 @@ class TestFunctionalization(TestCase):
         r = _functionalize(f, reapply_views=True, crossref=self.crossref)(torch.ones(2, 2))
         self.assertEqual(r.stride(), (5, 1))
 
+    def test_set_(self):
+        def f(x):
+            y = torch.ones(2)
+            y.set_(x.storage())
+            return y
+
+        # We should probaby get the crossref test to work,
+        # but fixing it for Storage() objects is annoying.
+        r = _functionalize(f, reapply_views=True, crossref=False)(torch.ones(2))
+        self.assertEqual(str(r.device), 'cpu')
+
+    def test_advanced_indexing(self):
+        def f():
+            x = torch.zeros(3, 3)
+            idx = torch.tensor([0])
+            val = torch.ones(3, 1)
+            x[:, idx] = val
+            return x
+
+        self.assert_functionalization(f)
+
     def test_view_clone_view_inplace(self):
         def f(input):
             shape = [1, 1024, 128, 128]
@@ -157,7 +178,7 @@ class TestFunctionalization(TestCase):
 
         def g(x):
             loss = f(x).sum()
-            from functorch._src.aot_autograd import setup_stacktrace_preservation_hooks
+            from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
             import torch.fx.traceback as fx_traceback
             setup_stacktrace_preservation_hooks([loss.grad_fn])
             with fx_traceback.override_stack_trace():

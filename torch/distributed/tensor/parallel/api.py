@@ -1,22 +1,25 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from typing import Dict, Union
+
 import torch
 import torch.nn as nn
-from typing import Union, Dict
 from torch.distributed._tensor import (
+    DeviceMesh,
     distribute_module,
     distribute_tensor,
-    Shard,
     Replicate,
-    DeviceMesh,
+    Shard,
 )
-from torch.distributed.tensor.parallel import TensorParallelMultiheadAttention
+from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
+from torch.distributed.tensor.parallel.multihead_attention_tp import (
+    TensorParallelMultiheadAttention,
+)
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
     ParallelStyle,
     RowwiseParallel,
 )
-from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 
 
 __all__ = [
@@ -245,8 +248,7 @@ def _parallelize_linear(
 
     if not isinstance(parallel_style, ParallelStyle):
         raise RuntimeError(
-            "Expect a ParallelStyle object but received"
-            f" {type(parallel_style)}!"
+            "Expect a ParallelStyle object but received" f" {type(parallel_style)}!"
         )
 
     if device_mesh.ndim > 1:
@@ -306,8 +308,7 @@ def _parallelize_multihead_attn(
 
     if not isinstance(parallel_style, PairwiseParallel):
         raise NotImplementedError(
-            "Only support PairwiseParallel for Multihead Attention"
-            " parallelization."
+            "Only support PairwiseParallel for Multihead Attention" " parallelization."
         )
 
     if device_mesh.ndim > 1:

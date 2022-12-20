@@ -31,9 +31,9 @@ string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" env_cxx_standard)
 if(env_cxx_standard GREATER -1)
   message(
       WARNING "C++ standard version definition detected in environment variable."
-      "PyTorch requires -std=c++14. Please remove -std=c++ settings in your environment.")
+      "PyTorch requires -std=c++17. Please remove -std=c++ settings in your environment.")
 endif()
-set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are requested to build this target.")
 
 if(DEFINED GLIBCXX_USE_CXX11_ABI)
@@ -819,6 +819,7 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnarrowing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
@@ -846,6 +847,12 @@ if(NOT MSVC)
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
     string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
+  endif()
+  if(NOT CMAKE_COMPILER_IS_GNUCXX OR GCC_VERSION VERSION_GREATER_EQUAL 9.2)
+    # Prior to GCC 9.2, this warning misfires when a method is
+    # labeled "final".
+    # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78010
+    append_cxx_flag_if_supported("-Wsuggest-override" CMAKE_CXX_FLAGS)
   endif()
 
   # Use ld.gold if available, fall back to ld.bfd (the default ld) if not
@@ -884,7 +891,6 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-inconsistent-missing-override" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-c++14-extensions" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
@@ -989,7 +995,6 @@ if(APPLE)
     endif()
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-c++14-extensions" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
 endif()
 

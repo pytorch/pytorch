@@ -362,6 +362,14 @@ class CppVecOverrides(OpOverrides):
         assert dtype in [torch.bool], f"{__name__} does not support {dtype}"
         return f"({x})"
 
+    @staticmethod
+    def expm1(x):
+        return f"{x}.expm1()"
+
+    @staticmethod
+    def log1p(x):
+        return f"{x}.log1p()"
+
 
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
@@ -756,6 +764,7 @@ class CppVecKernel(CppKernel):
         assert codecache.pick_vec_isa()
         self.simd_nelements = codecache.pick_vec_isa().nelements()
         self.reduction_omp_dec: Dict[str, str] = {}
+        self.var_vec_buf_map: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
     def is_single_step_var(self, var: sympy.Symbol, index: sympy.Expr):
@@ -788,13 +797,16 @@ class CppVecKernel(CppKernel):
             line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
         else:
             if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
-                g_tmp_buf = f"g_tmp_buffer_{var}"
                 nelements = codecache.pick_vec_isa().nelements()
-                self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
+                if var not in self.var_vec_buf_map:
+                    self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
+                    self.loads.writeline(
+                        f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
+                    )
                 self.loads.writeline(
-                    f"flag_to_float({var} + {cexpr(new_index)}, {g_tmp_buf}, {nelements});"
+                    f"flag_to_float({var} + {cexpr(new_index)}, {self.var_vec_buf_map[var]}, {nelements});"
                 )
-                line = f"at::vec::Vectorized<float>::loadu({g_tmp_buf})"
+                line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
 
@@ -1370,6 +1382,9 @@ class CppScheduling:
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, None)
 
+    def codegen_sync(self):
+        pass
+
     def flush(self):
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
         self.get_kernel_group()
@@ -1416,9 +1431,11 @@ class KernelGroup:
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
             if enable_kernel_profile:
+                graph_id = V.graph.graph_id
+                prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
                 code.writelines(
                     [
-                        f'RECORD_FUNCTION("{kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
                     ]
                 )
             for old, new in self.args.aliases():

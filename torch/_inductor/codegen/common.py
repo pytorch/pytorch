@@ -1,20 +1,24 @@
-import collections
 import contextlib
 import itertools
 import logging
-import math
 import re
-import textwrap
 import typing
 from collections import namedtuple
-from io import StringIO
 from itertools import chain
 
 import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
-from ..utils import free_symbol_startswith, sympy_dot, sympy_subs, sympy_symbol, unique
+from ..utils import (
+    DeferredLineBase,
+    free_symbol_startswith,
+    IndentedBuffer,
+    sympy_dot,
+    sympy_subs,
+    sympy_symbol,
+    unique,
+)
 from ..virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -48,7 +52,12 @@ class ExprPrinter(Printer):
         base = self._print(base)
         assert exp.is_integer
         exp = int(exp)
-        return "*".join([self.paren(base)] * exp)
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        elif exp < 0:
+            return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+        else:  # exp == 0
+            return "1"
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -120,86 +129,12 @@ class OpOverrides:
         return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
 
 
-class IndentedBuffer:
-    tabwidth = 4
-
-    def __init__(self, initial_indent=0):
-        self._lines = []
-        self._indent = initial_indent
-
-    def getvalue(
-        self,
-    ):
-        buf = StringIO()
-        for line in self._lines:
-            if isinstance(line, DeferredLine):
-                line = line()
-                if line is None:
-                    continue
-            assert isinstance(line, str)
-            buf.write(line)
-            buf.write("\n")
-        return buf.getvalue()
-
-    def clear(self):
-        self._lines.clear()
-
-    def __bool__(self):
-        return bool(self._lines)
-
-    def prefix(self):
-        return " " * (self._indent * self.tabwidth)
-
-    def writeline(self, line):
-        if isinstance(line, DeferredLine):
-            self._lines.append(line.with_prefix(self.prefix()))
-        elif line.strip():
-            self._lines.append(f"{self.prefix()}{line}")
-        else:
-            self._lines.append("")
-
-    def writelines(self, lines):
-        for line in lines:
-            self.writeline(line)
-
-    def indent(self, offset=1):
-        @contextlib.contextmanager
-        def ctx():
-            self._indent += offset
-            yield
-            self._indent -= offset
-
-        return ctx()
-
-    def splice(self, other_code, strip=False):
-        if isinstance(other_code, IndentedBuffer):
-            dedent = float("inf")
-            for line in other_code._lines:
-                if line:
-                    dedent = min(dedent, len(line) - len(line.lstrip()))
-            if math.isinf(dedent):
-                dedent = 0
-            for line in other_code._lines:
-                IndentedBuffer.writeline(self, line[dedent:])
-        else:
-            other_code = textwrap.dedent(other_code)
-            if strip:
-                other_code = other_code.lstrip()
-            if not other_code:
-                return
-            other_code = other_code.rstrip()
-            for line in other_code.split("\n"):
-                self.writeline(line)
-
-
-class DeferredLine:
+class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
     def __init__(self, name, line):
-        if not line.strip():
-            line = ""
+        super().__init__(line)
         self.name = name
-        self.line = line
 
     def __call__(self):
         if (
@@ -209,20 +144,8 @@ class DeferredLine:
             return self.line
         return None
 
-    def with_prefix(self, prefix):
-        return DeferredLine(self.name, f"{prefix}{self.line}")
-
-    def lstrip(self):
-        return DeferredLine(self.name, self.line.lstrip())
-
-    def __getitem__(self, index):
-        return DeferredLine(self.name, self.line[index])
-
-    def __bool__(self):
-        return bool(self.line)
-
-    def __len__(self):
-        return len(self.line)
+    def _new_line(self, line):
+        return DeferredLine(self.name, line)
 
 
 class DeferredIndentedBuffer(IndentedBuffer):
@@ -276,13 +199,29 @@ class KernelArgs:
         return odict[name]
 
     def __init__(self, sizevars=None):
-        self.input_buffers = collections.OrderedDict()
-        self.output_buffers = collections.OrderedDict()
-        self.inplace_buffers = collections.OrderedDict()
-        self.sizevars = sizevars or collections.OrderedDict()
+        self.input_buffers = dict()
+        self.output_buffers = dict()
+        self.inplace_buffers = dict()
+        self.sizevars = sizevars or dict()
+
+    def __repr__(self):
+        return "KernelArgs({})".format(
+            ", ".join(
+                map(
+                    repr,
+                    [
+                        self.input_buffers,
+                        self.output_buffers,
+                        self.inplace_buffers,
+                        self.sizevars,
+                    ],
+                )
+            )
+        )
 
     def input(self, name):
-        name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
@@ -293,7 +232,8 @@ class KernelArgs:
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
-        name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.inplace_buffers:
             return self.inplace_buffers[name].inner_name
@@ -501,7 +441,10 @@ class CSE:
             var = self.newvar()
             self.cache[expr] = var
             if write:
-                V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
+                if V.kernel.current_node:
+                    V.kernel.current_node.codegen_originating_info(
+                        buffer, only_once=True
+                    )
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
         return self.cache[expr]
 
@@ -590,8 +533,6 @@ class Kernel(CodeGen):
 
     def __enter__(self):
         class CSEProxy:
-            self.name = "CSEProxy"
-
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
@@ -625,8 +566,9 @@ class Kernel(CodeGen):
                 self.store_buffer_names.add(name)
                 if mode is None:
                     self.cse.store_cache[name] = value
-                    for other_name in self.current_node.get_mutations():
-                        self.cse.store_cache[other_name] = value
+                    if self.current_node:
+                        for other_name in self.current_node.get_mutations():
+                            self.cse.store_cache[other_name] = value
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
 
@@ -644,7 +586,8 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        V.graph.scheduler.remove_kernel_local_buffers()
+        if V.graph.scheduler:
+            V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index) -> sympy.Expr:

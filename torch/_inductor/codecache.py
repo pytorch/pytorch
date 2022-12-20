@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import getpass
 import hashlib
+import json
 import logging
 import multiprocessing
 import os
@@ -21,8 +22,6 @@ from time import sleep, time
 from typing import Any, Callable, Dict, List
 
 import torch
-
-from torch.hub import tqdm
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
 
@@ -59,6 +58,36 @@ def cache_dir():
     )
 
 
+class DiskCache:
+    @staticmethod
+    @functools.lru_cache(None)
+    def _subdir():
+        subdir = os.path.join(cache_dir(), "cached_tunings")
+        os.makedirs(subdir, exist_ok=True)
+        return subdir
+
+    @staticmethod
+    @functools.lru_cache(4096)
+    def _read_file(path):
+        with open(path, "r") as fd:
+            return json.loads(fd.read())
+
+    def __init__(self, unique_name):
+        super().__init__()
+        self.unique_name = unique_name
+
+    def lookup(self, key: Any, generate: Callable[[], Any]):
+        """
+        Check if we have already generated key, if not call generate()
+        to populate the cache.
+        """
+        path = os.path.join(self._subdir(), code_hash(self.unique_name + repr(key)))
+        if not os.path.exists(path):
+            value = generate()
+            write_atomic(path, json.dumps(value))
+        return self._read_file(path)
+
+
 def get_lock_dir():
     lock_dir = os.path.join(cache_dir(), "locks")
     if not os.path.exists(lock_dir):
@@ -87,12 +116,16 @@ def write(source_code, ext, extra=""):
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
-        # use a temp file for thread safety
-        fd, tmp_path = tempfile.mkstemp(dir=subdir)
-        with os.fdopen(fd, "w") as f:
-            f.write(source_code)
-        os.rename(tmp_path, path)
+        write_atomic(path, source_code)
     return basename, path
+
+
+def write_atomic(path: str, source_code: str):
+    # use a temp file for thread safety
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
+    with os.fdopen(fd, "w") as f:
+        f.write(source_code)
+    os.rename(tmp_path, path)
 
 
 def cpp_compiler():
@@ -111,6 +144,9 @@ def cpp_compiler_search(search):
                 # gxx package is only available for Linux
                 # according to https://anaconda.org/conda-forge/gxx/
                 if sys.platform != "linux":
+                    continue
+                # Do not install GXX by default
+                if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
                     continue
                 from filelock import FileLock
 
@@ -328,7 +364,7 @@ def get_warning_all_flag(warning_all=True):
 
 
 def cpp_flags():
-    return "-std=c++14 -Wno-unused-variable"
+    return "-std=c++17 -Wno-unused-variable"
 
 
 def optimization_flags():
@@ -434,7 +470,7 @@ class CppCodeCache:
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
-                        raise exc.CppCompileError(cmd, e.output)
+                        raise exc.CppCompileError(cmd, e.output) from e
 
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
@@ -523,7 +559,7 @@ class TritonFuture:
 
 class AsyncCompile:
     def __init__(self):
-        self._context_keepalive = None
+        pass
 
     @staticmethod
     @functools.lru_cache(1)
@@ -594,7 +630,7 @@ class AsyncCompile:
         if hasattr(pool, "_start_queue_management_thread"):
             pool._start_queue_management_thread()
         else:
-            for _ in range(config.compile_threads):
+            for i in range(config.compile_threads):
                 pool._adjust_process_count()
             pool._start_executor_manager_thread()
         _compile_end()
@@ -613,9 +649,6 @@ class AsyncCompile:
 
     def triton(self, source_code):
         _compile_start()
-        if self._context_keepalive is None:
-            # Workaround `CUDA: Error- context is destroyed`
-            self._context_keepalive = torch.tensor([1], device="cuda")
 
         if config.compile_threads > 1:
             major, minor = torch.cuda.get_device_capability()
@@ -635,26 +668,10 @@ class AsyncCompile:
         return self.submit(task)
 
     def wait(self, scope: Dict[str, Any]):
-        num_kernels = len(
-            [
-                value
-                for key, value in scope.items()
-                if isinstance(value, (Future, TritonFuture))
-            ]
-        )
-        pbar = tqdm(
-            total=num_kernels,
-            desc="Inductor Compilation",
-            disable=config.disable_progress,
-            delay=15,
-        )
         if config.compile_threads > 1:
-            for key, result in scope.items():
-                if config.verbose_progress:
-                    pbar.set_postfix_str(key)
+            for key, result in list(scope.items()):
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
-                    pbar.update(1)
 
         _compile_end()
 

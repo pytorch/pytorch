@@ -1,17 +1,12 @@
-import warnings
 import copy
-from typing import List, NamedTuple, Optional, Tuple, cast
+import warnings
+from typing import cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-import torch.distributed.distributed_c10d as c10d
-
-from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 
 import torch.distributed._shard.sharding_spec as shard_spec
-from torch.distributed._shard.sharding_spec.chunk_sharding_spec import (
-    ChunkShardingSpec,
-)
+import torch.distributed.distributed_c10d as c10d
 
 from torch.distributed._shard.sharded_tensor import (
     Shard,
@@ -20,18 +15,19 @@ from torch.distributed._shard.sharded_tensor import (
     TensorProperties,
 )
 
-from torch.distributed._shard.sharding_spec import (
-    ShardMetadata,
-)
-
-from torch.distributed.remote_device import _remote_device
+from torch.distributed._shard.sharding_spec import ShardMetadata
+from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
 
 from torch.distributed._tensor import (
-    DTensor as DistributedTensor,
     DeviceMesh,
+    DTensor as DistributedTensor,
     Shard as DShard,
 )
 from torch.distributed._tensor.placement_types import Placement
+
+from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
+
+from torch.distributed.remote_device import _remote_device
 
 __all__ = ["is_available"]
 
@@ -62,9 +58,7 @@ def _get_box(tensor: DistributedTensor) -> Tuple[torch.Size, torch.Size]:
     return (torch.Size(offsets), tensor._local_tensor.size())
 
 
-def _get_box_for(
-    tensor: DistributedTensor, idx: int
-) -> Tuple[torch.Size, torch.Size]:
+def _get_box_for(tensor: DistributedTensor, idx: int) -> Tuple[torch.Size, torch.Size]:
     offsets, size = _get_box(tensor)
     return (torch.Size([val * idx for val in offsets]), size)
 
@@ -76,9 +70,7 @@ def _get_local_box(tensor: DistributedTensor) -> Tuple[torch.Size, torch.Size]:
     return _get_box_for(tensor, dim_0_coord)
 
 
-def _create_shard_md_from_dt(
-    dt: DistributedTensor, current_rank: int
-) -> ShardMetadata:
+def _create_shard_md_from_dt(dt: DistributedTensor, current_rank: int) -> ShardMetadata:
     mesh = dt.device_mesh
     assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
 
@@ -159,9 +151,7 @@ def _rewrite_spec_if_needed(
         for i, placement in enumerate(spec.placements):
             placement = cast(_remote_device, placement)
             if placement.rank() == rank and placement.device() != tensor.device:
-                spec.placements[i] = _remote_device(
-                    f"rank:{rank}/{tensor.device}"
-                )
+                spec.placements[i] = _remote_device(f"rank:{rank}/{tensor.device}")
 
     return spec
 
@@ -268,9 +258,7 @@ def _chunk_tensor(
         dt_pg = _get_dt_pg(tensor)
         # We do this differently here, we create a ST with no local shards then patch it
         shards = [
-            Shard(
-                inner_st, _create_shard_md_from_dt(tensor, dist.get_rank(dt_pg))
-            )
+            Shard(inner_st, _create_shard_md_from_dt(tensor, dist.get_rank(dt_pg)))
         ]
 
         st_meta = _create_sharded_tensor_md_from_dt(tensor, dt_pg)
@@ -307,11 +295,11 @@ def _pre_load_state_dict(
 
 
 try:
+    from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
     from torch.distributed.fsdp._fsdp_extensions import (
         _set_fsdp_extensions,
         FSDPExtensions,
     )
-    from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 
     class DTensorExtensions(FSDPExtensions):
         def pre_flatten_transform(
@@ -333,9 +321,7 @@ try:
             num_devices_per_node: int,
             pg: dist.ProcessGroup,
         ) -> torch.Tensor:
-            return _chunk_tensor(
-                tensor, rank, world_size, num_devices_per_node, pg
-            )
+            return _chunk_tensor(tensor, rank, world_size, num_devices_per_node, pg)
 
         def pre_load_state_dict_transform(
             self,

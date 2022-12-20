@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections import OrderedDict
-from typing import Any, Callable, Dict, Tuple, Union
+from typing import Any, Callable, Dict, Tuple, Union, List
 
 import torch
 
@@ -83,26 +83,12 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
     qconfig_mapping = QConfigMapping() \
         .set_global(qconfig) \
         .set_object_type("reshape", default_reuse_input_qconfig) \
-        .set_object_type(torch.nn.Conv1d, qconfig) \
-        .set_object_type(torch.nn.Conv2d, qconfig) \
-        .set_object_type(torch.nn.Conv3d, qconfig) \
         .set_object_type(torch.nn.ConvTranspose1d, qconfig_transpose) \
         .set_object_type(torch.nn.ConvTranspose2d, qconfig_transpose) \
         .set_object_type(torch.nn.ConvTranspose3d, qconfig_transpose) \
-        .set_object_type(torch.nn.Linear, qconfig) \
-        .set_object_type(torch.nn.functional.conv1d, qconfig) \
-        .set_object_type(torch.nn.functional.conv2d, qconfig) \
-        .set_object_type(torch.nn.functional.conv3d, qconfig) \
         .set_object_type(torch.nn.functional.conv_transpose1d, qconfig_transpose) \
         .set_object_type(torch.nn.functional.conv_transpose2d, qconfig_transpose) \
         .set_object_type(torch.nn.functional.conv_transpose3d, qconfig_transpose) \
-        .set_object_type(torch.nn.functional.linear, qconfig) \
-        .set_object_type(torch.nn.ReLU, qconfig) \
-        .set_object_type(torch.nn.functional.relu, qconfig) \
-        .set_object_type(torch.relu, qconfig) \
-        .set_object_type(torch.nn.BatchNorm1d, qconfig) \
-        .set_object_type(torch.nn.BatchNorm2d, qconfig) \
-        .set_object_type(torch.nn.BatchNorm3d, qconfig) \
         .set_object_type(torch.nn.functional.layer_norm, qconfig_layernorm) \
         .set_object_type(torch.nn.LayerNorm, qconfig_layernorm) \
 
@@ -119,6 +105,16 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
             fixed_qparams_qconfig = QConfig(activation=activation, weight=default_weight)
             fixed_qparams_observer_to_qconfig[observer] = fixed_qparams_qconfig
         qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
+
+    # QConfig for fused ops for onednn backend
+    # Separate ops are required to have the same qconfig as fused ops
+    # TODO: we should be able to configure qconfig for patterns
+    if backend == 'onednn':
+        qconfig_mapping.set_object_type(torch.nn.Linear, qconfig) \
+                       .set_object_type(torch.nn.LeakyReLU, qconfig) \
+                       .set_object_type(torch.nn.functional.leaky_relu, qconfig) \
+                       .set_object_type(torch.nn.Tanh, qconfig) \
+                       .set_object_type(torch.nn.functional.tanh, qconfig)
 
     return qconfig_mapping
 
@@ -156,6 +152,14 @@ def _get_symmetric_qnnpack_qconfig_mapping():
         if pattern not in _FIXED_QPARAMS_OP_TO_OBSERVER:
             qconfig_mapping.set_object_type(pattern, default_symmetric_qnnpack_qconfig)
     return qconfig_mapping
+
+_QCONFIG_STYLE_ORDER: List[str] = [
+    "global_qconfig",
+    "object_type_qconfigs",
+    "module_name_regex_qconfigs",
+    "module_name_qconfigs",
+    "module_name_object_type_order_qconfigs",
+]
 
 class QConfigMapping:
     """
@@ -256,6 +260,18 @@ class QConfigMapping:
         """
         self.module_name_object_type_order_qconfigs[(module_name, object_type, index)] = qconfig
         return self
+
+    def __repr__(self) -> str:
+        output = self.__class__.__name__ + " ("
+        for style_name in _QCONFIG_STYLE_ORDER:
+            output += f"\n {style_name}"
+            qconfigs = getattr(self, style_name)
+            if isinstance(qconfigs, OrderedDict) and len(qconfigs) > 0:
+                for key, qconfig in qconfigs.items():
+                    output += f"\n  {key}: {qconfig}"
+            else:
+                output += f"\n  {qconfigs}"
+        return output + "\n)"
 
     # TODO: remove this
     def to_dict(self) -> Dict[str, Any]:
