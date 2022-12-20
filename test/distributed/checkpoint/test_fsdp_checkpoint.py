@@ -56,6 +56,7 @@ class FsdpCheckpoint(DTensorTestBase):
             torch.nn.Linear(8, 8, device="meta"), process_group=process_group
         )
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
+        p0(optim_2)
 
         with FSDP.summon_full_params(model):
             with FSDP.summon_full_params(model_2):
@@ -101,8 +102,8 @@ class FsdpCheckpoint(DTensorTestBase):
         def opt_at(opt, idx):
             return list(iter(opt.state.values()))[idx]
 
-        p0(opt_at(optim, 0)["exp_avg"])
-        p0(opt_at(optim_2, 0)["exp_avg"])
+        p0(len(opt_at(optim, 0)["exp_avg"]))
+        p0(len(opt_at(optim_2, 0)["exp_avg"]))
 
         # # Adam lazily creates its state
         # self.assertEqual(
