@@ -5248,7 +5248,7 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
-        def test_vec_comapre_op_cpu_only(self):
+        def test_vec_compare_op_cpu_only(self):
             def fn(x):
                 y1 = torch.eq(x, 1)
                 x = torch.where(y1, x, -x)
@@ -5273,6 +5273,10 @@ if HAS_CPU:
                 compiled = compile_fx_inner(traced, [x])
                 assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
+                assert (
+                    metrics.generated_kernel_count
+                    - metrics.generated_cpp_vec_kernel_count
+                ) == 0
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
