@@ -669,7 +669,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
                 for i in range(len(kernel_size)):
                     assume(input_feature_map_size[i] + 2 * padding[i]
-                        >= dilation[i] * (kernel_size[i] - 1) + 1)
+                           >= dilation[i] * (kernel_size[i] - 1) + 1)
 
                 in_channels = in_channels_per_group * groups
                 out_channels = out_channels_per_group * groups
