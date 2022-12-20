@@ -9,7 +9,7 @@ import time
 import warnings
 
 import torch
-from common import BenchmarkRunner, main
+from common import BenchmarkRunner, main, reset_rng_state
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
@@ -242,10 +242,11 @@ class TimmRunnner(BenchmarkRunner):
         # example_inputs = torch.randn(
         #     (batch_size,) + input_size, device=device, dtype=data_dtype
         # )
-        torch.manual_seed(1337)
+        reset_rng_state()
         input_tensor = torch.randint(
             256, size=(batch_size,) + input_size, device=device
         ).to(dtype=torch.float32)
+        print(input_tensor)
         mean = torch.mean(input_tensor)
         std_dev = torch.std(input_tensor)
         example_inputs = (input_tensor - mean) / std_dev
