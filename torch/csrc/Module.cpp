@@ -1124,8 +1124,8 @@ static PyMethodDef TorchMethods[] = {
      METH_O,
      nullptr},
     {"_has_torch_function_variadic",
-     MAYBE_WRAP_FASTCALL(THPModule_has_torch_function_variadic),
-     MAYBE_METH_FASTCALL,
+     (PyCFunction)(void (*)(void))THPModule_has_torch_function_variadic,
+     METH_FASTCALL,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
