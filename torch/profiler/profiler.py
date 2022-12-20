@@ -9,6 +9,7 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
+from torch.autograd.profiler import KinetoStepTracker
 from torch._C._profiler import (
     _add_execution_graph_observer,
     _disable_execution_graph_observer,
@@ -16,7 +17,7 @@ from torch._C._profiler import (
     _ExperimentalConfig,
     _remove_execution_graph_observer,
 )
-from torch.autograd import _kineto_step, kineto_available, ProfilerActivity
+from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler import _memory_profiler
 from torch.optim.optimizer import register_optimizer_step_post_hook
 
@@ -46,9 +47,9 @@ def supported_activities():
 
 
 def optimizer_post_hook(optimizer, args, kwargs):
-    _kineto_step()
+    KinetoStepTracker.increment_step("Optimizer")
 
-if os.getenv["USE_KINETO_DAEMON"]:
+if os.environ["USE_KINETO_DAEMON"]:
     handle = register_optimizer_step_post_hook(optimizer_post_hook)
 
 
