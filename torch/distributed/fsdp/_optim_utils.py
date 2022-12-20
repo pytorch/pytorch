@@ -1403,6 +1403,7 @@ def _gather_orig_param_state(
     logging.warning(f"DEBUG1 {fsdp_state.rank} {fqn} {len(object_list)} {time.time()}.")
     dist.all_gather_object(object_list, state_objects)
     orig_state: Dict[str, Any] = {}
+    logging.warning(f"DEBUG1 {fsdp_state.rank} {fqn} {len(object_list)} {time.time()}. semi-done")
     for state in object_list:
         for state_name, value in state.items():
             curr_value = orig_state.get(state_name, [])
