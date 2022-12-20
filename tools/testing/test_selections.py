@@ -12,13 +12,13 @@ NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
 # Special logic for ROCm GHA runners.
 # torch.version.hip was not available to check if this was a ROCm self-hosted runner.
 # Must check for ROCm runner in another way. We look for /opt/rocm directory.
-if os.path.exists('/opt/rocm') and not IS_MEM_LEAK_CHECK:
+if os.path.exists("/opt/rocm") and not IS_MEM_LEAK_CHECK:
     try:
         # This is the same logic used in GHA health check, see .github/templates/common.yml.j2
-        lines = subprocess.check_output(['rocminfo'], encoding='ascii').strip().split('\n')
+        lines = subprocess.check_output(["rocminfo"], encoding="ascii").strip().split("\n")
         count = 0
         for line in lines:
-            if ' gfx' in line:
+            if " gfx" in line:
                 count += 1
         assert count > 0  # there must be at least 1 GPU
         NUM_PROCS = count

@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     is_slow_gradcheck_env,
 )
 import torch.distributed as dist
-from torch.multiprocessing import current_process, get_context, Process
+from torch.multiprocessing import current_process, get_context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
