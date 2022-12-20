@@ -9,8 +9,7 @@ extern "C" {
 
 // PyTorch-only compat functions
 
-
 #ifdef __cplusplus
 }
 #endif
-#endif  // PYTHON_COMPAT
+#endif // PYTHON_COMPAT
