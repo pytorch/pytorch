@@ -291,6 +291,7 @@ CI_SERIAL_LIST = [
     'test_sparse_csr',
     'test_dispatch',
     'nn/test_pooling',
+    'nn/test_convolution',  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     'distributions/test_distributions',
     'test_autograd',  # slow gradcheck runs a test that checks the cuda memory allocator
     'test_prims',  # slow gradcheck runs a test that checks the cuda memory allocator
