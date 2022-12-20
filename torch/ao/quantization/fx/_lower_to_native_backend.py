@@ -590,9 +590,9 @@ def _lower_static_weighted_ref_module_with_two_dq_inputs(
     """
     Traverse the graph and find patterns
     dequantize   dequantize
-       \         /
+       \\         //
         ref module
-            \
+            \\
           quantize
     and replace them with the quantized version of the ref module.
     """
