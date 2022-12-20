@@ -63,7 +63,6 @@ def save_state_dict(
         >>> torch.distributed.checkpoint.save_state_dict(
         >>>     state_dict=model_state_dict,
         >>>     storage_writer=fs_stroage_writer,
-        >>>     planner=DefaultSavePlanner(),
         >>> )
 
     .. note::

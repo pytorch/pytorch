@@ -69,7 +69,6 @@ def load_state_dict(
         >>> torch.distributed.checkpoint.load_state_dict(
         >>>     state_dict=model_state_dict,
         >>>     storage_reader=fs_storage_loader,
-        >>>     planner=DefaultSaveLoader(),
         >>> )
 
         >>> # module.load_state_dict() function might have customized steps
