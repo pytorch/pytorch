@@ -339,7 +339,7 @@ struct ViewOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", original_shape=[";
     bool first_arg = true;
@@ -426,7 +426,7 @@ struct PermuteOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", dims=[";
     bool first_arg = true;
@@ -510,7 +510,7 @@ struct SqueezeOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", original_shape=[";
     bool first_arg = true;
@@ -662,7 +662,7 @@ struct BroadcastInDimOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", output_shape=[";
     bool first_arg = true;
@@ -748,7 +748,7 @@ struct BroadcastOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", is_broadcast_dim=[";
     bool first_arg = true;
@@ -844,7 +844,7 @@ struct CastOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
@@ -897,7 +897,7 @@ struct ConstantRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     if (std::is_same<ValueType, bool>::value) {
       os << (value_ ? "True" : "False");
@@ -1038,7 +1038,7 @@ struct TensorRecord : RecordFunctor {
     fd.addInput(tv);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << "symbolic_sizes=[";
     bool first_arg = true;
@@ -1231,7 +1231,7 @@ struct ReductionOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", axes=[";
     bool first_arg = true;
@@ -1316,7 +1316,7 @@ struct ScalarRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << "dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
@@ -1374,7 +1374,7 @@ struct NormOpRecord : RecordFunctor {
         correction_(correction),
         keep_dim_(keep_dim) {}
   virtual ~NormOpRecord() = default;
-  virtual RecordFunctor* clone() = 0;
+  RecordFunctor* clone() override = 0;
 
   // I am skipping the bassel's correction value in the hash because
   // I suspect we might change it to a bool from a 64-bit value
@@ -1415,7 +1415,7 @@ struct NormOpRecord : RecordFunctor {
   }
 
   //! Each NormOp Child should define the operator() to build the IR
-  virtual void operator()(FusionDefinition& fd) = 0;
+  void operator()(FusionDefinition& fd) override = 0;
 
   virtual void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
@@ -1645,7 +1645,7 @@ struct FullOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  virtual void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", shape=[";
     bool first_arg = true;
