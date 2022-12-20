@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from torch.distributed._tensor import (
     DeviceMesh,
+    DTensor,
     distribute_module,
     distribute_tensor,
     Replicate,
