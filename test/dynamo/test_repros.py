@@ -2055,8 +2055,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         for b in [True, False]:
             x = torch.randn(4, requires_grad=b)
-            self.assertEqual(f(x), opt_f(x))
-            self.assertEqual(f(x), opt_f(x))
+            out = f(x)
+            out_test = opt_f(x)
+            self.assertEqual(out, out_test)
+            self.assertEqual(out.requires_grad, out_test.requires_grad)
+            self.assertEqual(out._is_view(), out_test._is_view())
+            self.assertEqual(out._base.requires_grad, out_test._base.requires_grad)
 
     def test_while_loop_graph_break(self):
         # Repro of tacotron2 cache_size_recompilation
