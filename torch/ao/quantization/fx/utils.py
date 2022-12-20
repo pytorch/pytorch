@@ -23,8 +23,10 @@ from torch.ao.quantization.qconfig import (
     qconfig_equals,
 )
 from torch.ao.quantization.stubs import DeQuantStub
-from torch.ao.quantization.utils import activation_is_statically_quantized
-from torch.ao.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.utils import (
+    activation_is_statically_quantized,
+)
+from torch.ao.quantization.observer import _is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
 
@@ -250,7 +252,7 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
         result = False
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
-        if is_activation_post_process(modules[node.target]):
+        if _is_activation_post_process(modules[node.target]):
             result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'call_module':
         result = False
@@ -827,7 +829,7 @@ def _qconfig_satisfies_dtype_config_constraints(
     satisfies_constraints = True
     if activation_post_process_ctr is not None:
         activation_post_process = activation_post_process_ctr()
-        assert is_activation_post_process(activation_post_process)
+        assert _is_activation_post_process(activation_post_process)
         # If dtypes don't match, don't check the activation_post_process and return True early
         if activation_post_process.dtype != dtype_with_constraints.dtype:
             return True
