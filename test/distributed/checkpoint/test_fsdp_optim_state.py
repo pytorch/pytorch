@@ -28,7 +28,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_distributed_tensor_planner(self) -> None:
+    def test_fsdp_optim_state_no_resharding(self) -> None:
         CHECKPOINT_DIR = self.temp_dir
 
         model = FSDP(torch.nn.Linear(8, 8, device="meta"))
@@ -87,7 +87,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
             )
 
             flattened_osd = FSDP.flatten_sharded_optim_state_dict(
-                optim_state["optim"], model_2
+                optim_state["optim"], model_2, optim_2
             )
             optim_2.load_state_dict(flattened_osd)
 

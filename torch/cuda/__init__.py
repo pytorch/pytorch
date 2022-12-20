@@ -73,8 +73,8 @@ else:
 if hasattr(torch._C, '_cuda_exchangeDevice'):
     _exchange_device = torch._C._cuda_exchangeDevice
 else:
-    def _exchange_device(idx: int) -> int:
-        if idx < 0:
+    def _exchange_device(device: int) -> int:
+        if device < 0:
             return -1
         raise RuntimeError("PyTorch was compiled with CUDA support")
 
@@ -297,7 +297,7 @@ class _DeviceGuard:
     def __enter__(self):
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
-    def __exit__(self, type: Any, value: Any, traceback: Any) -> bool:
+    def __exit__(self, type: Any, value: Any, traceback: Any):
         torch.cuda._exchange_device(self.prev_idx)
         return False
 
