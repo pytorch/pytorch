@@ -2756,6 +2756,28 @@ class TestVmapOperators(Namespace.TestVmapBase):
             )(x)
             self.assertEqual(output, expected)
 
+    @parametrize('in_dim', [0, 1, 2])
+    @parametrize('out_dim', [0, 1, 2])
+    @parametrize('randomness', ['error', 'same'])
+    def test_vmap_chunksize(self, in_dim, out_dim, randomness):
+
+        x = torch.randn(4, 5, 6)
+
+        def f(x):
+            y = x.sin()
+            if randomness != "error":
+                y = y + torch.rand_like(x)
+            return y
+
+        rs = torch.get_rng_state()
+        expected = vmap(f, in_dims=in_dim, out_dims=out_dim, randomness=randomness)(x)
+
+        for chunk_size in [1, 2, 3, 4, 7, 10, 16]:
+            torch.set_rng_state(rs)
+            output = vmap(
+                f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
+            )(x)
+            self.assertEqual(output, expected)
 
 instantiate_parametrized_tests(TestVmapOperators)
 
