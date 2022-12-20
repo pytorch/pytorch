@@ -276,7 +276,8 @@ class DTensorSpec(object):
 
     def __eq__(self, __o: object) -> bool:
         return (
-            self.mesh == __o.mesh
+            isinstance(__o, DTensorSpec)
+            and self.mesh == __o.mesh
             and self.placements == __o.placements
             and self.shape == __o.shape
         )
