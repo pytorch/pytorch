@@ -514,7 +514,6 @@ def _lower_static_weighted_ref_module(
         dq_node = ref_node.args[0]
         assert(isinstance(dq_node, Node))
         ref_node.replace_input_with(dq_node, dq_node.args[0])
-
         q_node.replace_all_uses_with(ref_node)
         model.graph.erase_node(q_node)
         model.graph.erase_node(scale_node)
