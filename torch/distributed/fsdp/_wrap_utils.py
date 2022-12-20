@@ -102,8 +102,8 @@ def _get_fully_sharded_module_to_states(
     instead.
     """
     # Record the modules to wrap without actually wrapping
-    wrapped_modules: List[nn.Module] = []  # these are only logically wrapped
-    wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules)
+    wrapped_modules_set: Set[nn.Module] = set()  # these are only logically wrapped
+    wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules_set)
     if auto_wrap_policy is not None:
         _recursive_wrap(
             root_module,
@@ -114,33 +114,41 @@ def _get_fully_sharded_module_to_states(
             only_wrap_children=False,
         )
     # Always include the root module even if not wrapped by the given policy
-    if root_module not in wrapped_modules:
-        wrapped_modules.append(root_module)
+    wrapped_modules_set.add(root_module)
 
-    submodule_to_states = collections.OrderedDict()
+    fully_sharded_module_to_states = collections.OrderedDict()
     visited_params = set()
     for ignored_param in ignored_params:
         visited_params.add(ignored_param)
     visited_buffers = set()
-    # Constructing `wrapped_modules` with `_recursive_wrap()` follows a
-    # post-order traversal. We record state in `submodule_to_states` using a
-    # reverse post-ordering since that is a topological sort. This assigns
-    # parent-child shared parameters to the parent submodule.
-    # TODO: To handle sibling shared parameters, we need to pre-compute the
-    # shared parameters and assign them to the LCA submodule manually.
-    wrapped_modules.reverse()
-    wrapped_modules_set = set(wrapped_modules)
+    # Construct `wrapped_modules` to follow `.modules()` order to ensure that
+    # downstream data structures (`._handles`) match those of the wrapper path.
+    # NOTE: Since `.modules()` follows a depth-first order, which is a
+    # topological sort, and we iterate over `wrapped_modules` following that
+    # order, parent-child shared parameters are assigned to the parent module.
+    wrapped_modules: List[nn.Module] = []
+    for module in root_module.modules():
+        if module in wrapped_modules_set:
+            wrapped_modules.append(module)
     for submodule in wrapped_modules:
-        # Perform a BFS from `submodule` and record all unvisited state that is
-        # not already associated with another module in `wrapped_modules`.
-        queue: Deque[Tuple[nn.Module, str]] = collections.deque()
-        queue.append((submodule, ""))
+        # Perform a DFS from `submodule` and record all unvisited state that is
+        # not already associated with another module in `wrapped_modules`. We
+        # use DFS to follow the `.modules()` order.
+        deque: Deque[Tuple[nn.Module, str]] = collections.deque()
+        deque.append((submodule, ""))
         params: List[nn.Parameter] = []
         param_names: List[str] = []
         buffers: List[torch.Tensor] = []
         buffer_names: List[str] = []
-        while len(queue) > 0:
-            module, prefix = queue.popleft()
+        while len(deque) > 0:
+            module, prefix = deque.popleft()
+            # Reverse `named_children()`, use `appendleft()`, and add to the
+            # deque before processing to perform non-recursive DFS
+            for child_module_name, child_module in reversed(
+                list(module.named_children())
+            ):
+                if child_module not in wrapped_modules_set:
+                    deque.appendleft((child_module, prefix + child_module_name + "."))
             for param_name, param in module.named_parameters(recurse=False):
                 if param not in visited_params and not _is_fsdp_flattened(param):
                     params.append(param)
@@ -151,24 +159,21 @@ def _get_fully_sharded_module_to_states(
                     buffers.append(buffer)
                     visited_buffers.add(buffer)
                     buffer_names.append(prefix + buffer_name)
-            for child_module_name, child_module in module.named_children():
-                if child_module not in wrapped_modules_set:
-                    queue.append((child_module, prefix + child_module_name + "."))
-        submodule_to_states[submodule] = FullyShardedModuleState(
+        fully_sharded_module_to_states[submodule] = FullyShardedModuleState(
             params, buffers, param_names, buffer_names
         )
-    return submodule_to_states
+    return fully_sharded_module_to_states
 
 
 def _record_module_wrapper_cls(
-    wrapped_modules: List[nn.Module],
+    wrapped_modules_set: Set[nn.Module],
     module: nn.Module,
     **kwargs,
 ) -> nn.Module:
     """
     This defines a pseudo-wrapper class to be passed to ``_recursive_wrap()``
-    that records the wrapped module to the input ``wrapped_modules`` without
-    actually wrapping with a class.
+    that records the wrapped module to the input ``wrapped_modules_set``
+    without actually wrapping with a class.
     """
-    wrapped_modules.append(module)
+    wrapped_modules_set.add(module)
     return module

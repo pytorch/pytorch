@@ -3,35 +3,38 @@
 import contextlib
 import copy
 import functools
+import itertools
 import sys
 from enum import auto, Enum
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
-import itertools
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
-from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._common_utils import (
-    _FSDPState,
-    _get_fsdp_handles,
-    _is_fsdp_flattened,
-)
-from torch.testing._internal.common_fsdp import _zero_model
+from torch.distributed.fsdp._common_utils import _FSDPState, _is_fsdp_flattened
 from torch.distributed.fsdp.api import MixedPrecision
 from torch.distributed.fsdp.flat_param import _HandlesKey, FlatParamHandle
 from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
+from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
+    NestedSequentialModel,
     UnitModule,
 )
 from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import FSDPTest, TransformerWithSharedParams, CUDAInitMode, FSDPInitMode
+from torch.testing._internal.common_fsdp import (
+    _zero_model,
+    CUDAInitMode,
+    FSDPInitMode,
+    FSDPTest,
+    TransformerWithSharedParams,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 if not dist.is_available():
@@ -62,12 +65,25 @@ class TestFSDPInitialization(FSDPTest):
     def test_policy(self):
         """Tests passing a ``policy`` for pseudo-auto-wrapping."""
         self.run_subtests(
-            {"policy": [None, ModuleWrapPolicy({UnitModule})]},
+            {
+                "policy": [
+                    None,
+                    ModuleWrapPolicy({UnitModule}),
+                    ModuleWrapPolicy({nn.Sequential}),
+                ],
+            },
             self._test_policy,
         )
 
     def _test_policy(self, policy: Optional[_FSDPPolicy]):
-        local_model = CompositeParamModel(torch.device("cuda"))
+        use_nested_sequential_model = "Sequential" in getattr(
+            policy, "_module_classes_str", ""
+        )
+        local_model = (
+            NestedSequentialModel(torch.device("cuda"))
+            if use_nested_sequential_model
+            else CompositeParamModel(torch.device("cuda"))
+        )
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
             auto_wrap_policy=policy,
@@ -122,14 +138,18 @@ class TestFSDPInitialization(FSDPTest):
 
         # Check that the composable module has the same  `FlatParameter`
         # construction as the FSDP-wrapped model
-        composable_handles = _get_fsdp_handles(composable_module)
-        fsdp_wrapped_handles = _get_fsdp_handles(fsdp_wrapped_model)
+        composable_handles = traversal_utils._get_fsdp_handles(composable_module)
+        fsdp_wrapped_handles = traversal_utils._get_fsdp_handles(fsdp_wrapped_model)
         self.assertEqual(len(composable_handles), len(fsdp_wrapped_handles))
         for (composable_handle, fsdp_wrapped_handle) in zip(
             composable_handles, fsdp_wrapped_handles
         ):
             self.assertEqual(
                 composable_handle.flat_param.shape, fsdp_wrapped_handle.flat_param.shape
+            )
+            self.assertEqual(
+                composable_handle.flat_param._fqns,
+                fsdp_wrapped_handle.flat_param._fqns,
             )
 
         # Check that the composable module does not add any wrapper class
@@ -384,8 +404,8 @@ class TestFSDPRuntime(FSDPTest):
         ) = self._init_models_and_optims(device, fsdp_wrap_mode)
         # Before checking the unshard/reshard order, sanity check that the
         # assumption about wrapper FQN being a suffix of composable FQN holds
-        all_composable_handles = _get_fsdp_handles(composable_module)
-        all_wrapped_handles = _get_fsdp_handles(fsdp_wrapped_model)
+        all_composable_handles = traversal_utils._get_fsdp_handles(composable_module)
+        all_wrapped_handles = traversal_utils._get_fsdp_handles(fsdp_wrapped_model)
         self._check_same_param_handles(all_composable_handles, all_wrapped_handles)
         num_handles = len(all_composable_handles)
 
@@ -564,8 +584,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
 
         # Validate load
         load_composable = fully_shard(
-            copy.deepcopy(local_model),
-            policy=ModuleWrapPolicy({UnitModule})
+            copy.deepcopy(local_model), policy=ModuleWrapPolicy({UnitModule})
         )
         _zero_model(load_composable, summon_full=False)
         for p in load_composable.parameters():
@@ -634,10 +653,12 @@ class TestFSDPModelCheckpointing(FSDPTest):
                 save_model = copy.deepcopy(local_model)
                 save_model = fully_shard(
                     save_model,
-                    policy=ModuleWrapPolicy({TransformerEncoderLayer, TransformerDecoderLayer}),
+                    policy=ModuleWrapPolicy(
+                        {TransformerEncoderLayer, TransformerDecoderLayer}
+                    ),
                     ignored_modules=(
                         save_model.get_ignored_modules() if ignore_modules else []
-                    )
+                    ),
                 )
 
                 # TODO: test state_dict_type after https://github.com/pytorch/pytorch/issues/90954 is resolved
@@ -654,10 +675,12 @@ class TestFSDPModelCheckpointing(FSDPTest):
                 _zero_model(load_model, zero_buffers=True, summon_full=False)
                 fully_shard(
                     load_model,
-                    policy=ModuleWrapPolicy({TransformerDecoderLayer, TransformerEncoderLayer}),
+                    policy=ModuleWrapPolicy(
+                        {TransformerDecoderLayer, TransformerEncoderLayer}
+                    ),
                     ignored_modules=(
                         load_model.get_ignored_modules() if ignore_modules else []
-                    )
+                    ),
                 )
                 load_model.load_state_dict(state_dict)
                 self._check_model_parity(load_model, save_model)
@@ -670,7 +693,9 @@ class TestFSDPModelCheckpointing(FSDPTest):
         for k in composable_sd.keys():
             v1 = composable_sd[k]
             v2 = local_sd[k]
-            self.assertEqual(v1.shape, v2.shape, f"Shape mismatch for {k} {v1.shape} vs {v2.shape}")
+            self.assertEqual(
+                v1.shape, v2.shape, f"Shape mismatch for {k} {v1.shape} vs {v2.shape}"
+            )
 
         # Check actual values
         for k in composable_sd.keys():
@@ -682,9 +707,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
         """
         Checks that m1 and m2 have equivalent named_parameters.
         """
-        for (n1, p1), (n2, p2) in zip(
-            m1.named_parameters(), m2.named_parameters()
-        ):
+        for (n1, p1), (n2, p2) in zip(m1.named_parameters(), m2.named_parameters()):
             self.assertEqual(n1, n2)
             self.assertEqual(p1, p2)
 
