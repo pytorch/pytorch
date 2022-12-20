@@ -52,6 +52,7 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8  # not tested
+c64 = torch.complex64
 
 _ops = partial(
     ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
@@ -121,6 +122,7 @@ if COLLECT_EXPECT:
 inductor_skips = defaultdict(dict)
 
 inductor_skips["cpu"] = {
+
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
@@ -273,22 +275,22 @@ inductor_expected_failures_single_sample["cuda"] = {
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
-    "fft.fft": {f16, f32, f64},
+    "fft.fft": {b8, f16, f32, f64, i32, i64},
     "fft.fft2": {b8, f16, f32, f64, i32, i64},
     "fft.fftn": {b8, f16, f32, f64, i32, i64},
     "fft.hfft": {b8, f16, f32, f64, i32, i64},
     "fft.hfft2": {b8, f16, f32, f64, i32, i64},
     "fft.hfftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ifft": {f16, f32, f64},
+    "fft.ifft": {f16, f32, f64, b8, i32, i64},
     "fft.ifft2": {b8, f16, f32, f64, i32, i64},
     "fft.ifftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ihfft": {f16, f32, f64},
-    "fft.ihfft2": {f16, f32, f64},
-    "fft.ihfftn": {f16, f32, f64},
+    "fft.ihfft": {f16, f32, f64, c64, b8, i32, i64},
+    "fft.ihfft2": {f16, f32, f64, c64, b8, i32, i64},
+    "fft.ihfftn": {f16, f32, f64, c64, b8, i32, i64},
     "fft.irfft": {b8, f16, f32, f64, i32, i64},
     "fft.irfft2": {b8, f16, f32, f64, i32, i64},
     "fft.irfftn": {b8, f16, f32, f64, i32, i64},
-    "fft.rfft": {f16, f32, f64},
+    "fft.rfft": {f16, f32, f64, b8, i32, i64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
@@ -437,8 +439,8 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
-    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCUDAIf(True or not HAS_CUDA, "Skipped! Triton not found")
+    @skipCPUIf(True or not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
     @_ops(op_db[START:END])
