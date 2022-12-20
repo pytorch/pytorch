@@ -558,6 +558,7 @@ def trunc(x):
 
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
+    (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
     assert isinstance(x, TensorBox)
@@ -835,21 +836,6 @@ def glu(x, dim=-1):
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
-
-
-@register_lowering(aten.mm)
-def mm(a: TensorBox, b: TensorBox):
-    return TensorBox.create(ir.MatrixMultiply.create(a, b))
-
-
-@register_lowering(aten.addmm)
-def addmm(inp: TensorBox, a: TensorBox, b: TensorBox, beta=1, alpha=1):
-    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b, beta, alpha))
-
-
-@register_lowering(aten.bmm)
-def bmm(a: TensorBox, b: TensorBox):
-    return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
 def register_onednn_fusion_ops():
@@ -1658,12 +1644,15 @@ def create_tensor_like(creation_fn):
         if memory_format == torch.preserve_format:
             if not ir.is_storage_and_layout(x):
                 x = ir.ExternKernel.copy_input(x)
-                ir.as_storage_and_layout(x, freeze=True)
-            if x.get_layout().is_channels_last_stride_ordered():
+                _, x_layout = ir.as_storage_and_layout(x, freeze=True)
+            else:
+                x_layout = x.get_layout()
+
+            if x_layout.is_channels_last_stride_ordered():
                 memory_format = (
                     torch.channels_last if len(size) == 4 else torch.channels_last_3d
                 )
-            elif x.get_layout().is_contiguous():
+            elif x_layout.is_contiguous_stride_ordered():
                 memory_format = torch.contiguous_format
             else:
                 raise RuntimeError("Unsupported memory format")
@@ -3746,3 +3735,20 @@ def foobar(self, *args, **kwargs):
 def _realize(x):
     x.realize()
     return clone(x)
+
+
+def _import_kernels():
+    """
+    Need to make sure all these get registered in the lowers dict
+    """
+    import importlib
+    import os
+
+    from . import kernel
+
+    for filename in sorted(os.listdir(os.path.dirname(kernel.__file__))):
+        if filename.endswith(".py") and filename[0] != "_":
+            importlib.import_module(f"{kernel.__name__}.{filename[:-3]}")
+
+
+_import_kernels()
