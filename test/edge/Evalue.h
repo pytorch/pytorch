@@ -1,7 +1,22 @@
 #pragma once
 
 #include <ATen/ATen.h>
-
+/**
+ * WARNING: EValue is a class used by Executorch, for its boxed operators. It
+ * contains similar logic as `IValue` in PyTorch, by providing APIs to convert
+ * boxed values to unboxed values.
+ *
+ * It's mirroring a fbcode internal source file
+ * [`EValue.h`](https://www.internalfb.com/code/fbsource/xplat/executorch/core/values/Evalue.h).
+ *
+ * The reason why we are mirroring this class, is to make sure we have CI job
+ * coverage on torchgen logic, given that torchgen is used for both Executorch
+ * and PyTorch.
+ *
+ * If any of the logic here needs to be changed, please update fbcode version of
+ * `Evalue.h` as well. These two versions will be merged as soon as Executorch
+ * is in OSS (hopefully by Q2 2023).
+ */
 namespace torch {
 namespace executor {
 
@@ -103,8 +118,7 @@ struct EValue {
       at::ArrayRef<double> as_double_list;
       at::ArrayRef<bool> as_bool_list;
       EValObjectList<at::Tensor> as_tensor_list;
-      EValObjectList<at::optional<at::Tensor>>
-          as_list_optional_tensor;
+      EValObjectList<at::optional<at::Tensor>> as_list_optional_tensor;
     } copyable_union;
 
     // Since a Tensor just holds a TensorImpl*, there's no value to use Tensor*
@@ -319,8 +333,7 @@ struct EValue {
   }
 
   /****** Tensor List Type ******/
-  /*implicit*/ EValue(EValObjectList<at::Tensor> t)
-      : tag(Tag::ListTensor) {
+  /*implicit*/ EValue(EValObjectList<at::Tensor> t) : tag(Tag::ListTensor) {
     payload.copyable_union.as_tensor_list = t;
   }
 
@@ -343,8 +356,7 @@ struct EValue {
     return tag == Tag::ListOptionalTensor;
   }
 
-  at::ArrayRef<at::optional<at::Tensor>>
-  toListOptionalTensor() {
+  at::ArrayRef<at::optional<at::Tensor>> toListOptionalTensor() {
     return payload.copyable_union.as_list_optional_tensor.get();
   }
 
@@ -388,8 +400,7 @@ struct EValue {
   // Shared move logic
   void moveFrom(EValue&& rhs) noexcept {
     if (rhs.isTensor()) {
-      new (&payload.as_tensor)
-          at::Tensor(std::move(rhs.payload.as_tensor));
+      new (&payload.as_tensor) at::Tensor(std::move(rhs.payload.as_tensor));
       rhs.payload.as_tensor.~Tensor();
     } else {
       payload.copyable_union = rhs.payload.copyable_union;
@@ -444,9 +455,7 @@ EVALUE_DEFINE_TO(double, toDouble)
 EVALUE_DEFINE_TO(at::string_view, toString)
 EVALUE_DEFINE_TO(at::ScalarType, toScalarType)
 EVALUE_DEFINE_TO(at::MemoryFormat, toMemoryFormat)
-EVALUE_DEFINE_TO(
-    at::optional<at::Tensor>,
-    toOptional<at::Tensor>)
+EVALUE_DEFINE_TO(at::optional<at::Tensor>, toOptional<at::Tensor>)
 EVALUE_DEFINE_TO(at::ArrayRef<int64_t>, toIntList)
 EVALUE_DEFINE_TO(
     at::optional<at::ArrayRef<int64_t>>,
@@ -454,9 +463,7 @@ EVALUE_DEFINE_TO(
 EVALUE_DEFINE_TO(
     at::optional<at::ArrayRef<double>>,
     toOptional<at::ArrayRef<double>>)
-EVALUE_DEFINE_TO(
-    at::ArrayRef<at::optional<at::Tensor>>,
-    toListOptionalTensor)
+EVALUE_DEFINE_TO(at::ArrayRef<at::optional<at::Tensor>>, toListOptionalTensor)
 EVALUE_DEFINE_TO(at::ArrayRef<double>, toDoubleList)
 #undef EVALUE_DEFINE_TO
 

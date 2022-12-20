@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.1)
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../..)
 set(TEST_ROOT ${TORCH_ROOT}/test/edge)
 set(OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/out)
+file(GLOB_RECURSE all_python "${TORCH_ROOT}/torchgen/*.py")
 
 # Generate unboxing kernels
 set(GEN_COMMAND
@@ -25,6 +26,7 @@ add_custom_command(
         OUTPUT ${GEN_COMMAND_sources}
         COMMAND ${GEN_COMMAND}
         DEPENDS
+        ${all_python}
         ${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml
         ${TORCH_ROOT}/aten/src/ATen/native/tags.yaml
         ${TEST_ROOT}/templates/Functions.h
