@@ -13,6 +13,7 @@ from .pytree_hacks import tree_map_
 from functools import partial
 import os
 import sys
+import itertools
 
 from torch._C._functorch import (
     _add_batch_dim,
@@ -243,7 +244,9 @@ def vmap(
         func: Callable,
         in_dims: in_dims_t = 0,
         out_dims: out_dims_t = 0,
-        randomness: str = 'error') -> Callable:
+        randomness: str = 'error',
+        *,
+        chunk_size=None) -> Callable:
     """
     vmap is the vectorizing map; ``vmap(func)`` returns a new function that
     maps ``func`` over some dimension of the inputs. Semantically, vmap
@@ -391,17 +394,106 @@ def vmap(
         sequences out of the box.
     """
     _check_randomness_arg(randomness)
+    if not (chunk_size is None or chunk_size > 0):
+        raise ValueError("jacrev: `chunk_size` should be greater than 0.")
+
+    def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
+        split_idxs = (batch_size,)
+        if chunk_size is not None and chunk_size > 0:
+            n_chunks = n_chunks = batch_size // chunk_size
+            chunk_numels = [chunk_size] * n_chunks
+            # remainder chunk
+            remainder = batch_size % chunk_size
+            if remainder != 0:
+                chunk_numels.append(remainder)
+            split_idxs = tuple(itertools.accumulate(chunk_numels))
+
+        flat_args_chunks = tuple(
+            t.tensor_split(split_idxs, dim=in_dim) if in_dim is not None else [t, ] * len(split_idxs)
+            for t, in_dim in zip(flat_args, flat_in_dims)
+        )
+
+        # transpose chunk dim and flatten structure
+        # chunks_flat_args is a list of flatten args
+        chunks_flat_args = zip(*flat_args_chunks)
+        return chunks_flat_args
 
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
         lazy_load_decompositions()
         _check_out_dims_is_int_or_int_pytree(out_dims, func)
         batch_size, flat_in_dims, flat_args, args_spec = _process_batched_inputs(in_dims, args, func)
+
+        if chunk_size is not None:
+            chunks_flat_args = _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size)
+            return _vmap_chunked(func, flat_in_dims, chunks_flat_args,
+                                 args_spec, out_dims, randomness, **kwargs)
+
+        # If chunk_size is not specified.
         return _flat_vmap(
             func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
         )
 
     return wrapped
+
+
+def _flatten_chunks_output(chunks_output_):
+    # chunks_output is a list of chunked outputs
+    # flatten chunked outputs:
+    flat_chunks_output = []
+    arg_spec = None
+    for output in chunks_output_:
+        flat_output, arg_specs = tree_flatten(output)
+        flat_chunks_output.append(flat_output)
+        if arg_spec is None:
+            arg_spec = arg_specs
+
+    # transpose chunk dim and flatten structure
+    # flat_output_chunks is flat list of chunks
+    flat_output_chunks = list(zip(*flat_chunks_output))
+    return flat_output_chunks, arg_spec
+
+
+def _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks):
+    # concat chunks on out_dim
+    flat_out_dims = _broadcast_to_and_flatten(out_dims, arg_spec)
+    assert len(flat_out_dims) == len(flat_output_chunks)
+    flat_output = []
+    for out_dim in flat_out_dims:
+        flat_output.append(torch.cat(flat_output_chunks[0], dim=out_dim))
+        # release source data
+        del flat_output_chunks[0]
+    del flat_output_chunks
+
+    return flat_output
+
+
+def _vmap_chunked(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, randomness, **kwargs):
+    chunks_output = []
+    rs = torch.get_rng_state() if randomness == "same" else None
+    for flat_args in chunks_flat_args:
+        batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
+        if batch_size == 0:
+            continue
+
+        if rs is not None:
+            torch.set_rng_state(rs)
+        chunks_output.append(
+            _flat_vmap(
+                func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
+            )
+        )
+
+    flat_output_chunks, arg_spec = _flatten_chunks_output(chunks_output)
+
+    # Removing temporary variables helps to reduce memory usage on device like CUDA
+    del chunks_output
+
+    # concat chunks on out_dim
+    flat_output = _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks)
+
+    # finally unflatten the output
+    return tree_unflatten(flat_output, arg_spec)
 
 
 def chunk_vmap(
@@ -458,22 +550,6 @@ def chunk_vmap(
         chunks_flat_args = zip(*flat_args_chunks)
         return chunks_flat_args
 
-    def _flatten_chunks_output(chunks_output_):
-        # chunks_output is a list of chunked outputs
-        # flatten chunked outputs:
-        flat_chunks_output = []
-        arg_spec_list = []
-        for output in chunks_output_:
-            flat_output, arg_specs = tree_flatten(output)
-            flat_chunks_output.append(flat_output)
-            arg_spec_list.append(arg_specs)
-
-        arg_spec = arg_spec_list[0]  # all specs should be the same
-        # transpose chunk dim and flatten structure
-        # flat_output_chunks is flat list of chunks
-        flat_output_chunks = list(zip(*flat_chunks_output))
-        return flat_output_chunks, arg_spec
-
     @functools.wraps(func)
     def wrapped_with_chunks(*args, **kwargs):
         _check_out_dims_is_int_or_int_pytree(out_dims, func)
@@ -482,33 +558,7 @@ def chunk_vmap(
         chunks_flat_args = _get_chunk_flat_args(flat_args, flat_in_dims, chunks)
 
         # Apply vmap on chunks
-        chunks_output = []
-        rs = torch.get_rng_state() if randomness == "same" else None
-        for flat_args in chunks_flat_args:
-            batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
-            if rs is not None:
-                torch.set_rng_state(rs)
-            chunks_output.append(
-                _flat_vmap(
-                    func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
-                )
-            )
-        flat_output_chunks, arg_spec = _flatten_chunks_output(chunks_output)
-        # Removing temporary variables helps to reduce memory usage on device like CUDA
-        del chunks_output
-
-        # concat chunks on out_dim
-        flat_out_dims = _broadcast_to_and_flatten(out_dims, arg_spec)
-        assert len(flat_out_dims) == len(flat_output_chunks)
-        flat_output = []
-        for out_dim in flat_out_dims:
-            flat_output.append(torch.cat(flat_output_chunks[0], dim=out_dim))
-            # release source data
-            del flat_output_chunks[0]
-        del flat_output_chunks
-
-        # finally unflatten the output
-        return tree_unflatten(flat_output, arg_spec)
+        return _vmap_chunked(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, randomness, **kwargs)
 
     return wrapped_with_chunks
 
