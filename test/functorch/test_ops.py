@@ -2091,8 +2091,8 @@ class TestOperators(TestCase):
                     inner_mapped_op, batched_args, kwargs,
                     sample.output_process_fn_grad)
 
-                expected = jvpmap_fn(*primals)
-                result = jvpvmap_fn(*primals)
+                expected = jvpmap_op(*primals)
+                result = jvpvmap_op(*primals)
                 self.assertEqual(result, expected)
 
     # See NOTE: [three-transform testing]
