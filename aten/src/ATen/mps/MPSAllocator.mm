@@ -386,7 +386,9 @@ bool MPSHeapAllocatorImpl::release_cached_buffers()
 
 void MPSHeapAllocatorImpl::garbage_collect_cached_buffers(AllocParams& params)
 {
-  TORCH_INTERNAL_ASSERT(current_allocated_size() >= m_low_watermark_limit);
+  // skip garbage collection if memory pressure has already relieved
+  if (current_allocated_size() < m_low_watermark_limit)
+    return;
   // attempt to collect garbage until we reach below low watermark limit
   const auto target_size = current_allocated_size() - m_low_watermark_limit;
   const BufferPool& pool = *params.pool;
