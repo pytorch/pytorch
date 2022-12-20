@@ -1843,12 +1843,6 @@ def _fill_np(a, value):
     a.fill(value)
     return a
 
-def _fill_aten(a, value):
-    t = a * False
-    with torch.no_grad():
-        t.fill_(value)
-    return t
-
 def _fill_sample_kwargs(device, dtype, input):
     if dtype is torch.bool:
         value = True
@@ -3032,40 +3026,29 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
                          error_regex=error_msg)
 
         # error inputs for empty input with stride=0
-        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
-        error_msg = 'stride must be greater than zero, but got 0' if torch.device(
-            device).type == 'cpu' and not requires_grad else 'stride should not be zero'
+        error_msg = 'stride must be greater than zero, but got 0'
         yield ErrorInput(SampleInput(make_arg((3, 3, 3)), kwargs={'kernel_size': 1, 'stride': 0}),
                          error_regex=error_msg)
 
         # error inputs for empty input with dilation=0
-        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
-        error_msg = 'dilation must be greater than zero, but got 0' if torch.device(
-            device).type == 'cpu' and not requires_grad else 'dilation should be greater than zero, but got dilation'
+        error_msg = 'dilation must be greater than zero, but got 0'
         yield ErrorInput(SampleInput(make_arg((3, 3, 3)),
                                      kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
                          error_regex=error_msg)
 
         # error inputs for invalid output size
-        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
-        error_msg = 'Invalid computed output size: -2' if torch.device(device).type == 'cpu' and not requires_grad \
-            else \
-            r'Given input size: \(2x1x2\). Calculated output size: \(2x1x-2\). Output size is too small'
+        error_msg = 'Invalid computed output size: -2'
         yield ErrorInput(SampleInput(make_arg((2, 2, 2)),
                                      kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
                          error_regex=error_msg)
 
         # error inputs when kernel_size=0
-        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
-        error_msg = 'kernel_size must be greater than zero' if torch.device(
-            device).type == 'cpu' and not requires_grad else r'stride should not be zero'
+        error_msg = 'kernel_size must be greater than zero'
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
                          error_regex=error_msg)
 
         # error inputs for strides > 0
-        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
-        error_msg = 'stride must be greater than zero' if torch.device(
-            device).type == 'cpu' and not requires_grad else r'stride should not be zero'
+        error_msg = 'stride must be greater than zero'
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
                          error_regex=error_msg)
 
@@ -12158,7 +12141,9 @@ op_db: List[OpInfo] = [
     OpInfo(
         'nn.functional._scaled_dot_product_attention',
         op=lambda *args, **kwargs:
-               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
+               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs)
+               if kwargs['need_attn_weights'] else
+               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs)[0],
         sample_inputs_func=sample_inputs_scaled_dot_product_attention,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12176,17 +12161,12 @@ op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-            # Doesn't support autocasting
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
             # Forward works for dtype=float64 which is the math path
             DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
-            # No meta function
-            DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+            # OpInfo was implemented with a lambda
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            # No meta function
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', device_type='cuda'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),),
     ),
     UnaryUfuncInfo(
@@ -15318,10 +15298,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_squeeze),
     UnaryUfuncInfo(
         'fill',
-        op=_fill_aten,
         ref=_fill_np,
         method_variant=None,
-        inplace_variant=torch.Tensor.fill_,
         sample_kwargs=_fill_sample_kwargs,
         sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs={'value': True}),
         supports_forward_ad=True,
