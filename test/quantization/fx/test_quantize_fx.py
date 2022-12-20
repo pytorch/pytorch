@@ -8,8 +8,8 @@ import torch.nn as nn
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
 
@@ -155,6 +155,8 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_quantization import (
     LinearReluLinearModel,
     LinearReluModel,
+    LinearBnLeakyReluModel,
+    LinearTanhModel,
     QuantizationTestCase,
     skipIfNoFBGEMM,
     skipIfNoQNNPACK,
@@ -165,6 +167,7 @@ from torch.testing._internal.common_quantization import (
     test_only_train_fn,
     ModelForConvTransposeBNFusion,
     get_supported_device_types,
+    skipIfNoONEDNN,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -356,6 +359,88 @@ class TestFuseFx(QuantizationTestCase):
         ]
         expected_occurrence = {
             ns.call_module(nn.BatchNorm1d): 0,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
+
+    @skipIfNoONEDNN
+    def test_fuse_linear_bn_leaky_relu_onednn(self):
+        # linear - bn - leaky_relu is fused for onednn backend only
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        expected_nodes = [
+            ns.call_module(nni.LinearLeakyReLU),
+        ]
+        expected_occurrence = {
+            ns.call_module(nn.BatchNorm1d): 0,
+            ns.call_module(nn.LeakyReLU): 0,
+        }
+
+        for with_bn in [True, False]:
+            # test eval mode
+            m = LinearBnLeakyReluModel(with_bn).eval()
+            # fuse_fx is a top level api and only supports eval mode
+            m = fuse_fx(m,
+                        backend_config=get_onednn_backend_config())
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=expected_nodes,
+                expected_node_occurrence=expected_occurrence)
+
+    def test_linear_bn_leaky_relu_not_fused_by_default(self):
+        # Make sure linear - bn - leaky_relu is not fused by default
+        for with_bn in [True, False]:
+            # test eval mode
+            m = LinearBnLeakyReluModel(with_bn).eval()
+            # fuse_fx is a top level api and only supports eval mode
+            m = fuse_fx(m)
+            expected_nodes = [
+                ns.call_module(nn.Linear),
+                ns.call_module(nn.LeakyReLU),
+            ]
+            expected_occurrence = {
+                ns.call_module(nni.LinearLeakyReLU): 0,
+            }
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=expected_nodes,
+                expected_node_occurrence=expected_occurrence)
+
+    @skipIfNoONEDNN
+    def test_fuse_linear_tanh_for_onednn_backend(self):
+        # linear - tanh is fused for onednn backend only
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        expected_nodes = [
+            ns.call_module(nni.LinearTanh),
+        ]
+        expected_occurrence = {
+            ns.call_module(nn.Linear): 0,
+            ns.call_module(nn.Tanh): 0,
+        }
+
+        # test eval mode
+        m = LinearTanhModel().eval()
+        # fuse_fx is a top level api and only supports eval mode
+        m = fuse_fx(m,
+                    backend_config=get_onednn_backend_config())
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
+
+    def test_linear_tanh_not_fused_by_default(self):
+        # Make sure linear - tanh is not fused by default
+        # test eval mode
+        m = LinearTanhModel().eval()
+        # fuse_fx is a top level api and only supports eval mode
+        m = fuse_fx(m)
+        expected_nodes = [
+            ns.call_module(nn.Linear),
+            ns.call_module(nn.Tanh),
+        ]
+        expected_occurrence = {
+            ns.call_module(nni.LinearTanh): 0,
         }
         self.checkGraphModuleNodes(
             m,
@@ -5575,6 +5660,68 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    def _test_linear_activation_fusion_lowering_helper(
+            self, module, example_inputs, qconfig_mapping,
+            backend_config, fused_module, root_module, activation_module):
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method("dequantize"): 1,
+            ns.call_module(fused_module): 1,
+            ns.call_module(root_module): 0,
+            ns.call_module(activation_module): 0,
+        }
+        node_occurrence_ref = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 2,
+        }
+        m = module.eval()
+        m = prepare_fx(m, qconfig_mapping,
+                       example_inputs=example_inputs,
+                       backend_config=backend_config)
+        m_copy = copy.deepcopy(m)
+        m = convert_fx(m, backend_config=backend_config)
+        m_ref = convert_to_reference_fx(m_copy)
+
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
+        m(*example_inputs)
+
+    @skipIfNoONEDNN
+    def test_linear_leaky_relu_lowering(self):
+        """ Test fusion and lowering of Linear - (bn -) LeakyReLU
+            by FX. For onednn backedn only.
+        """
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        qconfig_mapping = get_default_qconfig_mapping('onednn')
+        with override_quantized_engine('onednn'):
+            for with_bn in [True, False]:
+                m = LinearBnLeakyReluModel(with_bn)
+                self._test_linear_activation_fusion_lowering_helper(
+                    m,
+                    m.get_example_inputs(),
+                    qconfig_mapping,
+                    get_onednn_backend_config(),
+                    nniq.LinearLeakyReLU,
+                    nn.Linear,
+                    nn.LeakyReLU)
+
+    @skipIfNoONEDNN
+    def test_linear_tanh_lowering(self):
+        """ Test fusion and lowering of Linear - Tanh
+            by FX. For onednn backedn only.
+        """
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        qconfig_mapping = get_default_qconfig_mapping('onednn')
+        with override_quantized_engine('onednn'):
+            m = LinearTanhModel()
+            self._test_linear_activation_fusion_lowering_helper(
+                m,
+                m.get_example_inputs(),
+                qconfig_mapping,
+                get_onednn_backend_config(),
+                nniq.LinearTanh,
+                nn.Linear,
+                nn.Tanh)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

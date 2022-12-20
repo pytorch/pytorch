@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional
+from collections import defaultdict
 from warnings import warn
 
 import torch
@@ -31,7 +32,7 @@ from torch.autograd.profiler_util import (
 from torch.futures import Future
 
 __all__ = ["profile", "record_function", "emit_itt", "emit_nvtx", "load_nvprof", "EnforceUnique",
-           "parse_nvprof_trace", "kineto_step", "EventList", "FunctionEvent", "MemRecordsAcc"]
+           "parse_nvprof_trace", "KinetoStepTracker", "EventList", "FunctionEvent", "MemRecordsAcc"]
 
 try:
     # Available in Python >= 3.2
@@ -812,8 +813,75 @@ def parse_nvprof_trace(path):
     return functions
 
 
-def kineto_step():
-    """ Notify kineto so it is aware of iteration boundaries for asynchronous
-        trace requests.
+class KinetoStepTracker:
+    """Provides an abstraction for incrementing the step count globally.
+    Previously, we only had one place to mark that a step() has occurred
+    in the program via pytorch profiler step(). We will now add step hooks
+    in the Optimizer class https://github.com/pytorch/pytorch/issues/88446
+
+    - This could mean programs that already call profiler.step() every
+      iteration can end up double incrementing step count.
+    - If a model uses multiple optimizers we can also have double or more
+      counting of the step.
+
+    We fix this by adding a layer of abstraction before calling step()
+    to the kineto library. The idea is to maintain steps per requester in a dict:
+    ```
+    {
+       "ProfilerStep": 100,  # triggered by profiler step() call
+       "Optimizer1Step": 100,   # Optimizer 1 or 2 are just examples, could be SGD, Adam etc
+       "Optimizer2Step": 100,
+    }
+    ```
+    To figure out the global step count just take the max of dict values (100).
+
+    If one of the count increments the max will go up.
+    ```
+    {
+       "ProfilerStep": 100,
+       "Optimizer1Step": 101,   # Optimizer1 got incremented first say
+       "Optimizer2Step": 100,
+    }
+    ```
+    Then global step count is 101
+    We only call the kineto step() function when global count increments.
+
+    NOTE: Please do not use the KinetoStepTracker in modules beside the Optimizer
+    for now. The result could be incorrect increments of the step count.
     """
-    _kineto_step()
+    _current_step = -1
+    _step_dict: Dict[str, int] = defaultdict(int)
+
+    @classmethod
+    def init_step_count(cls, requester: str):
+        cls._step_dict[requester] = cls._current_step
+
+    @classmethod
+    def erase_step_count(cls, requester: str) -> bool:
+        return cls._step_dict.pop(requester, None) is not None
+
+    @classmethod
+    def increment_step(cls, requester: str) -> int:
+        """Increments the step count for the requester.
+        Additionally if the max over all step counts has incremented then
+        trigger the _kineto_step()
+        returns global step count
+        """
+        if requester not in cls._step_dict:
+            cls.init_step_count(requester)
+        cls._step_dict[requester] += 1
+
+        new_step = max(cls._step_dict.values())
+        if new_step > cls._current_step:
+            delta = new_step - cls._current_step
+            if delta > 1:
+                warn("Profiler step count has increased more than 1 - "
+                     f"current_step = {cls._current_step} step dict =  {cls._step_dict}")
+            for _ in range(0, delta):
+                _kineto_step()
+            cls._current_step = new_step
+        return cls._current_step
+
+    @classmethod
+    def current_step(cls) -> int:
+        return cls._current_step
