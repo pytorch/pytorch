@@ -878,16 +878,6 @@ def tp_transports():
     return ["shm", "uv"] if has_efa() else None
 
 
-def _run_test_with_mt_pg(self, timeout, world_size, callback):
-    failed_ranks = run_with_threaded_pg(world_size, timeout, callback)
-    for rank, exc_info in failed_ranks:
-        print(f"Rank {rank} raised:")
-        for line in traceback.format_exception(*exc_info):
-            sys.stdout.write(line)
-    if failed_ranks:
-        raise failed_ranks[0][1][1]  # re-throw the first exception
-
-
 def spawn_threads_and_init_comms(
     func=None, timeout=TIMEOUT_DEFAULT, world_size=DEFAULT_WORLD_SIZE
 ):
@@ -901,8 +891,9 @@ def spawn_threads_and_init_comms(
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        _run_test_with_mt_pg(
-            self, timeout, world_size, lambda: func(self, *args, **kwargs)
+        # TODO: get test name from kwargs
+        MultiThreadedTestCase._run_test_with_mt_pg(
+            "runTest", timeout, world_size, lambda: func(self, *args, **kwargs)
         )
 
     return wrapper
@@ -937,8 +928,8 @@ class MultiThreadedTestCase(TestCase):
     def threaded_run_test(self):
         self.perThreadSetUp()
         try:
-            _run_test_with_mt_pg(
-                self=self,
+            MultiThreadedTestCase._run_test_with_mt_pg(
+                name=self._current_test_name,
                 timeout=TIMEOUT_DEFAULT,
                 world_size=self.world_size,
                 callback=self._test_method,
@@ -952,6 +943,61 @@ class MultiThreadedTestCase(TestCase):
     def perThreadTearDown(self):
         pass
 
+    @classmethod
+    def _run_test_with_mt_pg(cls, name, timeout, world_size, callback):
+        # Show full C++ stacktraces when a Python error originating from C++ is raised.
+        os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
+        failed_ranks = run_with_threaded_pg(world_size, timeout, callback)
+
+        # Print based on exceptions raised from threads
+        #   SkipTest: print info for each thread
+        #   TimeoutError: raise RuntimeError for any timed out thread
+        #   Normal Exception: print error for each thread that raises exception
+        #   and raise a RuntimeError
+        error_msg = ""
+        skip_code = -1
+        for rank, exc_info in failed_ranks:
+            exc = exc_info[1]
+            if isinstance(exc, unittest.SkipTest):
+                logger.info(
+                    f"Thread {rank} skipping test {name} for following reason: {str(exc)}"
+                )
+                if skip_code < 0:
+                    skip_code = TEST_SKIPS["generic"].exit_code
+            elif isinstance(exc, TimeoutError):
+                msg = "Thread {} terminated or timed out after {} seconds\n".format(
+                    rank, timeout
+                )
+                logger.error(msg)
+                raise RuntimeError(msg)
+            elif isinstance(exc, Exception):
+                msg = "".join(traceback.format_exception(*exc_info))
+                logger.error(
+                    f"Caught exception: \n{msg} exiting thread {rank}"
+                )
+                error_msg += (
+                    "Thread {} exited with exception:\n{}\n".format(rank, msg)
+                )
+            elif isinstance(exc, SystemExit):
+                if type(exc.code) == int and skip_code < 0:
+                    skip_code = exc.code
+
+        # check exceptions
+        if len(error_msg) > 0:
+            raise RuntimeError(error_msg)
+        # check skip
+        if skip_code > 0:
+            for skip in TEST_SKIPS.values():
+                if skip_code == skip.exit_code:
+                    if IS_SANDCASTLE:
+                        # "pass" the test with an appropriate message.
+                        logger.info(
+                            f"Skipping {name} on sandcastle for the following reason: {skip.message}"
+                        )
+                        return
+                    else:
+                        raise unittest.SkipTest(skip.message)
+
     @property
     def world_size(self) -> int:
         raise RuntimeError("world size not implemented")
@@ -959,6 +1005,11 @@ class MultiThreadedTestCase(TestCase):
     @property
     def rank(self) -> int:
         return c10d.get_rank()
+
+    @property
+    def _current_test_name(self) -> str:
+        # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
+        return self.id().split(".")[-1]
 
     def assertEqualOnRank(self, x, y, rank=0):
         """
