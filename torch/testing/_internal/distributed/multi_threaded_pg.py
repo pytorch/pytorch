@@ -363,9 +363,8 @@ def run_with_threaded_pg(world_size, timeout, callback):
         )
         try:
             callback()
-        # reason why we don't use BaseException is we want to
-        # ignore SystemExit excpetion caused by _terminate event
-        except Exception as ex:
+        # Exceptions are handled in MultiThreadedTestCase
+        except BaseException as ex:
             exception_queue.put((rank, sys.exc_info()))
             world.default_pg.exception_handle(ex)  # trigger _terminate event and awaken worker threads
         finally:
