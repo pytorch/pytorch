@@ -95,7 +95,7 @@ class ModuleUseDeduper {
         module, std::vector<std::string>(path.begin(), path.end() - 1));
 
     // Original name of the child module
-    std::string original_name = path[path.size() - 1];
+    const std::string& original_name = path[path.size() - 1];
     int uid = 0;
     std::string child_name = original_name + "_" + c10::to_string(uid++);
     while (parent_of_leaf.hasattr(child_name)) {

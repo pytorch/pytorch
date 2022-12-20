@@ -515,6 +515,30 @@ static PyObject* set_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* is_autograd_function_extension_enabled(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (torch::autograd::isAutogradFunctionExtensionEnabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_autograd_function_extension_enabled(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  torch::autograd::setAutogradFunctionExtensionEnabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_grad_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (!PyBool_Check(arg)) {
@@ -528,6 +552,26 @@ static PyObject* set_grad_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_grad_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (GradMode::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  c10::AutogradState::get_tls_state().set_fw_grad_mode(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state().get_fw_grad_mode()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -726,6 +770,8 @@ static PyObject* len_torch_dispatch_stack(
 static PyMethodDef methods[] = { // NOLINT
     {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
     {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
+    {"_set_fwd_grad_enabled", set_fwd_grad_enabled, METH_O, nullptr},
+    {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
     {"is_inference_mode_enabled",
      is_inference_mode_enabled,
      METH_NOARGS,
@@ -753,6 +799,14 @@ static PyMethodDef methods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
+    {"_set_autograd_function_extension_enabled",
+     set_autograd_function_extension_enabled,
+     METH_O,
+     nullptr},
+    {"_is_autograd_function_extension_enabled",
+     is_autograd_function_extension_enabled,
+     METH_NOARGS,
+     nullptr},
     {"set_anomaly_enabled",
      castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
      METH_VARARGS | METH_KEYWORDS,

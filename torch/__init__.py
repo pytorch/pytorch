@@ -162,7 +162,7 @@ def _preload_cuda_deps():
 
 # See Note [Global dependencies]
 def _load_global_deps():
-    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
+    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
@@ -181,7 +181,7 @@ def _load_global_deps():
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
-        platform.system() != 'Windows':
+        (sys.executable == "torch_deploy" or platform.system() != 'Windows'):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -956,7 +956,7 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
+    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
@@ -1139,6 +1139,20 @@ from ._linalg_utils import (  # type: ignore[misc]
     lstsq,
 )
 
+class _TorchCompileInductorWrapper:
+    def __init__(self, mode, passes):
+        from torch._dynamo.eval_frame import lookup_backend
+        from torch._inductor.config import InductorConfigContext
+
+        self.compile_fn = lookup_backend("inductor")
+        self.cm = InductorConfigContext(mode if mode is not None else passes)
+        self._torchdynamo_orig_callable = self.compile_fn
+
+    def __call__(self, model_, inputs_):
+        with self.cm:
+            return self.compile_fn(model_, inputs_)
+
+
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
             dynamic: builtins.bool = False,
@@ -1173,6 +1187,7 @@ def compile(model: Optional[Callable] = None, *,
             return torch.sin(x) + torch.cos(x)
 
     """
+    _C._log_api_usage_once("torch.compile")
     # Decorator mode
     if model is None:
         def fn(model: Callable):
@@ -1188,22 +1203,12 @@ def compile(model: Optional[Callable] = None, *,
         return fn
 
     import torch._dynamo
-    from torch._dynamo.eval_frame import lookup_backend
-    from torch._inductor.config import InductorConfigContext
     if mode is not None and passes is not None:
         raise RuntimeError("Either mode or passes can be specified, but both can't be specified at the same time.")
     if mode is None and passes is None:
         mode = "default"
     if backend == "inductor":
-        compile_fn = lookup_backend(backend)
-        cm = InductorConfigContext(mode if mode is not None else passes)
-
-        def _compile_fn(model_, inputs_):
-            with cm:
-                return compile_fn(model_, inputs_)
-
-        _compile_fn._torchdynamo_orig_callable = compile_fn  # type: ignore[attr-defined]
-        backend = _compile_fn
+        backend = _TorchCompileInductorWrapper(mode, passes)
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, **kwargs)(model)
 
 
@@ -1238,3 +1243,5 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.symbolic_shapes
+
+from torch import func as func
