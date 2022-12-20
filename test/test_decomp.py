@@ -640,11 +640,8 @@ class HasDecompTest(TestCase):
 
         def can_appear_in_trace(op) -> bool:
             try:
-                return (
-                    has_key(op, DispatchKey.Meta) and
-                    # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-                    not has_key(op, DispatchKey.CompositeImplicitAutograd)
-                )
+                # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
+                return not has_key(op, DispatchKey.CompositeImplicitAutograd)
             except RuntimeError as e:
                 # has_key fails for some jit-registered ops, which shouldn't be
                 # relevant here anyway

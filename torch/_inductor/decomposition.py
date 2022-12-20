@@ -35,6 +35,7 @@ decompositions = get_decompositions(
         aten.embedding_dense_backward,
         aten.expand_as,
         aten.eye,
+        aten.fill,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
@@ -50,8 +51,6 @@ decompositions = get_decompositions(
         aten.hardtanh_,
         aten.hardtanh_backward,
         aten.im2col,
-        aten.index_add,
-        aten.index_add_,
         aten.index_select,
         aten.l1_loss,
         aten.leaky_relu,
@@ -63,6 +62,8 @@ decompositions = get_decompositions(
         aten._log_softmax,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
+        aten.masked_fill,
+        aten.masked_fill_,
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
         aten.mse_loss_backward,
@@ -172,14 +173,6 @@ def pad_dim(x, padded_length, dim):
 
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2, *, beta=1, alpha=1):
-    if config.triton.mm != "aten":
-        out = torch.mm(mat1, mat2)
-        if not isinstance(alpha, numbers.Number) or alpha != 1:
-            out = out * alpha
-        if not isinstance(beta, numbers.Number) or beta != 1:
-            input = input * beta
-        return input + out
-
     if (
         config.shape_padding
         and check_device(mat1, mat2)
@@ -197,6 +190,7 @@ def addmm(input, mat1, mat2, *, beta=1, alpha=1):
 
 
 def pad_addmm(input, mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
+    # addmm decomp with padding will go through pad_addmm multiple times if multiple dimensions are needed to be padded
     if k_padded_length != 0:
         mat1 = pad_dim(mat1, k_padded_length, 1)
         mat2 = pad_dim(mat2, k_padded_length, 0)
@@ -290,8 +284,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 fast_flush=True,
             )[0]
         else:
-            if k_padded_length == 0 and not config.shape_padding_bmm:
-                return False
             pad_time = do_bench(
                 lambda: pad_bmm(
                     mat1_pad,
@@ -329,6 +321,7 @@ def mm_decomp(mat1, mat2):
 
 
 def pad_mm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
+    # mm_decomp will go through pad_mm multiple times if multiple dimensions are needed to be padded
     if k_padded_length != 0:
         mat1 = pad_dim(mat1, k_padded_length, 1)
         mat2 = pad_dim(mat2, k_padded_length, 0)
@@ -352,20 +345,19 @@ def bmm_decomp(mat1, mat2):
         k_padded_length = get_padded_length(mat1.shape[2], get_alignment_size(mat1))
         n_padded_length = get_padded_length(mat2.shape[2], get_alignment_size(mat2))
 
-        if k_padded_length != 0 or (
-            config.shape_padding_bmm and (n_padded_length != 0 or m_padded_length != 0)
-        ):
+        if k_padded_length != 0 or n_padded_length != 0 or m_padded_length != 0:
             pad_bmm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length)
 
     return NotImplemented  # go directly to lowering
 
 
 def pad_bmm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
+    # bmm_decomp will go through pad_bmm multiple times if multiple dimensions are needed to be padded
     if k_padded_length != 0:
         mat1 = pad_dim(mat1, k_padded_length, 2)
         mat2 = pad_dim(mat2, k_padded_length, 1)
         return torch.ops.aten.bmm(mat1, mat2)
-    elif config.shape_padding_bmm and n_padded_length != 0:
+    elif n_padded_length != 0:
         mat2 = pad_dim(mat2, n_padded_length, 2)
         return torch.ops.aten.bmm(mat1, mat2)[:, :, :-n_padded_length].contiguous()
     else:
@@ -424,19 +416,6 @@ def rsub(a, b):
     return b - a
 
 
-@register_decomposition([aten.masked_fill])
-def masked_fill(value, mask, other):
-    if isinstance(other, numbers.Number):
-        other = torch.tensor(other, dtype=value.dtype, device=value.device)
-    assert other.numel() == 1 and other.ndim == 0
-    if other.device != value.device and other.numel() == 1:
-        other = other.to(value.device)
-    if other.dtype != value.dtype:
-        # TODO: error out on improper complex conversions
-        other = other.to(value.dtype)
-    return torch.where(mask, other, value)
-
-
 @register_decomposition([aten.nan_to_num])
 def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
     if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
@@ -478,11 +457,6 @@ def copy(self, src, non_blocking=False):
         return intermediate
 
 
-@register_decomposition(aten.masked_fill_)
-def masked_fill_(x, mask, value):
-    return x.copy_(aten.masked_fill(x, mask, value))
-
-
 @register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     result = torch.bmm(batch1, batch2)
@@ -502,17 +476,6 @@ def conj_physical(self):
 @register_decomposition([aten.lift, aten.detach_])
 def lift(self):
     return self
-
-
-@register_decomposition([aten.fill.Scalar])
-def fill_scalar(self, value):
-    return torch.full_like(self, value)
-
-
-@register_decomposition([aten.fill.Tensor])
-def fill_tensor(self, value: Tensor):
-    assert value.dim() == 0, "aten.fill.Tensor only supports 0-dimension value tensor"
-    return torch.full_like(self, value.item())
 
 
 @register_decomposition([aten.bernoulli.default])

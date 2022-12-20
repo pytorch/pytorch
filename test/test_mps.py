@@ -4729,6 +4729,21 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
 
+    # Test inverse
+    def test_inverse(self):
+        def helper(n):
+            cpu_input = torch.randn(n, n, device='cpu')
+            mps_input = cpu_input.to('mps')
+
+            cpu_result = torch.linalg.inv(cpu_input)
+            mps_result = torch.linalg.inv(mps_input)
+            self.assertEqual(cpu_result, mps_result)
+
+        helper(2)
+        helper(6)
+        helper(3)
+        helper(8)
+
     # Test tril
     def test_tril(self):
         def helper(shape, diag=0):
@@ -7796,6 +7811,7 @@ class TestConsistency(TestCase):
         'diag_embed': [torch.uint8],
         'diagonal_scatter': [torch.uint8],
         'index_add': None,
+        'linalg.inv': ['f32'],
         'log1p': None,
         'long': None,
         'nn.functional.avg_pool1d': [torch.int64],
@@ -7813,7 +7829,6 @@ class TestConsistency(TestCase):
         'sigmoid': [torch.int64],
         'slice_scatter': [torch.uint8],
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8],  # moved from section below
-
 
         # ALLOW_LIST doesn't know about variants
         'nn.functional.padconstant': None,
@@ -7896,6 +7911,14 @@ class TestConsistency(TestCase):
         'take_along_dim': None,
     }
 
+    # Those ops worked on MacOS12, but broken on MacOS13
+    VENTURA_BLOCKLIST = {
+        'masked.softmax': [torch.float32],
+        'masked.softmin': [torch.float32],
+        'masked.log_softmax': [torch.float32],
+        'dot': [torch.int64],
+    }
+
     # Used for accept mode only
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
@@ -7907,6 +7930,10 @@ class TestConsistency(TestCase):
             self.skipTest("MPS is not available")
 
         key = op.name + op.variant_test_name
+
+        if key in self.VENTURA_BLOCKLIST and torch.backends.mps.is_macos13_or_newer():
+            if dtype in self.VENTURA_BLOCKLIST[key]:
+                self.skipTest(f"{key}_{dtype} fails on Ventura, see https://github.com/pytorch/pytorch/issues/85758")
         if key in self.BLOCKLIST:
             if self.BLOCKLIST[key] is None or dtype in self.BLOCKLIST[key]:
                 self.skipTest(f"Running test with {op.name} hangs so skipping")
