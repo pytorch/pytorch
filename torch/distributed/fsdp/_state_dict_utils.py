@@ -237,14 +237,19 @@ def _common_unshard_post_state_dict_hook(
             # TODO: for composable FSDP, this should be clean_tensor_name(clean_key),
             buffer_clean_fqns.append(clean_key)
             buffers.append(state_dict[fqn])
-    if buffers and fsdp_state._mixed_precision_enabled_for_buffers():
-        buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
-        _cast_buffers_to_dtype_and_device(
-            buffers, buffer_dtypes, fsdp_state.compute_device
+    if buffers:
+        mixed_precision_enabled_for_buffers = (
+            fsdp_state._mixed_precision_enabled_for_buffers() if not _is_composable(fsdp_state)
+            else (fsdp_state.mixed_precision.buffer_dtype is not None)
         )
-        for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
-            fqn = f"{prefix}{clean_fqn}"
-            state_dict[fqn] = buffer.clone()
+        if mixed_precision_enabled_for_buffers:
+            buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
+            _cast_buffers_to_dtype_and_device(
+                buffers, buffer_dtypes, fsdp_state.compute_device
+            )
+            for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
+                fqn = f"{prefix}{clean_fqn}"
+                state_dict[fqn] = buffer.clone()
     return state_dict
 
 
@@ -330,7 +335,9 @@ def _full_pre_load_state_dict_hook(
 ) -> None:
     _lazy_init(fsdp_state, module)
     _enter_unshard_params_ctx(module, fsdp_state, recurse=False, writeback=True)
-    _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
+    # Add FSDP_PREFIX only for wrapper-based FSDP.
+    if not _is_composable(fsdp_state):
+        _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
 
 
 def _full_post_load_state_dict_hook(
@@ -706,55 +713,42 @@ def _post_load_state_dict_hook(
     _post_load_state_dict_hook_fn[fsdp_state._state_dict_type](module, fsdp_state)
 
 
-@no_type_check
-def _register_state_dict_pre_hooks(state: _FSDPState) -> None:
-    """Registers the pre-save state dict hooks."""
-    if not _is_composable(state):
-        state.register_state_dict_pre_hook(
-            functools.partial(_pre_state_dict_hook, state)
-        )
-        return
-    for handle in state._handles:
-        handle._comm_module.register_state_dict_pre_hook(
-            functools.partial(_pre_state_dict_hook, state)
-        )
-
-
-@no_type_check
-def _register_state_dict_hooks(state: _FSDPState) -> None:
-    """Registers the post-save state dict hooks."""
-    if not _is_composable(state):
-        state._register_state_dict_hook(functools.partial(_post_state_dict_hook, state))
-        return
-    for handle in state._handles:
-        handle._comm_module._register_state_dict_hook(
-            functools.partial(_post_state_dict_hook, state)
+def _register_all_state_dict_hooks(state: _FSDPState):
+    """
+    Registers pre-save, post-save, pre-load, and post-load state dict hooks.
+    """
+    for hook_registration_fn_str, hook, hook_registration_fn_kwargs in (
+        ("register_state_dict_pre_hook", _pre_state_dict_hook, {}),
+        ("_register_state_dict_hook", _post_state_dict_hook, {}),
+        (
+            "_register_load_state_dict_pre_hook",
+            _pre_load_state_dict_hook,
+            {"with_module": True},
+        ),
+        ("register_load_state_dict_post_hook", _post_load_state_dict_hook, {}),
+    ):
+        _register_state_dict_hooks_base(
+            state, hook_registration_fn_str, hook, hook_registration_fn_kwargs
         )
 
 
 @no_type_check
-def _register_load_state_dict_pre_hooks(state: _FSDPState) -> None:
-    """Registers the pre-load state dict hooks."""
+def _register_state_dict_hooks_base(
+    state: _FSDPState,
+    hook_registration_fn_name: str,
+    hook: Callable,
+    hook_registration_fn_kwargs: Dict[str, Any],
+) -> None:
+    """Registers ``hook`` using ``hook_registration_fn``."""
+    # TODO: Use `_get_submodule_state(module)` in each hook instead of
+    # `partial`: https://github.com/pytorch/pytorch/issues/90788
+    hook_with_state = functools.partial(hook, state)
     if not _is_composable(state):
-        state._register_load_state_dict_pre_hook(
-            functools.partial(_pre_load_state_dict_hook, state), with_module=True
+        getattr(state, hook_registration_fn_name)(
+            hook_with_state, **hook_registration_fn_kwargs
         )
-        return
-    for handle in state._handles:
-        handle._comm_module._register_load_state_dict_pre_hook(
-            functools.partial(_pre_load_state_dict_hook, state), with_module=True
-        )
-
-
-@no_type_check
-def _register_load_state_dict_post_hooks(state: _FSDPState) -> None:
-    """Registers the post-load state dict hooks."""
-    if not _is_composable(state):
-        state.register_load_state_dict_post_hook(
-            functools.partial(_post_load_state_dict_hook, state)
-        )
-        return
-    for handle in state._handles:
-        handle._comm_module.register_load_state_dict_post_hook(
-            functools.partial(_post_load_state_dict_hook, state)
-        )
+    else:
+        for handle in state._handles:
+            getattr(handle._fully_sharded_module, hook_registration_fn_name)(
+                hook_with_state, **hook_registration_fn_kwargs
+            )
