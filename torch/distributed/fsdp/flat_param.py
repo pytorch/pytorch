@@ -790,9 +790,6 @@ class FlatParamHandle:
             ):
                 self._reduce_dtype = flat_param.dtype
             self._orig_param_dtype = flat_param.dtype
-        # Delete since they are no longer needed
-        delattr(self, "_low_prec_param_dtype_specified")
-        delattr(self, "_low_prec_reduce_dtype_specified")
         cpu_device = torch.device("cpu")
         if self._offload_params:
             p_assert(
