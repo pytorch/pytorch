@@ -881,6 +881,13 @@ PyObject* THPModule_getCurrentGraphTaskId(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_getCurrentNode(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return torch::autograd::functionToPyObject(
+      torch::autograd::get_current_node());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setDefaultMobileCPUAllocator(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1098,6 +1105,7 @@ static PyMethodDef TorchMethods[] = {
      THPModule_getCurrentGraphTaskId,
      METH_NOARGS,
      nullptr},
+    {"_current_autograd_node", THPModule_getCurrentNode, METH_NOARGS, nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
      METH_NOARGS,
