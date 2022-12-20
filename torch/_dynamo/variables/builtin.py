@@ -588,9 +588,7 @@ class BuiltinVariable(VariableTracker):
             and "__instancecheck__" in isinstance_type.__class__.__dict__
         ):
             return variables.ConstantVariable(
-                isinstance_type.__class__.__instancecheck__(
-                    isinstance_type, arg.as_python_constant()
-                )
+                isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
 
         try:

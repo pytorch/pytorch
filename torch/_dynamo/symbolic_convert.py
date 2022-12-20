@@ -80,7 +80,7 @@ from .variables.misc import (
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedVariable
+from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -275,6 +275,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, NNModuleVariable):
             # Equivant of "self.nn_module is not None"
             if truth_fn(value):
+                push and self.push(value)
+                self.jump(inst)
+        elif isinstance(value, UserDefinedObjectVariable):
+            if truth_fn(value.value):
                 push and self.push(value)
                 self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
