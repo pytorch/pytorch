@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import getpass
 import hashlib
+import json
 import logging
 import multiprocessing
 import os
@@ -57,6 +58,36 @@ def cache_dir():
     )
 
 
+class DiskCache:
+    @staticmethod
+    @functools.lru_cache(None)
+    def _subdir():
+        subdir = os.path.join(cache_dir(), "cached_tunings")
+        os.makedirs(subdir, exist_ok=True)
+        return subdir
+
+    @staticmethod
+    @functools.lru_cache(4096)
+    def _read_file(path):
+        with open(path, "r") as fd:
+            return json.loads(fd.read())
+
+    def __init__(self, unique_name):
+        super().__init__()
+        self.unique_name = unique_name
+
+    def lookup(self, key: Any, generate: Callable[[], Any]):
+        """
+        Check if we have already generated key, if not call generate()
+        to populate the cache.
+        """
+        path = os.path.join(self._subdir(), code_hash(self.unique_name + repr(key)))
+        if not os.path.exists(path):
+            value = generate()
+            write_atomic(path, json.dumps(value))
+        return self._read_file(path)
+
+
 def get_lock_dir():
     lock_dir = os.path.join(cache_dir(), "locks")
     if not os.path.exists(lock_dir):
@@ -85,12 +116,16 @@ def write(source_code, ext, extra=""):
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
-        # use a temp file for thread safety
-        fd, tmp_path = tempfile.mkstemp(dir=subdir)
-        with os.fdopen(fd, "w") as f:
-            f.write(source_code)
-        os.rename(tmp_path, path)
+        write_atomic(path, source_code)
     return basename, path
+
+
+def write_atomic(path: str, source_code: str):
+    # use a temp file for thread safety
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
+    with os.fdopen(fd, "w") as f:
+        f.write(source_code)
+    os.rename(tmp_path, path)
 
 
 def cpp_compiler():
