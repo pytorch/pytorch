@@ -7780,7 +7780,7 @@ class TestConsistency(TestCase):
         'vsplit': ['f16', 'f32'],
         'vstack': ['f16', 'f32'],
         'zero_': ['f16', 'f32']
-     }
+    }
 
     # These ops that are problematic. So never run them even when
     # generating the new allowlist.
