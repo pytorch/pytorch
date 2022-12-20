@@ -17,6 +17,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
@@ -131,7 +132,7 @@ def _unflatten_optim_state(
         otherwise. The final optimizer state dict will need to map these
         entries using the proper unflattened parameter IDs.
     """
-    _clear_grads_if_needed(fsdp_module._fsdp_handles(fsdp_module))
+    _clear_grads_if_needed(traversal_utils._get_fsdp_handles(fsdp_module))
     consolidated_state = _communicate_optim_state(
         flat_param,
         flat_param_state,
