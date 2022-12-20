@@ -52,7 +52,7 @@ class TestPureFP16(FSDPTest):
                     CPUOffload(offload_params=False),
                 ]
             },
-            self._test_pure_fp16,
+            self._test_pure_fp16_training,
         )
 
     def _test_pure_fp16_training(self, cpu_offload: CPUOffload):
