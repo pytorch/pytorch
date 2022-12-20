@@ -52,6 +52,7 @@ from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.autograd.function import _set_autograd_function_extension_enabled
+from torch._functorch.vmap import restore_vmap
 
 FALLBACK_REGEX = 'There is a performance drop'
 
@@ -1075,6 +1076,47 @@ class TestVmapAPI(TestCase):
     @skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_vmap_autocast_cuda(self):
         self._test_vmap_autocast("cuda")
+
+    def test_restore_vmap_pytree_input_output(self):
+        def f(x, y):
+            output0 = x[0] + x[1]
+            output1 = y
+            return {'a': output0, 'b': output1}
+
+        B = 2
+        x0 = torch.randn(B, 3)
+        x1 = torch.randn(B)
+        y = torch.randn(4, B)
+
+        out, out_dims = restore_vmap(f, ((0, 0), 1), B, 'error')((x0, x1), y)
+        expected = vmap(f, in_dims=((0, 0), 1), out_dims={'a': 0, 'b': 1})((x0, x1), y)
+        self.assertEqual(out, expected)
+        self.assertEqual(out_dims, {'a': 0, 'b': 1})
+
+    def test_restore_vmap_no_vmapped_inputs(self):
+        def f(x, y, z):
+            return x, y * z, z
+
+        B = 2
+        # Mix of tensor and non-tensor inputs
+        x = torch.randn(3)
+        y = torch.randn(4)
+        z = 5
+        out, out_dims = restore_vmap(f, (None, None, None), B, 'error')(x, y, z)
+        self.assertEqual(out, f(x, y, z))
+        self.assertEqual(out_dims, (None, None, None))
+
+    def test_restore_vmap_unexpanded_outputs(self):
+        def f(x, y):
+            # Mix of tensor and non-tensor outputs
+            return 3 * y, y.sum(), None
+
+        B = 2
+        x = torch.randn(B, 3)
+        y = torch.randn(4)
+        out, out_dims = restore_vmap(f, (0, None), B, 'error')(x, y)
+        self.assertEqual(out, f(None, y))
+        self.assertEqual(out_dims, (None, None, None))
 
 
 def slice_inputs(inputs, bdims, i):

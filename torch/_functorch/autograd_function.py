@@ -6,11 +6,10 @@ import torch.utils._pytree as pytree
 from torch._C._functorch import (
     _wrap_for_grad,
     _unwrap_for_grad,
-    _unwrap_batched,
 )
 from torch._functorch.vmap import (
-    _broadcast_to_and_flatten,
-    _create_batched_inputs,
+    wrap_batched,
+    unwrap_batched,
 )
 from torch.autograd.forward_ad import _set_fwd_grad_enabled
 from typing import NamedTuple
@@ -232,30 +231,12 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
     with interpreter.lower():
         unwrapped_output, out_dims = autograd_function.vmap(info, in_dims, *unwrapped_operands)
 
-    output = wrap_batched(unwrapped_output, out_dims, current_level)
-    return output
-
-
-def unwrap_batched(args, level):
-    flat_args, spec = pytree.tree_flatten(args)
-    if len(flat_args) == 0:
-        return args, ()
-    result = [_unwrap_batched(arg, level) if isinstance(arg, torch.Tensor)
-              else (arg, None) for arg in flat_args]
-    output, bdims = zip(*result)
-    return pytree.tree_unflatten(output, spec), pytree.tree_unflatten(bdims, spec)
-
-
-def wrap_batched(args, bdims, level):
     # TODO: raise better error message to the user when they don't follow the API.
     # Should probably mimic the logic of _process_batched_inputs,
     # but that one is hyperspecialized on error messages.
     # https://github.com/pytorch/pytorch/issues/90224
-    flat_args, spec = pytree.tree_flatten(args)
-    flat_bdims = _broadcast_to_and_flatten(bdims, spec)
-    assert flat_bdims is not None
-    result = _create_batched_inputs(flat_bdims, flat_args, level, spec)
-    return result
+    output = wrap_batched(unwrapped_output, out_dims, current_level)
+    return output
 
 
 @custom_function_call.py_impl(TransformType.Functionalize)
