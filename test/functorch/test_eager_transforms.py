@@ -1156,10 +1156,13 @@ class TestAutogradFunctionVmapAPI(TestCase):
             @staticmethod
             def vmap(info, in_dims, input):
                 self.assertEqual(info.batch_size, batch_size)
+                self.assertEqual(info.randomness, randomness)
                 return input, in_dims[0]
 
         x = torch.randn(batch_size, 3, device=device)
-        vmap(Id.apply)(x)
+
+        for randomness in ('error', 'different', 'same'):
+            vmap(Id.apply, randomness=randomness)(x)
 
     @_set_autograd_function_extension_enabled()
     def test_in_dims_single_input(self, device):
@@ -1868,6 +1871,41 @@ class TestJac(TestCase):
 
         out_val = out(x, y, z)
         self.assertEqual(out_val, expected_out)
+
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        y = torch.randn(1, 2, device=device)
+
+        def f(x, y):
+            return (x.sin(), x + y), (x + 2, x.sum())
+
+        for chunk_size in (1, 2, 3, 4, 7, 10, 1000):
+            expected = jacrev(f, argnums=(0, 1))(x, y)
+            actual = jacrev(f, argnums=(0, 1),
+                            chunk_size=chunk_size,
+                            _preallocate_and_copy=_preallocate_and_copy)(x, y)
+            self.assertEqual(actual, expected)
+
+        err_msg = "jacrev: `chunk_size` should be greater than 0."
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
+
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=-2)(x, y)
+
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev_composition(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        chunk_size = 3
+
+        def f(x):
+            return (x.sin(), x), (x + 2, x.sum())
+
+        expected = vmap(jacrev(jacrev(f)))(x)
+        actual = vmap(jacrev(jacrev(f, chunk_size=chunk_size,
+                             _preallocate_and_copy=_preallocate_and_copy), chunk_size=chunk_size))(x)
+        self.assertEqual(actual, expected)
 
 
 class TestHessian(TestCase):

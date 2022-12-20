@@ -570,8 +570,11 @@ def _get_ignored_params(
     excluding any :class:`FlatParameter` s, and their fully prefixed names,
     both as :class:`set` s.
     """
-    ignored_params = set(
-        p for m in ignored_modules for p in m.parameters() if not _is_fsdp_flattened(p)
+    ignored_params_to_names = dict(
+        (p, n)
+        for m in ignored_modules
+        for n, p in m.named_parameters()
+        if not _is_fsdp_flattened(p)
     )
     # Conservatively include all shared parameters' names
     param_to_unflat_param_names = _get_param_to_fqns(
@@ -579,14 +582,24 @@ def _get_ignored_params(
         dedup_shared_params=False,
     )
     ignored_param_names = set()
-    for param in ignored_params:
+    for param, name in ignored_params_to_names.items():
+        if param not in param_to_unflat_param_names:
+            # Allow users to pass parameters not under FSDP root module.
+            # This is useful when user apply FSDP manually to different
+            # submodules with the same global set of ignored parameters.
+            warnings.warn(
+                f"Parameter {name} is in the ignored modules passed to FSDP, "
+                "but it's not under the root module wrapped by FSDP."
+            )
+            continue
+
         unflat_param_names = param_to_unflat_param_names[param]
         clean_names = []
         for k in unflat_param_names:
             # Clean any module wrapper prefixes in case of nested wrapping
             clean_names.append(clean_tensor_name(k))
         ignored_param_names.update(clean_names)
-    return ignored_params, ignored_param_names
+    return set(ignored_params_to_names.keys()), ignored_param_names
 
 
 def _get_buffer_names(root_module: nn.Module) -> Set[str]:
