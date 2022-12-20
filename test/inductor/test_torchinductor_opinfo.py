@@ -134,8 +134,8 @@ inductor_skips["cuda"] = {
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
     # flaky
+    # "native_batch_norm": {f16, f32, f64},
     "native_batch_norm": {f16, f32, f64},
-    "_native_batch_norm_legit": {f16, f32, f64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)

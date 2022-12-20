@@ -433,21 +433,21 @@ def sample_inputs_softmax_backward_data(op_info, device, dtype, requires_grad, *
         output = torch.nn.functional.softmax(input, dim=dim, dtype=input_dtype)
         yield SampleInput(make_arg(shape), output, dim, input_dtype)
 
+# def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
+#     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
+#     for sample in samples:
+#         # torch.native_batch_norm does not support 0 numel tensors
+#         # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
+#         if sample.input.numel() == 0:
+#             continue
+#         args = sample.args
+#         training = sample.kwargs.get('training', True)
+#         momentum = sample.kwargs.get('momentum', 0.5)
+#         eps = sample.kwargs.get('eps', 1e-5)
+#         yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
+
+
 def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
-    samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
-    for sample in samples:
-        # torch.native_batch_norm does not support 0 numel tensors
-        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
-        if sample.input.numel() == 0:
-            continue
-        args = sample.args
-        training = sample.kwargs.get('training', True)
-        momentum = sample.kwargs.get('momentum', 0.5)
-        eps = sample.kwargs.get('eps', 1e-5)
-        yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
-
-
-def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
     for sample in samples:
         # torch.native_batch_norm does not support 0 numel tensors
@@ -10856,6 +10856,37 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
                DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
            )),
+    # OpInfo('native_batch_norm',
+    #        aten_name='native_batch_norm',
+    #        dtypes=floating_types_and(torch.bfloat16),
+    #        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+    #        supports_forward_ad=True,
+    #        supports_fwgrad_bwgrad=True,
+    #        assert_jit_shape_analysis=True,
+    #        sample_inputs_func=sample_inputs_native_batch_norm,
+    #        skips=(
+    #            # NotImplementedError: Could not run
+    #            # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
+    #            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
+    #            # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
+    #            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+    #            # Problem with _get_numerical_jacobian
+    #            # IndexError: tuple index out of range
+    #            DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+    #            # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
+    #            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+    #            # https://github.com/pytorch/pytorch/issues/85960
+    #            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+    #            # AssertionError: Booleans mismatch: True is not False
+    #            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
+    #            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
+    #            DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
+    #                         "TestCompositeCompliance", "test_forward_ad"),
+    #            # Extremal value issue on aten::native_batch_norm, which returns 'nan' for mean on 'inf' inputs
+    #            # possibly because of the welford implementation.
+    #            DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+    #        )
+    #        ),
     OpInfo('native_batch_norm',
            aten_name='native_batch_norm',
            dtypes=floating_types_and(torch.bfloat16),
@@ -10864,37 +10895,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_native_batch_norm,
-           skips=(
-               # NotImplementedError: Could not run
-               # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
-               # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
-               # Problem with _get_numerical_jacobian
-               # IndexError: tuple index out of range
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
-               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # https://github.com/pytorch/pytorch/issues/85960
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
-               # AssertionError: Booleans mismatch: True is not False
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
-                            "TestCompositeCompliance", "test_forward_ad"),
-               # Extremal value issue on aten::native_batch_norm, which returns 'nan' for mean on 'inf' inputs
-               # possibly because of the welford implementation.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
-           )
-           ),
-    OpInfo('_native_batch_norm_legit',
-           aten_name='_native_batch_norm_legit',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           assert_jit_shape_analysis=True,
-           sample_inputs_func=sample_inputs__native_batch_norm_legit,
            skips=(
                # NotImplementedError: Could not run
                # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.

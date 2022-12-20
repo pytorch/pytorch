@@ -71,7 +71,7 @@ TORCH_META_FUNC(renorm)(const Tensor& self, const Scalar& p, int64_t dim, const 
 
 namespace native {
 
-DEFINE_DISPATCH(batch_norm_cpu_stub);
+DEFINE_DISPATCH(batch_norm_cpu_helper_stub);
 DEFINE_DISPATCH(batch_norm_cpu_collect_stats_stub);
 DEFINE_DISPATCH(batch_norm_cpu_backward_stub);
 DEFINE_DISPATCH(renorm_scale_factor_stub);
@@ -135,7 +135,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 
   // inference contiguous path
   if (all_contiguous) {
-    batch_norm_cpu_stub(kCPU, output, input, weight, bias,
+    batch_norm_cpu_helper_stub(kCPU, output, input, weight, bias,
         save_mean, save_invstd, running_mean, running_var, train, eps);
     return std::make_tuple(output, save_mean, save_invstd);
   }
@@ -696,7 +696,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
   });
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_helper_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -705,7 +705,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, con
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  checkBackend("batch_norm_cpu_out", {self, weight, bias, running_mean, running_var}, Backend::CPU);
+  checkBackend("batch_norm_cpu_helper_out", {self, weight, bias, running_mean, running_var}, Backend::CPU);
   // Resize out
   at::native::resize_output(out, self.sizes());
 
@@ -738,7 +738,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, con
   return std::tuple<Tensor& ,Tensor&, Tensor&>(out, save_mean, save_var);
 }
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu_helper(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -747,7 +747,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
+  checkBackend("batch_norm_cpu_helper", {self, weight, bias, running_mean, running_var}, Backend::CPU);
 
   // Prepare output tensor
   const bool all_contiguous = is_contiguous(self)
@@ -784,30 +784,30 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
       save_var = at::empty({self.size(1)}, self.options());
     }
   }
-  return batch_norm_cpu_out(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train, momentum, eps, output, save_mean, save_var);
+  return batch_norm_cpu_helper_out(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train, momentum, eps, output, save_mean, save_var);
 }
 
 
-std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cpu(
+std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(
     const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps) {
-  return batch_norm_cpu(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
+  return batch_norm_cpu_helper(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
 }
 
-std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_cpu(
+std::tuple<Tensor, Tensor, Tensor> batch_norm_no_stats_cpu(
     const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     bool train, double momentum, double eps) {
-  return batch_norm_cpu(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+  return batch_norm_cpu_helper(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
 }
 
 
-std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
-  return batch_norm_cpu_out(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps, out, save_mean, save_var);
+std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+  return batch_norm_cpu_helper_out(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps, out, save_mean, save_var);
 }
 
 
-std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
-  return batch_norm_cpu_out(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps, out, save_mean, save_var);
+std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_no_stats_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+  return batch_norm_cpu_helper_out(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps, out, save_mean, save_var);
 }
 
 

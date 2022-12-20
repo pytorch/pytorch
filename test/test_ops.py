@@ -1661,7 +1661,7 @@ class TestMathBits(TestCase):
 def check_inplace_view(func, input, rs, input_size, input_strides):
     if func is None:
         return
-    # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm(_legit).out
+    # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
     # which mutate not necessarily the first input.
     if isinstance(rs, torch.Tensor) and rs is input:
         unequal_size = rs.size() != input_size

@@ -89,6 +89,7 @@ class TestFuseEager(QuantizationTestCase):
             test_only_eval_fn(model, self.img_data_1d)
             self.checkNoQconfig(model)
 
+        # TODO: deal with me!
         with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
             checkQuantized(model)
 

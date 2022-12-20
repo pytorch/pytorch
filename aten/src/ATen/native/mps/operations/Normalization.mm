@@ -58,7 +58,7 @@ void get_shapes(MPSShape* input_shape_readonly,
 }
 
 // Inverse standard deviation now becomes variance (without epsilon)
-std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
+std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_helper_out
                    (const Tensor& self,
                     const c10::optional<Tensor>& weight_opt,
                     const c10::optional<Tensor>& bias_opt,
@@ -131,7 +131,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "batch_norm_mps_out:" + mem_format_key + ":" + std::to_string(epsilon) + ":"
+    string key = "batch_norm_mps_helper_out:" + mem_format_key + ":" + std::to_string(epsilon) + ":"
                       + std::to_string(momentum) + ":" + std::to_string(train) + ":"
                       + std::to_string(has_running_mean) + ":"
                       + std::to_string(has_weight) + ":" + std::to_string(has_bias) + ":"
@@ -355,7 +355,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
   return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
 }
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_mps
+std::tuple<Tensor, Tensor, Tensor> batch_norm_mps_helper
                   (const Tensor& self,
                    const c10::optional<Tensor>& weight_opt,
                    const c10::optional<Tensor>& bias_opt,
@@ -396,7 +396,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps
               c10::nullopt,
               c10::nullopt);
 
-  at::native::batch_norm_mps_out(
+  at::native::batch_norm_mps_helper_out(
       self,
       weight_opt,
       bias_opt,
@@ -411,7 +411,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps
   return std::make_tuple(output, save_mean, save_var);
 }
 
-std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_mps
+std::tuple<Tensor, Tensor, Tensor> batch_norm_mps
                   (const Tensor& self,
                    const c10::optional<Tensor>& weight_opt,
                    const c10::optional<Tensor>& bias_opt,
@@ -421,10 +421,10 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_mps
                    double momentum,
                    double epsilon) {
 
-  return batch_norm_mps(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon);
+  return batch_norm_mps_helper(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon);
 }
 
-std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_mps
+std::tuple<Tensor, Tensor, Tensor> batch_norm_no_stats_mps
                   (const Tensor& self,
                    const c10::optional<Tensor>& weight_opt,
                    const c10::optional<Tensor>& bias_opt,
@@ -432,10 +432,10 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_mps
                    double momentum,
                    double epsilon) {
 
-  return batch_norm_mps(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon);
+  return batch_norm_mps_helper(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_mps_out
+std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
                    (const Tensor& self,
                     const c10::optional<Tensor>& weight_opt,
                     const c10::optional<Tensor>& bias_opt,
@@ -445,10 +445,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_mps_out
                     Tensor& output,
                     Tensor& save_mean,
                     Tensor& save_var) {
-  return batch_norm_mps_out(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon, output, save_mean, save_var);
+  return batch_norm_mps_helper_out(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon, output, save_mean, save_var);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_mps_out
+std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_no_stats_mps_out
                    (const Tensor& self,
                     const c10::optional<Tensor>& weight_opt,
                     const c10::optional<Tensor>& bias_opt,
@@ -456,7 +456,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_mps_out
                     Tensor& output,
                     Tensor& save_mean,
                     Tensor& save_var) {
-  return batch_norm_mps_out(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon, output, save_mean, save_var);
+  return batch_norm_mps_helper_out(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon, output, save_mean, save_var);
 }
 
 string get_mem_string(c10::MemoryFormat memory_format) {

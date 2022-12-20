@@ -3950,48 +3950,48 @@
   dispatch:
     CompositeImplicitAutograd: narrow_tensor_symint
 
-- func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+# - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+#   dispatch:
+#     CPU: batch_norm_cpu
+#     CUDA: batch_norm_cuda
+#     MPS: batch_norm_mps
+#     MkldnnCPU: mkldnn_batch_norm
+#   tags: canonical
+
+# - func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+#   dispatch:
+#     CUDA: batch_norm_cuda_out
+#     MPS: batch_norm_mps_out
+#     CPU: batch_norm_cpu_out
+
+# TODO: In 2 weeks, we should make native_batch_norm composite implicit so that this correct schema percolates correctly through our dispatching
+- func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: batch_norm_cpu
     CUDA: batch_norm_cuda
     MPS: batch_norm_mps
     MkldnnCPU: mkldnn_batch_norm
-  tags: canonical
+  autogen: native_batch_norm_functional
 
-- func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd) -> (Tensor(d!), Tensor(e!), Tensor(f!))
   dispatch:
+    CPU: batch_norm_cpu_out
     CUDA: batch_norm_cuda_out
     MPS: batch_norm_mps_out
-    CPU: batch_norm_cpu_out
 
-# TODO: In 2 weeks, we should make native_batch_norm composite implicit so that this correct schema percolates correctly through our dispatching
-- func: _native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+- func: native_batch_norm.no_stats(Tensor input, Tensor? weight, Tensor? bias, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU: _batch_norm_legit_cpu
-    CUDA: _batch_norm_legit_cuda
-    MPS: _batch_norm_legit_mps
-    MkldnnCPU: _mkldnn_batch_norm_legit
-  autogen: _native_batch_norm_legit_functional
-
-- func: _native_batch_norm_legit.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd) -> (Tensor(d!), Tensor(e!), Tensor(f!))
-  dispatch:
-    CPU: _batch_norm_legit_cpu_out
-    CUDA: _batch_norm_legit_cuda_out
-    MPS: _batch_norm_legit_mps_out
-
-- func: _native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
-  dispatch:
-    CPU: _batch_norm_legit_no_stats_cpu
-    CUDA: _batch_norm_legit_no_stats_cuda
-    MPS: _batch_norm_legit_no_stats_mps
-    MkldnnCPU: _mkldnn_batch_norm_legit_no_stats
+    CPU: batch_norm_no_stats_cpu
+    CUDA: batch_norm_no_stats_cuda
+    MPS: batch_norm_no_stats_mps
+    MkldnnCPU: mkldnn_batch_norm_no_stats
   tags: canonical
 
-- func: _native_batch_norm_legit.no_stats_out(Tensor input, Tensor? weight, Tensor? bias, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: native_batch_norm.no_stats_out(Tensor input, Tensor? weight, Tensor? bias, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   dispatch:
-    CPU: _batch_norm_legit_no_stats_cpu_out
-    CUDA: _batch_norm_legit_no_stats_cuda_out
-    MPS: _batch_norm_legit_no_stats_mps_out
+    CPU: batch_norm_no_stats_cpu_out
+    CUDA: batch_norm_no_stats_cuda_out
+    MPS: batch_norm_no_stats_mps_out
 
 - func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
   dispatch:

@@ -478,7 +478,7 @@ def forward(self, primals_1, primals_2, primals_3):
             # are *also* saved for backwards.
             # This tests that what we save for the backward is actually cloned inputs,
             # and not the original inputs that got mutated.
-            return torch._native_batch_norm_legit(inpt, weight, bias, running_mean, running_var, True, 0.5, 1e-5)
+            return torch.native_batch_norm(inpt, weight, bias, running_mean, running_var, True, 0.5, 1e-5)
         inp = [
             torch.ones(2, 5, 5, 5, requires_grad=True),
             torch.ones(5, requires_grad=True),
@@ -490,7 +490,7 @@ def forward(self, primals_1, primals_2, primals_3):
         from torch._decomp import get_decompositions
         # This simulates what inductor does (running the fw + bw decompositions)
         decompositions = get_decompositions([
-            torch.ops.aten._native_batch_norm_legit_functional,
+            torch.ops.aten.native_batch_norm_functional,
             torch.ops.aten.native_batch_norm_backward,
         ])
         self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True, decompositions=decompositions)

@@ -599,6 +599,7 @@ class TestPrims(TestCase):
     @onlyCUDA
     @dtypes(torch.float32, torch.float64)
     def test_native_batch_norm_nvprims(self, device, dtype):
+        # TODO: DEAL WITH ME
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 

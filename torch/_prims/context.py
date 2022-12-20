@@ -352,6 +352,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         } - set(self.skip_ops)
         return torch.overrides.resolve_name(func) in allowed_ops
 
+    # TODO: deal with me
     def _is_native_batch_norm(self, func):
         return "torch.native_batch_norm" == torch.overrides.resolve_name(func) or (
             func == torch.ops.aten.native_batch_norm.default
