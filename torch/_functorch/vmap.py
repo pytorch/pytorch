@@ -407,9 +407,7 @@ def vmap(
             n_chunks = n_chunks = batch_size // chunk_size
             chunk_numels = [chunk_size] * n_chunks
             # remainder chunk
-            remainder = batch_size % chunk_size
-            if remainder != 0:
-                chunk_numels.append(remainder)
+            chunk_numels.append(batch_size % chunk_size)
             split_idxs = tuple(itertools.accumulate(chunk_numels))
 
         flat_args_chunks = tuple(
@@ -485,8 +483,6 @@ def _chunked_vmap(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, ran
     rs = torch.get_rng_state() if randomness == "same" else None
     for flat_args in chunks_flat_args:
         batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
-        if batch_size == 0:
-            continue
 
         if rs is not None:
             torch.set_rng_state(rs)
