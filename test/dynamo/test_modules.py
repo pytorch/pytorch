@@ -1144,7 +1144,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(
             torch.allclose(
-                torch._dynamo.optimize(nopython=True)(fn)(torch.ones(10)),
+                torch._dynamo.optimize("eager", nopython=True)(fn)(torch.ones(10)),
                 torch.zeros(1),
             )
         )
