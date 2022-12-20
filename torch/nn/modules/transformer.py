@@ -194,12 +194,19 @@ class TransformerEncoder(Module):
         self.enable_nested_tensor = enable_nested_tensor
         self.mask_check = mask_check
 
-    def forward(self, src: Tensor, mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+            self,
+            src: Tensor,
+            mask: Optional[Tensor] = None,
+            src_key_padding_mask: Optional[Tensor] = None,
+            is_causal: bool = False) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
 
         Args:
             src: the sequence to the encoder (required).
             mask: the mask for the src sequence (optional).
+            is_causal: If specified, applies a causal mask as mask (optional). Mutually exclusive with providing mask.
+                Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
@@ -278,8 +285,18 @@ class TransformerEncoder(Module):
                 output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
                 src_key_padding_mask_for_layers = None
 
+        # Prevent type refinement
+        make_causal = False
+        if mask is not None:
+            if is_causal:
+                raise RuntimeError("specify either mask or is_causal, but not both")
+
+        if make_causal:
+            is_causal = True
+            mask = None
+
         for mod in self.layers:
-            output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask_for_layers)
+            output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
 
         if convert_to_nested:
             output = output.to_padded_tensor(0.)
@@ -437,13 +454,19 @@ class TransformerEncoderLayer(Module):
             self.activation = F.relu
 
 
-    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None,
-                src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+            self,
+            src: Tensor,
+            src_mask: Optional[Tensor] = None,
+            src_key_padding_mask: Optional[Tensor] = None,
+            is_causal: bool = False) -> Tensor:
         r"""Pass the input through the encoder layer.
 
         Args:
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
+            is_causal: If specified, applies a causal mask as src_mask. Mutually exclusive with providing src_mask.
+              Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
@@ -623,8 +646,17 @@ class TransformerDecoderLayer(Module):
             state['activation'] = F.relu
         super(TransformerDecoderLayer, self).__setstate__(state)
 
-    def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None, memory_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self,
+        tgt: Tensor,
+        memory: Tensor,
+        tgt_mask: Optional[Tensor] = None,
+        memory_mask: Optional[Tensor] = None,
+        tgt_key_padding_mask: Optional[Tensor] = None,
+        memory_key_padding_mask: Optional[Tensor] = None,
+        tgt_is_causal: bool = False,
+        memory_is_causal: bool = False,
+    ) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:
@@ -634,7 +666,10 @@ class TransformerDecoderLayer(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-
+            tgt_is_causal: If specified, applies a causal mask as tgt mask.
+                Mutually exclusive with providing tgt_mask. Default: ``False``.
+            memory_is_causal: If specified, applies a causal mask as tgt mask.
+                Mutually exclusive with providing memory_mask. Default: ``False``.
         Shape:
             see the docs in Transformer class.
         """
@@ -642,31 +677,33 @@ class TransformerDecoderLayer(Module):
 
         x = tgt
         if self.norm_first:
-            x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask)
-            x = x + self._mha_block(self.norm2(x), memory, memory_mask, memory_key_padding_mask)
+            x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal)
+            x = x + self._mha_block(self.norm2(x), memory, memory_mask, memory_key_padding_mask, memory_is_causal)
             x = x + self._ff_block(self.norm3(x))
         else:
-            x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask))
-            x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask))
+            x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask, tgt_is_causal))
+            x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask, memory_is_causal))
             x = self.norm3(x + self._ff_block(x))
 
         return x
 
     # self-attention block
     def _sa_block(self, x: Tensor,
-                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
+                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool = False) -> Tensor:
         x = self.self_attn(x, x, x,
                            attn_mask=attn_mask,
                            key_padding_mask=key_padding_mask,
+                           is_causal=is_causal,
                            need_weights=False)[0]
         return self.dropout1(x)
 
     # multihead attention block
     def _mha_block(self, x: Tensor, mem: Tensor,
-                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
+                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool = False) -> Tensor:
         x = self.multihead_attn(x, mem, mem,
                                 attn_mask=attn_mask,
                                 key_padding_mask=key_padding_mask,
+                                is_causal=is_causal,
                                 need_weights=False)[0]
         return self.dropout2(x)
 
