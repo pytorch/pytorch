@@ -928,7 +928,7 @@ class MultiThreadedTestCase(TestCase):
     def threaded_run_test(self):
         self.perThreadSetUp()
         try:
-            self.__class__._run_test_with_mt_pg(
+            MultiThreadedTestCase._run_test_with_mt_pg(
                 name=self._current_test_name,
                 timeout=TIMEOUT_DEFAULT,
                 world_size=self.world_size,
@@ -955,7 +955,6 @@ class MultiThreadedTestCase(TestCase):
         #   Normal Exception: print error for each thread that raises exception
         #   and raise a RuntimeError
         error_msg = ""
-        timeout_msg = ""
         skip_code = -1
         for rank, exc_info in failed_ranks:
             exc = exc_info[1]
@@ -970,8 +969,7 @@ class MultiThreadedTestCase(TestCase):
                     rank, timeout
                 )
                 logger.error(msg)
-                if len(timeout_msg) == 0:
-                    timeout_msg = msg
+                raise RuntimeError(msg)
             elif isinstance(exc, Exception):
                 msg = "".join(traceback.format_exception(*exc_info))
                 logger.error(
@@ -987,8 +985,6 @@ class MultiThreadedTestCase(TestCase):
         # check exceptions
         if len(error_msg) > 0:
             raise RuntimeError(error_msg)
-        if len(timeout_msg) > 0:
-            raise RuntimeError(timeout_msg)
         # check skip
         if skip_code > 0:
             for skip in TEST_SKIPS.values():
@@ -1014,16 +1010,19 @@ class MultiThreadedTestCase(TestCase):
     def _current_test_name(self) -> str:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
-        
-    def assertEqualRank0(self, x, y):
+
+    def assertEqualOnRank(self, x, y, rank=0):
         """
         The reason why we have this util function instead of
         self.assertEqual is all threads are sharing one CPU RNG
         so the assertion result is only reliable on rank 0
         """
-        if self.rank == 0:
+        if self.rank == rank:
             self.assertEqual(x, y)
 
+    def assertNotEqualOnRank(self, x, y, rank):
+        if self.rank == rank:
+            self.assertNotEqual(x, y)
 
 class SaveForwardInputsModule(nn.Module):
     def __init__(

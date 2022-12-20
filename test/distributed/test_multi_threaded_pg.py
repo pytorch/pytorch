@@ -141,13 +141,14 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         with self.assertRaisesRegex(NotImplementedError, "only supports SUM on threaded pg for now"):
             dist.all_reduce(output, op=ReduceOp.MAX)
 
-    def test_assert_equal_rank_0(self):
+    def test_assert_equal_on_rank(self):
         # RNG is shared across threads. So instead of asserting on all threads
         # we only assert on rank 0
         self_tensor = torch.rand(3, 3)
         rank_0_tensor = self_tensor.clone()
         dist.broadcast(rank_0_tensor, src=0)
-        self.assertEqualRank0(rank_0_tensor, self_tensor)
+        self.assertEqualOnRank(rank_0_tensor, self_tensor, rank=0)
+        self.assertNotEqualOnRank(rank_0_tensor, self_tensor, rank=1)
 
 
 if __name__ == "__main__":

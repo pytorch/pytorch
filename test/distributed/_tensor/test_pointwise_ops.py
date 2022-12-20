@@ -125,7 +125,7 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
 
         collected_result = deepcopy_convert_from_dtensor(dist_result)
 
-        self.assertEqualRank0(reference_result, collected_result)
+        self.assertEqualOnRank(reference_result, collected_result)
 
     # TODO: We need to add CPU tests for ops in the future.
     def _run_sharded_elementwise_ops(
