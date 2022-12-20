@@ -126,11 +126,6 @@ def clamp(x, min=None, max=None):
     return x
 
 
-@register_decomposition([aten.tanh])
-def tanh(x):
-    return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
-
-
 # TorchInductor-only decomposition. It should not be taken to core.
 # See https://github.com/pytorch/torchdynamo/pull/1120
 @register_decomposition([aten.floor_divide.default])
@@ -166,14 +161,6 @@ def pad_dim(x, padded_length, dim):
 
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2, *, beta=1, alpha=1):
-    if config.triton.mm != "aten":
-        out = torch.mm(mat1, mat2)
-        if not isinstance(alpha, numbers.Number) or alpha != 1:
-            out = out * alpha
-        if not isinstance(beta, numbers.Number) or beta != 1:
-            input = input * beta
-        return input + out
-
     if (
         config.shape_padding
         and check_device(mat1, mat2)
