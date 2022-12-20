@@ -1627,7 +1627,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 #ifndef _WIN32
   module.def(
       "_round_robin_process_groups",
-      [](std::vector<c10::intrusive_ptr<::c10d::Backend>> processGroups)
+      [](std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> processGroups)
           -> c10::intrusive_ptr<::c10d::ProcessGroup> {
         if (processGroups.size() == 0) {
           throw std::invalid_argument("Specify at least 1 process group");
