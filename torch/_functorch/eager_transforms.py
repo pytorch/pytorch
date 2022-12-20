@@ -1345,6 +1345,8 @@ def _maybe_unwrap_functional_tensor(maybe_tensor, *, reapply_views: bool):
         # This can happen if we functionalize a fn that returns a global,
         # which was never wrapped properly.
         return maybe_tensor
+    # Sync any pending updates on the output tensor
+    torch._sync(maybe_tensor)
     return _unwrap_functional_tensor(maybe_tensor, reapply_views)
 
 
