@@ -276,14 +276,26 @@ def get_jvp_variant(f, sample):
     return wrapped, tangents
 
 
+def get_jvp_variant_primals_tangents2(f, args, kwargs, output_process_fn_grad=None,
+                                      requires_grad=False):
+    fn, primals = normalize_op_input_output2(f, args, kwargs, output_process_fn_grad,
+                                             requires_grad)
+    tangents = _as_tuple(
+        tree_map(lambda x: torch.randn_like(x), primals))
+    return _get_jvp_variant(fn, primals, tangents)
+
+
 def get_jvp_variant_primals_tangents(f, sample):
     # We want this higher-order variant of jvp, so that it can
     # be used to wrap vmap
     fn, primals = normalize_op_input_output(f, sample, requires_grad=False)
     tangents = _as_tuple(
         tree_map(lambda x: torch.randn_like(x), primals))
+    return _get_jvp_variant(fn, primals, tangents)
 
-    @functools.wraps(f)
+
+def _get_jvp_variant(fn, primals, tangents):
+    @functools.wraps(fn)
     def wrapped(*args):
         primals_in = args[:len(primals)]
         tangents_in = args[len(primals):]
@@ -2012,7 +2024,6 @@ class TestOperators(TestCase):
                     _, vjp_fn = vjp(mapped_fn, *primals)
                     expected_vjps = vjp_fn(cotangents)
 
-                    print(inner_in_dims, in_dims)
                     _, vjp_fn = vjp(vmapped_fn, *primals)
                     result_vjps = vjp_fn(cotangents)
 
@@ -2045,6 +2056,201 @@ class TestOperators(TestCase):
                 expected = vjpvjpmap_fn(*new_args)
                 result = vjpvjpvmap_fn(*new_args)
                 self.assertEqual(result, expected)
+
+    # We're generally convinced that jvp x vmap works (vmap turns an operator
+    # into another operator and we test jvp support for operators). So
+    # we only test it on the things we're not sure about:
+    # - the autograd.Function <> functorch interaction
+    @_set_autograd_function_extension_enabled()
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_jvpvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+        xfail('CubeGenVmapAutogradFunction'),  # NYI
+        xfail('MulGenVmapAutogradFunction'),  # NYI
+        xfail('ScaleGradGenVmapAutogradFunction'),  # NYI
+        xfail('SelectGenVmapAutogradFunction'),  # NYI
+        xfail('SortGenVmapAutogradFunction'),  # NYI
+        xfail('ZeroGradientsGenVmapAutogradFunction'),  # NYI
+    })
+    def test_jvpvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, in_dims)
+                inner_mapped_op = functools.partial(loop, op, in_dims, 0, B)
+
+                jvpvmap_op, primals = get_jvp_variant_primals_tangents2(
+                    inner_vmapped_op, batched_args, kwargs,
+                    sample.output_process_fn_grad)
+                jvpmap_op, _ = get_jvp_variant_primals_tangents2(
+                    inner_mapped_op, batched_args, kwargs,
+                    sample.output_process_fn_grad)
+
+                expected = jvpmap_fn(*primals)
+                result = jvpvmap_fn(*primals)
+                self.assertEqual(result, expected)
+
+    # See NOTE: [three-transform testing]
+    @_set_autograd_function_extension_enabled()
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_jvpvmapvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+        xfail('CubeGenVmapAutogradFunction'),  # NYI
+        xfail('MulGenVmapAutogradFunction'),  # NYI
+        xfail('ScaleGradGenVmapAutogradFunction'),  # NYI
+        xfail('SelectGenVmapAutogradFunction'),  # NYI
+        xfail('SortGenVmapAutogradFunction'),  # NYI
+        xfail('ZeroGradientsGenVmapAutogradFunction'),  # NYI
+    })
+    def test_jvpvmapvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, inner_in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, inner_in_dims)
+                inner_mapped_op = functools.partial(loop, op, inner_in_dims, 0, B)
+                generator = generate_vmap_inputs(batched_args, kwargs)
+                for batched_args, in_dims, kwargs in generator:
+                    # strategy: compare jvp(vmap(vmap(op)) vs jvp(map(map(op))
+                    vmapped_op = vmap(inner_vmapped_op, in_dims)
+                    mapped_op = functools.partial(loop, inner_mapped_op, in_dims, 0, B)
+
+                    jvpvmapvmap_fn, primals = get_jvp_variant_primals_tangents2(
+                        vmapped_op, batched_args, kwargs,
+                        sample.output_process_fn_grad)
+                    jvpmapmap_fn, _ = get_jvp_variant_primals_tangents2(
+                        mapped_op, batched_args, kwargs,
+                        sample.output_process_fn_grad)
+
+                    expected = jvpmapmap_fn(*primals)
+                    result = jvpvmapvmap_fn(*primals)
+                    self.assertEqual(result, expected)
+
+    # See NOTE: [three-transform testing]
+    @_set_autograd_function_extension_enabled()
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_vmapjvpvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+        xfail('CubeGenVmapAutogradFunction'),  # NYI
+        xfail('MulGenVmapAutogradFunction'),  # NYI
+        xfail('ScaleGradGenVmapAutogradFunction'),  # NYI
+        xfail('SelectGenVmapAutogradFunction'),  # NYI
+        xfail('SortGenVmapAutogradFunction'),  # NYI
+        xfail('ZeroGradientsGenVmapAutogradFunction'),  # NYI
+    })
+    def test_vmapjvpvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, in_dims)
+                inner_mapped_op = functools.partial(loop, op, in_dims, 0, B)
+
+                jvpvmap_fn, primals = get_jvp_variant_primals_tangents2(
+                    inner_vmapped_op, batched_args, kwargs,
+                    sample.output_process_fn_grad)
+                jvpmap_fn, _ = get_jvp_variant_primals_tangents2(
+                    inner_mapped_op, batched_args, kwargs,
+                    sample.output_process_fn_grad)
+
+                generator = generate_vmap_inputs(primals, {})
+
+                for batched_args, in_dims, _ in generator:
+                    # strategy: compare vmap(jvp(vmap(op)) vs map(jvp(map(op))
+                    vmapjvpvmap_fn = vmap(jvpvmap_fn, in_dims)
+                    mapjvpmap_fn = functools.partial(loop, jvpmap_fn, in_dims, 0, B)
+
+                    result = vmapjvpvmap_fn(*batched_args)
+                    expected = mapjvpmap_fn(*batched_args)
+                    self.assertEqual(result, expected)
+
+    # See NOTE: [three-transform testing]
+    @_set_autograd_function_extension_enabled()
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_jvpjvpvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
+        xfail('CubeGenVmapAutogradFunction'),  # NYI
+        xfail('MulGenVmapAutogradFunction'),  # NYI
+        xfail('ScaleGradGenVmapAutogradFunction'),  # NYI
+        xfail('SelectGenVmapAutogradFunction'),  # NYI
+        xfail('SortGenVmapAutogradFunction'),  # NYI
+        xfail('ZeroGradientsGenVmapAutogradFunction'),  # NYI
+    })
+    def test_jvpjvpvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, in_dims)
+                inner_mapped_op = functools.partial(loop, op, in_dims, 0, B)
+
+                jvpmap_fn, args = get_jvp_variant_primals_tangents2(
+                    inner_mapped_op, batched_args, kwargs, sample.output_process_fn_grad)
+                jvpvmap_fn, _ = get_jvp_variant_primals_tangents2(
+                    inner_vmapped_op, batched_args, kwargs, sample.output_process_fn_grad)
+
+                jvpjvpvmap_fn, new_args = get_jvp_variant_primals_tangents2(jvpvmap_fn, args, {})
+                jvpjvpmap_fn, _ = get_jvp_variant_primals_tangents2(jvpmap_fn, args, {})
+
+                expected = jvpjvpmap_fn(*new_args)
+                result = jvpjvpvmap_fn(*new_args)
+                self.assertEqual(result, expected)
+
+    # See NOTE: [three-transform testing]
+    @_set_autograd_function_extension_enabled()
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_jvpvjpvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
+        xfail('CubeGenVmapAutogradFunction'),  # NYI
+        xfail('MulGenVmapAutogradFunction'),  # NYI
+        xfail('ScaleGradGenVmapAutogradFunction'),  # NYI
+        xfail('SelectGenVmapAutogradFunction'),  # NYI
+        xfail('SortGenVmapAutogradFunction'),  # NYI
+        xfail('ZeroGradientsGenVmapAutogradFunction'),  # NYI
+    })
+    def test_jvpvjpvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, in_dims)
+                inner_mapped_op = functools.partial(loop, op, in_dims, 0, B)
+
+                vjpmap_fn, args = get_vjpfull_variant2(inner_mapped_op, batched_args, kwargs)
+                vjpvmap_fn, _ = get_vjpfull_variant2(inner_vmapped_op, batched_args, kwargs)
+
+                jvpvjpvmap_fn, new_args = get_jvp_variant_primals_tangents2(vjpvmap_fn, args, {})
+                jvpvjpmap_fn, _ = get_jvp_variant_primals_tangents2(vjpmap_fn, args, {})
+
+                expected = jvpvjpmap_fn(*new_args)
+                result = jvpvjpvmap_fn(*new_args)
+                self.assertEqual(result, expected)
+
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
