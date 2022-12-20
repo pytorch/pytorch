@@ -1035,8 +1035,7 @@ Tensor take_backward(
 Tensor to_sparse_backward(
     const Tensor& grad,
     const c10::Layout self_layout,
-    const c10::OptionalArrayRef<c10::SymInt>& self_blocksize,
-    const c10::SymInt n_dense_dim);
+    const c10::OptionalArrayRef<c10::SymInt>& self_blocksize);
 
 } // namespace details
 } // namespace generated

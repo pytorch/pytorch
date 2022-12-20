@@ -785,15 +785,6 @@ def saved_variables(
                 "expr": lambda name: f"at::sparse_csr::getSymIntBlockSize({name})",
             },
         ),
-        # replace self.sym_n_dense_dim() with self_sym_n_dense_dim
-        (
-            r"{}.sym_n_dense_dim\(\)",
-            {
-                "suffix": "_self_sym_n_ndense_dim",
-                "nctype": lambda name: NamedCType(name, BaseCType(SymIntT)),
-                "expr": lambda name: f"at::sparse_csr::getSymIntNDenseDim({name})",
-            },
-        ),
         # replace self.options() with self_options
         (
             r"{}.options\(\)",

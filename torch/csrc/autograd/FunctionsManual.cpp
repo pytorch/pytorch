@@ -6772,8 +6772,7 @@ Tensor take_backward(
 Tensor to_sparse_backward(
     const Tensor& grad,
     const c10::Layout self_layout,
-    const c10::OptionalArrayRef<c10::SymInt>& self_blocksize,
-    const c10::SymInt n_dense_dim) {
+    const c10::OptionalArrayRef<c10::SymInt>& self_blocksize) {
   // Path for strided and nested
   if (self_layout == c10::kStrided) {
     return grad.to_dense();
@@ -6782,8 +6781,7 @@ Tensor to_sparse_backward(
     if (self_blocksize.has_value()) {
       blocksize = c10::asIntArrayRefSlowOpt(*self_blocksize);
     }
-    return grad.to_sparse(
-        self_layout, blocksize, n_dense_dim.as_int_unchecked());
+    return grad.to_sparse(self_layout, blocksize);
   }
 }
 
