@@ -41,7 +41,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
   TORCH_CHECK(false, "mkldnn_layer_norm_last_index_weight_bias_f32: ATen not compiled with MKLDNN support");
 }
 
-std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm(
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var,
     bool train,
     double momentum,
@@ -50,7 +50,7 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_no_stats(
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_no_stats(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     bool train,
     double momentum,

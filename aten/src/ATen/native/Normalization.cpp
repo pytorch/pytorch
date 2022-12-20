@@ -72,7 +72,7 @@ TORCH_META_FUNC(renorm)(const Tensor& self, const Scalar& p, int64_t dim, const 
 
 namespace native {
 
-DEFINE_DISPATCH(batch_norm_cpu_helper_stub);
+DEFINE_DISPATCH(batch_norm_cpu_stub);
 DEFINE_DISPATCH(batch_norm_cpu_collect_stats_stub);
 DEFINE_DISPATCH(batch_norm_cpu_backward_stub);
 DEFINE_DISPATCH(renorm_scale_factor_stub);
@@ -136,7 +136,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 
   // inference contiguous path
   if (all_contiguous) {
-    batch_norm_cpu_helper_stub(kCPU, output, input, weight, bias,
+    batch_norm_cpu_stub(kCPU, output, input, weight, bias,
         save_mean, save_invstd, running_mean, running_var, train, eps);
     return std::make_tuple(output, save_mean, save_invstd);
   }
@@ -578,7 +578,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 
   return std::tuple_cat(
            at::native_batch_norm(
-             input, weight, bias, running_mean, running_var, training, momentum, eps),
+             input, weight, bias, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), training, momentum, eps),
            std::tuple<Tensor>(reserve),
            std::make_tuple(0));
 }
