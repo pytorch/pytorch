@@ -40,7 +40,7 @@ class ShardingPropagator(object):
             output_sharding = sharding_prop_func(op_schema)
         except Exception as e:
             raise RuntimeError(
-                f"Sharding propagation failed on op {op_key}.\n"
+                f"Sharding propagation failed on op {op_overload}.\n"
                 f"Input schema: {op_schema}.\n"
                 f"Error: {e}"
             ) from e
@@ -55,7 +55,7 @@ class ShardingPropagator(object):
             and output_sharding.schema_suggestions is None
         ):
             raise RuntimeError(
-                f"Sharding propagation failed on op {op_key}!"
+                f"Sharding propagation failed on op {op_overload}!"
                 f"Input schema: {op_schema}."
                 f"Failed reason: {output_sharding.failed_reason}"
             )
