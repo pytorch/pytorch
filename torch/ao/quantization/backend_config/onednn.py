@@ -135,7 +135,7 @@ def conv_add_extra_inputs_getter_right(pattern):
 for add_op in [torch.add, operator.add]:
     conv_configs.append(
         BackendPatternConfig()
-            ._set_pattern_complex_format((add_op, nn.Conv2d, MatchAllNode))
+            ._set_pattern_complex_format((add_op, nn.Conv2d, MatchAllNode))  # noqa: E131
             .set_observation_type(observation_type)
             .set_dtype_configs(conv_dtype_configs)
             .set_fuser_method(fuse_conv_add_right)
@@ -163,7 +163,7 @@ def conv_add_extra_inputs_getter(pattern):
 for add_op in [torch.add, operator.add]:
     conv_configs.append(
         BackendPatternConfig()
-            ._set_pattern_complex_format((add_op, MatchAllNode, nn.Conv2d))
+            ._set_pattern_complex_format((add_op, MatchAllNode, nn.Conv2d))  # noqa: E131
             .set_observation_type(observation_type)
             .set_dtype_configs(conv_dtype_configs)
             .set_fuser_method(fuse_conv_add)
@@ -204,7 +204,7 @@ def conv_add_relu_extra_inputs_getter_right(pattern):
 for add_op in [torch.add, operator.add]:
     conv_configs.append(
         BackendPatternConfig()
-            ._set_pattern_complex_format((nn.ReLU, (add_op, nn.Conv2d, MatchAllNode)))
+            ._set_pattern_complex_format((nn.ReLU, (add_op, nn.Conv2d, MatchAllNode)))  # noqa: E131
             .set_observation_type(observation_type)
             .set_dtype_configs(conv_dtype_configs)
             .set_fuser_method(fuse_conv_add_relu_right)
@@ -242,7 +242,7 @@ def conv_bn_add_relu_extra_inputs_getter_right(pattern):
 for add_op in [torch.add, operator.add]:
     conv_configs.append(
         BackendPatternConfig()
-            ._set_pattern_complex_format((nn.ReLU, (add_op, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode)))
+            ._set_pattern_complex_format((nn.ReLU, (add_op, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode)))  # noqa: E131
             .set_observation_type(observation_type)
             .set_dtype_configs(conv_dtype_configs)
             .set_fuser_method(fuse_conv_bn_add_relu_right)
