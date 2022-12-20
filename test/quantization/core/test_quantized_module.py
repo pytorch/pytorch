@@ -610,6 +610,130 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                     W_zero_point, Y_scale, Y_zero_point, use_bias, use_fused,
                     use_channelwise)
 
+    @skipIfNoONEDNN
+    def test_conv2d_add(self):
+        """test API functionality for nn.intrinsic.quantized.ConvAdd2d"""
+        with override_quantized_engine('onednn'):
+            options = itertools.product(
+                ["zeros", "reflect"],  # pad_mode
+                [True, False],  # use_bias
+                [False],  # fused_with_relu
+                [True, False],  # use_channelwise
+            )
+            for pad_mode, use_bias, fused_with_relu, use_channelwise in options:
+                batch_size = 2
+                in_channels_per_group = 2
+                H = 8
+                W = 8
+                out_channels_per_group = 2
+                groups = 3
+                kernel_h = 3
+                kernel_w = 3
+                stride_h = 2
+                stride_w = 2
+                pad_h = 1
+                pad_w = 1
+                dilation = 1
+                # Tests the correctness of the conv2d module.
+                in_channels = in_channels_per_group * groups
+                out_channels = out_channels_per_group * groups
+                input_feature_map_size = (H, W)
+                kernel_size = (kernel_h, kernel_w)
+                stride = (stride_h, stride_w)
+                padding = (pad_h, pad_w)
+                dilation = (dilation, dilation)
+                X_scale = 1.3
+                X_zero_point = 2
+                X2_scale = 1.2
+                X2_zero_point = 1
+                W_scale = [0.5]
+                W_zero_point = [0] if qengine_is_onednn() else [3]
+                Y_scale = 5.0
+                Y_zero_point = 4
+                # use_fused -> quantized class
+                class_map = {
+                    False: (nniq.ConvAdd2d, "QuantizedConvAdd2d")
+                }
+
+                qconv_cls, module_name = class_map[fused_with_relu]
+                qconv_module = qconv_cls(
+                    in_channels, out_channels, kernel_size, stride, padding,
+                    dilation, groups, use_bias, padding_mode=pad_mode
+                )
+
+                conv_module = nn.Conv2d(
+                    in_channels, out_channels, kernel_size, stride, padding,
+                    dilation, groups, use_bias, padding_mode=pad_mode)
+                conv_module = conv_module.float()
+
+                for i in range(len(kernel_size)):
+                    assume(input_feature_map_size[i] + 2 * padding[i]
+                        >= dilation[i] * (kernel_size[i] - 1) + 1)
+
+                in_channels = in_channels_per_group * groups
+                out_channels = out_channels_per_group * groups
+                (X, X_q, W, W_q, b) = _make_conv_test_input(
+                    batch_size, in_channels_per_group, input_feature_map_size,
+                    out_channels_per_group, groups, kernel_size, X_scale, X_zero_point,
+                    W_scale, W_zero_point, use_bias, use_channelwise)
+
+                # Make sure the weight shape is correct
+                self.assertTrue(qconv_module.weight().shape == W_q.shape)
+
+                qconv_module.set_weight_bias(W_q, b)
+                qconv_module.scale = Y_scale
+                qconv_module.zero_point = Y_zero_point
+
+                conv_module.weight.data = W
+                if use_bias:
+                    conv_module.bias.data = b
+
+                # Test members
+                self.assertTrue(module_name == qconv_module._get_name(), module_name + " " + qconv_module._get_name())
+                self.assertTrue(hasattr(qconv_module, '_packed_params'))
+                self.assertTrue(hasattr(qconv_module, 'scale'))
+                self.assertTrue(hasattr(qconv_module, 'zero_point'))
+
+                # Test properties
+                self.assertEqual(W_q, qconv_module.weight())
+                if use_bias:
+                    self.assertEqual(b, qconv_module.bias())
+                self.assertEqual(Y_scale, qconv_module.scale)
+                self.assertEqual(Y_zero_point, qconv_module.zero_point)
+
+                # Test forward
+                Y_exp = conv_module(X)
+
+                (X2_value_min, X2_value_max) = (0, 4)
+                X2_init = torch.randint(
+                    X2_value_min,
+                    X2_value_max,
+                    Y_exp.size()
+                )
+                X2 = X2_scale * (X2_init - X2_zero_point).float()
+                X2_q = torch.quantize_per_tensor(
+                    X2, scale=X2_scale, zero_point=X2_zero_point, dtype=torch.quint8)
+                Y_exp += X2
+
+                Y_exp = torch.quantize_per_tensor(
+                    Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
+
+                Y_act = qconv_module(X_q, X2_q)
+                # Make sure the results match
+                # assert_array_almost_equal compares using the following formula:
+                #     abs(desired-actual) < 1.5 * 10**(-decimal)
+                # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+                # We use decimal = 0 to ignore off-by-1 differences between reference
+                # and test. Off-by-1 differences arise due to the order of round and
+                # zero_point addition operation, i.e., if addition followed by round is
+                # used by reference and round followed by addition is used by test, the
+                # results may differ by 1.
+                # For example, the result of round(2.5) + 1 is 3 while round(2.5 + 1) is
+                # 4 assuming the rounding mode is round-to-nearest, ties-to-even.
+                # skip numerics checking for reference module
+                np.testing.assert_array_almost_equal(
+                    Y_exp.int_repr().numpy(), Y_act.int_repr().numpy(), decimal=0)
+
     def test_pool_api(self):
         """Tests the correctness of the pool module.
         The correctness is defined against the functional implementation.
