@@ -9,6 +9,8 @@ on:
   pull_request:
     paths:
       - .github/workflows/inductor-perf-test-nightly.yml
+    branches-ignore:
+      - postnightly
   workflow_dispatch:
 
 concurrency:
