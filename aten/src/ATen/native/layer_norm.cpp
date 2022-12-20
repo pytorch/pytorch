@@ -20,8 +20,6 @@
 #include <ATen/ops/native_layer_norm_native.h>
 #include <ATen/ops/zeros_like_native.h>
 #endif
-#include <ATen/native/cpu/mixed_data_type.h>
-
 
 #include <array>
 #include <tuple>

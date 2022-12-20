@@ -90,6 +90,7 @@ from torch.testing._comparison import (
 )
 from torch.testing._comparison import assert_equal as assert_equal
 from torch.testing._internal.common_dtype import get_all_dtypes
+import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
 
@@ -942,6 +943,9 @@ if TEST_WITH_TORCHDYNAMO:
     # TODO: Remove this; this is grandfathered in because we suppressed errors
     # on test suite previously
     torch._dynamo.config.suppress_errors = True
+    if TEST_WITH_TORCHINDUCTOR:
+        import torch._inductor.config
+        torch._inductor.config.fallback_random = True
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
@@ -2131,8 +2135,10 @@ class TestCase(expecttest.TestCase):
             return
 
         if using_unittest:
-            failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
-            errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
+            # Keep track of the number of tests marked as failures, errors, and skipped before starting
+            failures_before = 0 if result is None else len(result.failures)
+            errors_before = 0 if result is None else len(result.errors)
+            skipped_before = 0 if result is None else len(result.skipped)
 
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
@@ -2186,7 +2192,7 @@ class TestCase(expecttest.TestCase):
                 result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red + 1, num_green=num_green)
-        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and not result.skipped:
+        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and skipped_before == len(result.skipped):
             # Always re-run up to MAX_NUM_RETRIES when running under rerun disabled tests modes if the test successes.
             # The parameter num_retries_left can be equal to MAX_NUM_RETRIES here because num_runs_left is initially
             # set to MAX_NUM_RETRIES + 1, i.e. the first run successes
@@ -4046,6 +4052,22 @@ def custom_op(opname, symbolic_fn, opset_version):
     finally:
         unregister_custom_op_symbolic(opname, opset_version)
 
+
+def outs_and_grads(fn, graph_inps, inps):
+    outs = fn(*graph_inps)
+    for out in pytree.tree_flatten(outs)[0]:
+        if isinstance(out, torch.Tensor) and out.requires_grad:
+            out.sum().backward(retain_graph=True)
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+    for inp in pytree.tree_flatten(inps)[0]:
+        inp.grad = None
+    return outs, grads
+
+def compare_equal_outs_and_grads(test, m1, m2, inps):
+    r1, g1 = outs_and_grads(m1, inps, inps)
+    r2, g2 = outs_and_grads(m2, inps, inps)
+    test.assertEqual(r1, r2)
+    test.assertEqual(g1, g2)
 
 class TestGradients(TestCase):
     exact_dtype = True

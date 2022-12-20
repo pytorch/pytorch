@@ -12,6 +12,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/cpu/moments_utils.h>
 #include <ATen/native/cpu/mixed_data_type.h>
+#include <ATen/OpMathType.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -34,7 +35,7 @@ void GroupNormKernelImplInternal(
     int64_t C,
     int64_t HxW,
     int64_t group,
-    double eps,
+    T eps,
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
@@ -53,7 +54,7 @@ void GroupNormKernelImplInternal(
   const bool beta_null = beta_data == nullptr;
   const int64_t inner_size = D * HxW;
 
-  using T_ACC = vec::vec_scalar_t<T>;
+  using T_ACC = at::opmath_type<T>;
 
   at::parallel_for(0, N * G, 1, [&](int64_t start, int64_t end) {
     for (const auto i : c10::irange(start, end)) {
@@ -165,7 +166,7 @@ void GroupNormKernelImplChannelsLastInternal(
     int64_t C,
     int64_t HxW,
     int64_t group,
-    double eps,
+    T eps,
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
@@ -181,7 +182,7 @@ void GroupNormKernelImplChannelsLastInternal(
   PT* mean_data = mean.data_ptr<PT>();
   PT* rstd_data = rstd.data_ptr<PT>();
 
-  using T_ACC = vec::vec_scalar_t<T>;
+  using T_ACC = at::opmath_type<T>;
   using Vec = vec::Vectorized<T_ACC>;
 
   const T s = T_ACC(1) / static_cast<T_ACC>(D * HxW);
@@ -396,10 +397,13 @@ void GroupNormKernelImpl(
   switch (X.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
+        using param_t = at::opmath_type<scalar_t>;
         if (mixed_type) {
-          GroupNormKernelImplInternal<BFloat16, float>(X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+          GroupNormKernelImplInternal<scalar_t, param_t>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
         } else {
-          GroupNormKernelImplInternal<scalar_t, scalar_t>(X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+          GroupNormKernelImplInternal<scalar_t, scalar_t>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
         }
       });
       break;
@@ -407,10 +411,13 @@ void GroupNormKernelImpl(
     case at::MemoryFormat::ChannelsLast:
     case at::MemoryFormat::ChannelsLast3d: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
+        using param_t = at::opmath_type<scalar_t>;
         if (mixed_type) {
-          GroupNormKernelImplChannelsLastInternal<BFloat16, float>(X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+          GroupNormKernelImplChannelsLastInternal<scalar_t, param_t>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
         } else {
-          GroupNormKernelImplChannelsLastInternal<scalar_t, scalar_t>(X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
+          GroupNormKernelImplChannelsLastInternal<scalar_t, scalar_t>(
+              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
         }
       });
       break;
