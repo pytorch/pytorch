@@ -11,7 +11,7 @@ def basic_ddp_model(self, rank, model, process_group, hook_state, hook):
         rank (int): worker rank
         model (nn.Module): neural network model
         process_group (ProcessGroup): distributed process group
-        HookState (class): class that will be used to keep track of state
+        hook_state (class): class that will be used to keep track of state
             during training.
         hook (function): ddp communication hook
     """
