@@ -95,7 +95,24 @@ test_libtorch() {
   fi
 }
 
+debug_cmake() {
+  CMAKE_EXEC="$(which cmake)"
+  echo "$CMAKE_EXEC"
+  otool -l "$CMAKE_EXEC" | grep RPATH -A2
+
+  CONDA_INSTALLATION_DIR="$(dirname $CMAKE_EXEC)"
+  echo "$CONDA_INSTALLATION_DIR"
+  ls -la "$CONDA_INSTALLATION_DIR"
+  ls -la "$CONDA_INSTALLATION_DIR/../lib"
+
+  ls -la /Users/ec2-user/runner/_work/_temp/miniconda
+  ls -la /Users/ec2-user/runner/_work/_temp/miniconda/bin
+  ls -la /Users/ec2-user/runner/_work/_temp/miniconda/lib
+}
+
 test_custom_backend() {
+  debug_cmake
+
   echo "Testing custom backends"
   pushd test/custom_backend
   rm -rf build && mkdir build
@@ -116,6 +133,8 @@ test_custom_backend() {
 }
 
 test_custom_script_ops() {
+  debug_cmake
+
   echo "Testing custom script operators"
   pushd test/custom_operator
   # Build the custom operator library.
@@ -136,6 +155,8 @@ test_custom_script_ops() {
 }
 
 test_jit_hooks() {
+  debug_cmake
+
   echo "Testing jit hooks in cpp"
   pushd test/jit_hooks
   # Build the custom operator library.
@@ -157,7 +178,7 @@ test_jit_hooks() {
 if [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
-  test_python_shard "${SHARD_NUMBER}"
+  # test_python_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_libtorch
     test_custom_script_ops
