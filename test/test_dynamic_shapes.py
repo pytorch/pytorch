@@ -622,7 +622,10 @@ class TestFloorDiv(TestCase):
             return x // y
 
         def torch_func(x, y):
-            return FloorDiv(x, y)
+            # Note: we fully evaluate here since FloorDiv might not always do
+            # that.
+            shape_env = ShapeEnv()
+            return shape_env.evaluate_expr(FloorDiv(x, y))
 
         def other_func(func, x, y):
             if func is python_func:

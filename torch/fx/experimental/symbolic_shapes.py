@@ -256,9 +256,7 @@ if HAS_SYMPY:
         def eval(cls, base, divisor):
             # NOTE [ Checking types with SymPy ]
             # Python has a dedicated complex type, but SymPy represents complex
-            # with Add exprs. So we cannot provide the same error message here
-            # as in Python floordiv because there's no easy way to distinguish
-            # an arbitrary Add expr from a complex number.
+            # with Add exprs.
             #
             # isinstance doesn't work for arbitrary exprs and for Symbols, even
             # when the latter have integer=True set during construction. So you
@@ -270,10 +268,13 @@ if HAS_SYMPY:
             # cannot be passed to the Integer and Float constructors.
             # https://github.com/pytorch/pytorch/issues/90900
             def check_supported_type(x):
-                # Note: is_real returns True for both Integer and Float, but
-                # let's be explicit here so this reflects the error message
-                # below.
-                if not x.is_integer and not x.is_real:
+                # Note: we disallow complex as in regular Python, but we have to
+                # check for is_integer and is_real explicitly because Integer
+                # and Float have is_complex set to True. We also don't allow
+                # booleans because they cannot be used in arithmetic exprs in
+                # SymPy.
+                if (not x.is_integer and not x.is_real and x.is_complex
+                        or x.is_Boolean):
                     raise TypeError(
                         f"unsupported operand type(s) for //: "
                         f"'{type(base).__name__}' and '{type(divisor).__name__}'"
@@ -307,8 +308,6 @@ if HAS_SYMPY:
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
-            else:
-                return sympy.floor(base / divisor)
 
 
 # Methods that have a `__foo__` as well as `__rfoo__`
@@ -1020,8 +1019,8 @@ class ShapeEnv(object):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        if len(expr.free_symbols) == 0:
-            return expr
+        # Note: do not short-circuit here without evaluating as we might need to
+        # compute FloorDiv exprs in some cases.
         expr = self.simplify(expr)
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
