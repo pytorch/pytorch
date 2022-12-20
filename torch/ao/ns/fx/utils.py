@@ -16,7 +16,7 @@ from torch.ao.quantization import (
     FakeQuantizeBase,
 )
 from torch.ao.quantization.utils import getattr_from_fqn
-from torch.ao.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.observer import _is_activation_post_process
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
@@ -256,14 +256,14 @@ def return_first_non_observer_node(
     """
     if node.op == "call_module":
         node_obj = getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
-        if is_activation_post_process(node_obj):
+        if _is_activation_post_process(node_obj):
             assert len(node.args) == 1
             assert isinstance(node.args[0], Node)
             node = node.args[0]
             # code duplication intended, not worth refactoring
             assert isinstance(node.target, str)
             node_obj = getattr_from_fqn(gm, node.target)
-            if is_activation_post_process(node_obj):
+            if _is_activation_post_process(node_obj):
                 assert len(node.args) == 1
                 assert isinstance(node.args[0], Node)
                 node = node.args[0]
