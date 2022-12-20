@@ -6,6 +6,9 @@
 
 set -ex
 
+echo "Environment variables:"
+env
+
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
@@ -278,6 +281,12 @@ test_inductor_benchmark() {
     --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
   # shellcheck disable=SC2086
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+  # Check training with symbolic shapes (not actually inductor)
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/$1.py --ci --training --accuracy --dynamic-shapes \
+    --device cuda --backend aot_eager $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_$1.csv
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_$1.csv
 }
 
 test_inductor_benchmark_perf() {
