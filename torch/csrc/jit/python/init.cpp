@@ -1703,9 +1703,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "__hash__",
           [](const FunctionSchema& self) {
-            std::stringstream ss;
-            ss << self;
-            return std::hash<std::string>()(ss.str());
+            return std::hash<FunctionSchema>{}(self);
           })
       .def(
           "__str__",
