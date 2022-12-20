@@ -4,22 +4,9 @@
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
-if [ -z "${CI}" ]; then
-  rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
-fi
-
-export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
-
-# Test PyTorch
-if [ -z "${CI}" ]; then
-  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
-fi
-
-# Download torch binaries in the test jobs
-if [ -z "${CI}" ]; then
-  rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
-  aws s3 cp s3://ossci-macos-build/pytorch/"${IMAGE_COMMIT_TAG}".7z "${IMAGE_COMMIT_TAG}".7z
-  7z x "${IMAGE_COMMIT_TAG}".7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
+if [[ -n "$CONDA_ENV" ]]; then
+  # Use binaries under conda environment
+  export PATH="$CONDA_ENV/bin":$PATH
 fi
 
 # Test that OpenMP is enabled for non-arm64 build
@@ -95,23 +82,17 @@ test_libtorch() {
   fi
 }
 
-debug_cmake() {
-  CMAKE_EXEC="$(which cmake)"
+print_cmake_info() {
+  CMAKE_EXEC=$(which cmake)
   echo "$CMAKE_EXEC"
-  otool -l "$CMAKE_EXEC" | grep RPATH -A2
 
-  CONDA_INSTALLATION_DIR="$(dirname $CMAKE_EXEC)"
-  echo "$CONDA_INSTALLATION_DIR"
-  ls -la "$CONDA_INSTALLATION_DIR"
+  CONDA_INSTALLATION_DIR=$(dirname "$CMAKE_EXEC")
+  # Print all libraries under cmake rpath for debugging
   ls -la "$CONDA_INSTALLATION_DIR/../lib"
-
-  ls -la /Users/ec2-user/runner/_work/_temp/miniconda
-  ls -la /Users/ec2-user/runner/_work/_temp/miniconda/bin
-  ls -la /Users/ec2-user/runner/_work/_temp/miniconda/lib
 }
 
 test_custom_backend() {
-  debug_cmake
+  print_cmake_info
 
   echo "Testing custom backends"
   pushd test/custom_backend
@@ -133,7 +114,7 @@ test_custom_backend() {
 }
 
 test_custom_script_ops() {
-  debug_cmake
+  print_cmake_info
 
   echo "Testing custom script operators"
   pushd test/custom_operator
@@ -155,7 +136,7 @@ test_custom_script_ops() {
 }
 
 test_jit_hooks() {
-  debug_cmake
+  print_cmake_info
 
   echo "Testing jit hooks in cpp"
   pushd test/jit_hooks
@@ -178,7 +159,7 @@ test_jit_hooks() {
 if [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
-  # test_python_shard "${SHARD_NUMBER}"
+  test_python_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_libtorch
     test_custom_script_ops
