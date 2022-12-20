@@ -174,7 +174,20 @@ def default_partition(
             for user in users:
                 saved_values.append(user)
         else:
-            saved_values.append(node)
+            backward_usages = [n for n in node.users if n.name not in forward_node_names]
+            if 'tensor_meta' in node.meta and all(is_sym_node(n) for n in backward_usages):
+                # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
+                # and not the actual tensor data,
+                # then it will be a lot cheaper to save only the sizes/strides, and not the actual tensor.
+                #
+                # Note that saving the tensor could also cause compilation problems:
+                # If the user mutated an input in the forward and uses its sizes/strides in the backward,
+                # then we would be obligated to clone the input before saving it to appease autograd.
+                # (This is how we originally found this bug).
+                for user in backward_usages:
+                    saved_sym_nodes.append(user)
+            else:
+                saved_values.append(node)
     saved_values = list(set(saved_values))
     saved_sym_nodes = list(set(saved_sym_nodes))
 
@@ -342,10 +355,10 @@ def min_cut_rematerialization_partition(
         # key in their meta dict, but that isn't always true today (see proxy_tensor.py)
         return 'tensor_meta' in x.meta or ('val' in x.meta and isinstance(x.meta['val'], torch.Tensor))
 
-    # networkx blows up on graphs with no required backward nodes
+    # networkx blows up on graphs with no tensor outputs.
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
     # this case, send our graph over to the default partitioner.
-    if len(required_bw_nodes) == 0:
+    if not any(is_tensor_node(x) for x in orig_fw_outputs):
         return default_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
 
     for node in reversed(joint_module.graph.nodes):
