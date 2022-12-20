@@ -1199,15 +1199,17 @@ class BenchmarkRunner:
                         "TorchDynamo optimized model failed to run because of following error"
                     )
                     log.exception(e)
-                    if i < retries and (
-                        (
-                            isinstance(e, RuntimeError)
-                            and str(e).startswith("Internal Triton PTX codegen error")
-                        )
-                        or (isinstance(e, KeyError) and str(e) == "'cubin'")
-                    ):
-                        time.sleep((i + 1) * 30)
-                        print("Retrying...")
+                    if (
+                        isinstance(e, RuntimeError)
+                        and "Internal Triton PTX codegen error" in str(e)
+                    ) or (isinstance(e, KeyError) and str(e) == "'cubin'"):
+                        if i < retries:
+                            time.sleep((i + 1) * 30)
+                            print("Retrying...")
+                        else:
+                            # Skip this kind of random failure for now
+                            accuracy_status = "pass_due_to_skip"
+                            return record_status(accuracy_status)
                     else:
                         accuracy_status = "fail_to_run"
                         return record_status(accuracy_status)
