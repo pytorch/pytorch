@@ -639,6 +639,40 @@ template<>
       return c10::hash_combine(std::hash<size_t>()(arg.index), std::hash<size_t>()(static_cast<std::size_t>(arg.type)));
     }
   };
+template<>
+  struct hash<c10::Argument> {
+    size_t operator()(const c10::Argument& arg) const
+    {
+      // We don't need to hash default value and alias_info
+      // because they are not useful in distinguishing schema.
+      auto hash = std::hash<std::string>{}(arg.name());
+      auto type_hash = std::hash<c10::TypePtr>{}(arg.type());
+      auto kwarg_only_hash = std::hash<bool>{}(arg.kwarg_only());
+      hash = c10::hash_combine(hash, type_hash);
+      hash = c10::hash_combine(hash, kwarg_only_hash);
+      if (arg.N()) {
+        auto N_hash = std::hash<int64_t>{}(*arg.N());
+        hash = c10::hash_combine(hash, N_hash);
+      }
+      return hash;
+    }
+  };
+template<>
+  struct hash<c10::FunctionSchema> {
+    size_t operator()(const c10::FunctionSchema& schema) const
+    {
+      auto hash = std::hash<c10::OperatorName>{}(schema.operator_name());
+      auto args_hash = c10::hash<std::vector<c10::Argument>>{}(schema.arguments());
+      auto returns_hash = c10::hash<std::vector<c10::Argument>>{}(schema.returns());
+      auto is_vararg_hash = std::hash<bool>{}(schema.is_vararg());
+      auto is_varret_hash = std::hash<bool>{}(schema.is_varret());
+      hash = c10::hash_combine(hash, args_hash);
+      hash = c10::hash_combine(hash, returns_hash);
+      hash = c10::hash_combine(hash, is_vararg_hash);
+      hash = c10::hash_combine(hash, is_varret_hash);
+      return hash;
+    }
+  };
 } // namespace std
 
 
