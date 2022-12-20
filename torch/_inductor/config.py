@@ -1,6 +1,5 @@
 import os
 import sys
-from functools import lru_cache
 
 # add some debug printouts
 debug = False
@@ -30,6 +29,15 @@ inplace_buffers = True
 
 # codegen benchmark harness
 benchmark_harness = True
+
+# fuse pointwise into templates
+epilogue_fusion = False
+
+# do epilogue fusions before other fusions
+epilogue_fusion_first = False
+
+# enable slow autotuning passes to select algorithms
+max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
@@ -64,13 +72,10 @@ unroll_reductions_threshold = 8
 comment_origin = False
 
 
-@lru_cache(1)
 def is_fbcode():
-    try:
-        import torch.fb  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    import torch
+
+    return not hasattr(torch.version, "git_version")
 
 
 compile_threads = (
@@ -96,7 +101,6 @@ dynamo_import = inductor_import.replace("inductor", "dynamo")
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
-alignment_size = 4
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -119,12 +123,12 @@ class cpp:
     min_chunk_size = 4096
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
-        "g++-12",
-        "g++-11",
-        "g++-10",
-        "clang++",
+        # "g++-12",
+        # "g++-11",
+        # "g++-10",
+        # "clang++",
         "g++",
-        "g++.par",
+        # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = False
@@ -136,11 +140,14 @@ class triton:
     # Use cudagraphs on output code
     cudagraphs = True
 
-    # choose conv backend, "aten" or "triton" or "autotune"
-    convolution = "aten"
+    # Synchronize before and after every compiled graph.
+    debug_sync_graph = False
 
-    # choose mm backend, "aten" or "triton" or "autotune"
-    mm = "aten"
+    # Synchronize after every kernel launch, to help pinpoint bugs
+    debug_sync_kernel = False
+
+    # choose conv backend, "aten" or "triton"
+    convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
     # Set default as True because otherwise will encouter `map::at` error
@@ -152,10 +159,9 @@ class triton:
     # limit tiling dimensions
     max_tiles = 2
 
-    # use triton.autotune?
-    autotune = True
-
-    use_bmm = False
+    # use triton.autotune for pointwise ops with complex layouts
+    # this should only be disabled for debugging/testing
+    autotune_pointwise = True
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -169,7 +175,7 @@ class triton:
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
-    enabled = os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+    enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
     debug_log = True
@@ -202,33 +208,25 @@ class trace:
 
 class InductorConfigContext:
     static_memory: bool
-    matmul_tune: str
     matmul_padding: bool
-    triton_autotune: bool
-    triton_bmm: bool
-    triton_mm: str
+    max_autotune: bool
     triton_convolution: str
     rematerialize_threshold: int
     rematerialize_acc_threshold: int
 
     def _save(self):
         self.static_memory = triton.cudagraphs
-        self.matmul_tune = triton.mm
         self.matmul_padding = shape_padding
-        self.triton_autotune = triton.autotune
-        self.triton_bmm = triton.use_bmm
-        self.triton_mm = triton.mm
+        self.max_autotune = max_autotune
         self.triton_convolution = triton.convolution
         self.rematerialize_threshold = realize_reads_threshold
         self.rematerialize_acc_threshold = realize_acc_reads_threshold
 
     def _apply(self):
+        global shape_padding, realize_reads_threshold, realize_acc_reads_threshold, max_autotune
         triton.cudagraphs = self.static_memory
-        triton.mm = self.matmul_tune
         shape_padding = self.matmul_padding
-        triton.autotune = self.triton_autotune
-        triton.use_bmm = self.triton_bmm
-        triton.mm = self.triton_mm
+        max_autotune = self.max_autotune
         triton.convolution = self.triton_convolution
         realize_reads_threshold = self.rematerialize_threshold
         realize_acc_reads_threshold = self.rematerialize_acc_threshold
@@ -247,11 +245,7 @@ class InductorConfigContext:
                 self.static_memory = True
 
             def max_autotune():
-                self.static_memory = False
-                self.matmul_padding = True
-                self.triton_convolution = "autotune"
-                self.triton_mm = "autotune"
-                self.matmul_padding = True
+                self.max_autotune = True
 
             modes = {
                 x.__name__.replace("_", "-"): x
@@ -287,3 +281,8 @@ class InductorConfigContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._prev._apply()
+
+
+from .._dynamo.config_utils import get_config_serialization_fns
+
+save_config, load_config = get_config_serialization_fns(sys.modules[__name__])

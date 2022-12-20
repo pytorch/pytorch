@@ -101,8 +101,8 @@ def get_hf_bert(rank):
     # in a multiprocessing test
     try:
         from transformers import BertConfig, AutoModelForMaskedLM
-    except ImportError:
-        raise unittest.SkipTest("Unable to import transformers")
+    except ImportError as e:
+        raise unittest.SkipTest("Unable to import transformers") from e
 
     batch_size, max_length, config, device = 4, 512, BertConfig(), f"cuda:{rank}"
     model = AutoModelForMaskedLM.from_config(config).to(device)
@@ -193,6 +193,18 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         model, inputs = get_hf_bert(0)
         model = FakeDDP(model)
         run_hf_bert_ddp(self, model, inputs, "aot_eager")
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_issue90375(self):
+        class Model(nn.Module):
+            def forward(self):
+                return torch.randn(3) * torch.randn(3)
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch._dynamo.optimize("aot_eager")(model)
+        opt_model()
 
 
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a

@@ -1,4 +1,5 @@
 #include <torch/csrc/profiler/collection.h>
+#include <torch/csrc/profiler/orchestration/vulkan.h>
 
 #include <algorithm>
 #include <functional>
@@ -356,6 +357,31 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   inputs_outputs_.clear();
 }
 
+template <size_t BlockSize>
+void materialize_vulkan(
+    std::vector<std::shared_ptr<Result>>& out,
+    AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>&
+        raw_events,
+    const std::function<time_t(approx_time_t)> time_converter,
+    const uint64_t tid,
+    const kineto::DeviceAndResource& kineto_info) {
+  for (const auto& i : raw_events) {
+    const auto name_and_duration_ns =
+        torch::profiler::impl::vulkan::getShaderNameAndDurationNs(i.second);
+
+    out.emplace_back(Result::create(
+        /*start_time_ns_=*/time_converter(i.first),
+        /*start_tid_=*/tid,
+        /*kineto_info_=*/kineto_info,
+        /*extra_fields_=*/
+        ExtraFields<EventType::Vulkan>{
+            /*name_=*/std::get<0>(name_and_duration_ns),
+            /*duration_ns_=*/
+            static_cast<int64_t>(std::get<1>(name_and_duration_ns)),
+            /*in_tree_building_=*/false}));
+  }
+}
+
 namespace {
 // See `RecordQueue::getSubqueue()` for an overview of this cache.
 struct SubQueueThreadCache {
@@ -423,6 +449,7 @@ auto kinetoEventCorrelationID(
 
 std::string Result::name() const {
   return visit(c10::overloaded(
+      ATTRIBUTE(Vulkan, std::string(e.name_)),
       ATTRIBUTE(Allocation, std::string("[memory]")),
       ATTRIBUTE(OutOfMemory, std::string("[OutOfMemory]")),
       ATTRIBUTE(PyCall, toString(e)),
@@ -434,6 +461,7 @@ libkineto::ActivityType Result::kinetoType() const {
   return visit(c10::overloaded(
       ATTRIBUTE(TorchOp, scopeToType(e.scope_)),
       ATTRIBUTE(Backend, scopeToType(e.scope_)),
+      ATTRIBUTE(Vulkan, libkineto::ActivityType::CPU_OP),
       ATTRIBUTE(Allocation, libkineto::ActivityType::CPU_INSTANT_EVENT),
       ATTRIBUTE(OutOfMemory, libkineto::ActivityType::CPU_INSTANT_EVENT),
       ATTRIBUTE(PyCall, libkineto::ActivityType::PYTHON_FUNCTION),
@@ -452,6 +480,8 @@ int64_t Result::endTimeNS() const {
   auto end_time_ns = visit(c10::overloaded(
       ATTRIBUTE(TorchOp, torchOpEndNS(e, finished_, parent_)),
       ATTRIBUTE(Backend, e.end_time_us_ * 1000),
+      ATTRIBUTE(
+          Vulkan, start_time_ns_ + (e.in_tree_building_ ? 0 : e.duration_ns_)),
       ATTRIBUTE(Allocation, start_time_ns_),
       ATTRIBUTE(OutOfMemory, start_time_ns_),
       ATTRIBUTE(Kineto, start_time_ns_ + e.duration_us_ * 1000),
@@ -475,6 +505,7 @@ uint64_t Result::endTID() const {
 c10::DeviceType Result::deviceType() const {
   using torch::autograd::profiler::deviceTypeFromActivity;
   return visit(c10::overloaded(
+      ATTRIBUTE(Vulkan, c10::DeviceType::Vulkan),
       ATTRIBUTE(Allocation, e.device_type_),
       ATTRIBUTE(OutOfMemory, e.device_type_),
       ATTRIBUTE(Kineto, deviceTypeFromActivity(e.activity_type_)),
@@ -623,7 +654,7 @@ class TransferEvents {
     static const auto prefix = fmt::format("\"{}\": ", indexKey);
     auto pos = metadata_json.find(prefix);
     return (pos == std::string::npos) ? unmatchedIndex : [&]() {
-      auto end = metadata_json.find(",", pos);
+      auto end = metadata_json.find(',', pos);
       end = (end == std::string::npos) ? metadata_json.size() : end;
       return std::stoll(metadata_json.substr(pos + prefix.size(), end));
     }();
@@ -852,7 +883,23 @@ struct ResultGreater {
   }
 };
 
+void set_in_tree_building(
+    std::vector<result_ptr_t>& results,
+    const bool value) {
+  for (result_ptr_t& r : results) {
+    r->visit(c10::overloaded(
+        [value](ExtraFields<EventType::Vulkan>& i) {
+          i.in_tree_building_ = value;
+        },
+        [&](auto&) {
+          // pass
+        }));
+  }
+}
+
 void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
+  set_in_tree_building(sorted_events, true);
+
   using op_fields = ExtraFields<EventType::TorchOp>;
   ska::flat_hash_map<uint64_t, std::shared_ptr<Result>> stacks;
   std::priority_queue<result_ptr_t, std::vector<result_ptr_t>, ResultGreater>
@@ -941,6 +988,125 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     pop_event(end_events_.top());
     end_events_.pop();
   }
+
+  set_in_tree_building(sorted_events, false);
+}
+
+/**
+ * Adjust r's duration to be the max of its current duration and the sum of all
+ * of its children's adjusted durations (keeping its start time the same)
+ * (adjust all child durations recursively)
+ */
+int64_t adjust_durations_dfs(std::shared_ptr<Result>& r) {
+  if (SOFT_ASSERT(r != nullptr)) {
+    int64_t original_duration = r->endTimeNS() - r->start_time_ns_;
+    int64_t children_total_duration = std::accumulate(
+        r->children_.begin(),
+        r->children_.end(),
+        0,
+        [](int64_t acc, std::shared_ptr<Result>& child) {
+          return acc + adjust_durations_dfs(child);
+        });
+
+    if (children_total_duration > original_duration) {
+      r->visit(c10::overloaded(
+          [&r, &children_total_duration](ExtraFields<EventType::TorchOp>& i) {
+            i.end_time_ns_ = r->start_time_ns_ + children_total_duration;
+          },
+          [&children_total_duration](ExtraFields<EventType::Vulkan>& i) {
+            i.duration_ns_ = children_total_duration;
+          },
+          [](ExtraFields<EventType::Allocation>& _) {
+            // Pass- Allocation events can't have children
+          },
+          [&](auto&) {
+            SOFT_ASSERT(
+                false,
+                "unexpected event type in mobile profiler adjust_durations_dfs: ",
+                r->name());
+          }));
+      return children_total_duration;
+    } else {
+      return original_duration;
+    }
+  } else {
+    return 0;
+  }
+}
+
+/**
+ * 1) Adjust r's start time to be [new_start_time] (also adjusting end time and
+      keeping duration the same)
+ * 2) Recursively adjust r's children's start times, making them line up such
+      that the last one ends at the same time as r
+ * 3) Return r's final end time
+ */
+int64_t adjust_timestamps_dfs(
+    std::shared_ptr<Result>& r,
+    int64_t new_start_time) {
+  if (SOFT_ASSERT(r != nullptr)) {
+    if (r->start_time_ns_ != new_start_time) {
+      // Adjust start time (keeping duration constant)
+      r->visit(c10::overloaded(
+          [&r, &new_start_time](ExtraFields<EventType::TorchOp>& i) {
+            i.end_time_ns_ =
+                new_start_time + (i.end_time_ns_ - r->start_time_ns_);
+          },
+          [](ExtraFields<EventType::Vulkan>& i) {
+            // Pass- We don't need to manually adjust end time for Vulkan events
+          },
+          [](ExtraFields<EventType::Allocation>& _) {
+            // Pass- No duration or end time to adjust
+          },
+          [&](auto&) {
+            SOFT_ASSERT(
+                false,
+                "unexpected event type in mobile profiler adjust_timestamps_dfs: ",
+                r->name());
+          }));
+      r->start_time_ns_ = new_start_time;
+    }
+    int64_t children_total_duration = std::accumulate(
+        r->children_.begin(),
+        r->children_.end(),
+        0,
+        [](int64_t acc, std::shared_ptr<Result>& child) {
+          return acc + (child->endTimeNS() - child->start_time_ns_);
+        });
+
+    int64_t child_start_time = r->endTimeNS() - children_total_duration;
+    for (std::shared_ptr<Result>& child : r->children_) {
+      child_start_time = adjust_timestamps_dfs(child, child_start_time);
+    }
+  }
+  return r->endTimeNS();
+}
+
+/**
+ * Adjust timestamps and durations of nodes in [out] such that
+ *  - Vulkan event timelines are synchronized with CPU event times
+ *  - Parent event timelines fully contain their child timelines
+ *  - No overlaps in timelines for nodes at the same depth
+ */
+void adjust_timestamps(std::vector<std::shared_ptr<Result>>& out) {
+  if (out.empty()) {
+    return;
+  }
+
+  int64_t min_start_time = out[0]->start_time_ns_;
+  for (std::shared_ptr<Result>& r : out) {
+    // Only begin traversal for root nodes.
+    if (r->parent_.expired()) {
+      adjust_durations_dfs(r);
+      min_start_time = adjust_timestamps_dfs(
+          r,
+          std::max(
+              r->tag() != EventType::Vulkan
+                  ? r->start_time_ns_
+                  : std::numeric_limits<int64_t>::min(),
+              min_start_time));
+    }
+  }
 }
 } // namespace
 
@@ -978,6 +1144,8 @@ RecordQueue::getRecords(
     queue.torch_ops_.materialize(
         out, converter, queue.tid(), queue.kineto_info());
     materialize(queue.backend_events_);
+    materialize_vulkan(
+        out, queue.vulkan_events_, converter, queue.tid(), queue.kineto_info());
     for (auto& i : queue.allocations_) {
       out.emplace_back(Result::create(
           /*start_time_ns_=*/converter(i.start_time_),
@@ -994,11 +1162,25 @@ RecordQueue::getRecords(
   }
 
   if (python_tracer_) {
-    for (auto i : python_tracer_->getEvents(
+    for (const auto& i : python_tracer_->getEvents(
              converter, python_enters, end_time_us * 1000)) {
       out.push_back(i);
     }
     python_tracer_.reset();
+  }
+
+  if (config_.experimental_config.adjust_timestamps) {
+    std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+      return a->start_time_ns_ < b->start_time_ns_;
+    });
+    build_tree(out);
+    adjust_timestamps(out);
+    for (auto& r : out) {
+      r->parent_.reset();
+      // Reset these so that second build_tree can happen
+      r->finished_ = false;
+      r->children_.clear();
+    }
   }
 
   auto trace = addKinetoEvents(out, start_time_us, end_time_us, config_);

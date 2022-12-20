@@ -9,6 +9,7 @@ import functorch
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch.fx
+from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
 
@@ -85,10 +86,7 @@ def _step_logger():
 
 @DebugContext.wrap
 def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
-    shape_env = None
-    for inp in example_inputs:
-        if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
-            shape_env = inp.fake_mode.shape_env
+    shape_env = _shape_env_from_inputs(example_inputs)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph):
@@ -127,13 +125,15 @@ def compile_fx_inner(
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
-    shape_env = None
-    for inp in example_inputs:
-        if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
-            shape_env = inp.fake_mode.shape_env
 
+    shape_env = _shape_env_from_inputs(example_inputs)
+    fake_mode = fake_mode_from_tensors(example_inputs)
     graph = GraphLowering(
-        gm, shape_env=shape_env, num_static_inputs=num_fixed, graph_id=graph_id
+        gm,
+        shape_env=shape_env,
+        num_static_inputs=num_fixed,
+        graph_id=graph_id,
+        fake_mode=fake_mode,
     )
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
@@ -402,11 +402,20 @@ def compile_fx(
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
-            # A "tiny" graph can actually decompose into multiple
-            # operators (if it's a decomposition) and inductor can
-            # do a better job on it in this case
-            #
-            # Also, for some reason, test_comprehensive___rmatmul___cpu
-            # fails without forcing a compile lol.
-            force_compile_tiny_graphs=True,
         )(model_, example_inputs_)
+
+
+def _shape_env_from_inputs(inputs):
+    shape_env = None
+    fake_mode = fake_mode_from_tensors(inputs)
+
+    # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
+    # pass in real inputs for now.
+    # if len(inputs) > 0:
+    # assert fake_mode is not None, breakpoint()
+
+    if fake_mode is not None:
+        return fake_mode.shape_env
+
+    # TODO(voz): Should we always have one anyway?
+    return None

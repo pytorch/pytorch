@@ -12,6 +12,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
+    skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
@@ -251,6 +252,7 @@ class TestMetaConverter(TestCase):
         m = MetaConverter()(y)
         self.assertMetadataMatches(m, y)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_weakref(self):
         x = torch.randn(4, 4, 4)
         m = MetaConverter()
@@ -274,6 +276,7 @@ class TestMetaConverter(TestCase):
         m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_tensor_outlives_converter(self):
         m = MetaConverter()
         ref = weakref.ref(m)
@@ -286,6 +289,10 @@ aten = torch.ops.aten
 
 CHECK_STRIDES = {
     torch.Tensor.__getitem__,
+}
+
+CHECK_ALL_STRIDES = {
+    aten.unsqueeze.default
 }
 
 CHECK_STRIDES_SKIPS = {
@@ -319,22 +326,29 @@ CHECK_STRIDES_SKIPS = {
     # aten.view.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_unflatten_cuda_float32
 }
 
+class CheckStrides(Enum):
+    NONE = 0
+    SIGNIFICANT = 1
+    ALL = 2
+
 def should_check_strides(func):
+    if func in CHECK_ALL_STRIDES:
+        return CheckStrides.ALL
     if func in CHECK_STRIDES:
-        return True
+        return CheckStrides.SIGNIFICANT
     if func in CHECK_STRIDES_SKIPS:
-        return False
+        return CheckStrides.NONE
     if not isinstance(func, torch._ops.OpOverload):
-        return False
+        return CheckStrides.NONE
     # Prims are expected to model strides correctly
     if func.namespace == "prims":
-        return True
+        return CheckStrides.SIGNIFICANT
     # Check if it's a view, by testing if any of the returns have
     # a non-empty alias set
     if any(r.alias_info.before_set for r in func._schema.returns if r.alias_info):
-        return True
+        return CheckStrides.SIGNIFICANT
     # TODO: check for TensorIterator
-    return True
+    return CheckStrides.SIGNIFICANT
 
 def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
     flat_meta_rs, _ = tree_flatten(meta_rs)
@@ -350,7 +364,10 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
         test_assert(meta_r.dtype == r.dtype, f"but real dtype was {r.dtype}")
         test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
         # See https://github.com/pytorch/pytorch/issues/78050
-        if should_check_strides(func):
+        if should_check_strides(func) == CheckStrides.ALL:
+            same_strides, _ = torch._prims_common.check_all_strides(meta_r, r)
+            test_assert(same_strides, f"but real stride was {r.stride()}")
+        elif should_check_strides(func) == CheckStrides.SIGNIFICANT:
             same_strides, _ = torch._prims_common.check_significant_strides(meta_r, r)
             test_assert(same_strides, f"but real stride was {r.stride()}")
         test_assert(
@@ -467,7 +484,7 @@ def run_meta_crossref(
         # they're not tested outside of gradcheck which only checks
         # torch.float64 and torch.complex128 (which this second one
         # often skipped as well).
-        raise unittest.SkipTest("Original OpInfo is broken")
+        raise unittest.SkipTest("Original OpInfo is broken") from e
 
 
     # TODO: also handle cases where func raise an exception

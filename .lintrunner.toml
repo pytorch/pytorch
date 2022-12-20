@@ -117,7 +117,6 @@ exclude_patterns = [
     'torch/distributed/distributed_c10d.py',
     # TODO(suo): these exclusions were added just to get lint clean on master.
     # Follow up to do more target suppressions and remove them.
-    'torch/distributed/fsdp/flatten_params_wrapper.py',
     'torch/ao/quantization/fx/convert.py',
     'torch/ao/quantization/_dbr/function_fusion.py',
     'test/test_datapipe.py',
@@ -156,12 +155,15 @@ code = 'MYPYNOFOLLOW'
 include_patterns = [
     'torch/_dynamo/eval_frame.py',
     'torch/_dynamo/convert_frame.py',
+    'torch/_dynamo/symbolic_convert.py',
     'torch/_dynamo/types.py',
     'torch/_dynamo/output_graph.py',
     'torch/_dynamo/guards.py',
+    'torch/_dynamo/side_effects.py',
     'torch/_dynamo/optimizations/__init__.py',
     'torch/_dynamo/optimizations/backends.py',
     'torch/_dynamo/optimizations/training.py',
+    'torch/_inductor/graph.py',
     'torch/_C/_dynamo/**/*.py',
 ]
 exclude_patterns = [
@@ -170,6 +172,7 @@ command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--config=mypy-nofollow.ini',
+    '--code=MYPYNOFOLLOW',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -199,6 +202,7 @@ command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--config=mypy-strict.ini',
+    '--code=MYPYSTRICT',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -206,6 +210,8 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
+    'c10/core/*.cpp',
+    'c10/core/**/*.cpp',
     'torch/csrc/fx/**/*.cpp',
     'torch/csrc/generic/**/*.cpp',
     'torch/csrc/onnx/**/*.cpp',
@@ -219,6 +225,7 @@ exclude_patterns = [
     # in a follow up PR.
     # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
     # that are not easily converted to accepted c++
+    'c10/test/**/*.cpp',
     'torch/csrc/jit/passes/onnx/helper.cpp',
     'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
     'torch/csrc/jit/serialization/onnx.cpp',
@@ -610,6 +617,37 @@ command = [
 ]
 
 [[linter]]
+code = 'ROOT_LOGGING'
+include_patterns = [
+    '**/*.py',
+]
+# These are not library code, but scripts in their own right, and so
+# therefore are permitted to use logging
+exclude_patterns = [
+    'tools/**',
+    'test/**',
+    'benchmarks/**',
+    'torch/distributed/run.py',
+    'functorch/benchmarks/**',
+    # Grandfathered in
+    'caffe2/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=logging\.(debug|info|warn|warning|error|critical|log|exception)\(',
+    '--replace-pattern=s/logging\.(debug|info|warn|warning|error|critical|log|exception)\(/log.\1(/',
+    '--linter-name=ROOT_LOGGING',
+    '--error-name=use of root logger',
+    """--error-description=\
+        Do not use root logger (logging.info, etc) directly; instead \
+        define 'log = logging.getLogger(__name__)' and call, e.g., log.info().
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'CMAKE'
 include_patterns = [
     "**/*.cmake",
@@ -777,6 +815,7 @@ include_patterns = [
     'benchmarks/dynamo/**/*.py',
     'torch/_inductor/**/*.py',
     'test/inductor/**/*.py',
+    'test/test_weak.py',
     'torch/onnx/**/*.py',
     'torch/package/**/*.py',
     'torch/_decomp/**/*.py',
@@ -812,3 +851,21 @@ init_command = [
     'usort==1.0.2',
 ]
 is_formatter = true
+
+[[linter]]
+code = 'COPYRIGHT'
+include_patterns = ['**']
+exclude_patterns = ['.lintrunner.toml']
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=Confidential and proprietary',
+    '--linter-name=COPYRIGHT',
+    '--error-name=Confidential Code',
+    """--error-description=\
+        Proprietary and confidential source code\
+        should not be contributed to PyTorch codebase\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
