@@ -164,6 +164,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
 
 REQUIRE_HIGHER_TOLERANCE = set("MT5ForConditionalGeneration")
 
+
 def get_module_cls_by_model_name(model_cls_name):
     _module_by_model_name = {
         "Speech2Text2Decoder": "transformers.models.speech_to_text_2.modeling_speech_to_text_2",
