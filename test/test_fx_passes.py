@@ -53,8 +53,8 @@ class TestDeepModule(torch.nn.Module):
         o = a + b
         o = o + 1.0
 
-        # testing to avoid DFS uses in passes. Since Python has 1000 max recursion depth.
-        for _ in range(sys.getrecursionlimit()+1):
+        # testing to avoid DFS uses in passes. Since Python has max recursion depth.
+        for _ in range(sys.getrecursionlimit() + 1):
             o = o - c
 
         return o
@@ -361,8 +361,6 @@ class TestFXGraphPasses(JitTestCase):
                                                  supported_ops,
                                                  allows_single_node_partition=True)
         partitions = partitioner.propose_partitions()
-        print(traced)
-        print(partitions)
 
 @dataclass
 class TestCase:
