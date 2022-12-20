@@ -1,6 +1,16 @@
 import functools
 import warnings
-from typing import Any, Callable, Dict, Iterable, List, no_type_check, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    no_type_check,
+    Optional,
+    Set,
+    Tuple,
+)
 
 import torch
 import torch.nn as nn
@@ -11,6 +21,8 @@ from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _assert_in_training_states,
     _FSDPState,
+    _get_fsdp_states,
+    _get_module_fsdp_state,
     _is_composable,
     TrainingState,
 )
@@ -36,6 +48,43 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
 }
 
 
+def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
+    """
+    Returns all root ``_FSDPState`` instances in the module tree rooted at
+    ``module``.
+
+    This is similar to :func:`_get_fsdp_states` except we must call
+    :func:`_is_fsdp_root` to force a lazy initialization to determine the FSDP
+    root in case lazy initialization has not yet happened.
+    """
+    fsdp_root_states: List[_FSDPState] = []
+    visited_fsdp_states: Set[_FSDPState] = set()
+    # NOTE: This function assumes that `module.modules()` proceeds top-down.
+    for submodule in module.modules():
+        optional_state = _get_module_fsdp_state(submodule)
+        if (
+            optional_state is not None
+            and optional_state not in visited_fsdp_states
+            and _is_fsdp_root(optional_state, submodule)
+        ):
+            visited_fsdp_states.add(optional_state)
+            fsdp_root_states.append(optional_state)
+    return fsdp_root_states
+
+
+def _is_fsdp_root(state: _FSDPState, module: nn.Module) -> bool:
+    """
+    Returns if ``state`` corresponds to that of an FSDP root.
+
+    For the wrapper code path, ``state`` and ``module`` should be the same. For
+    the non-wrapper code path, ``state`` should be ``module`` 's state.
+    """
+    # Force a lazy initialization to determine the FSDP root
+    _lazy_init(state, module)
+    assert state._is_root is not None  # mypy
+    return state._is_root
+
+
 @no_type_check
 def _validate_and_get_hybrid_shard_state(
     root_module: nn.Module,
@@ -53,7 +102,7 @@ def _validate_and_get_hybrid_shard_state(
     intra_node_pgs = set()
     inter_node_pgs = set()
     inter_node_states = set()
-    for fsdp_module in root_module.fsdp_modules(root_module):
+    for fsdp_module in _get_fsdp_states(root_module):
         # TODO: Change this to handle's sharding strategy if we deprecate
         # `ShardingStrategy` internally.
         # https://github.com/pytorch/pytorch/issues/90857
@@ -116,7 +165,7 @@ def _lazy_init(
     assert state is root_module
     inconsistent_limit_all_gathers = False
     inter_node_state = _validate_and_get_hybrid_shard_state(root_module)
-    for fsdp_module in state.fsdp_modules(root_module):
+    for fsdp_module in _get_fsdp_states(root_module):
         if fsdp_module is root_module:
             continue
 
@@ -313,8 +362,8 @@ def _pre_forward(
     # Recursively convert args and kwargs to specified precision.
     input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
     if state.mixed_precision.cast_forward_inputs:
-        args, kwargs = _prepare_forward_inputs(
-            state.compute_device, input_dtype, *args, **kwargs
+        args, kwargs = _cast_forward_inputs(
+            input_dtype, *args, **kwargs
         )
     return args, kwargs
 
@@ -398,7 +447,8 @@ def _post_forward_reshard(
 def _root_pre_forward(
     state: _FSDPState,
     module: nn.Module,
-    unused_args: Any,
+    args,
+    kwargs,
 ) -> None:
     """
     Runs pre-forward logic specific to the root FSDP instance, which should run
@@ -413,14 +463,14 @@ def _root_pre_forward(
     _lazy_init(state, module)
     p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
-        return
+        return args, kwargs
     if state.forward_prefetch:
         handles_keys = []
         if _is_composable(state):
             # TODO: This assumes singleton handles keys.
             handles_keys = [tuple(handle) for handle in state._handles]
         else:
-            for fsdp_module in state.fsdp_modules(state):
+            for fsdp_module in _get_fsdp_states(state):
                 handles_key = tuple(fsdp_module._handles)
                 handles_keys.append(handles_key)
         for handles_key in handles_keys:
@@ -432,24 +482,25 @@ def _root_pre_forward(
     )
     _clear_grads_if_needed(_all_handles(state))
 
+    # Prepares the forward inputs by moving them to ``compute_device``
+    # TODO: Do not use the side stream for tensor copies for now; investigate
+    # the perf with/without it.
+    args_tuple, kwargs_tuple = _to_kwargs(args, kwargs, state.compute_device.index, False)
+    args = args_tuple[0]
+    kwargs = kwargs_tuple[0]
 
-def _prepare_forward_inputs(
-    device: torch.device,
+    return args, kwargs
+
+
+def _cast_forward_inputs(
     input_dtype: Optional[torch.dtype],
     *args: Any,
     **kwargs: Any,
 ) -> Tuple[Any, Any]:
     """
-    Prepares the forward inputs by moving them to ``device`` and casting them
-    to ``input_dtype`` if it is not ``None``.
+    Prepares the forward inputs by casting them to ``input_dtype`` if it is not ``None``.
     """
-    # TODO: Do not use the side stream for tensor copies for now; investigate
-    # the perf with/without it.
-    # TODO: For mixed precision, move the inputs to the compute device and cast
-    # to reduced-precision in a single `to()` call.
-    args_tuple, kwargs_tuple = _to_kwargs(args, kwargs, device.index, False)
-    args = args_tuple[0]
-    kwargs = kwargs_tuple[0]
+    # TODO: For mixed precision, cast to reduced-precision in a single `to()` call.
     if input_dtype is not None:
         args, kwargs = _cast_fp_inputs_to_dtype(input_dtype, *args, **kwargs)
     return args, kwargs
@@ -468,15 +519,9 @@ def _cast_fp_inputs_to_dtype(
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
         if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
-        y = x.to(dtype)
-        # Explicitly copy over `requires_grad` since this runs inside
-        # `torch.no_grad()`
-        if x.is_leaf:
-            y.requires_grad = x.requires_grad
-        return y
+        return x.to(dtype)
 
-    with torch.no_grad():
-        return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
+    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
 
 @no_type_check
@@ -793,7 +838,7 @@ def _post_backward_final_callback(
             torch.cuda.current_stream().synchronize()
     state._exec_order_data.next_iter()
 
-    states = [state] if _is_composable(state) else state.fsdp_modules(state)
+    states = [state] if _is_composable(state) else _get_fsdp_states(state)
     for state in states:
         _catch_all_reshard(state)
         _finalize_params(state)
@@ -975,7 +1020,7 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -1005,7 +1050,7 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._comm_module_to_handles.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,
@@ -1041,7 +1086,7 @@ def _register_root_pre_forward_hook(
     state._root_pre_forward_handles.clear()
     hook = functools.partial(_root_pre_forward, state)
     state._root_pre_forward_handles.append(
-        module.register_forward_pre_hook(hook, prepend=True)
+        module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
     )
 
 
@@ -1197,7 +1242,7 @@ def _get_buffers_and_dtypes_for_computation(
         visited_buffers = set()
         # Traverse the FSDP instances bottom-up so that we prefer the owning
         # FSDP instance's mixed precision setting for each buffer
-        for fsdp_module in reversed(state.fsdp_modules(root_module)):
+        for fsdp_module in reversed(_get_fsdp_states(root_module)):
             for buffer in fsdp_module.buffers():
                 if buffer in visited_buffers:
                     continue
