@@ -117,7 +117,7 @@ def run_trainer(
         extra_args (dict): configurations added by the user
         data (list): training samples
         rank (int): process number in the world
-        server_rrefs (dict): a dictionary containing server RRefs
+        server_rref (dict): a dictionary containing server RRefs
     """
     trainer_class = trainer_map[args.trainer]
     if extra_args is not None:
