@@ -17,7 +17,7 @@ file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/nvfuser")
 
 set(NVFUSER_ROOT ${PROJECT_SOURCE_DIR})
 set(NVFUSER_SRCS_DIR "${NVFUSER_ROOT}/csrc")
-set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
+set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 
 # --- build nvfuser_codegen library
@@ -213,7 +213,7 @@ if(BUILD_PYTHON)
     message(STATUS "somehow this is happening")
     set_target_properties(${NVFUSER} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
-  install(TARGETS ${NVFUSER} EXPORT NvfuserTargets DESTINATION ${CMAKE_CURRENT_SOURCE_DIR})
+  install(TARGETS ${NVFUSER} EXPORT NvfuserTargets DESTINATION ${TORCH_ROOT}/nvfuser/)
 endif()
 
 # --- generate runtime files

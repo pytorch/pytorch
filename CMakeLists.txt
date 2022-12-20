@@ -1181,7 +1181,7 @@ if(NOT USE_CUDA AND NOT USE_ROCM)
 endif()
 
 if(BUILD_NVFUSER)
-  add_subdirectory(nvfuser)
+  add_subdirectory(third_party/nvfuser)
 endif()
 
 include(cmake/Summary.cmake)

@@ -1575,7 +1575,7 @@ cc_library(
 # torch
 py_binary(
     name = "stringify_file",
-    srcs = ["nvfuser/tools/stringify_file.py"],
+    srcs = ["third_party/nvfuser/tools/stringify_file.py"],
 )
 
 generated_nvfuser_hdrs = ["generated_" + hdr for hdr in libtorch_nvfuser_generated_headers]
