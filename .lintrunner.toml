@@ -59,6 +59,7 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'c10/util/strong_type.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
+    'torch/csrc/utils/python_compat.h',
 ]
 init_command = [
     'python3',
@@ -413,6 +414,7 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'aten/src/ATen/native/vulkan/glsl/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
+    'torch/csrc/utils/python_compat.h',
 ]
 command = [
     'python3',
