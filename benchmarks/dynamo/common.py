@@ -157,7 +157,7 @@ CI_SKIP_OPTIMIZER = {
     "tf_mixnet_l",  # This model is non-deterministic with same input + weights,
     # but without optimizing over multiple iterations, this still passes
     "mixnet_l",  # same as above
-    "ghostnet_100"  # same as above
+    "ghostnet_100",  # same as above
     # TorchBench
     "dlrm",  # symbolic shapes error
     # HF
@@ -942,7 +942,9 @@ class BenchmarkRunner:
             self.autocast = torch.cuda.amp.autocast
 
     def init_optimizer(self, name, device, params):
+        print(name)
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
+            print("INIT OPTIMIZER")
             self.optimizer = torch.optim.SGD(params, lr=0.01)
         else:
             self.optimizer = None
