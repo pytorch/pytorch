@@ -26,7 +26,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch._dispatch.python import enable_python_dispatcher
-from torch._ops import has_key, DispatchKey
 
 import itertools
 import functools
@@ -634,43 +633,6 @@ class DecompAmpTests(TestCase):
 
 
 instantiate_device_type_tests(DecompAmpTests, globals())
-
-class HasDecompTest(TestCase):
-    def test_has_decomposition(self):
-
-        def can_appear_in_trace(op) -> bool:
-            try:
-                return (
-                    has_key(op, DispatchKey.Meta) and
-                    # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-                    not has_key(op, DispatchKey.CompositeImplicitAutograd)
-                )
-            except RuntimeError as e:
-                # has_key fails for some jit-registered ops, which shouldn't be
-                # relevant here anyway
-                if 'does not exist' in str(e):
-                    return False
-                raise
-
-        def all_aten_overloads():
-            for name in torch._C._dispatch_get_all_op_names():
-                if not name.startswith("aten::"):
-                    continue
-
-                name = name[6:]
-                if "." in name:
-                    packet_name, overload_name = name.split(".")
-                else:
-                    packet_name, overload_name = name, "default"
-
-                packet = getattr(torch.ops.aten, packet_name)
-                assert isinstance(packet, torch._ops.OpOverloadPacket)
-                op = getattr(packet, overload_name)
-                yield op
-
-        overloads_wanting_decomp = set(op for op in all_aten_overloads() if can_appear_in_trace(op))
-        ops_missing_decomp = overloads_wanting_decomp - decomposition_table.keys()
-        self.assertExpected("".join(sorted(op.name() + "\n" for op in ops_missing_decomp)))
 
 if __name__ == "__main__":
     run_tests()

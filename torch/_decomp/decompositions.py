@@ -1332,7 +1332,15 @@ def native_batch_norm_helper(
     new_running_mean = running_mean
     new_running_var = running_var
     if training:
-        output, mean, rstd = normalize(input, reduction_dims, eps)
+        computation_dtype = utils.get_computation_dtype(input.dtype)
+        input_acc = input.to(dtype=computation_dtype)
+        biased_var = torch.var(
+            input_acc, dim=reduction_dims, unbiased=False, keepdim=True
+        )
+        mean = torch.mean(input_acc, dim=reduction_dims, keepdim=True)
+        rstd = torch.rsqrt(biased_var + eps)
+
+        output = (input - mean) * rstd
 
         save_mean = _squeeze_multiple(mean, reduction_dims)
         save_rstd = _squeeze_multiple(rstd, reduction_dims)
@@ -1345,9 +1353,8 @@ def native_batch_norm_helper(
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
-                n / (n - 1)
-            )
+            squeezed_var = _squeeze_multiple(biased_var, reduction_dims)
+            unbiased_var = squeezed_var * (n / (n - 1))
             new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
             if not functional:
                 running_var.copy_(new_running_var)
@@ -1539,7 +1546,7 @@ def _to_copy(
         x = torch._prims.convert_element_type(x, dtype)
     if memory_format is not None:  # no ref/prim for memory format
         out = torch.empty_like(x, memory_format=memory_format)
-        out.copy_(x)
+        out = torch.ops.aten.copy.default(out, x)
         return out  # type: ignore[call-overload]
     return x
 
@@ -2616,24 +2623,11 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
-register_inplace(aten.addbmm_, aten.addbmm)
-register_inplace(aten.addmm_, aten.addmm)
-register_inplace(aten.addmv_, aten.addmv)
-register_inplace(aten.baddbmm_, aten.baddbmm)
-register_inplace(aten.cumprod_, aten.cumprod)
-register_inplace(aten.fill_, aten.fill)
-register_inplace(aten.gelu_, aten.gelu)
-register_inplace(aten.hardswish_, aten.hardswish)
-register_inplace(aten.hardtanh_, aten.hardtanh)
-register_inplace(aten.hardsigmoid_, aten.hardsigmoid)
-register_inplace(aten.index_put_, aten.index_put)
-register_inplace(aten.index_reduce_, aten.index_reduce)
-register_inplace(aten.leaky_relu_, aten.leaky_relu)
-register_inplace(aten.logit_, aten.logit)
+register_inplace(aten.add_, aten.add)
+register_inplace(aten.sub_, aten.sub)
+register_inplace(aten.mul_, aten.mul)
 register_inplace(aten.relu_, aten.relu)
-register_inplace(aten.renorm_, aten.renorm)
-register_inplace(aten.round_, aten.round)
-register_inplace(aten.scatter_, aten.scatter)
-register_inplace(aten.scatter_add_, aten.scatter_add)
-register_inplace(aten.scatter_reduce_, aten.scatter_reduce)
+register_inplace(aten.hardtanh_, aten.hardtanh)
+register_inplace(aten.hardswish_, aten.hardswish)
+register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.silu_, aten.silu)

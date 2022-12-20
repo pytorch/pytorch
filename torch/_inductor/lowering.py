@@ -10,6 +10,7 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch import _prims_common
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -18,7 +19,7 @@ from torch._prims_common import (
     Number,
 )
 
-from . import config, ir, overrides
+from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
@@ -557,6 +558,7 @@ def trunc(x):
 
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
+    (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
     assert isinstance(x, TensorBox)
@@ -834,21 +836,6 @@ def glu(x, dim=-1):
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
-
-
-@register_lowering(aten.mm)
-def mm(a: TensorBox, b: TensorBox):
-    return TensorBox.create(ir.MatrixMultiply.create(a, b))
-
-
-@register_lowering(aten.addmm)
-def addmm(inp: TensorBox, a: TensorBox, b: TensorBox, beta=1, alpha=1):
-    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b, beta, alpha))
-
-
-@register_lowering(aten.bmm)
-def bmm(a: TensorBox, b: TensorBox):
-    return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
 def register_onednn_fusion_ops():
@@ -1853,6 +1840,7 @@ def index(x, indices):
     )
 
 
+# Note [Decompositions as Inductor Lowerings]
 # This is moved from decomposition to lowering because this decomp introduced
 # mutation in the graph, which is bad for Aot Autograd. Aot Autograd runs dead
 # code elimination and common subexpression elimination optimizations, which
@@ -1860,9 +1848,33 @@ def index(x, indices):
 # https://github.com/pytorch/torchdynamo/issues/1235.
 # Moving such reinplacing type of decomps to lowering ensures that AotAutograd
 # gets good graphs.
+# A better long term solution would be to functionalize all decompositions.
+# That would let us use these decompositions "normally",
+# instead of forcing them to be lowerings.
 @register_lowering([aten.index_put])
 def index_put(x, indices, values, accumulate=False):
     return index_put_(clone(x), indices, values, accumulate)
+
+
+# See Note [Decompositions as Inductor Lowerings]
+# We don't want the decomp to do type promotion implicitly;
+# It will try to convert index (int64) to a float-like type.
+@register_lowering([aten.index_add], type_promotion_kind=None)
+def index_add(x, dim, index, tensor, *, alpha=1):
+    return index_add_(clone(x), dim, index, tensor, alpha=alpha)
+
+
+# See Note [Decompositions as Inductor Lowerings]
+# We don't want the decomp to do type promotion implicitly;
+# It will try to convert index (int64) to a float-like type.
+@register_lowering([aten.index_add_], type_promotion_kind=None)
+def index_add_(x, dim, index, tensor, *, alpha=1):
+    dim = _prims_common.canonicalize_dims(len(x.get_size()), dim)
+    if alpha != 1:
+        tensor = mul(tensor, alpha)
+    idx = (None,) * dim + (index,)
+    index_put_(x, idx, tensor, accumulate=True)
+    return x
 
 
 def index_put_as_masked_fill(self, indices, value, accumulate):
@@ -3684,7 +3696,24 @@ def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
 
 
-@register_lowering(aten._test_inductor_realize)
+@register_lowering(torch.ops._inductor_test.realize)
 def _realize(x):
     x.realize()
     return clone(x)
+
+
+def _import_kernels():
+    """
+    Need to make sure all these get registered in the lowers dict
+    """
+    import importlib
+    import os
+
+    from . import kernel
+
+    for filename in sorted(os.listdir(os.path.dirname(kernel.__file__))):
+        if filename.endswith(".py") and filename[0] != "_":
+            importlib.import_module(f"{kernel.__name__}.{filename[:-3]}")
+
+
+_import_kernels()
