@@ -684,7 +684,9 @@ def register_var_mean():
                 inp.shape[i] if i not in dim else 1 for i in range(inp.ndim)
             ]
             broadcast_dims = [i for i in range(inp.ndim) if i not in dim]
-            var = torch._ops.ops.nvprims.broadcast_in_dim(var, output_shape, broadcast_dims)
+            var = torch._ops.ops.nvprims.broadcast_in_dim(
+                var, output_shape, broadcast_dims
+            )
             mean = torch._ops.ops.nvprims.broadcast_in_dim(
                 mean, output_shape, broadcast_dims
             )
@@ -729,7 +731,9 @@ def register_var_mean():
             output_shape = [a.shape[i] if i not in dim else 1 for i in range(a.ndim)]
             broadcast_dims = [i for i in range(a.ndim) if i not in dim]
             var, mean = var_mean
-            var = torch._ops.ops.nvprims.broadcast_in_dim(var, output_shape, broadcast_dims)
+            var = torch._ops.ops.nvprims.broadcast_in_dim(
+                var, output_shape, broadcast_dims
+            )
             mean = torch._ops.ops.nvprims.broadcast_in_dim(
                 mean, output_shape, broadcast_dims
             )
