@@ -63,8 +63,8 @@ runs:
         # Examine the runner name. If it ends with "-2", this is the second runner on the host.
         if [[ ${{ runner.name }} == *-2 ]]; then
             # select the last two GPUs on the host
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri/renderD130 --device=/dev/dri/renderD131 --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon -e ROCR_VISIBLE_DEVICES=2,3" >> "${GITHUB_ENV}"
         else
             # select the first two GPUs on the host
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri/renderD128 --device=/dev/dri/renderD129 --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon -e ROCR_VISIBLE_DEVICES=0,1" >> "${GITHUB_ENV}"
         fi
