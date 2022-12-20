@@ -4,6 +4,7 @@ import sys
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import ReduceOp
+from unittest import skip, SkipTest
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -12,7 +13,6 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     spawn_threads_and_init_comms,
     MultiThreadedTestCase,
-    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import TestCase, run_tests
 
@@ -127,13 +127,13 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         with self.assertRaisesRegex(NotImplementedError, "only supports SUM on threaded pg for now"):
             dist.all_reduce(output, op=ReduceOp.MAX)
 
-    @skip_if_lt_x_gpu(DEFAULT_WORLD_SIZE)
-    def test_random_seed_consistency(self):
-        device = f"cuda:{self.rank}"
-        self_tensor = torch.rand(3, 3, device=device)
+    def test_assert_equal_rank_0(self):
+        # RNG is shared across threads. So instead of asserting on all threads
+        # we only assert on rank 0
+        self_tensor = torch.rand(3, 3)
         rank_0_tensor = self_tensor.clone()
         dist.broadcast(rank_0_tensor, src=0)
-        self.assertEqual(rank_0_tensor, self_tensor)
+        self.assertEqualRank0(rank_0_tensor, self_tensor)
 
 
 if __name__ == "__main__":

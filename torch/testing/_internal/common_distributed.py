@@ -960,6 +960,15 @@ class MultiThreadedTestCase(TestCase):
     def rank(self) -> int:
         return c10d.get_rank()
 
+    def assertEqualRank0(self, x, y):
+        """
+        The reason why we have this util function instead of
+        self.assertEqual is all threads are sharing one CPU RNG
+        so the assertion result is only reliable on rank 0
+        """
+        if self.rank == 0:
+            self.assertEqual(x, y)
+
 
 class SaveForwardInputsModule(nn.Module):
     def __init__(
