@@ -157,7 +157,7 @@ def _remap_keys(old_dict, rename_fn):
     Args:
         old_dict: Dictionary (i.e. containing blob_name -> blob_name
             relationships.)
-        remap_fn: Function string -> string for renaming.
+        rename_fn: Function string -> string for renaming.
 
     Returns:
         None. Modifies old_dict in-place.
