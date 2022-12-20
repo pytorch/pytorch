@@ -55,9 +55,9 @@ batch_norm_batch_rule(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
   c10::MaybeOwned<Tensor> running_mean_maybe_owned = at::borrow_from_optional_tensor(running_mean_opt);
-  auto running_mean = *running_mean_maybe_owned;
+  const auto& running_mean = *running_mean_maybe_owned;
   c10::MaybeOwned<Tensor> running_var_maybe_owned = at::borrow_from_optional_tensor(running_var_opt);
-  auto running_var = *running_var_maybe_owned;
+  const auto& running_var = *running_var_maybe_owned;
   TORCH_CHECK(!training || (!input_bdim || ((!running_mean.defined() || running_mean_bdim) && (!running_var.defined() || running_var_bdim))),
       "Batch norm got a batched tensor as input while the running_mean or running_var, which will be updated in place, ",
       "were not batched.\nIf you are using a module and do not need eval mode, please set `track_running_stats` to be False.",
