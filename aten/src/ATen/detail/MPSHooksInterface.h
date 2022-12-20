@@ -28,8 +28,7 @@ struct TORCH_API MPSHooksInterface {
     return false;
   }
 
-  virtual const Generator& getDefaultMPSGenerator(DeviceIndex device_index = -1) const {
-    (void)device_index; // Suppress unused variable warning
+  virtual const Generator& getDefaultMPSGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
     AT_ERROR("Cannot get default MPS generator without MPS backend.");
   }
 

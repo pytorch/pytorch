@@ -14,16 +14,12 @@ const MPSHooksInterface& getMPSHooks() {
   c10::call_once(once, [] {
     mps_hooks = MPSHooksRegistry()->Create("MPSHooks", MPSHooksArgs{});
     if (!mps_hooks) {
-      mps_hooks =
-          // NOLINTNEXTLINE(modernize-make-unique)
-          std::unique_ptr<MPSHooksInterface>(new MPSHooksInterface());
+      mps_hooks = std::make_unique<MPSHooksInterface>();
     }
   });
 #else
   if (mps_hooks == nullptr) {
-    mps_hooks =
-        // NOLINTNEXTLINE(modernize-make-unique)
-        std::unique_ptr<MPSHooksInterface>(new MPSHooksInterface());
+    mps_hooks = std::make_unique<MPSHooksInterface>();
   }
 #endif
   return *mps_hooks;
