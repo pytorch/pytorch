@@ -280,9 +280,16 @@ inline static void enable_eval_frame_default(PyThreadState* tstate) {
 
 static inline PyObject* call_callback(
     PyObject* callable,
-    PyObject* frame,
+    THP_EVAL_API_FRAME_OBJECT* frame,
     long cache_len) {
-  PyObject* args = Py_BuildValue("(Ol)", frame, cache_len);
+
+#if PY_VERSION_HEX >= 0x030B00A7 // 3.11+
+  // Only the pointer to the frame is passed back to python here and it is
+  // casted back into a _PyInterpreterFrame in real_callback in eval_frame.py
+  PyObject* args = Py_BuildValue("(Lll)", frame, cache_len, _PyInterpreterFrame_LASTI(frame));
+#else
+  PyObject* args = Py_BuildValue("(Oll)", frame, cache_len, frame->f_lasti);
+#endif
   if (args == NULL) {
     return NULL;
   }
@@ -561,7 +568,7 @@ static PyObject* _custom_eval_frame(
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // that gets re-interpreted as a PyObject (which it is NOT!)
   PyObject* result =
-      call_callback(callback, (PyObject*)frame, cache_size(extra));
+      call_callback(callback, frame, cache_size(extra));
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of

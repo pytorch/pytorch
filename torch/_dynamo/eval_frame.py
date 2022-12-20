@@ -1,4 +1,5 @@
 import contextlib
+import ctypes
 import functools
 import inspect
 import logging
@@ -141,7 +142,20 @@ class _TorchDynamoContext:
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
-        self.callback: DynamoCallback = callback
+
+        if sys.version_info >= (3, 11):
+            # This MUST be the inner most callback that is responsible for converting
+            # from the raw ptr back to the _PyInterpreterFrame object.
+            @wraps(callback)
+            def real_callback(ptr, cache_size, lasti):
+                frame = ctypes.cast(ptr, ctypes.POINTER(_PyInterpreterFrame))[0]
+                return callback(frame, cache_size, lasti)
+
+        else:
+            real_callback = callback
+
+        self.callback = real_callback
+
         self.prior: Union[Unset, DynamoCallback] = unset
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
@@ -302,12 +316,8 @@ class DisableContext(_TorchDynamoContext):
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size):
-        if (
-            frame.f_lasti >= 0
-            or skipfiles.check(frame.f_code.co_filename)
-            or config.disable
-        ):
+    def catch_errors(frame, cache_size, lasti):
+        if lasti >= 0 or skipfiles.check(frame.f_code.co_filename) or config.disable:
             log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
