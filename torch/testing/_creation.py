@@ -2,16 +2,21 @@
 This module contains tensor creation utilities.
 """
 
-import torch
-from typing import Optional, List, Tuple, Union, cast
-import math
 import collections.abc
+import math
+from typing import cast, List, Optional, Tuple, Union
+
+import torch
 
 # Used by make_tensor for generating complex tensor.
-complex_to_corresponding_float_type_map = {torch.complex32: torch.float16,
-                                           torch.complex64: torch.float32,
-                                           torch.complex128: torch.float64}
-float_to_corresponding_complex_type_map = {v: k for k, v in complex_to_corresponding_float_type_map.items()}
+complex_to_corresponding_float_type_map = {
+    torch.complex32: torch.float16,
+    torch.complex64: torch.float32,
+    torch.complex128: torch.float64,
+}
+float_to_corresponding_complex_type_map = {
+    v: k for k, v in complex_to_corresponding_float_type_map.items()
+}
 
 
 def _uniform_random(t: torch.Tensor, low: float, high: float):
@@ -95,10 +100,12 @@ def make_tensor(
         tensor([[False, False],
                 [False, True]], device='cuda:0')
     """
+
     def _modify_low_high(low, high, lowest, highest, default_low, default_high, dtype):
         """
         Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high) if required.
         """
+
         def clamp(a, l, h):
             return min(max(a, l), h)
 
@@ -133,27 +140,36 @@ def make_tensor(
         result = torch.randint(0, 2, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = cast(Tuple[int, int], _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype))
-        result = torch.randint(low, high, shape, device=device, dtype=dtype)   # type: ignore[call-overload]
+        low, high = cast(
+            Tuple[int, int],
+            _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype),
+        )
+        result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
     elif dtype in _integral_types:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 10, dtype)
         result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
     elif dtype in _floating_types:
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
-        m_low, m_high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
+        m_low, m_high = _modify_low_high(
+            low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype
+        )
         result = torch.empty(shape, device=device, dtype=dtype)
         _uniform_random(result, m_low, m_high)
     elif dtype in _complex_types:
         float_dtype = complex_to_corresponding_float_type_map[dtype]
         ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
-        m_low, m_high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
+        m_low, m_high = _modify_low_high(
+            low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype
+        )
         result = torch.empty(shape, device=device, dtype=dtype)
         result_real = torch.view_as_real(result)
         _uniform_random(result_real, m_low, m_high)
     else:
-        raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
-                        " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
+        raise TypeError(
+            f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
+            " To request support, file an issue at: https://github.com/pytorch/pytorch/issues"
+        )
 
     assert not (noncontiguous and memory_format is not None)
     if noncontiguous and result.numel() > 1:
@@ -166,10 +182,14 @@ def make_tensor(
         if dtype in _integral_types or dtype is torch.bool:
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in _floating_types:
-            replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
+            replace_with = torch.tensor(
+                torch.finfo(dtype).tiny, device=device, dtype=dtype
+            )
         else:  # dtype in _complex_types:
             float_dtype = complex_to_corresponding_float_type_map[dtype]
-            float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
+            float_eps = torch.tensor(
+                torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype
+            )
             replace_with = torch.complex(float_eps, float_eps)
         result[result == 0] = replace_with
 

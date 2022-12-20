@@ -307,6 +307,22 @@ def skipIfNoQNNPACK(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def skipIfNoONEDNN(fn):
+    reason = 'Quantized operations require ONEDNN.'
+    if isinstance(fn, type):
+        if 'onednn' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'onednn' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 try:
     import torchvision  # noqa: F401
     HAS_TORCHVISION = True
@@ -1367,6 +1383,38 @@ class LinearReluAddModel(torch.nn.Module):
         x = torch.add(x, 5)
         x = self.fc2(x)
         self.relu = torch.nn.ReLU()
+        return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
+class LinearBnLeakyReluModel(torch.nn.Module):
+    def __init__(self, with_bn=True):
+        super().__init__()
+        self.linear = nn.Linear(5, 5)
+        self.bn1d = nn.BatchNorm1d(5)
+        self.leaky_relu = nn.LeakyReLU(0.01)
+        self.with_bn = with_bn
+
+    def forward(self, x):
+        x = self.linear(x)
+        if self.with_bn:
+            x = self.bn1d(x)
+        x = self.leaky_relu(x)
+        return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
+class LinearTanhModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(5, 5)
+        self.tanh = nn.Tanh()
+
+    def forward(self, x):
+        x = self.linear(x)
+        x = self.tanh(x)
         return x
 
     def get_example_inputs(self) -> Tuple[Any, ...]:

@@ -1,9 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import operator
+from typing import Iterable, List, Sequence, Union
 
 import torch
-from typing import List, Union, Sequence, Iterable
 from torch.distributed._tensor.api import DTensor
 
 
@@ -51,9 +51,7 @@ def as_list(
     # During tracing, `aten.sum.dim_IntList` uses `immutable_list` for its args,
     # which is an object but treated as a list by the tracer. Therefore, keep
     # `immutable_list` intact here as well.
-    if type(x) is list or isinstance(
-        x, torch.fx.immutable_collections.immutable_list
-    ):
+    if type(x) is list or isinstance(x, torch.fx.immutable_collections.immutable_list):
         return x
     else:
         return [x]

@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling
 from typing import List, Optional
 
 __all__ = ["Adamax", "adamax"]
@@ -99,6 +99,31 @@ class Adamax(Optimizer):
             for s in state_values:
                 s["step"] = torch.tensor(float(s["step"]))
 
+    def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            params_with_grad.append(p)
+            if p.grad.is_sparse:
+                raise RuntimeError("Adamax does not support sparse gradients")
+            grads.append(p.grad)
+
+            state = self.state[p]
+
+            # State initialization
+            if len(state) == 0:
+                state["step"] = torch.tensor(0.0)
+                state["exp_avg"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+                state["exp_inf"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+
+            exp_avgs.append(state["exp_avg"])
+            exp_infs.append(state["exp_inf"])
+            state_steps.append(state["step"])
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -127,29 +152,7 @@ class Adamax(Optimizer):
             maximize = group["maximize"]
             differentiable = group["differentiable"]
 
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-                params_with_grad.append(p)
-                if p.grad.is_sparse:
-                    raise RuntimeError("Adamax does not support sparse gradients")
-                grads.append(p.grad)
-
-                state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state["step"] = torch.tensor(0.0)
-                    state["exp_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
-                    state["exp_inf"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
-
-                exp_avgs.append(state["exp_avg"])
-                exp_infs.append(state["exp_inf"])
-                state_steps.append(state["step"])
+            self._init_group(group, params_with_grad, grads, exp_avgs, exp_infs, state_steps)
 
             adamax(
                 params_with_grad,
@@ -250,7 +253,6 @@ def _single_tensor_adamax(
         step_t = state_steps[i]
         # update step
         step_t += 1
-        step = step_t.item()
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
@@ -273,7 +275,7 @@ def _single_tensor_adamax(
         else:
             exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
 
-        bias_correction = 1 - beta1**step
+        bias_correction = 1 - beta1 ** _get_value(step_t)
         clr = lr / bias_correction
 
         param.addcdiv_(exp_avg, exp_inf, value=-clr)
@@ -327,6 +329,6 @@ def _multi_tensor_adamax(
         )
         torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
 
-    bias_corrections = [1 - beta1 ** step.item() for step in state_steps]
-    clr = [-1 * (lr / bias_correction) for bias_correction in bias_corrections]
+    bias_corrections = [1 - beta1 ** _get_value(step) for step in state_steps]
+    clr = _stack_if_compiling([-1 * (lr / bias_correction) for bias_correction in bias_corrections])
     torch._foreach_addcdiv_(params, exp_avgs, exp_infs, clr)

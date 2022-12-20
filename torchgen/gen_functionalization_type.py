@@ -386,7 +386,7 @@ def emit_view_functionalization_body(
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      {{
+      if (compute_reference_meta) {{
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
@@ -596,10 +596,18 @@ def emit_inplace_functionalization_body(
         )
 
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
+    # We don't want to run the inplace meta func for ops like .set_(), because:
+    # (1) they're unnecessary: inplace meta checks are only useful for ops like add_(),
+    #     where broadcasting will work for the out-of-place case but should fail on the inplace call
+    # (2) They'll also fail without adding extra infra: we'd need to convert the input storage argument
+    #     into a meta storage
+    any_storage_args = any(
+        a.type == BaseType(BaseTy.Storage) for a in f.func.arguments.flat_all
+    )
 
     return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-      if ({str(f.func.kind() == SchemaKind.inplace).lower()}) {{
+      if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()}) {{
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).

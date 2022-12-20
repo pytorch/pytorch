@@ -2,28 +2,20 @@
 
 from typing import Any
 
-
 import torch
-import torch.nn.functional as F
 import torch.distributed as dist
-from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
-from torch.distributed._tensor import (
-    DeviceMesh,
-    DTensor as DT,
-    Replicate,
-)
-from torch.distributed.tensor.parallel import (
-    PairwiseParallel,
-    parallelize_module,
-)
 
 import torch.distributed.distributed_c10d as distributed_c10d
+import torch.nn.functional as F
+from torch.distributed._shard.sharded_tensor.api import ShardedTensor
+from torch.distributed._tensor import DeviceMesh, DTensor as DT, Replicate
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
+from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel.fsdp import is_available
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.distributed.tensor.parallel.fsdp import is_available
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -64,9 +56,7 @@ def _distribute_and_fsdp_wrap_module(
         module.net2 = FSDP(
             module.net2, process_group=pg, use_orig_params=use_orig_params
         )
-    return FSDP(
-        module, process_group=pg, use_orig_params=use_orig_params
-    )
+    return FSDP(module, process_group=pg, use_orig_params=use_orig_params)
 
 
 def init_model(model_parallel_size=TP_DEGREE, use_orig_params=False, fsdp_nested=False):
@@ -100,9 +90,7 @@ def is_nested_tensor(val: Any) -> bool:
         if isinstance(val.local_shards()[0].tensor, DT):
             raise ValueError("Cannot handle DT nested insided ST")
     # Safety valve for when this eventually happen
-    elif isinstance(val, DT) and isinstance(
-        val._local_tensor, (DT, ShardedTensor)
-    ):
+    elif isinstance(val, DT) and isinstance(val._local_tensor, (DT, ShardedTensor)):
         raise ValueError("Cannot handle nested DT")
     return False
 
@@ -137,9 +125,7 @@ class Test2dParallelIntegration(DTensorTestBase):
         self.assertTrue(
             is_nested_tensor(optim_state["state"]["net1.weight"]["exp_avg"])
         )
-        self.assertFalse(
-            is_nested_tensor(optim_state["state"]["net3.bias"]["exp_avg"])
-        )
+        self.assertFalse(is_nested_tensor(optim_state["state"]["net3.bias"]["exp_avg"]))
 
     def _compare_params(self, m1, m2):
         with FSDP.summon_full_params(m1):
@@ -152,19 +138,21 @@ class Test2dParallelIntegration(DTensorTestBase):
                     if name == "net2.bias" and self.rank != 0:
                         continue
                     if type(p2) is DT:
-                        p2 = p2.redistribute(
-                            p2.device_mesh, [Replicate()]
-                        ).to_local()
+                        p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
                     self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
 
-    def _test_2d_e2e_flow(self, use_orig_params=False, fsdp_nested=False, multi_param_group=False) -> None:
+    def _test_2d_e2e_flow(
+        self, use_orig_params=False, fsdp_nested=False, multi_param_group=False
+    ) -> None:
         if not is_available():
             self.skipTest("FSDP 2d parallel integration not available")
         torch.manual_seed(0)
         model = SimpleModel().cuda(self.rank)
         model = FSDP(model, use_orig_params=use_orig_params)
         torch.manual_seed(0)
-        model_2d, dp_pg = init_model(use_orig_params=use_orig_params, fsdp_nested=fsdp_nested)
+        model_2d, dp_pg = init_model(
+            use_orig_params=use_orig_params, fsdp_nested=fsdp_nested
+        )
         # Check named parameters are returning the same name at least.
         param_names_2d = [name for name, _ in model_2d.named_parameters()]
         for name, _ in model.named_parameters():
@@ -220,7 +208,9 @@ class Test2dParallelIntegration(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_integration_fsdp_nested_param_groups(self) -> None:
-        self._test_2d_e2e_flow(fsdp_nested=True, use_orig_params=True, multi_param_group=True)
+        self._test_2d_e2e_flow(
+            fsdp_nested=True, use_orig_params=True, multi_param_group=True
+        )
 
 
 if __name__ == "__main__":

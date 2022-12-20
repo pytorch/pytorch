@@ -9,10 +9,10 @@
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
-#include <ATen/VmapMode.h>
 #include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
@@ -84,6 +84,10 @@
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
 #endif
+#endif
+
+#if defined(USE_MPS)
+#include <ATen/mps/MPSDevice.h>
 #endif
 
 #if defined(USE_VALGRIND)
@@ -877,6 +881,13 @@ PyObject* THPModule_getCurrentGraphTaskId(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_getCurrentNode(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return torch::autograd::functionToPyObject(
+      torch::autograd::get_current_node());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setDefaultMobileCPUAllocator(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1094,6 +1105,7 @@ static PyMethodDef TorchMethods[] = {
      THPModule_getCurrentGraphTaskId,
      METH_NOARGS,
      nullptr},
+    {"_current_autograd_node", THPModule_getCurrentNode, METH_NOARGS, nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
      METH_NOARGS,
@@ -1506,6 +1518,13 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
   ASSERT_TRUE(set_module_attr("has_mps", has_mps));
   py_module.def("_is_mps_available", []() { return at::hasMPS(); });
+  py_module.def("_is_mps_on_macos_13_or_newer", []() {
+#ifdef USE_MPS
+    return at::mps::is_macos_13_or_newer();
+#else
+    return false;
+#endif
+  });
 
   ASSERT_TRUE(
       set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));

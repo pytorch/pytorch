@@ -11,7 +11,7 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.nn import Parameter
-from torch.optim import SGD
+from torch.optim import Adam, SGD, Optimizer
 from torch import sparse
 from torch.optim.lr_scheduler import (
     LambdaLR,
@@ -44,6 +44,8 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo
 )
+from typing import Dict, Any, Tuple
+from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1556,6 +1558,102 @@ class TestOptim(TestCase):
             for original_param, param in zip(original_params, net.parameters()):
                 # assert that the parameters have not changed
                 self.assertEqual(original_param, param)
+
+    @skipIfTorchDynamo()
+    def test_post_hook(self):
+        def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data += 2
+
+        params = [torch.Tensor([1, 1])]
+        opt = SGD(params, lr=0.001)
+        data = 2
+        hook_handle = opt.register_step_post_hook(post_hook)
+
+        opt.step()
+        opt.step()
+        # check if pre hooks were registered
+        self.assertEqual(data, 6)
+
+        # remove handles, take step and verify that hook is no longer registered
+        hook_handle.remove()
+
+        opt.step()
+        self.assertEqual(data, 6)
+
+    @skipIfTorchDynamo()
+    def test_pre_hook(self):
+        def pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data += 2
+
+        params = [torch.Tensor([1, 1])]
+        opt = SGD(params, lr=0.001)
+        data = 5
+        hook_handle = opt.register_step_pre_hook(pre_hook)
+
+        opt.step()
+        opt.step()
+        # check if pre hooks were registered
+        self.assertEqual(data, 9)
+
+        # remove handles, take step and verify that hook is no longer registered
+        hook_handle.remove()
+
+        opt.step()
+        self.assertEqual(data, 9)
+
+    @skipIfTorchDynamo()
+    def test_pre_and_post_hook(self):
+        def global_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(0)
+
+        def global_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(5)
+
+        def local_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(1)
+
+        def local_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(2)
+
+        params = [torch.Tensor([1, 1])]
+        opt1 = SGD(params, lr=0.001)
+        opt2 = Adam(params, lr=0.01)
+        data = []
+
+        # register global hooks to both optimizers
+        global_pre_handle = register_optimizer_step_pre_hook(global_pre_hook)
+        global_post_handle = register_optimizer_step_post_hook(global_post_hook)
+
+        # register local hooks
+        first_pre_handle = opt1.register_step_pre_hook(local_pre_hook)
+        first_post_handle = opt1.register_step_post_hook(local_post_hook)
+        second_pre_handle = opt2.register_step_pre_hook(local_pre_hook)
+        second_post_handle = opt2.register_step_post_hook(local_post_hook)
+
+        opt1.step()
+        self.assertListEqual(data, [0, 1, 2, 5])
+        opt2.step()
+        self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5])
+        opt1.step()
+        self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
+
+        # remove all hooks
+        global_pre_handle.remove()
+        global_post_handle.remove()
+        first_pre_handle.remove()
+        first_post_handle.remove()
+        second_pre_handle.remove()
+        second_post_handle.remove()
+
+        opt1.step()
+        opt2.step()
+        self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
 
 
 class SchedulerTestNet(torch.nn.Module):
@@ -4172,6 +4270,8 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
+    @skipIfTorchDynamo("The inplace mu update fails with dynamo, "
+                       "since this is only happening when differentiable is enabled, skipping for now")
     def test_asgd(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
