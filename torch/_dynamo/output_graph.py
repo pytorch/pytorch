@@ -20,7 +20,6 @@ from typing import (
     Union,
 )
 
-import sympy
 from typing_extensions import Protocol
 
 import torch.nn
@@ -580,12 +579,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["calls_captured"] += ncalls
         counters["stats"]["fusions_possible"] += ncalls - 1
 
-        if config.dynamic_propagation:
-            # free a bit of memory
-            for node in self.graph.nodes:
-                if "example_value" in node.meta:
-                    del node.meta["example_value"]
-            self.real_value_cache.clear()
+        # free a bit of memory
+        for node in self.graph.nodes:
+            if "example_value" in node.meta:
+                del node.meta["example_value"]
+        self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
