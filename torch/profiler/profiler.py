@@ -29,7 +29,7 @@ __all__ = [
     "profile",
     "ExecutionGraphObserver",
 ]
-
+PROFILER_STEP_NAME = "ProfilerStep"
 
 def supported_activities():
     """
@@ -300,8 +300,8 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
         if not os.path.isdir(dir_name):
             try:
                 os.makedirs(dir_name, exist_ok=True)
-            except Exception:
-                raise RuntimeError("Can't create directory: " + dir_name)
+            except Exception as e:
+                raise RuntimeError("Can't create directory: " + dir_name) from e
         if not worker_name:
             worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
@@ -504,6 +504,9 @@ class profile(_KinetoProfile):
             (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
             (ProfilerAction.RECORD_AND_SAVE, None): [self.stop_trace, self._trace_ready]
         }
+        # Start tracking increments to profiler step, this will be used
+        # by Kineto
+        prof.KinetoStepTracker.init_step_count(PROFILER_STEP_NAME)
 
     def __enter__(self):
         self.start()
@@ -511,6 +514,7 @@ class profile(_KinetoProfile):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
+        prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
 
     def start(self):
         self._transit_action(ProfilerAction.NONE, self.current_action)
@@ -535,8 +539,8 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
 
         self._transit_action(prev_action, self.current_action)
+        prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
 
-        prof.kineto_step()
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(cur_step))
             self.step_rec_fn.__enter__()

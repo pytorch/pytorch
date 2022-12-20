@@ -52,6 +52,7 @@ class SizeVarAllocator(object):
         self._simplify_loops = self.make_simplify_loops_cache()
         self.declare = ""
         self.ending = ""
+        self.as_strided = "as_strided"
 
     def seed(self):
         """
@@ -146,6 +147,11 @@ class SizeVarAllocator(object):
                 base_s = base.args[2] - 1
             elif not base.has(ModularIndexing):
                 # actual iteration range is to size-1
+                iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
+                base_lowest = sympy_subs(base, iter_ranges_zero)
+                if self.maybe_guard_lt(base_lowest, 0):
+                    # can't replace with indexing div if base can be negative
+                    return ModularIndexing(base, divisor, modulus)
                 iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
                 base_s = sympy_subs(base, iter_ranges)
             else:
@@ -355,11 +361,14 @@ class SizeVarAllocator(object):
         return int(right)
 
     def __getitem__(self, val: int) -> Expr:
-        return self.shape_env.create_symbol(val)
+        return self.shape_env.duck_int(val)
 
     def size_hint(self, expr: Expr) -> int:
         out = sympy_subs(sympy.expand(expr), self.var_to_val)
         return int(out)
+
+    def size_hints(self, exprs: List[Expr]) -> int:
+        return tuple(self.size_hint(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -388,7 +397,13 @@ class SizeVarAllocator(object):
         return stride_vars
 
     def _stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
-        """Convert an indexing expression back into strides"""
+        """Convert an indexing expression back into strides
+
+        NOTE: This is only valid if the index is a standard strided offset
+        calculation. e.g. 10 * ModularIndexing(i0 + 1, 1, 2) would give a
+        stride of -10 because the index wraps around after the first element
+
+        """
         strides = []
         index = self.simplify(index)
         # remove any offset
@@ -575,6 +590,7 @@ class CppSizeVarAllocator(SizeVarAllocator):
         super().__init__(shape_env)
         self.declare = "auto "
         self.ending = ";"
+        self.as_strided = "at::as_strided"
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
