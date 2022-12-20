@@ -13,12 +13,6 @@
 namespace at { namespace native {
 
 
-std::tuple<Tensor, Tensor, Tensor> lstm_mkldnn_stub(
-    const Tensor& input, TensorList hx, TensorList params, bool has_biases,
-    int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-  AT_ERROR("lstm_mkldnn_stub: ATen not compiled with MKLDNN support");
-}
-
 std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(
 const Tensor& input,
     const Tensor& w0,
@@ -39,7 +33,7 @@ const Tensor& input,
   AT_ERROR("mkldnn_rnn_layer: ATen not compiled with MKLDNN support");
 
 }} // namespace at::native
-
+}
 #else // AT_MKLDNN_EBABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
@@ -283,23 +277,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   auto w1_ = get_mkldnn_tensor(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih.scalar_type())));
   auto w2_ = get_mkldnn_tensor(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh.scalar_type())));
 
-  if (train) {
-    Tensor workspace = Tensor();
-    auto pd = ideep::lstm_forward_training::prepare(
-        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
-    workspace = empty_aten_tensor_from_desc(
-        pd.workspace_desc(), input.options().dtype(at::kByte));
-    ideep::tensor mkldnn_workspace;
-    mkldnn_workspace.init(
-        pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
-    ideep::lstm_forward_training::compute(
-        pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
-    return std::make_tuple(output, hy_, cy_, workspace);
-  } else {
-    ideep::lstm_forward_inference::compute(
-        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
-    return std::make_tuple(output, hy_, cy_, Tensor());
-  }
+  Tensor workspace = Tensor();
+  auto pd = ideep::lstm_forward_training::prepare(
+      x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
+  workspace = empty_aten_tensor_from_desc(
+      pd.workspace_desc(), input.options().dtype(at::kByte));
+  ideep::tensor mkldnn_workspace;
+  mkldnn_workspace.init(
+      pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
+  ideep::lstm_forward_training::compute(
+      pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
+  return std::make_tuple(output, hy_, cy_, workspace);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(

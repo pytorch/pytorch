@@ -1460,11 +1460,16 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   }
 
   if (use_mkldnn(_input, dropout_p)) {
-    std::cout<<"in use_mkldnn\n";
-    Tensor output, hy, cy;
-    lstm_mkldnn_stub(_input.device().type(), output, hy, cy,_input, hx, _params, has_biases,
-        num_layers, dropout_p, train, bidirectional, batch_first);
-    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+    if (!has_projections) {
+      std::cout<<"in use_mkldnn\n";
+      Tensor output, hy, cy;
+      lstm_mkldnn_stub(_input.device().type(), output, hy, cy,_input, hx, _params, has_biases,
+          num_layers, dropout_p, train, bidirectional, batch_first);
+      return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+    } else {
+      TORCH_WARN_ONCE(
+          "LSTM with projections is not supported with oneDNN. Using default implementation.");
+    }
   }
 
   check_attributes(_input, _params, hx);
