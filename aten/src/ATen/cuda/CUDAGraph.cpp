@@ -162,7 +162,11 @@ void CUDAGraph::capture_end() {
     // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
     // who prefer not to report error message through these arguments moving forward
     // (they prefer return value, or errors on api calls internal to the capture)
+#if CUDA_VERSION >= 12000
+    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, 0));
+#else
     AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
+#endif
 #if CUDA_VERSION >= 11040
   } else {
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
