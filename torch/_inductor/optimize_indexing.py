@@ -108,10 +108,13 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
+        def is_bool(val):
+            return isinstance(val, bool) or hasattr(low, "is_Boolean") and low.is_Boolean
+
         x = ValueRanges.wrap(x)
         low, up = x.lower, x.upper
-        if hasattr(low, "is_Boolean") and low.is_Boolean:
-            assert hasattr(up, "is_Boolean") and up.is_Boolean
+        if is_bool(low):
+            assert is_bool(up)
             if dtype.is_floating_point:
                 return ValueRanges(sympy.Float(0.0), sympy.Float(1.0))
             else:

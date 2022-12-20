@@ -377,14 +377,7 @@ class SchedulerNode(BaseSchedulerNode):
         return var_ranges
 
     def codegen(self, index_vars):
-        sizes = self._sizes
-        assert sum(map(len, sizes)) == sum(map(len, index_vars))
-        var_ranges = dict(
-            zip(
-                itertools.chain.from_iterable(index_vars),
-                itertools.chain.from_iterable(sizes),
-            )
-        )
+        var_ranges = self.ranges_from_index_vars(index_vars)
         try:
             with V.set_ops_handler(
                 SimplifyIndexing(V.get_ops_handler(), var_ranges)
