@@ -68,6 +68,21 @@ template <CallType C>
 PyCodeObject* getCode();
 
 template <>
+PyCodeObject* getCode<CallType::PyOptimizerCall>() {
+  static auto optimizer_step_post_hook = []() {
+    pybind11::gil_scoped_acquire gil;
+    auto res = py::module::import("torch.optim")
+                   .attr("Optimizer")
+                   .attr("register_optimizer_step_post_hook")
+                   .attr("__code__")
+                   .ptr();
+    TORCH_INTERNAL_ASSERT(PyCode_Check(res));
+    return (PyCodeObject*)res;
+  }();
+  return optimizer_step_post_hook;
+};
+
+template <>
 PyCodeObject* getCode<CallType::PyModuleCall>() {
   static auto module_call_code = []() {
     pybind11::gil_scoped_acquire gil;
@@ -751,20 +766,6 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
 
   // Restore the thread state to its initial value.
   PyThreadState_Swap(thread_states[0]);
-
-  PyCodeObject* getCode<CallType::PyOptimizerCall>() {
-    static auto optimizer_step_post_hook = []() {
-      pybind11::gil_scoped_acquire gil;
-      auto res = pybind11::module::import("torch.optim")
-                     .attr("Optimizer")
-                     .attr("register_optimizer_step_post_hook")
-                     .attr("__code__")
-                     .ptr();
-      TORCH_INTERNAL_ASSERT(PyCode_Check(res));
-      return (PyCodeObject*)res;
-    }();
-    return optimizer_step_post_hook;
-  };
 };
 
 void PythonTracer::stop() {
