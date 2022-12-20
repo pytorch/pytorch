@@ -894,7 +894,9 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
         ep_sizes[dim] = numel;
         ep_strides[dim] = 1;
         for (const auto i : c10::irange(a.size())) {
-          if (i == dim) { continue; }
+          if (i == dim) {
+            continue;
+          }
 
           if (a[i] != b[i]) {
             return false;
