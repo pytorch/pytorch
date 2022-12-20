@@ -3368,6 +3368,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
+        xfail('fill'),
         # Batch norm got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
