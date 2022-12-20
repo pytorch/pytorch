@@ -322,8 +322,13 @@ inline static PyObject* eval_custom_code(
     return NULL;
   }
 
+  #if PY_VERSION_HEX >= 0x030B00A7 // 3.11+
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
+  #else
+  PyObject** fastlocals_old = frame->f_localsplus;
+  PyObject** fastlocals_new = shadow->f_localsplus;
+  #endif
 
   for (Py_ssize_t i = 0; i < nlocals_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
