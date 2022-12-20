@@ -122,16 +122,6 @@ int run(
   const int length_k = tensor_b.size(0);
   const int length_n = tensor_b.size(1);
 
-  std::cout << "length_m: " << length_m << std::endl;
-  std::cout << "length_n: " << length_n << std::endl;
-  std::cout << "length_k: " << length_k << std::endl;
-
-  std::cout << "kSparse: " << kSparse << std::endl;
-  std::cout << "kElementsPerElementE: " << kElementsPerElementE << std::endl;
-//  std::cout << "ElementInputE: " << ElementInputE << std::endl;
-  ElementInputE asdf;
-  std::cout << "ElementInputE: " << typeid(asdf).name() << std::endl;
-  std::cout << "std::numeric_limits<ElementInputE>: " << std::numeric_limits<ElementInputE>::digits << std::endl;
   TORCH_CHECK(
       tensor_b.size(0) % kSparse == 0,
       "Expected tensor_b.size(0) of value ",
