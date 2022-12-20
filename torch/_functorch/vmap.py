@@ -276,6 +276,10 @@ def vmap(
             random functions will error. Default: 'error'. WARNING: this flag
             only applies to random PyTorch operations and does not apply to
             Python's random module or numpy randomness.
+        chunk_size (None or int): If None (default), apply a single vmap over inputs.
+            If not None, then compute the vmap :attr:`chunk_size` samples at a time.
+            Note that :attr:`chunk_size=1` is equivalent to computing the vmap with a for-loop.
+            If you run into memory issues computing the vmap, please try a non-None chunk_size.
 
     Returns:
         Returns a new "batched" function. It takes the same inputs as
