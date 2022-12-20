@@ -1,6 +1,10 @@
 #include <ATen/native/vulkan/api/QueryPool.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/ops/Tensor.h>
+#ifdef USE_KINETO
+#include <torch/csrc/autograd/profiler_kineto.h>
+#include <torch/csrc/profiler/orchestration/vulkan.h>
+#endif // USE_KINETO
 
 #include <cmath>
 #include <iostream>
@@ -22,8 +26,10 @@ QueryPool::QueryPool(const QueryPoolConfig& config, const Adapter* adapter_p)
       device_(adapter_p->device_handle()),
       config_(config),
       querypool_(VK_NULL_HANDLE),
-      shader_log_{},
-      in_use_(0u) {
+      shader_logs_(1),
+      in_use_(0),
+      previous_shader_count_(0u),
+      results_pending_(false) {
   const VkQueryPoolCreateInfo info{
       VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, // sType
       nullptr, // pNext
@@ -35,11 +41,18 @@ QueryPool::QueryPool(const QueryPoolConfig& config, const Adapter* adapter_p)
 
   VK_CHECK(vkCreateQueryPool(device_, &info, nullptr, &querypool_));
 
-  shader_log_.reserve(config_.initialReserveSize);
+  shader_log().reserve(config_.initialReserveSize);
 
   TORCH_CHECK(adapter_p, "Valid GPU device must be created for QueryPool");
   ns_per_tick_ = std::lround(adapter_p->timestamp_period());
   ns_per_tick_ = (ns_per_tick_ == 0) ? default_ns_per_tick : ns_per_tick_;
+
+#ifdef USE_KINETO
+  torch::profiler::impl::vulkan::registerGetShaderNameAndDurationNs(
+      [this](int64_t vulkan_id) {
+        return get_shader_name_and_execution_duration_ns(vulkan_id);
+      });
+#endif // USE_KINETO
 }
 
 QueryPool::~QueryPool() {
@@ -47,14 +60,20 @@ QueryPool::~QueryPool() {
     return;
   }
   vkDestroyQueryPool(device_, querypool_, nullptr);
-  shader_log_.clear();
+
+#ifdef USE_KINETO
+  torch::profiler::impl::vulkan::deregisterGetShaderNameAndDurationNs();
+#endif // USE_KINETO
 }
 
 void QueryPool::reset(const CommandBuffer& cmd) {
   std::lock_guard<std::mutex> lock(mutex_);
   cmd.reset_querypool(querypool_, 0u, in_use_);
+  previous_shader_count_ += shader_log().size();
   in_use_ = 0u;
-  shader_log_.clear();
+  shader_logs_.push_back(std::vector<ShaderDuration>());
+  shader_log().reserve(config_.initialReserveSize);
+  results_pending_ = false;
 }
 
 size_t QueryPool::write_timestamp(const CommandBuffer& cmd) {
@@ -79,7 +98,7 @@ uint32_t QueryPool::shader_profile_begin(
 
   uint32_t query_idx = write_timestamp(cmd);
 
-  uint32_t log_idx = shader_log_.size();
+  uint32_t log_idx = shader_log().size();
   ShaderDuration log_entry{
       log_idx,
       // Execution Properties
@@ -95,7 +114,16 @@ uint32_t QueryPool::shader_profile_begin(
       0u, // duration
   };
 
-  shader_log_.emplace_back(log_entry);
+  shader_log().emplace_back(log_entry);
+
+  results_pending_ = true;
+
+#ifdef USE_KINETO
+  torch::profiler::impl::vulkan_id_t vulkan_id =
+      torch::profiler::impl::vulkan_id_t(previous_shader_count_ + log_idx);
+
+  torch::profiler::impl::_reportVulkanEventToProfiler(vulkan_id);
+#endif // USE_KINETO
 
   return log_idx;
 }
@@ -107,11 +135,15 @@ void QueryPool::shader_profile_end(
 
   size_t query_idx = write_timestamp(cmd);
 
-  shader_log_[log_idx].end_query_idx = query_idx;
+  shader_log()[log_idx].end_query_idx = query_idx;
 }
 
 void QueryPool::extract_results() {
   std::lock_guard<std::mutex> lock(mutex_);
+
+  if (!results_pending_) {
+    return;
+  }
 
   const VkQueryResultFlags flags = VK_QUERY_RESULT_64_BIT;
 
@@ -128,11 +160,13 @@ void QueryPool::extract_results() {
       sizeof(uint64_t), // stride
       flags)); // flags
 
-  for (ShaderDuration& entry : shader_log_) {
+  for (ShaderDuration& entry : shader_log()) {
     entry.start_time_ns = query_data.at(entry.start_query_idx) * ns_per_tick_;
     entry.end_time_ns = query_data.at(entry.end_query_idx) * ns_per_tick_;
     entry.execution_duration_ns = entry.end_time_ns - entry.start_time_ns;
   }
+
+  results_pending_ = false;
 }
 
 std::ostream& operator<<(std::ostream& os, const VkExtent3D& extents) {
@@ -169,7 +203,7 @@ std::string QueryPool::generate_string_report() {
   ss << std::right << std::setw(duration_w) << "===========";
   ss << std::endl;
 
-  for (ShaderDuration& entry : shader_log_) {
+  for (ShaderDuration& entry : shader_log()) {
     std::chrono::duration<size_t, std::nano> exec_duration_ns(
         entry.execution_duration_ns);
 
@@ -190,7 +224,7 @@ void QueryPool::print_results() {
 uint64_t QueryPool::get_total_op_ns(std::string op_name) {
   std::lock_guard<std::mutex> lock(mutex_);
   uint64_t sum = 0;
-  for (ShaderDuration& entry : shader_log_) {
+  for (ShaderDuration& entry : shader_log()) {
     if (entry.kernel_name == op_name) {
       sum += entry.execution_duration_ns;
     }
@@ -201,7 +235,45 @@ uint64_t QueryPool::get_total_op_ns(std::string op_name) {
 void QueryPool::shader_log_for_each(
     std::function<void(const ShaderDuration&)> fn) {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::for_each(shader_log_.begin(), shader_log_.end(), fn);
+  std::for_each(shader_log().begin(), shader_log().end(), fn);
+}
+
+std::tuple<std::string, uint64_t> QueryPool::
+    get_shader_name_and_execution_duration_ns(size_t query_index) {
+  extract_results();
+
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  const size_t entry_count = shader_logs_entry_count_thread_unsafe();
+  TORCH_CHECK(
+      (query_index >= 0 && query_index < entry_count),
+      "query_index of ",
+      query_index,
+      " is out of bounds (",
+      entry_count,
+      ") in QueryPool::get_shader_name_and_duration_ns");
+
+  size_t log_idx = 0;
+  size_t entry_count_acc = 0;
+  while (entry_count_acc + shader_logs_[log_idx].size() <= query_index) {
+    entry_count_acc += shader_logs_[log_idx].size();
+    log_idx += 1;
+  }
+
+  const ShaderDuration& entry =
+      shader_logs_[log_idx][query_index - entry_count_acc];
+
+  return std::tuple<std::string, uint64_t>(
+      entry.kernel_name, entry.execution_duration_ns);
+}
+
+size_t QueryPool::shader_logs_entry_count_thread_unsafe() {
+  return previous_shader_count_ + shader_log().size();
+}
+
+size_t QueryPool::shader_logs_entry_count() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return shader_logs_entry_count_thread_unsafe();
 }
 
 } // namespace api
