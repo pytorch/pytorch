@@ -27,12 +27,10 @@ from torch.fx.passes.tools_common import legalize_graph
 from . import config, ir  # noqa: F811, this is needed
 from .scheduler import (
     BaseSchedulerNode,
-    ExternKernelSchedulerNode,
     FusedSchedulerNode,
     NopKernelSchedulerNode,
     OutputNode,
     SchedulerNode,
-    TemplateSchedulerNode,
 )
 from .utils import dynamo_config, dynamo_debug_utils, dynamo_utils
 from .virtualized import V
@@ -110,10 +108,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     group: Any = None
     # create call_function node for each Buffer and Kernel
     for snode in snodes:
-        if isinstance(snode, ExternKernelSchedulerNode):
+        if snode.is_extern():
             node_type = "extern"
             group = node_type
-        elif isinstance(snode, TemplateSchedulerNode):
+        elif snode.is_template():
             node_type = "template"
             group = node_type
         elif isinstance(snode, NopKernelSchedulerNode):
@@ -182,7 +180,6 @@ def enable_aot_logging():
     # and the log level of the file logger to DEBUG
 
     stack = contextlib.ExitStack()
-    stack.enter_context(patch("functorch.compile.config.debug_fake_cross_ref", True))
     stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
     stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
     stack.enter_context(patch("functorch.compile.config.debug_joint", True))
@@ -280,6 +277,11 @@ class DebugContext:
             dynamo_utils.init_logging()
 
         if config.debug:
+
+            def reset_log_level(level):
+                dynamo_config.log_level = level
+
+            self._stack.callback(reset_log_level, dynamo_config.log_level)
             dynamo_config.log_level = logging.DEBUG
 
         self._stack.enter_context(V.set_debug_handler(self))

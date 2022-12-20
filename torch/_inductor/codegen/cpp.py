@@ -362,6 +362,14 @@ class CppVecOverrides(OpOverrides):
         assert dtype in [torch.bool], f"{__name__} does not support {dtype}"
         return f"({x})"
 
+    @staticmethod
+    def expm1(x):
+        return f"{x}.expm1()"
+
+    @staticmethod
+    def log1p(x):
+        return f"{x}.log1p()"
+
 
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
@@ -1373,6 +1381,9 @@ class CppScheduling:
         cpp_kernel_proxy.simd_omp_kernel = simd_omp_kernel
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, None)
+
+    def codegen_sync(self):
+        pass
 
     def flush(self):
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
