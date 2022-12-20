@@ -113,8 +113,6 @@ decompositions = get_decompositions(
         aten.softplus,
         aten.softplus_backward,
         aten.bucketize,
-        aten.zero,
-        aten.zero_,
     ]
 )
 
