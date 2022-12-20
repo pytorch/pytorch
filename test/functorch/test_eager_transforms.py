@@ -3533,7 +3533,7 @@ class TestFunctionalize(TestCase):
             z = y2[0]
             z.add_(tmp)
             return y
-        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device), skip_vmap=True)
 
     # See https://github.com/pytorch/functorch/issues/780
     def test_linear(self, device):
@@ -3656,6 +3656,7 @@ def forward(self, x_1) -> torch.Tensor:
     view_copy = torch.ops.aten.view_copy.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view_copy, ones);  view_copy = ones = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4, 2]);  add = None
+    view_copy_2 = torch.ops.aten.view_copy.default(view_copy_1, [4, 2])
     copy_ = torch.ops.aten.copy_.default(x_1, view_copy_1);  x_1 = None
     return view_copy_1
     """)
@@ -3699,6 +3700,7 @@ def forward(self, inpt_1) -> torch.Tensor:
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4]);  add = None
     add_1 = torch.ops.aten.add.Tensor(view_copy_1, 1);  view_copy_1 = None
     view_copy_2 = torch.ops.aten.view_copy.default(add_1, [4]);  add_1 = None
+    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4])
     return view_copy_2
     """)
 
@@ -3728,6 +3730,7 @@ def forward(self, inpt_1) -> torch.Tensor:
     getitem = aminmax[0]
     getitem_1 = aminmax[1];  aminmax = None
     view_copy_2 = torch.ops.aten.view_copy.default(getitem_1, [2, 2]);  getitem_1 = None
+    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4])
     return (view_copy_2, getitem)
     """)
 
@@ -3750,6 +3753,7 @@ def forward(self, x_1) -> torch.Tensor:
     view = torch.ops.aten.view.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
     view_1 = torch.ops.aten.view.default(add, [4, 2]);  add = None
+    view_2 = torch.ops.aten.view.default(view_1, [4, 2])
     copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = None
     return view_1
     """)
