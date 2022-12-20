@@ -327,7 +327,7 @@ bool plan_errata_exception(const cudnnHandle_t handle, const std::string & execu
   }
 }
 
-void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::OperationGraph& opGraph, cudnn_frontend::EngineConfigGenerator& generator, const Tensor& x, cudnn_frontend::executionPlans_t& valid_plans, at::DataPtr& workspace_ptr, unsigned int max_plans = 0) {
+void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::OperationGraph& opGraph, cudnn_frontend::EngineConfigGenerator& generator, const Tensor& x, cudnn_frontend::executionPlans_t& valid_plans, at::DataPtr& workspace_ptr) {
   auto initial_predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
     return plan_errata_exception(handle, plan.getTag());
   };
@@ -355,21 +355,97 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
       remove_invalid = true;
     }
   }
-  if (remove_invalid || max_plans) {
+  if (remove_invalid) {
     cudnn_frontend::executionPlans_t new_valid_plans;
-    unsigned int plan_count = 0;
     for (auto &plan : valid_plans) {
       if (plan.getWorkspaceSize() <= max_workspace_size) {
         new_valid_plans.emplace_back(std::move(plan));
-        plan_count++;
-      }
-      if (max_plans && plan_count >= max_plans) {
-        break;
       }
     }
     valid_plans = std::move(new_valid_plans);
   }
 }
+
+// TODO: This is a hacked version of a cuDNN frontend function to allow us to
+// limit the number of benchmarked plans to save time. Once upstream cuDNN
+// frontend adds this functionality, remove this duplicate function definition.
+template <cudnn_frontend::CudnnFindSamplingTechnique samplingTechnique>
+auto
+temp_cudnn_time_sorted_plan_hack(cudnnHandle_t handle, cudnn_frontend::executionPlans_t plans, cudnn_frontend::VariantPack const &variantPack, const unsigned int benchmark_limit) -> cudnn_frontend::executionPlans_t {
+    cudnn_frontend::executionPlans_t time_sorted_plans;
+
+    auto plan_cmp = [](const cudnn_frontend::ExecutionPlan& a, const cudnn_frontend::ExecutionPlan& b) {return a.getExecutionTime() < b.getExecutionTime();};
+    std::set<std::reference_wrapper<cudnn_frontend::ExecutionPlan>, decltype(plan_cmp)> timed_execution_plans(plan_cmp);
+
+    const int maxIterCount =
+        (samplingTechnique == cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE)
+            ? 1
+            : (samplingTechnique == cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE) ? 3 : 100;
+    const float threshhold = 0.95f;
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaDeviceSynchronize();
+
+    cudaStream_t stream = nullptr;
+    cudnnGetStream(handle, &stream);
+
+    unsigned int count = 0;
+
+    for (auto &plan : plans) {
+        float time_ms       = 0.0f;
+        float final_time_ms = 0.0f;
+        float min_time_ms   = std::numeric_limits<float>::max();
+
+        // Warm-up run
+        auto warmup_status = ::cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc());
+        if (warmup_status != CUDNN_STATUS_SUCCESS) {
+            continue;
+        }
+
+        cudaDeviceSynchronize();
+
+        for (int i = 0; i < maxIterCount; i++) {
+            cudaEventRecord(start, stream);
+
+            cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc());
+
+            cudaEventRecord(stop, stream);
+            cudaEventSynchronize(stop);
+            cudaEventElapsedTime(&time_ms, start, stop);
+
+            if (samplingTechnique == cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE) {
+                final_time_ms = std::min(min_time_ms, time_ms);
+                if (time_ms / min_time_ms < threshhold) {
+                    min_time_ms = final_time_ms;
+                } else {
+                    break;
+                }
+            } else {
+                final_time_ms = i == (maxIterCount / 2) ? time_ms : final_time_ms;
+            }
+        }
+        plan.setExecutionTime(final_time_ms);
+        timed_execution_plans.insert(plan);
+
+        count += 1;
+        if (benchmark_limit && count >= benchmark_limit) {
+          break;
+        }
+    }
+
+    for (cudnn_frontend::ExecutionPlan &plan : timed_execution_plans) {
+        time_sorted_plans.emplace_back(std::move(plan));
+    }
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+
+
+    return time_sorted_plans;
+}
+
 
 auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
@@ -381,15 +457,15 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   cudnn_frontend::executionPlans_t valid_plans;
   c10::DeviceGuard g(x.options().device());
   at::DataPtr workspace_ptr;
-  auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
-  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr, benchmark_limit);
+  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr);
   auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(3, data_ptrs)
       .setUids(3, uids)
       .setWorkspacePointer(workspace_ptr ? workspace_ptr.get() : nullptr)
       .build();
 
-  auto plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(handle, std::move(valid_plans), variantPack);
+  auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
+  auto plans = temp_cudnn_time_sorted_plan_hack<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(handle, std::move(valid_plans), variantPack, benchmark_limit);
 
   cudnn_frontend::executionPlans_t sorted_plans;
   for (auto& plan : plans) {
@@ -412,15 +488,15 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
   cudnn_frontend::executionPlans_t valid_plans;
   c10::DeviceGuard g(x.options().device());
   at::DataPtr workspace_ptr;
-  auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
-  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr, benchmark_limit);
+  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr);
   auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(5, data_ptrs)
       .setUids(5, uids)
       .setWorkspacePointer(workspace_ptr ? workspace_ptr.get() : nullptr)
       .build();
 
-  auto plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(handle, std::move(valid_plans), variantPack);
+  auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
+  auto plans = temp_cudnn_time_sorted_plan_hack<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(handle, std::move(valid_plans), variantPack, benchmark_limit);
 
   cudnn_frontend::executionPlans_t sorted_plans;
   for (auto& plan : plans) {
