@@ -109,8 +109,9 @@ class ValueRangeAnalysis(object):
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
         x = ValueRanges.wrap(x)
-        if isinstance(x, sympy.Expr) and x.lower.is_Boolean:
-            assert isinstance(x, sympy.Expr) and x.upper.is_Boolean
+        low, up = x.lower, x.upper
+        if hasattr(low, "is_Boolean") and low.is_Boolean:
+            assert hasattr(up, "is_Boolean") and up.is_Boolean
             if dtype.is_floating_point:
                 return ValueRanges(sympy.Float(0.0), sympy.Float(1.0))
             else:
@@ -170,7 +171,7 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def log(x):
-        return ValueRanges.checked_unary_map(x, lambda y: sympy.log(y))
+        return ValueRanges.checked_unary_map(x, lambda y: -math.inf if y <= 0 else sympy.log(y))
 
     @staticmethod
     def sqrt(x):
