@@ -905,6 +905,17 @@ def _broadcast_unsharded_pos_dim_tensor_state(
     param_state[state_name] = unsharded_tensor
 
 
+def _rekey_named_optim_state_dict(optim_state_dict: Dict[str, Any]) -> Dict[str, Any]:
+    osd = {"state": {}, "param_groups": optim_state_dict["param_groups"]}
+    for k, state in optim_state_dict["state"].items():
+        assert len(k.unflat_param_names) == 1, (
+            "For NamedOptimzer, each _OptimStateKey should have one name "
+            "in `unflat_param_names`."
+        )
+        osd["state"][k.unflat_param_names[0]] = state
+    return osd
+
+
 def _rekey_sharded_optim_state_dict(
     sharded_osd: Dict[str, Any],
     model: torch.nn.Module,
@@ -924,12 +935,6 @@ def _rekey_sharded_optim_state_dict(
     may be different across ranks. In particular, the unflattened parameter
     names are represented as :class:`_OptimStateKey` s.
     """
-    if is_named_optimizer:
-        osd = {"state": {}, "param_groups": sharded_osd["param_groups"]}
-        for k, state in sharded_osd["state"].items():
-            osd["state"][k.unflat_param_names[0]] = state
-        return osd
-
     param_to_flat_param_id = (
         _get_param_to_param_id_from_optim_input(model, optim_input)
         if using_optim_input

@@ -83,6 +83,7 @@ from ._optim_utils import (
     _get_param_to_param_id_from_optim_input,
     _optim_state_dict,
     _process_pos_dim_tensor_state,
+    _rekey_named_optim_state_dict,
     _rekey_sharded_optim_state_dict,
 )
 from ._state_dict_utils import _register_all_state_dict_hooks
@@ -1146,6 +1147,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """
         The internal API that is used by all the optim_state_dict implementations.
+        Given model, optim, the original optim_state_dict, this API removes the
+        FSDP internal information and internal sharding from the optim_state_dict.
         """
         if full_state_dict:
             FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(
@@ -1163,10 +1166,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 model, False, False
             )
 
-        use_orig_params = False
-        for module in FullyShardedDataParallel.fsdp_modules(model):
-            use_orig_params = module._use_orig_params
-            break
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        assert all(
+            use_orig_params == m._use_orig_params
+            for m in FullyShardedDataParallel.fsdp_modules(model)
+        ), "Not all FSDP modules have the same _use_orig_params value"
 
         return _optim_state_dict(
             model=model,
@@ -1194,6 +1198,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         full_state_dict: bool = True,
         is_named_optimizer: bool = False,
     ) -> Dict[str, Any]:
+        """
+        The internal API that is used by all the load optim_state_dict
+        implementations except for loading optim_state_dict with rank0_only is
+        True option.
+        Given model, optim, the saved optim_state_dict, this API adds the
+        FSDP internal information and internal sharding to the optim_state_dict.
+        """
         FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(
             model, full_state_dict, False
         )
@@ -1203,10 +1214,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim,
         )
 
-        use_orig_params: bool = False
-        for module in FullyShardedDataParallel.fsdp_modules(model):
-            use_orig_params = module._use_orig_params
-            break
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        assert all(
+            use_orig_params == m._use_orig_params
+            for m in FullyShardedDataParallel.fsdp_modules(model)
+        ), "Not all FSDP modules have the same _use_orig_params value"
 
         sharded_osd = _flatten_optim_state_dict(
             optim_state_dict,
@@ -1214,14 +1226,16 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             True,
             use_orig_params,
         )
-        return _rekey_sharded_optim_state_dict(
-            sharded_osd,
-            model,
-            optim,
-            optim_input,
-            using_optim_input,
-            is_named_optimizer=is_named_optimizer,
-        )
+        if is_named_optimizer:
+            return _rekey_named_optim_state_dict(sharded_osd)
+        else:
+            return _rekey_sharded_optim_state_dict(
+                sharded_osd,
+                model,
+                optim,
+                optim_input,
+                using_optim_input,
+            )
 
     @staticmethod
     def full_optim_state_dict(
