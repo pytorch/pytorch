@@ -346,7 +346,10 @@ void Engine::thread_init(
   // We don't have any good reason to prefer one or the other, so we've
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
-  set_device(device);
+
+  if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
+    set_device(device);
+  }
 
   // initialize each device thread's thread local ready queue with the ready
   // queue that is created before the thread initialization
