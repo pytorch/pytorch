@@ -23,7 +23,7 @@ class LKJCholesky(Distribution):
     to make the probability of the correlation matrix :math:`M` generated from
     a Cholesky factor proportional to :math:`\det(M)^{\eta - 1}`. Because of that,
     when ``concentration == 1``, we have a uniform distribution over Cholesky
-    factors of correlation matrices.::
+    factors of correlation matrices::
 
         L ~ LKJCholesky(dim, concentration)
         X = L @ L' ~ LKJCorr(dim, concentration)
