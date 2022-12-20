@@ -9964,6 +9964,23 @@ class TestNNDeviceType(NNTestCase):
             small_image.grad.zero_()
             large_view.grad.zero_()
 
+    @onlyCUDA
+    def test_grid_sample_half_precision(self):
+        def helper(shape_in, shape_out):
+            for mode in ('bilinear', 'nearest', 'bicubic'):
+                if len(shape_in) != 4 and mode == 'bicubic':
+                    continue
+                data = torch.randn(shape_in, device='cuda', dtype=torch.half)
+                grid = torch.rand(shape_out, device='cuda', dtype=torch.half) * 2.0 - 1.0
+
+                out_half = F.grid_sample(data, grid, mode=mode, padding_mode='zeros', align_corners=False)
+                out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros', align_corners=False)
+
+                self.assertEqual(out_half, out_double.half(), msg="grid_sample with mode = {} doesn't match".format(mode))
+
+        helper((32, 64, 16, 16), (32, 8, 8, 2))
+        helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3))
+
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float, device=device)
         logits = logits.to(dtype)
