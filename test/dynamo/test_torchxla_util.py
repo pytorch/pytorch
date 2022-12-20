@@ -6,18 +6,17 @@ import unittest
 @functools.lru_cache(None)
 def should_run_torchxla_tests():
     """
-    Run the tests if torch_xla is available and number of gpu devices is specified.
+    Run the tests if torch_xla is available and xla_device can be init.
     """
-    has_torch_xla = True
     try:
         import torch_xla.core.xla_model as xm
     except ImportError:
-        has_torch_xla = False
+        return False
     try:
         device = xm.xla_device()
     except RuntimeError:
-        device = None
-    return has_torch_xla and device
+        return False
+    return True
 
 
 def maybe_skip_torchxla_test(test_case):
