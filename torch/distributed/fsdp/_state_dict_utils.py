@@ -6,6 +6,7 @@ from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 
 # Import the entire FSDP file to avoid circular imports
 import torch.nn as nn
@@ -17,7 +18,6 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 from torch.distributed.fsdp._common_utils import (
-    _all_handles,
     _FSDPState,
     _has_fsdp_params,
     _is_composable,
@@ -130,7 +130,7 @@ def _common_pre_state_dict_hook(
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-        _clear_grads_if_needed(_all_handles(fsdp_state))
+        _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
 
 
 def _common_unshard_pre_state_dict_hook(
@@ -237,14 +237,19 @@ def _common_unshard_post_state_dict_hook(
             # TODO: for composable FSDP, this should be clean_tensor_name(clean_key),
             buffer_clean_fqns.append(clean_key)
             buffers.append(state_dict[fqn])
-    if buffers and fsdp_state._mixed_precision_enabled_for_buffers():
-        buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
-        _cast_buffers_to_dtype_and_device(
-            buffers, buffer_dtypes, fsdp_state.compute_device
+    if buffers:
+        mixed_precision_enabled_for_buffers = (
+            fsdp_state._mixed_precision_enabled_for_buffers() if not _is_composable(fsdp_state)
+            else (fsdp_state.mixed_precision.buffer_dtype is not None)
         )
-        for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
-            fqn = f"{prefix}{clean_fqn}"
-            state_dict[fqn] = buffer.clone()
+        if mixed_precision_enabled_for_buffers:
+            buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
+            _cast_buffers_to_dtype_and_device(
+                buffers, buffer_dtypes, fsdp_state.compute_device
+            )
+            for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
+                fqn = f"{prefix}{clean_fqn}"
+                state_dict[fqn] = buffer.clone()
     return state_dict
 
 
@@ -330,7 +335,9 @@ def _full_pre_load_state_dict_hook(
 ) -> None:
     _lazy_init(fsdp_state, module)
     _enter_unshard_params_ctx(module, fsdp_state, recurse=False, writeback=True)
-    _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
+    # Add FSDP_PREFIX only for wrapper-based FSDP.
+    if not _is_composable(fsdp_state):
+        _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
 
 
 def _full_post_load_state_dict_hook(
