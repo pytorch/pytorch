@@ -78,45 +78,6 @@ using LayoutInputA = cutlass::layout::RowMajor;
 using LayoutInputB = cutlass::layout::RowMajor;
 using LayoutOutput = cutlass::layout::RowMajor;
 
-// This code section describes whether you want to use tensor cores or regular SIMT cores on GPU SM
-using MMAOp = cutlass::arch::OpClassTensorOp;
-
-// This code section describes CUDA SM architecture number
-using SmArch = cutlass::arch::Sm80;
-
-
-// This code section describes how threadblocks are scheduled on GPU
-using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;
-
-// This code section describes the epilogue part of the kernel
-using EpilogueOp = cutlass::epilogue::thread::LinearCombination<
-    ElementOutput,                                     // <- data type of output matrix
-    128 / cutlass::sizeof_bits<ElementOutput>::value,  // <- the number of elements per vectorized
-                                                       // memory access. For a byte, it's 16
-                                                       // elements. This becomes the vector width of
-                                                       // math instructions in the epilogue too
-    ElementAccumulator,                                // <- data type of accumulator
-    ElementAccumulator>;  // <- data type for alpha/beta in linear combination function
-
-// Number of pipelines you want to use
-constexpr int NumStages = 3;
-
-// using Gemm = cutlass::gemm::device::SparseGemm<ElementInputA,
-//                                                LayoutInputA,
-//                                                ElementInputB,
-//                                                LayoutInputB,
-//                                                ElementOutput,
-//                                                LayoutOutput,
-//                                                ElementAccumulator,
-//                                                MMAOp,
-//                                                SmArch,
-//                                                cutlass::gemm::GemmShape<64, 64, 64>,
-//                                                cutlass::gemm::GemmShape<32, 32, 64>,
-//                                                cutlass::gemm::GemmShape<16, 8, 32>,
-//                                                EpilogueOp,
-//                                                SwizzleThreadBlock,
-//                                                NumStages>;
-
 using Gemm = cutlass::gemm::device::SparseGemm<
     cutlass::half_t,
     cutlass::layout::RowMajor,
@@ -131,7 +92,7 @@ using Gemm = cutlass::gemm::device::SparseGemm<
     cutlass::gemm::GemmShape<64, 64, 64>,
     cutlass::gemm::GemmShape<16, 8, 32>,
     cutlass::epilogue::thread::LinearCombination<
-        float,
+        cutlass::half_t,
         128 / cutlass::sizeof_bits<ElementOutput>::value,
         ElementAccumulator,
         ElementAccumulator>,
