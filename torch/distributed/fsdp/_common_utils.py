@@ -29,6 +29,24 @@ FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
+"""
+[Note: FSDP State Traversal]
+For the wrapper code path, ``_FSDPState`` is the ``FullyShardedDataParallel``
+module wrapping a fully sharded module, and for the non-wrapper code path,
+``_FSDPState`` is an object that gets embedded on a fully sharded module.
+See [Note: Fully Sharded Module] for the definition.
+
+There are three common traversal idioms: Given a root module,
+- ``_get_fsdp_states()`` returns all ``_FSDPState`` s in the tree.
+- ``get_fsdp_root_states()`` returns all local root ``_FSDPState`` s in the
+tree (i.e. those with ``_is_root == True``).
+- ``_get_fsdp_handles()``returns all ``FlatParamHandle`` s in the tree.
+
+All of these methods must take in the root module (i.e. an ``nn.Module``) and
+not a general ``_FSDPState`` because ``_FSDPState`` does not support a graph
+traversal, whereas ``nn.Module`` has ``nn.Module.modules()`` for traversal.
+"""
+
 
 class _FSDPState(_State):
     def __init__(self) -> None:
