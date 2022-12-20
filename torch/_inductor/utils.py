@@ -1,12 +1,16 @@
 import collections
 import contextlib
 import functools
+import logging
+import math
 import operator
 import os
 import tempfile
+import textwrap
 import time
 from importlib import import_module
-from typing import Any, Dict, List
+from io import StringIO
+from typing import Any, Dict, List, Optional
 from unittest import mock
 
 import sympy
@@ -14,8 +18,10 @@ import sympy
 import torch
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
-from . import config
+from . import config, config as inductor_config
 from .cuda_properties import get_device_capability
+
+log = logging.getLogger(__name__)
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
@@ -26,6 +32,13 @@ dynamo_logging = import_module(f"{config.dynamo_import}.logging")
 dynamo_optimizations = import_module(f"{config.dynamo_import}.optimizations")
 dynamo_testing = import_module(f"{config.dynamo_import}.testing")
 dynamo_utils = import_module(f"{config.dynamo_import}.utils")
+
+try:
+    from triton.testing import do_bench
+except ImportError:
+
+    def do_bench(*args, **kwargs):
+        raise NotImplementedError("requires Triton")
 
 
 @functools.lru_cache(None)
@@ -309,3 +322,141 @@ def argsort(seq):
 @functools.lru_cache(8)
 def get_dtype_size(dtype):
     return torch.empty((), dtype=dtype).element_size()
+
+
+class IndentedBuffer:
+    tabwidth = 4
+
+    def __init__(self, initial_indent=0):
+        self._lines = []
+        self._indent = initial_indent
+
+    def getvalue(
+        self,
+    ):
+        buf = StringIO()
+        for line in self._lines:
+            if isinstance(line, DeferredLineBase):
+                line = line()
+                if line is None:
+                    continue
+            assert isinstance(line, str)
+            buf.write(line)
+            buf.write("\n")
+        return buf.getvalue()
+
+    def getrawvalue(self):
+        buf = StringIO()
+        for line in self._lines:
+            if isinstance(line, DeferredLineBase):
+                line = line()
+                if line is None:
+                    continue
+            assert isinstance(line, str)
+            # backslash implies line continuation
+            if line.endswith("\\"):
+                buf.write(line[:-1])
+            else:
+                buf.write(line)
+                buf.write("\n")
+        return buf.getvalue()
+
+    def clear(self):
+        self._lines.clear()
+
+    def __bool__(self):
+        return bool(self._lines)
+
+    def prefix(self):
+        return " " * (self._indent * self.tabwidth)
+
+    def writeline(self, line):
+        if isinstance(line, DeferredLineBase):
+            self._lines.append(line.with_prefix(self.prefix()))
+        elif line.strip():
+            self._lines.append(f"{self.prefix()}{line}")
+        else:
+            self._lines.append("")
+
+    def writelines(self, lines):
+        for line in lines:
+            self.writeline(line)
+
+    def indent(self, offset=1):
+        @contextlib.contextmanager
+        def ctx():
+            self._indent += offset
+            yield
+            self._indent -= offset
+
+        return ctx()
+
+    def splice(self, other_code, strip=False):
+        if isinstance(other_code, IndentedBuffer):
+            dedent = float("inf")
+            for line in other_code._lines:
+                if line:
+                    dedent = min(dedent, len(line) - len(line.lstrip()))
+            if math.isinf(dedent):
+                dedent = 0
+            for line in other_code._lines:
+                IndentedBuffer.writeline(self, line[dedent:])
+        else:
+            other_code = textwrap.dedent(other_code)
+            if strip:
+                other_code = other_code.lstrip()
+            if not other_code:
+                return
+            other_code = other_code.rstrip()
+            for line in other_code.split("\n"):
+                self.writeline(line)
+
+
+class DeferredLineBase:
+    """A line that can be 'unwritten' at a later time"""
+
+    def __init__(self, line):
+        if not line.strip():
+            line = ""
+        self.line = line
+
+    def __call__(self) -> Optional[str]:
+        """Returns either self.line or None to indicate the line has been 'unwritten'"""
+        raise NotImplementedError()
+
+    def _new_line(self, line: str) -> "DeferredLineBase":
+        """Returns a new deferred line with the same condition"""
+        raise NotImplementedError()
+
+    def with_prefix(self, prefix):
+        return self._new_line(f"{prefix}{self.line}")
+
+    def lstrip(self):
+        return self._new_line(self.line.lstrip())
+
+    def __getitem__(self, index):
+        return self._new_line(self.line[index])
+
+    def __bool__(self):
+        return bool(self.line)
+
+    def __len__(self):
+        return len(self.line)
+
+
+@functools.lru_cache(None)
+def is_big_gpu(index):
+    cores = torch.cuda.get_device_properties(index).multi_processor_count
+    if cores < 80:  # V100
+        log.warning("not enough cuda cores to use max_autotune mode")
+        return False
+    return True
+
+
+def use_triton_template(layout):
+    return (
+        inductor_config.max_autotune
+        and layout.device.type == "cuda"
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and is_big_gpu(layout.device.index or 0)
+    )

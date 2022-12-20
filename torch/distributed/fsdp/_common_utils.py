@@ -40,6 +40,29 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
     return state
 
 
+def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
+    """
+    Returns all ``_FSDPState`` instances in the module tree rooted at
+    ``module`` without any duplicates and following the ``module.modules()``
+    traversal order.
+
+    For the wrapper code path, this returns all ``FullyShardedDataParallel``
+    instances. For the non-wrapper code path, this returns composable state
+    instances.
+
+    NOTE: For now, we must pass an ``nn.Module`` as the argument because
+    ``_FSDPState`` does not support graph traversal.
+    """
+    fsdp_states: List[_FSDPState] = []
+    visited_fsdp_states: Set[_FSDPState] = set()
+    for submodule in module.modules():
+        optional_state = _get_module_fsdp_state(submodule)
+        if optional_state is not None and optional_state not in visited_fsdp_states:
+            visited_fsdp_states.add(optional_state)
+            fsdp_states.append(optional_state)
+    return fsdp_states
+
+
 class TrainingState(Enum):
     """
     An enum that indicates the state of a ``FullyShardedDataParallel` instance.
@@ -69,6 +92,9 @@ def _is_composable(state: _FSDPState):
 
 @no_type_check
 def _all_handles(state: _FSDPState) -> List:
+    """
+    Returns all ``FlatParamHandle`` s managed by ``state``.
+    """
     return (
         state._handles
         if _is_composable(state)
@@ -79,21 +105,22 @@ def _all_handles(state: _FSDPState) -> List:
 @no_type_check
 def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     """
-    Given a module and returns the flat handles that map to this module. If the
-    module is FullyShardedDataParallel, the module._handles will be returned.
+    Returns the ``FlatParamHandle`` s corresponding to ``module``. These are
+    the handles that contain some parameter in ``module``.
     """
     if _is_composable(state):
         assert (
-            module in state._comm_module_to_handles
+            module in state._fully_sharded_module_to_handles
         ), f"Expects a `comm_module` but got {module} on rank {state.rank}"
-        return state._comm_module_to_handles[module][:]
+        return state._fully_sharded_module_to_handles[module][:]
     else:
+        # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
         return module._handles[:]
 
 
 @no_type_check
 def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
-    """Given a module and returns if this module has parameters sharded by FSDP."""
+    """Returns if ``module`` has parameters managed by FSDP."""
     return len(_module_handles(state, module)) > 0
 
 

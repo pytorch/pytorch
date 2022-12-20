@@ -28,6 +28,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
+from torch._guards import TracingContext, DuplicateInputs
 
 log = logging.getLogger(__name__)
 
@@ -274,7 +275,7 @@ def run_functionalized_fw_and_collect_metadata(f):
     @wraps(f)
     def inner(*args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, torch.Tensor) or type(a) in KNOWN_TYPES for a in args)
+        assert all(a is None or isinstance(a, torch.Tensor) or type(a) in KNOWN_TYPES for a in args)
 
         collect_mutated_input_info: List[MutationType] = []
         collect_requires_grad_out_info: List[bool] = []
@@ -299,9 +300,10 @@ def run_functionalized_fw_and_collect_metadata(f):
         maybe_inputs_with_mutated_metadata: List[Optional[torch.Tensor]] = []
         for (i, (arg, f_arg)) in enumerate(zip(flat_args, flat_f_args)):
             if not isinstance(arg, Tensor):
-                continue
-            torch._sync(f_arg)
-            new_arg = torch._from_functional_tensor(f_arg)
+                new_arg = arg
+            else:
+                torch._sync(f_arg)
+                new_arg = torch._from_functional_tensor(f_arg)
             if arg is not new_arg:
                 # Note [Input mutation handling in aot autograd]
                 # We use functionalization to detect two types in input mutations:
@@ -427,7 +429,8 @@ def run_functionalized_fw_and_collect_metadata(f):
             # This will be more complicated when you have multiple _base tensors aliasing the same
             # underlying storage, when we eventually handle that.
             # We'll need to ensure that we generate the view off of the right base.
-            inp_storage_refs = {StorageWeakRef(inpt._storage()): idx for idx, inpt in enumerate(flat_f_args)}
+            inp_storage_refs = {
+                StorageWeakRef(inpt._storage()): idx for idx, inpt in enumerate(flat_f_args) if isinstance(inpt, torch.Tensor)}
             inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, torch.Tensor)}
             inp_storage_refs_set = set(inp_storage_refs)
 
@@ -960,6 +963,13 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
+def assert_functional_graph(fx_g: torch.fx.Graph):
+    for n in fx_g.nodes:
+        if isinstance(n.target, torch._ops.OpOverload):
+            assert not n.target._schema.is_mutable, \
+                f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+
+
 @contextmanager
 def disable_autocast_manager():
     guard = torch._C._DisableAutocast()
@@ -1057,12 +1067,14 @@ def merge_view_inputs(
 ) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, Tuple[Any]]]]]]:
     assert len(fwd_inputs) == len(mutated_input_info)
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
+    base_args = []
+    other_args = []
     for i, inpt in enumerate(fwd_inputs):
         if isinstance(inpt, Tensor):
             storage_ref = StorageWeakRef(inpt._storage())
             storage_ref_to_idx[storage_ref].append(i)
-    base_args = []
-    other_args = []
+        else:
+            other_args.append(inpt)
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
@@ -1260,7 +1272,7 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
                 flat_fn
             )(*flat_args)
     except RuntimeError as e:
-        logging.warning(
+        log.warning(
             "Failed to collect metadata on function, produced code may be suboptimal.  "
             "Known situations this can occur are inference mode only compilation involving "
             "resize_ or prims (!schema.hasAnyAliasInfo() INTERNAL ASSERT FAILED); "
@@ -1356,6 +1368,16 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
         return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
 
     deduped_flat_args = remove_dupe_args(flat_args)
+
+    tracing_context = TracingContext.get()
+    if tracing_context:
+        # TODO(voz): This structure is 1:1, we could consider an alternate structure like
+        # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
+        # which feels like needless complexity for a tiny bit of efficiency at this point.
+        for dupe_arg_pos, kept_pos in add_dupe_map.items():
+            # Edge case, only happens for identity
+            if dupe_arg_pos != kept_pos:
+                tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_pos, dupe_arg_pos))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
@@ -1495,6 +1517,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 *joint_inputs
             )
 
+        # There should be *NO* mutating ops in the graph at this point.
+        assert_functional_graph(fx_g.graph)
         # Redudant with the check above, but worth having in case tracing introduced
         # a fake tensor. Unlikely.
         # See Note: [Fake Modules and AOTAutograd]
@@ -2345,6 +2369,7 @@ def aot_module_simplified(
     # Just for convenience
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
+    forward.named_buffers = mod.named_buffers
 
     return forward
 

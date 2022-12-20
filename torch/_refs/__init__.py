@@ -4728,21 +4728,23 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     if isinstance(value, Number):
         value_type = type(value)
     else:
-        # NOTE: Could not use value = item(value) as it resulted in
-        # RuntimeError: Cannot cast FakeTensor(cpu) to number
         value_ndim = value.ndim
         check(
             value_ndim == 0,
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
         # `masked_fill` allows cpu scalar to be moved to cuda but not otherwise.
+        if a.device.type == "cuda" and value.device.type == "cpu":
+            # NOTE: Could not use value = item(value) as it resulted in
+            # RuntimeError: Cannot cast FakeTensor(cpu) to number
+            value = prims.device_put(value, a.device)
+
+        assert isinstance(value, TensorLikeType)
         check(
-            a.device.type == "cuda" or value.device == a.device,
+            value.device == a.device,
             lambda: "Expected `value` to be on same device as `a`",
         )
         value_type = utils.dtype_to_type(value.dtype)
-        if utils.is_cpu_scalar_tensor(value):
-            value = value.item()
 
     if value_type is complex:
         # only downcasting from complex to lower type is not allowed.
@@ -4765,6 +4767,15 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # aten.mask_fill always return a new contiguous tensor
     # contiguous() is needed to correctly model the output stride
     return r.contiguous()
+
+
+@register_decomposition([torch.ops.aten.masked_fill_])
+def masked_fill_(
+    a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType
+) -> TensorLikeType:
+    b = torch.masked_fill(a, mask, value)  # type: ignore[arg-type]
+    a.copy_(b)
+    return a
 
 
 # CompositeImplicitAutograd - don't register decomp
