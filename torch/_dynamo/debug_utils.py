@@ -150,20 +150,35 @@ def _cuda_system_info_comment():
     return model_str
 
 
+def generate_config_string():
+    import torch._inductor.config
+
+    return textwrap.dedent(
+        f"""\
+import {config.dynamo_import}.config
+import {config.inductor_import}.config
+{config.dynamo_import}.config.load_config({repr(torch._dynamo.config.save_config())})
+{config.inductor_import}.config.load_config({repr(torch._inductor.config.save_config())})
+        """
+    )
+
+
 TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
 
 
 def generate_compiler_repro_string(gm, args):
     model_str = textwrap.dedent(
         f"""
-        import torch
-        from torch import tensor, device
-        import torch.fx as fx
-        from {config.dynamo_import}.testing import rand_strided
-        from math import inf
-        from torch.fx.experimental.proxy_tensor import make_fx
+import torch
+from torch import tensor, device
+import torch.fx as fx
+from {config.dynamo_import}.testing import rand_strided
+from math import inf
+from torch.fx.experimental.proxy_tensor import make_fx
 
-        {TEST_REPLACEABLE_COMMENT}
+{generate_config_string()}
+
+{TEST_REPLACEABLE_COMMENT}
 
         """
     )
@@ -282,6 +297,8 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
                 """
             )
         )
+    with open(file_name, "r") as fd:
+        print(fd.read())
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
     stdout, stderr = TemporaryFile(), TemporaryFile()
@@ -514,10 +531,16 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
         gm.zero_grad(True)
 
     # TorchInductor returned callable expects lists. So, boxing the call.
-    if not hasattr(gm, "_boxed_call") and hasattr(gm, "named_parameters"):
-        orig_named_parameters = gm.named_parameters
+    orig_named_parameters = getattr(gm, "named_parameters", None)
+    orig_named_buffers = getattr(gm, "named_buffers", None)
+    if not hasattr(gm, "_boxed_call") and (
+        orig_named_parameters is not None or orig_named_buffers is not None
+    ):
         gm = make_boxed_func(gm)
-        gm.named_parameters = orig_named_parameters
+        if orig_named_parameters is not None:
+            gm.named_parameters = orig_named_parameters
+        if orig_named_buffers is not None:
+            gm.named_buffers = orig_named_buffers
 
     out = gm(args)
     if only_fwd:
@@ -533,14 +556,19 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
     Check two models have same accuracy.
     """
     from .eval_frame import OptimizedModule
-    from .testing import named_parameters_for_optimized_module
+    from .testing import (
+        named_buffers_for_optimized_module,
+        named_parameters_for_optimized_module,
+    )
     from .utils import same
 
     if isinstance(gm, OptimizedModule):
         gm.named_parameters = named_parameters_for_optimized_module(gm)
+        gm.named_buffers = named_buffers_for_optimized_module(gm)
 
     if isinstance(opt_gm, OptimizedModule):
         opt_gm.named_parameters = named_parameters_for_optimized_module(opt_gm)
+        opt_gm.named_buffers = named_buffers_for_optimized_module(opt_gm)
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 
@@ -631,6 +659,8 @@ import {config.dynamo_import}
 from {config.dynamo_import}.testing import rand_strided
 from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.debug_utils import same_two_models
+
+{generate_config_string()}
 
 {TEST_REPLACEABLE_COMMENT}
 
@@ -821,6 +851,8 @@ import {config.dynamo_import}
 from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.optimizations.backends import BACKENDS
 from {config.dynamo_import}.testing import rand_strided
+
+{generate_config_string()}
 
 {TEST_REPLACEABLE_COMMENT}
 
