@@ -439,8 +439,8 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @skipCUDAIf(True or not HAS_CUDA, "Skipped! Triton not found")
-    @skipCPUIf(True or not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
+    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
     @_ops(op_db[START:END])
