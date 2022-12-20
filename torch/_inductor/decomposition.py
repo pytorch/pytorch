@@ -45,18 +45,13 @@ decompositions = get_decompositions(
         aten.hardsigmoid,
         aten.hardsigmoid_backward,
         aten.hardswish,
-        aten.hardswish_,
         aten.hardswish_backward,
         aten.hardtanh,
-        aten.hardtanh_,
         aten.hardtanh_backward,
         aten.im2col,
-        aten.index_add,
-        aten.index_add_,
         aten.index_select,
         aten.l1_loss,
         aten.leaky_relu,
-        aten.leaky_relu_,
         aten.leaky_relu_backward,
         aten.linalg_vector_norm,
         aten.logit,
@@ -93,7 +88,6 @@ decompositions = get_decompositions(
         aten.sgn,
         aten.sigmoid_backward,
         aten.silu,
-        aten.silu_,
         aten.silu_backward,
         aten.slice_backward,
         aten._softmax,
@@ -175,14 +169,6 @@ def pad_dim(x, padded_length, dim):
 
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2, *, beta=1, alpha=1):
-    if config.triton.mm != "aten":
-        out = torch.mm(mat1, mat2)
-        if not isinstance(alpha, numbers.Number) or alpha != 1:
-            out = out * alpha
-        if not isinstance(beta, numbers.Number) or beta != 1:
-            input = input * beta
-        return input + out
-
     if (
         config.shape_padding
         and check_device(mat1, mat2)
@@ -200,6 +186,7 @@ def addmm(input, mat1, mat2, *, beta=1, alpha=1):
 
 
 def pad_addmm(input, mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
+    # addmm decomp with padding will go through pad_addmm multiple times if multiple dimensions are needed to be padded
     if k_padded_length != 0:
         mat1 = pad_dim(mat1, k_padded_length, 1)
         mat2 = pad_dim(mat2, k_padded_length, 0)
@@ -293,8 +280,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 fast_flush=True,
             )[0]
         else:
-            if k_padded_length == 0 and not config.shape_padding_bmm:
-                return False
             pad_time = do_bench(
                 lambda: pad_bmm(
                     mat1_pad,
@@ -332,6 +317,7 @@ def mm_decomp(mat1, mat2):
 
 
 def pad_mm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
+    # mm_decomp will go through pad_mm multiple times if multiple dimensions are needed to be padded
     if k_padded_length != 0:
         mat1 = pad_dim(mat1, k_padded_length, 1)
         mat2 = pad_dim(mat2, k_padded_length, 0)
@@ -355,20 +341,19 @@ def bmm_decomp(mat1, mat2):
         k_padded_length = get_padded_length(mat1.shape[2], get_alignment_size(mat1))
         n_padded_length = get_padded_length(mat2.shape[2], get_alignment_size(mat2))
 
-        if k_padded_length != 0 or (
-            config.shape_padding_bmm and (n_padded_length != 0 or m_padded_length != 0)
-        ):
+        if k_padded_length != 0 or n_padded_length != 0 or m_padded_length != 0:
             pad_bmm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length)
 
     return NotImplemented  # go directly to lowering
 
 
 def pad_bmm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
+    # bmm_decomp will go through pad_bmm multiple times if multiple dimensions are needed to be padded
     if k_padded_length != 0:
         mat1 = pad_dim(mat1, k_padded_length, 2)
         mat2 = pad_dim(mat2, k_padded_length, 1)
         return torch.ops.aten.bmm(mat1, mat2)
-    elif config.shape_padding_bmm and n_padded_length != 0:
+    elif n_padded_length != 0:
         mat2 = pad_dim(mat2, n_padded_length, 2)
         return torch.ops.aten.bmm(mat1, mat2)[:, :, :-n_padded_length].contiguous()
     else:
@@ -466,6 +451,26 @@ def copy(self, src, non_blocking=False):
         return aten.expand_copy.default(intermediate, self.size())
     else:
         return intermediate
+
+
+@register_decomposition(aten.hardswish_)
+def hardswish_(x):
+    return x.copy_(aten.hardswish(x))
+
+
+@register_decomposition(aten.hardtanh_)
+def hardtanh_(x, min_val=-1, max_val=1):
+    return x.copy_(aten.hardtanh(x, min_val, max_val))
+
+
+@register_decomposition(aten.leaky_relu_)
+def leaky_relu_(x, negative_slope=0.01):
+    return x.copy_(aten.leaky_relu(x, negative_slope))
+
+
+@register_decomposition(aten.silu_)
+def silu_(x):
+    return x.copy_(aten.silu(x))
 
 
 @register_decomposition([aten.baddbmm])

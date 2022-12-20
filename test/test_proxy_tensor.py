@@ -13,10 +13,10 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
 
 from torch._decomp import decomposition_table
-from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, fx_placeholder_vals
+from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, bind_symbols, fx_placeholder_vals
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule, has_proxy
+from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
 from torch import nn
 import re
@@ -368,6 +368,12 @@ def forward(self, x_1):
         for f in [f_grad, f_backward]:
             self._test(f, [torch.randn(3, requires_grad=True)])
 
+    def test_pickle_issue89626(self):
+        import pickle
+        x = torch.randn(2)
+        make_fx(lambda x: x * 2, tracing_mode=self.tracing_mode)(x)
+        pickle.dumps(x)
+
     def test_inplace_metadata(self):
         def f(x):
             x = x.clone()
@@ -659,19 +665,6 @@ def forward(self, x_1):
         for a, b in zip(out_graph.nodes, out_graph2.nodes):
             self.assertEqual(a.op, b.op)
 
-    def test_has_proxy(self):
-        foo = torch.randn(5)
-
-        def f(x):
-            self.assertFalse(has_proxy(foo))
-            self.assertTrue(has_proxy(x))
-            y = x.cos()
-            self.assertTrue(has_proxy(y))
-            return y
-
-        self.assertFalse(has_proxy(torch.randn(5)))
-        make_fx(f)(torch.randn(5))
-
     def test_strides(self):
         def f(x):
             self.assertTrue(x.is_contiguous())
@@ -801,6 +794,42 @@ class TestSymbolicTracing(TestCase):
         return traced_f
 
 
+    def test_debug_interpreter(self):
+        import torch.library
+        from torch.library import Library
+
+        foo = Library("foo", "DEF")
+        foo.define("foo(Tensor self) -> Tensor")
+
+        # Operator where meta and cpu disagree on strides
+        @torch.library.impl(foo, "foo", "CPU")
+        def foo_cpu(x):
+            return x.clone().T
+
+        @torch.library.impl(foo, "foo", "Meta")
+        def foo_meta(x):
+            return x.clone()
+
+        def f(x):
+            return torch.ops.foo.foo.default(x)
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2))
+        from torch._functorch.compilers import DebugInterpreter
+
+        interp = DebugInterpreter(gm)
+
+        # input mismatch is caught (indicates guard problem)
+        self.assertRaisesRegex(
+            AssertionError, r"3 != 1",
+            lambda: interp.run(torch.randn(3, 3).T),
+        )
+
+        # Catch the incorrect meta
+        self.assertRaisesRegex(
+            AssertionError, r"\(3, 1\) != \(1, 3\)",
+            lambda: interp.run(torch.randn(3, 3))
+        )
+
     def test_resize_from_zero(self):
         def f(x, y):
             x.resize_(y.size(0))
@@ -822,6 +851,7 @@ def forward(self, x_1, y_1):
         test_inputs.append([(6, 8)])
         gm = self._test_dynamic(f, [(3, 4)], test_inputs)
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
+        self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
         # TODO: There should eventually be guards for contiguity, but they're
         # not currently being done yet
@@ -1195,8 +1225,10 @@ symbolic_tensor_failures = {
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('hsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
+    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_reduce', ''),  # Float
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
+    xfail('isclose', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
@@ -1345,7 +1377,6 @@ symbolic_tensor_segfaults = {
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
-    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('masked_scatter', ''),  # aten.masked_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.rrelu', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
 }
@@ -1354,6 +1385,13 @@ inplace_symbolic_tensor_failures = {
     # bugs
     xfail('float_power', ''),  # base given to float_power_ has dtype Float but the operation's result requires dtype Double
     # decomp not implemented
+    xfail('addmm', ''),
+    xfail('addmm', 'decomposed'),
+    xfail('nn.functional.hardsigmoid', ''),
+    xfail('round', ''),  # ref missing a kwarg
+    xfail('round', 'decimals_0'),  # ref missing a kwarg
+    xfail('round', 'decimals_3'),  # ref missing a kwarg
+    xfail('round', 'decimals_neg_3'),  # ref missing a kwarg
     xfail('unique', ''),
     # in-place has a different signature than out-of-place
     xfail('uniform', ''),
