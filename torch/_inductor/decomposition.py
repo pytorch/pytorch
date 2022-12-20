@@ -126,6 +126,11 @@ def clamp(x, min=None, max=None):
     return x
 
 
+@register_decomposition([aten.tanh])
+def tanh(x):
+    return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
+
+
 # TorchInductor-only decomposition. It should not be taken to core.
 # See https://github.com/pytorch/torchdynamo/pull/1120
 @register_decomposition([aten.floor_divide.default])
