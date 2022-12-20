@@ -2772,12 +2772,19 @@ class TestVmapOperators(Namespace.TestVmapBase):
         rs = torch.get_rng_state()
         expected = vmap(f, in_dims=in_dim, out_dims=out_dim, randomness=randomness)(x)
 
-        for chunk_size in [1, 2, 3, 4, 7, 10, 16]:
+        for chunk_size in (1, 2, 3, 4, 7, 10, 16, 100):
             torch.set_rng_state(rs)
             output = vmap(
                 f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
             )(x)
             self.assertEqual(output, expected)
+
+        for chunk_size in (-1, 0):
+            with self.assertRaisesRegex(ValueError, "vmap: `chunk_size` should be greater than 0."):
+                vmap(
+                    f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
+                )(x)
+
 
 instantiate_parametrized_tests(TestVmapOperators)
 
