@@ -374,31 +374,31 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Generate loop-nests and place each expression at its
   // corresponding loop
   const auto exprs_lowered = LoopNestGenerator::loweredExprs(exprs_sorted);
-  dumpExprsIfEnabled(exprs_sorted, "LoopNestGenerator");
+  dumpExprsIfEnabled(exprs_lowered, "LoopNestGenerator");
 
   // Replace squeezes, Transpose, Shift, Gather, and View ops with
   // unary ops since they're not separately processed in lowering.
   const auto exprs_unary_replaced = unarySetOpInserter(exprs_lowered);
-  dumpExprsIfEnabled(exprs_lowered, "unarySetOpInserter");
+  dumpExprsIfEnabled(exprs_unary_replaced, "unarySetOpInserter");
 
   // Insert allocations
   const auto exprs_alloced = insertAllocations(exprs_unary_replaced);
-  dumpExprsIfEnabled(exprs_unary_replaced, "insertAllocations");
+  dumpExprsIfEnabled(exprs_alloced, "insertAllocations");
 
   // Insert read after write smem syncs
   const auto exprs_raw_sync = insertRawThreadSynchronization(exprs_alloced);
-  dumpExprsIfEnabled(exprs_alloced, "insertRawThreadSynchronization");
+  dumpExprsIfEnabled(exprs_raw_sync, "insertRawThreadSynchronization");
 
   // Reuse memory locations
   const auto exprs_reuse_mem = reuseMemoryAllocations(exprs_raw_sync);
-  dumpExprsIfEnabled(exprs_raw_sync, "reuseMemoryAllocations");
+  dumpExprsIfEnabled(exprs_reuse_mem, "reuseMemoryAllocations");
 
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
   const auto exprs_war_sync = insertWarThreadSynchronization(exprs_reuse_mem);
-  dumpExprsIfEnabled(exprs_reuse_mem, "insertWarThreadSynchronization");
+  dumpExprsIfEnabled(exprs_war_sync, "insertWarThreadSynchronization");
 
   const auto exprs_double_buffered = DoubleBufferPass::run(exprs_war_sync);
-  dumpExprsIfEnabled(exprs_war_sync, "DoubleBufferPass");
+  dumpExprsIfEnabled(exprs_double_buffered, "DoubleBufferPass");
 
   // This pass inserts predicates as well as branches in the code. Up until now
   // the code is explicitly single shot for loop based. Need to be careful in
@@ -406,37 +406,37 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // insertions could be on if then or else instead of directly on a for loop.
   const auto exprs_unrolled_loops =
       UnrollPass::runPass(fusion_, exprs_double_buffered);
-  dumpExprsIfEnabled(exprs_double_buffered, "UnrollPass");
+  dumpExprsIfEnabled(exprs_unrolled_loops, "UnrollPass");
 
   commonScalarMap().initialize(exprs_unrolled_loops);
 
   const auto exprs_unrolled_mv_loops =
       processMisalignedVectorization(exprs_unrolled_loops);
-  dumpExprsIfEnabled(exprs_unrolled_loops, "processMisalignedVectorization");
+  dumpExprsIfEnabled(exprs_unrolled_mv_loops, "processMisalignedVectorization");
 
   const auto exprs_indexed_loops =
       IndexLowering::getIndexedExprs(exprs_unrolled_mv_loops);
-  dumpExprsIfEnabled(exprs_unrolled_mv_loops, "IndexLowering");
+  dumpExprsIfEnabled(exprs_indexed_loops, "IndexLowering");
 
   // TODO: It seems this type of optimization would be far easier to implement
   // on fusion ir than kernel ir. We should likely refactor this to at least run
   // before allocation insertion.
   const auto exprs_with_fused_broadcast = fuseWarpReduce(exprs_indexed_loops);
-  dumpExprsIfEnabled(exprs_indexed_loops, "fuseWarpReduce");
+  dumpExprsIfEnabled(exprs_with_fused_broadcast, "fuseWarpReduce");
 
   const auto exprs_conditional_loops =
       generateConditionalFromPredicate(exprs_with_fused_broadcast);
   dumpExprsIfEnabled(
-      exprs_with_fused_broadcast, "generateConditionalFromPredicate");
+      exprs_conditional_loops, "generateConditionalFromPredicate");
 
   const auto exprs_common_index_allocated =
       allocateCommonScalars(exprs_conditional_loops);
-  dumpExprsIfEnabled(exprs_conditional_loops, "allocateCommonScalars");
+  dumpExprsIfEnabled(exprs_common_index_allocated, "allocateCommonScalars");
 
   std::vector<Expr*> exprs_welford_vectorized;
   if (!isOptionDisabled(DisableOption::WelfordVectorization)) {
     exprs_welford_vectorized = vectorizeWelford(exprs_common_index_allocated);
-    dumpExprsIfEnabled(exprs_common_index_allocated, "vectorizeWelford");
+    dumpExprsIfEnabled(exprs_welford_vectorized, "vectorizeWelford");
   } else {
     exprs_welford_vectorized = exprs_common_index_allocated;
   }
@@ -445,14 +445,14 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // on index and predicate reuse
   const auto exprs_register_adjusted =
       insertMagicZero(exprs_welford_vectorized);
-  dumpExprsIfEnabled(exprs_common_index_allocated, "insertMagicZero");
+  dumpExprsIfEnabled(exprs_register_adjusted, "insertMagicZero");
 
   const auto exprs_cleaned_up_loops =
       KIRCleaner::cleanUp(exprs_register_adjusted);
-  dumpExprsIfEnabled(exprs_register_adjusted, "KIRCleaner");
+  dumpExprsIfEnabled(exprs_cleaned_up_loops, "KIRCleaner");
 
   const auto exprs_instrumented = instrumentKernel(exprs_cleaned_up_loops);
-  dumpExprsIfEnabled(exprs_cleaned_up_loops, "instrumentKernel");
+  dumpExprsIfEnabled(exprs_instrumented, "instrumentKernel");
 
   // We now have the lowered expressions, finalize the kernel IR. This function
   // will also copy over some relevant information for code generation from
