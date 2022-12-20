@@ -8,7 +8,10 @@ import sys
 import time
 import warnings
 
+import cv2
+
 import torch
+import torchvision
 from common import BenchmarkRunner, main
 
 from torch._dynamo.testing import collect_results
@@ -243,9 +246,21 @@ class TimmRunnner(BenchmarkRunner):
         #     (batch_size,) + input_size, device=device, dtype=data_dtype
         # )
         torch.manual_seed(1337)
-        input_tensor = torch.randint(
-            256, size=(batch_size,) + input_size, device=device
-        ).to(dtype=torch.float32)
+        if self.args.ci:
+            img = torch.from_numpy(
+                cv2.imread(
+                    os.path.join(os.path.dirname(__file__), "static", "test.jpg")
+                )
+            ).to(device=device)
+            img = img.permute((2, 0, 1))
+            img_resize = torchvision.transforms.Resize(input_size[1:])(img)
+            input_tensor = torch.stack(tuple(img_resize for _ in range(batch_size))).to(
+                dtype=torch.float32
+            )
+        else:
+            input_tensor = torch.randint(
+                256, size=(batch_size,) + input_size, device=device
+            ).to(dtype=torch.float32)
         mean = torch.mean(input_tensor)
         std_dev = torch.std(input_tensor)
         example_inputs = (input_tensor - mean) / std_dev
