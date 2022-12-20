@@ -171,9 +171,7 @@ class _NamedOptimizer(optim.Optimizer):
             )
         for idx, param_key in enumerate(self.ordered_param_keys):
             if param_key not in state.keys():
-                raise ValueError(
-                    f"Expect {param_key} as a parameter in `state_dict` state but not found."
-                )
+                continue
             if len(state[param_key]) != len(new_state[idx]):
                 raise ValueError(
                     f"Expects equal length as {len(new_state[idx])} for parameter {param_key} but found: {len(state[param_key])}"

@@ -1020,7 +1020,7 @@ def _get_param_id_to_param_from_optim_input(
     if optim_input is None:
         return {pid: param for pid, param in enumerate(model.parameters())}
     try:
-        params = list(optim_input)
+        params = cast(List[nn.Parameter], list(optim_input))
     except TypeError as e:
         raise TypeError(
             "Optimizer input should be an iterable of Tensors or dicts, "
@@ -1038,9 +1038,9 @@ def _get_param_id_to_param_from_optim_input(
     if not all_tensors and not all_dicts:
         raise TypeError("Optimizer input should be an iterable of Tensors or dicts")
     if all_tensors:
-        return {pid: param for pid, param in enumerate(params)}  # type: ignore[return-value]
+        return {pid: param for pid, param in enumerate(params)}
     assert all_dicts
-    param_id_to_param = []
+    param_id_to_param: List[nn.Parameter] = []
     for param_group in params:
         has_params_key = "params" in param_group  # type: ignore[operator]
         assert has_params_key, (
@@ -1057,7 +1057,7 @@ def _get_param_id_to_param_from_optim_input(
 def _get_param_key_to_param(
     optim: torch.optim.Optimizer,
     optim_state_dict: Optional[Dict[str, Any]] = None,
-    param_to_fqns: Optional[Dict[nn.Parameter, str]] = None,
+    param_to_fqns: Optional[Dict[nn.Parameter, List[str]]] = None,
 ) -> Dict[Union[int, str], nn.Parameter]:
     """
     Constructs a mapping from parameter keys to parameters. For the regular
@@ -1089,6 +1089,7 @@ def _get_param_key_to_param(
     pid = 0
     for param_group in optim.param_groups:
         if is_named_optimizer:
+            assert param_to_fqns is not None
             for param in param_group["params"]:
                 param_key_to_param[param_to_fqns[param][0]] = param
         else:
@@ -1230,7 +1231,7 @@ def _map_param_key_to_optim_keys(
 
 def _unflatten_process_groups(
     state_dict: Dict[str, Any],
-    param_key_to_param: List[nn.Parameter],
+    param_key_to_param: Dict[Union[int, str], nn.Parameter],
     param_to_fqns: Dict[nn.Parameter, List[str]],
 ) -> List[Dict[str, Any]]:
     param_groups: List[Dict[str, Any]] = []
@@ -1295,13 +1296,16 @@ def _optim_state_dict(
         then nonzero ranks return an empty :class:`dict`.
     """
     to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
-    fsdp_osd: Dict = {"state": {}, "param_groups": []} if to_save else {}
-    fsdp_osd_state = fsdp_osd["state"] if to_save else None
-    param_to_fqns: Dict[torch.nn.Parameter, List[str]] = _get_param_to_fqns(model)
-    param_key_to_param: Dict[Union[int, str], torch.nn.Parameter] = (
-        _get_param_id_to_param_from_optim_input(model, optim_input)
-        if using_optim_input
-        else _get_param_key_to_param(optim, optim_state_dict, param_to_fqns)
+    fsdp_osd: Dict[str, Any] = {"state": {}, "param_groups": []} if to_save else {}
+    fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
+    param_to_fqns = _get_param_to_fqns(model)
+    param_key_to_param = cast(
+        Dict[Union[int, str], nn.Parameter],
+        (
+            _get_param_id_to_param_from_optim_input(model, optim_input)
+            if using_optim_input
+            else _get_param_key_to_param(optim, optim_state_dict, param_to_fqns)
+        ),
     )
     fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
 
