@@ -1,17 +1,17 @@
 import itertools
 import warnings
 from enum import auto, Enum
-from typing import cast, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (
-    _all_handles,
     _FSDPState,
+    _get_fsdp_handles,
     _get_param_to_fqns,
 )
-from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
+from torch.distributed.fsdp.flat_param import FlatParamHandle
 
 _HandlesKey = Tuple[FlatParamHandle, ...]
 
@@ -67,7 +67,7 @@ class _ExecOrderData:
         # same across ranks for the execution order validation to work
         self.handle_to_handle_index: Dict[FlatParamHandle, int] = {}
         # Names are prefixed from the root module
-        self.flat_param_to_prefixed_param_names: Dict[FlatParameter, List[str]] = {}
+        self.param_to_fqn: Dict[nn.Parameter, List[str]] = {}
         # Current index in the pre-forward execution order
         self.current_order_index = 0
         self.warn_status = _ExecOrderWarnStatus.NONE
@@ -87,14 +87,11 @@ class _ExecOrderData:
         self.rank = process_group.rank()
         self.world_size = process_group.size()
         # Fix an order over the handles, which should be the same across ranks
-        for handle in _all_handles(state):
+        for handle in _get_fsdp_handles(root_module):
             index = len(self.all_handles)
             self.all_handles.append(handle)
             self.handle_to_handle_index[handle] = index
-        self.flat_param_to_prefixed_param_names = cast(
-            Dict[FlatParameter, List[str]],
-            _get_param_to_fqns(root_module),
-        )
+        self.param_to_fqn = _get_param_to_fqns(root_module)
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
         # https://github.com/pytorch/pytorch/issues/79620
@@ -349,9 +346,7 @@ class _ExecOrderData:
                 continue
             handle = self.all_handles[index]
             flat_param = handle.flat_param
-            prefixed_param_names.append(
-                self.flat_param_to_prefixed_param_names[flat_param]
-            )
+            prefixed_param_names.append(self.param_to_fqn[flat_param])
         return prefixed_param_names
 
     def _get_names_from_handles(
@@ -366,11 +361,9 @@ class _ExecOrderData:
         prefixed_param_names: List[List[str]] = []
         for handle in handles_key:
             flat_param = handle.flat_param
-            if flat_param not in self.flat_param_to_prefixed_param_names:
+            if flat_param not in self.param_to_fqn:
                 continue
-            prefixed_param_names.append(
-                self.flat_param_to_prefixed_param_names[flat_param]
-            )
+            prefixed_param_names.append(self.param_to_fqn[flat_param])
         return prefixed_param_names
 
     def next_iter(self):
