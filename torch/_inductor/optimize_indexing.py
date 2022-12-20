@@ -109,8 +109,8 @@ class ValueRangeAnalysis(object):
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
         x = ValueRanges.wrap(x)
-        if x.lower.is_Boolean:
-            assert x.upper.is_Boolean
+        if isinstance(x, sympy.Expr) and x.lower.is_Boolean:
+            assert isinstance(x, sympy.Expr) and x.upper.is_Boolean
             if dtype.is_floating_point:
                 return ValueRanges(sympy.Float(0.0), sympy.Float(1.0))
             else:
@@ -124,7 +124,7 @@ class ValueRangeAnalysis(object):
         if math.isnan(value):
             return ValueRanges(-math.inf, math.inf)
         if isinstance(value, int):
-            return ValueRanges(sympy.Integer(value), sympy.xInteger(value))
+            return ValueRanges(sympy.Integer(value), sympy.Integer(value))
         else:
             return ValueRanges(sympy.Float(value), sympy.Float(value))
 
