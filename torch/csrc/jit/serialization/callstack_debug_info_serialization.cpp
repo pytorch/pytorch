@@ -46,7 +46,7 @@ c10::IValue InlinedCallStackSerializer::serialize(
     elements.emplace_back(
         serialize(cs_ptr->callee().value(), source_range_tags));
   } else {
-    elements.emplace_back(c10::IValue());
+    elements.emplace_back();
   }
   auto fn_name = cs_ptr->function_name();
   if (!fn_name.empty()) {
