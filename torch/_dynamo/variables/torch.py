@@ -61,6 +61,7 @@ constant_fold_functions = [
     torch.device,
     torch.distributed.is_available,
     torch.finfo,
+    torch.get_default_dtype,
     torch.iinfo,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
