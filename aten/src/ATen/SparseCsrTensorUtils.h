@@ -308,5 +308,10 @@ inline at::OptionalArray<at::SymInt> getSymIntBlockSize(Tensor const& self) {
   }
 }
 
+inline at::SymInt getSymIntNDenseDim(Tensor const& self) {
+  int64_t n_batch = numBatchDimensions(self);
+  return self.values().sym_sizes().size() - (n_batch + 2);
+}
+
 } // namespace sparse_csr
 } // namespace at
