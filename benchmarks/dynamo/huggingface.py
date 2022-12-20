@@ -162,6 +162,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "BlenderbotForCausalLM",
 }
 
+REQUIRE_HIGHER_TOLERANCE = set("MT5ForConditionalGeneration")
 
 def get_module_cls_by_model_name(model_cls_name):
     _module_by_model_name = {
@@ -468,7 +469,10 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            return 1e-2, cosine
+            if name in REQUIRE_HIGHER_TOLERANCE:
+                return 2e-2, cosine
+            else:
+                return 1e-2, cosine
         return 1e-3, cosine
 
     def compute_loss(self, pred):
