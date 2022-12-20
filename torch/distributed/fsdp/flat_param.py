@@ -1478,10 +1478,12 @@ class FlatParamHandle:
             ):
                 param.grad = None
             return
+        # For `NO_SHARD` with CPU offloading, the unsharded gradient's source
+        # of truth (as used for the optimizer) is `_cpu_grad`
         unsharded_grad = (
             self.flat_param.grad
             if self.uses_sharded_strategy or not self._offload_params
-            else self.flat_param._cpu_grad
+            else self.flat_param._cpu_grad  # type: ignore[attr-defined]
         )
         self._check_unsharded(unsharded_grad)
         views = self._get_unflat_views(self.flat_param, unsharded_grad)
