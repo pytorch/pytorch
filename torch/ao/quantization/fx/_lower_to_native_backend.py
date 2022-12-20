@@ -513,12 +513,10 @@ def _lower_static_weighted_ref_module(
         setattr(modules[parent_name], module_name, q_module)
 
         # Step 2: Reroute around dq_node, and remove q_node and its args
-        for arg in ref_node.args:
-            if not is_dequantize_node(arg):
-                continue
-            dq_node = arg
-            assert(isinstance(dq_node, Node))
-            ref_node.replace_input_with(dq_node, dq_node.args[0])
+        assert(len(ref_node.args) == 1)
+        dq_node = ref_node.args[0]
+        assert(isinstance(dq_node, Node))
+        ref_node.replace_input_with(dq_node, dq_node.args[0])
 
         q_node.replace_all_uses_with(ref_node)
         model.graph.erase_node(q_node)
