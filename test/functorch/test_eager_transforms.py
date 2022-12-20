@@ -1899,6 +1899,41 @@ class TestJac(TestCase):
         out_val = out(x, y, z)
         self.assertEqual(out_val, expected_out)
 
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        y = torch.randn(1, 2, device=device)
+
+        def f(x, y):
+            return (x.sin(), x + y), (x + 2, x.sum())
+
+        for chunk_size in (1, 2, 3, 4, 7, 10, 1000):
+            expected = jacrev(f, argnums=(0, 1))(x, y)
+            actual = jacrev(f, argnums=(0, 1),
+                            chunk_size=chunk_size,
+                            _preallocate_and_copy=_preallocate_and_copy)(x, y)
+            self.assertEqual(actual, expected)
+
+        err_msg = "jacrev: `chunk_size` should be greater than 0."
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
+
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=-2)(x, y)
+
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev_composition(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        chunk_size = 3
+
+        def f(x):
+            return (x.sin(), x), (x + 2, x.sum())
+
+        expected = vmap(jacrev(jacrev(f)))(x)
+        actual = vmap(jacrev(jacrev(f, chunk_size=chunk_size,
+                             _preallocate_and_copy=_preallocate_and_copy), chunk_size=chunk_size))(x)
+        self.assertEqual(actual, expected)
+
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
@@ -2565,7 +2600,7 @@ class TestHelpers(TestCase):
         B = 2
 
         # grad_input None case
-        output = reductify_leaf(None, None, 0, (B, 3), B)
+        output = reductify_leaf(None, None, 0, (3,), B)
         self.assertIsNone(output)
         output = reductify_leaf(None, None, None, (4, 3), B)
         self.assertIsNone(output)
