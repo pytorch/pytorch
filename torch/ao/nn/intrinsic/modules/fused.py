@@ -146,16 +146,6 @@ class ConvAdd2d(_FusedModule):
     def forward(self, x1, x2):
         return self.add(self[0](x1), x2)
 
-class ConvAdd2d(_FusedModule):
-    r"""This is a sequential container which calls the Conv2d modules with extra Add.
-    During quantization this will be replaced with the corresponding fused module."""
-    def __init__(self, add, conv):
-        super().__init__(conv)
-        self.add = add
-
-    def forward(self, x1, x2):
-        return self.add(self[0](x1), x2)
-
 class ConvAddReLU2d(_FusedModule):
     r"""This is a sequential container which calls the Conv2d, add, Relu.
     During quantization this will be replaced with the corresponding fused module."""
