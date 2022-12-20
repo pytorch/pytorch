@@ -7,14 +7,14 @@ import os
 import argparse
 
 
-def handle_bad_status(response):
+def handle_bad_status(response) -> None:
     if response.status_code != 200:
         exception_message = (
             "Is github alright?",
             f"Recieved status code '{response.status_code}' when attempting to retrieve runs:\n",
             f"{response.content}"
         )
-        raise Exception(exception_message)
+        raise RuntimeError(exception_message)
 
 
 # Our strategy is to retrieve the parent workflow run, then filter its jobs on
