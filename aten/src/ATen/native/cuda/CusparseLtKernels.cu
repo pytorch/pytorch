@@ -66,8 +66,6 @@ efficiently.
 
 // The code section below describes datatype for input, output matrices and computation between
 // elements in input matrices, which will all be used as template parameters for cutlass::gemm::device::SparseGemm
-using ElementAccumulator = float;                 // <- data type of accumulator
-using ElementComputeEpilogue = ElementAccumulator;  // <- data type of epilogue operations
 using ElementInputA = cutlass::half_t;             // <- data type of elements in input matrix A
 using ElementInputB = cutlass::half_t;             // <- data type of elements in input matrix B
 using ElementOutput = cutlass::half_t;                      // <- data type of elements in output matrix D
@@ -85,7 +83,7 @@ using Gemm = cutlass::gemm::device::SparseGemm<
     cutlass::layout::RowMajor,
     cutlass::half_t,
     cutlass::layout::RowMajor,
-    ElementAccumulator,
+    float,
     cutlass::arch::OpClassTensorOp,
     cutlass::arch::Sm80,
     cutlass::gemm::GemmShape<128, 256, 64>,
@@ -94,8 +92,8 @@ using Gemm = cutlass::gemm::device::SparseGemm<
     cutlass::epilogue::thread::LinearCombination<
         cutlass::half_t,
         128 / cutlass::sizeof_bits<ElementOutput>::value,
-        ElementAccumulator,
-        ElementAccumulator>,
+        float,
+        float>,
     cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>,
     3>;
 
@@ -178,8 +176,8 @@ int run(
   tensor_e_reordered.sync_device();
 
   // Initialize alpha and beta for dot product computation
-  ElementComputeEpilogue alpha = ElementComputeEpilogue(1);
-  ElementComputeEpilogue beta = ElementComputeEpilogue(0);
+  float alpha = 1;
+  float beta  = 0;
 
   LayoutInputA layout_a;
   LayoutInputB layout_b;
