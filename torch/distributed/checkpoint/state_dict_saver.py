@@ -24,38 +24,38 @@ def save_state_dict(
     planner: SavePlanner = None,
 ) -> Metadata:
     """
-    Save a distributed model in SPMD style.
+    Saves a distributed model in SPMD style.
 
     This function is different from ``torch.save()`` as it handles
     ``ShardedTensor`` by having each rank only save their local shards.
 
-    To produce a state_dict with ShardedTensor instances you must call
-    ``_register_state_dict_hook`` on the top module with value
-    `torch.distributed._shard.sharded_tensor.state_dict_hook` prior to
-    calling `state_dict()` on the top module.
-
+    .. warning::
     There is no guarantees of Backwards Compatibility across PyTorch versions
     for saved state_dicts.
 
+    .. warning::
     If using the `process_group` argument, make sure that only its ranks
     call `save_state_dict` and that all data in state_dict belong to it.
 
+    .. note:
     This function can be used to save a state_dict with an intialized process
     group by passing ``no_dist=True``. This can be used to produce a checkpoint
     that can consumed by load_state_dict is a SPMD fashion.
 
     Args:
-        state_dict (Dict[str, Any]) : A state_dict
-        storage_writer (StorageWriter): Instance of StorageWrite use to perform writes.
-        process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
-        coordinator_rank (int): Rank to use to coordinate the checkpoint, rank0 is used by default
-        no_dist (bool): Don't attempt to save in SPMD style. Default to False
+        state_dict (Dict[str, Any]): A state_dict
+        storage_writer (StorageWriter):
+            Instance of StorageWrite use to perform writes.
+        process_group (ProcessGroup):
+            ProcessGroup to be used for cross-rank synchronization.
+        coordinator_rank (int): Rank to use to coordinate the checkpoint.
+            rank0 is used by default.
+        no_dist (bool): If ``True``, distributed checkpoint will not save
+            in SPMD style. (Default: ``False``)
 
     Example:
         >>> # xdoctest: +SKIP
         >>> my_model = MyModule()
-        >>> # We must call this function prior to state_dict()
-        >>> my_model._register_state_dict_hook(state_dict_hook)
 
         >>> model_state_dict = my_model.state_dict()
 
@@ -63,14 +63,16 @@ def save_state_dict(
         >>> torch.distributed.checkpoint.save_state_dict(
         >>>     state_dict=model_state_dict,
         >>>     storage_writer=fs_stroage_writer,
+        >>>     planner=DefaultSavePlanner(),
         >>> )
 
-    .. note:: save_state_dict uses collectives to coordinate writes across ranks.
-        For NCCL-based process groups, internal tensor representations of objects
-        must be moved to the GPU device before communication takes place. In this
-        case, the device used is given by ``torch.cuda.current_device()`` and it
-        is the user's responsibility to ensure that this is set so that each rank
-        has an individual GPU, via ``torch.cuda.set_device()``
+    .. note::
+        save_state_dict uses collectives to coordinate writes across ranks.
+        For NCCL-based process groups, internal tensor representations of
+        objects must be moved to the GPU device before communication takes place.
+        In this case, the device used is given by ``torch.cuda.current_device()``
+        and it is the user's responsibility to ensure that this is set so that
+        each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
