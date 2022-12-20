@@ -209,6 +209,9 @@ static inline Variable applySlicing(
             return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
           } else if (PySlice_Check(obj)) {
             auto val = checkUnpackSlice(obj);
+            if (is_tracing) {
+              recordSliceTrace(obj);
+            }
             return at::indexing::TensorIndex(
                 at::indexing::Slice(val.start, val.stop, val.step));
           } else if (obj == Py_Ellipsis) {

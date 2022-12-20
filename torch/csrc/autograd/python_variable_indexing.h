@@ -42,7 +42,9 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
       if (!_PyEval_SliceIndex(r->step, &step)) {
         throw python_error();
       }
-      TORCH_CHECK(step != 0, "Slicing step size can't be zero");
+      if (step == 0) {
+        PyErr_SetString(PyExc_ValueError, "slice step cannot be zero");
+      }
 
       /* Here *step might be -PY_SSIZE_T_MAX-1; in this case we replace it
        * with -PY_SSIZE_T_MAX.  This doesn't affect the semantics, and it
