@@ -1478,15 +1478,8 @@ class FlatParamHandle:
             ):
                 param.grad = None
             return
-        # For `NO_SHARD` with CPU offloading, the unsharded gradient's source
-        # of truth (as used for the optimizer) is `_cpu_grad`
-        unsharded_grad = (
-            self.flat_param.grad
-            if self.uses_sharded_strategy or not self._offload_params
-            else self.flat_param._cpu_grad  # type: ignore[attr-defined]
-        )
-        self._check_unsharded(unsharded_grad)
-        views = self._get_unflat_views(self.flat_param, unsharded_grad)
+        self._check_unsharded(self.flat_param.grad)
+        views = self._get_unflat_views(self.flat_param, self.flat_param.grad)
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
         ):
@@ -1623,11 +1616,11 @@ class FlatParamHandle:
         this method does not manipulate existing ``Tensor`` data directly and
         creates new ``Tensor`` variables instead.
         """
-        if not self.uses_sharded_strategy:
-            # For `NO_SHARD`, use the *unflattened* unsharded views since we
-            # have the unsharded gradient
-            self._use_unsharded_grad_views()
-            return
+        # if not self.uses_sharded_strategy:
+        #     # For `NO_SHARD`, use the *unflattened* unsharded views since we
+        #     # have the unsharded gradient
+        #     self._use_unsharded_grad_views()
+        #     return
         flat_param = self.flat_param
         self._check_sharded(flat_param)
         grad = self.sharded_grad
@@ -1652,7 +1645,7 @@ class FlatParamHandle:
                 numel_in_shard = param_end - param_start + 1
                 assert flat_param._is_grad_none is not None  # mypy
                 if param.requires_grad and not flat_param._is_grad_none[i]:
-                    if self._keep_low_precision_grads:
+                    if self._keep_low_precision_grads or param.dtype != grad.dtype:
                         # NOTE: This is a hack using `.data` to side step the
                         # check that parameter/gradient dtypes match. Here,
                         # `param` has full precision; `grad` has low precision.
