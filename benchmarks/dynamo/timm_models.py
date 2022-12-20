@@ -295,7 +295,7 @@ class TimmRunnner(BenchmarkRunner):
         cosine = self.args.cosine
         tolerance = 1e-3
         if is_training:
-            if REQUIRE_HIGHER_TOLERANCE:
+            if name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 2 * 1e-2
             else:
                 tolerance = 1e-2
