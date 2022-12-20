@@ -530,8 +530,29 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
     const at::Tensor& input,
     const c10::optional<at::Tensor>& weight,
     const c10::optional<at::Tensor>& bias,
-    const c10::optional<at::Tensor>& running_mean,
-    const c10::optional<at::Tensor>& running_var,
+    at::Tensor & running_mean,
+    at::Tensor & running_var,
+    bool training,
+    double momentum,
+    double eps) {
+  std::vector<torch::lazy::Shape> shapes;
+  shapes.reserve(3);
+  shapes.emplace_back(input.scalar_type(), input.sizes().vec());
+
+  // A separate mean and var needs to be kept for each channel.
+  TORCH_CHECK(
+      input.sizes().size() >= 2,
+      "Input tensor must have at least batch and channel dimensions!");
+
+  shapes.emplace_back(running_mean.scalar_type(), running_mean.sizes().vec());
+  shapes.emplace_back(running_var.scalar_type(), running_var.sizes().vec());
+  return shapes;
+}
+
+std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_no_stats(
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& weight,
+    const c10::optional<at::Tensor>& bias,
     bool training,
     double momentum,
     double eps) {
@@ -544,26 +565,15 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
       input.sizes().size() >= 2,
       "Input tensor must have at least batch and channel dimensions!");
   int64_t num_features = input.size(1);
-
-  if (running_mean.has_value()) {
-    shapes.emplace_back(
-        running_mean.value().scalar_type(), running_mean.value().sizes().vec());
-  } else {
-    shapes.emplace_back(
-        at::get_default_dtype_as_scalartype(),
-        std::vector<int64_t>{num_features});
-  }
-
-  if (running_var.has_value()) {
-    shapes.emplace_back(
-        running_var.value().scalar_type(), running_var.value().sizes().vec());
-  } else {
-    shapes.emplace_back(
-        at::get_default_dtype_as_scalartype(),
-        std::vector<int64_t>{num_features});
-  }
+  shapes.emplace_back(
+      at::get_default_dtype_as_scalartype(),
+      std::vector<int64_t>{num_features});
+  shapes.emplace_back(
+      at::get_default_dtype_as_scalartype(),
+      std::vector<int64_t>{num_features});
   return shapes;
 }
+
 
 std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
     const at::Tensor& grad_out,

@@ -235,8 +235,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   // per-element scale and bias. E.g. For input {N, C, H, W}, weight for
   // batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
   auto outputs = at::native_batch_norm(
-      input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
-      /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
+      input_reshaped, /*weight=*/{}, /*bias=*/{}, /*training=*/true, /*momentum=*/0, eps);
   at::Tensor out = std::get<0>(outputs);
   out = out.view(input_shape);
   if (weight.defined() && bias.defined()) {

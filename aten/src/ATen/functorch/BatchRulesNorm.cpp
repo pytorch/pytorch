@@ -8,6 +8,7 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <tuple>
 
 namespace at { namespace functorch {
 
@@ -47,8 +48,8 @@ batch_norm_batch_rule(
     const Tensor& input, optional<int64_t> input_bdim,
     const c10::optional<Tensor>& weight_opt, optional<int64_t> weight_bdim,
     const c10::optional<Tensor>& bias_opt, optional<int64_t> bias_bdim,
-    const c10::optional<Tensor>& running_mean_opt, optional<int64_t> running_mean_bdim,
-    const c10::optional<Tensor>& running_var_opt, optional<int64_t> running_var_bdim,
+    c10::optional<Tensor>& running_mean_opt, optional<int64_t> running_mean_bdim,
+    c10::optional<Tensor>& running_var_opt, optional<int64_t> running_var_bdim,
     bool training, double momentum, double eps) {
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -71,9 +72,20 @@ batch_norm_batch_rule(
     const auto dummy_weight = at::ones(input.size(1), input.options());  // cudnn and miopen require a weight
     const auto dummy_bias = at::zeros(input.size(1), input.options());   // without this, get "strides() called on undefined Tensor" on cuda
     const auto result = Func(input, dummy_weight, dummy_bias, running_mean_opt, running_var_opt, training, momentum, eps);
-    result0 = std::get<0>(result).transpose(0, 1);          // [C, B, *]
-    mean = std::get<1>(result);
-    rstd = std::get<2>(result);
+      result0 = std::get<0>(result).transpose(0, 1);          // [C, B, *]
+      mean = std::get<1>(result);
+      rstd = std::get<2>(result);
+    // if (running_mean_opt.has_value() && running_var_opt.has_value()) {
+    //   const auto result = Func(input, dummy_weight, dummy_bias, running_mean_opt.value(), running_var_opt.value(), training, momentum, eps);
+    //   result0 = std::get<0>(result).transpose(0, 1);          // [C, B, *]
+    //   mean = std::get<1>(result);
+    //   rstd = std::get<2>(result);
+    // } else {
+    //   const auto result = Func(input, dummy_weight, dummy_bias, training, momentum, eps);
+    //   result0 = std::get<0>(result).transpose(0, 1);          // [C, B, *]
+    //   mean = std::get<1>(result);
+    //   rstd = std::get<2>(result);
+    // }
   } else {
     bdim_size = get_bdim_size3(input, input_bdim, running_mean, running_mean_bdim, running_var, running_var_bdim);
     auto input_ = moveBatchDimToFront(input, input_bdim);
@@ -685,8 +697,8 @@ struct NativeBatchNormBatchRuleHelper {
     const Tensor& input, optional<int64_t> input_bdim,
     const c10::optional<Tensor>& weight_opt, optional<int64_t> weight_bdim,
     const c10::optional<Tensor>& bias_opt, optional<int64_t> bias_bdim,
-    const c10::optional<Tensor>& running_mean_opt, optional<int64_t> running_mean_bdim,
-    const c10::optional<Tensor>& running_var_opt, optional<int64_t> running_var_bdim,
+    c10::optional<Tensor>& running_mean_opt, optional<int64_t> running_mean_bdim,
+    c10::optional<Tensor>& running_var_opt, optional<int64_t> running_var_bdim,
     bool training, double momentum, double eps) {
     return batch_norm_batch_rule<F, Func>(
         input, input_bdim, weight_opt, weight_bdim, bias_opt, bias_bdim,
@@ -700,8 +712,8 @@ struct CudnnBatchNormBatchRuleHelper {
     const Tensor& input, optional<int64_t> input_bdim,
     const Tensor& weight_opt, optional<int64_t> weight_bdim,
     const c10::optional<Tensor>& bias_opt, optional<int64_t> bias_bdim,
-    const c10::optional<Tensor>& running_mean_opt, optional<int64_t> running_mean_bdim,
-    const c10::optional<Tensor>& running_var_opt, optional<int64_t> running_var_bdim,
+    c10::optional<Tensor>& running_mean_opt, optional<int64_t> running_mean_bdim,
+    c10::optional<Tensor>& running_var_opt, optional<int64_t> running_var_bdim,
     bool training, double momentum, double eps) {
     auto reserve = at::empty({0}, input.options().dtype(kByte));  // in experiments, reserve was never set to anything other than empty by cuda
     auto res = batch_norm_batch_rule<F, Func>(
@@ -717,8 +729,8 @@ struct MiopenBatchNormBatchRuleHelper {
     const Tensor& input, optional<int64_t> input_bdim,
     const Tensor& weight_opt, optional<int64_t> weight_bdim,
     const c10::optional<Tensor>& bias_opt, optional<int64_t> bias_bdim,
-    const c10::optional<Tensor>& running_mean_opt, optional<int64_t> running_mean_bdim,
-    const c10::optional<Tensor>& running_var_opt, optional<int64_t> running_var_bdim,
+    c10::optional<Tensor>& running_mean_opt, optional<int64_t> running_mean_bdim,
+    c10::optional<Tensor>& running_var_opt, optional<int64_t> running_var_bdim,
     bool training, double momentum, double eps) {
     return batch_norm_batch_rule<F, Func>(
         input, input_bdim, weight_opt, weight_bdim, bias_opt, bias_bdim,
@@ -888,11 +900,11 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> _native_batch_norm_legit_batch(
 std::tuple<at::Tensor,at::Tensor,at::Tensor> _native_batch_norm_legit_no_stats_batch(
   const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
   bool train, double momentum, double eps) {
-    return at::native_batch_norm(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+    return at::native_batch_norm(self, weight_opt, bias_opt, train, momentum, eps);
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
-  VMAP_SUPPORT(native_batch_norm, NATIVE_BATCH_NORM_BATCH_RULE(native_batch_norm));
+  // VMAP_SUPPORT(native_batch_norm, NATIVE_BATCH_NORM_BATCH_RULE(native_batch_norm));
   VMAP_SUPPORT(cudnn_batch_norm, CUDNN_BATCH_NORM_BATCH_RULE(cudnn_batch_norm));
   VMAP_SUPPORT(miopen_batch_norm, MIOPEN_BATCH_NORM_BATCH_RULE(miopen_batch_norm));
   m.impl("native_batch_norm", _native_batch_norm_legit_batch);

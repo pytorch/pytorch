@@ -1,3 +1,4 @@
+#include "c10/util/Optional.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>

@@ -225,8 +225,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
       input_reshaped,
       /*weight=*/{},
       /*bias=*/{},
-      /*running_mean=*/{},
-      /*running_var=*/{},
       /*training=*/true,
       /*momentum=*/0,
       eps);
