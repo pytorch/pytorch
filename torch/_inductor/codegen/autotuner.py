@@ -3,7 +3,6 @@ import builtins
 import torch
 
 from .. import config, triton_ops
-from ..triton_ops.autotune import mm_autotune, mm_heuristics
 from ..utils import dynamo_testing
 from ..virtualized import V
 
@@ -138,79 +137,6 @@ def tuned_conv(
     best_kernel = autotune.cache[key]
     # if best_kernel == "triton_ops.conv":
     #     print(key, best_kernel)
-    return best_kernel
-
-
-def tuned_mm(
-    a_shape,
-    b_shape,
-    a_stride,
-    b_stride,
-    device,
-    dtype,
-    adjust_triton=0.95,
-):
-    """
-    Return the best kernel name given mm input size;
-    Considering potential pointwise fusion of mm, we could adjust triton timing
-    by multiplying adjust_triton (default=0.95)
-    """
-
-    sizevars = V.graph.sizevars
-    a_shape = [sizevars.size_hint(s) for s in a_shape]
-    b_shape = [sizevars.size_hint(s) for s in b_shape]
-    a_stride = [sizevars.size_hint(s) for s in a_stride]
-    b_stride = [sizevars.size_hint(s) for s in b_stride]
-    a = rand_strided(a_shape, a_stride, device=device, dtype=dtype)
-    b = rand_strided(b_shape, b_stride, device=device, dtype=dtype)
-    c = torch.empty((a_shape[0], b_shape[1]), device=device, dtype=dtype)
-    id_args = [
-        *a_shape,
-        *b_shape,
-    ]
-    use_cuda = a.is_cuda
-
-    # gen_key
-    key = tuple(id_args)
-    key = ("mm",) + key
-
-    # candidate kernels
-    kernels = ["aten.mm.out"]
-    if use_cuda:
-        kernels += ["triton_ops.matmul_out"]
-    # if only one choice, return that kernel
-    if len(kernels) == 1:
-        kernel = kernels[0]
-        return kernel
-    timings = {}
-    if key not in autotune.cache:
-        # bench_start = time.time()
-        for kernel in kernels:
-            runnable_kernel = str2func(kernel)
-            if "triton_ops" in kernel:
-                run_args = (a, b, c)
-                run_kwargs = {}
-                inner_kernel = str2func(
-                    kernel.replace("matmul_out", "_matmul_out") + ".kernel"
-                )
-                inner_kernel.kernel_decorators = []
-                # fix SPLIT_K = 1 for fusable kernels
-                mm_heuristics()(mm_autotune(get_io_bound_configs=False)(inner_kernel))
-            else:
-                run_args = (a, b)
-                run_kwargs = {"out": c}
-            timing, _, _ = autotune._bench(runnable_kernel, *run_args, **run_kwargs)
-            if "triton_ops" in kernel:
-                timing = timing * adjust_triton
-            timings[kernel] = timing
-        # bench_end = time.time()
-        # bench_time = bench_end - bench_start
-        autotune.cache[key] = builtins.min(timings, key=timings.get)
-        if config.debug:
-            print("for key = ", key)
-            print("timing", timings)
-            print("best_kernel", autotune.cache[key])
-    best_kernel = autotune.cache[key]
     return best_kernel
 
 
