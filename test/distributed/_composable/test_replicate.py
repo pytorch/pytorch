@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
-from torch.distributed._composable.replicate import mark_root_module, replicate
+from torch.distributed._composable.replicate import replicate
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import run_tests
 
@@ -26,6 +26,50 @@ class Net(nn.Module):
         x = self.fc3(x)
         return F.softmax(x, dim=1)
 
+class ReplicateStateDictTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _check_state_dict_parity(self, sd_1, sd_2):
+        for k1, k2 in zip(sd_1.keys(), sd_2.keys()):
+            self.assertEqual(k1, k2)
+
+        for v1, v2 in zip(sd_1.values(), sd_2.values()):
+            self.assertEqual(v1, v2)
+
+    def test_replicate_single_module_save_load(self):
+        """
+        Tests that replicate() on a single module state_dict
+        matches local module state_dict.
+        """
+        model = Net()
+        replicate_model = replicate(deepcopy(model))
+        local_sd = model.state_dict()
+        ddp_sd = replicate_model.state_dict()
+        self._check_state_dict_parity(local_sd, ddp_sd)
+
+    def test_replicate_non_root_multiple_save_load(self):
+        """
+        Tests tha replicate() on multiple submodules matches
+        local module state_dict.
+        """
+        model = Net()
+        replicate_model = deepcopy(model)
+        replicate(replicate_model.fc1)
+        replicate(replicate_model.fc2)
+        replicate(replicate_model.fc3)
+
+        local_sd = model.state_dict()
+        ddp_sd = replicate_model.state_dict()
+        self._check_state_dict_parity(local_sd, ddp_sd)
 
 class ReplicateTest(MultiProcessTestCase):
     def setUp(self) -> None:
@@ -91,15 +135,22 @@ class ReplicateTest(MultiProcessTestCase):
 
     def test_replicate_single_module(self):
         model = Net()
-        replicate_model = mark_root_module(replicate(deepcopy(model)))
+        replicate_model = replicate(deepcopy(model))
         self._compare_module(model, replicate_model)
 
     def test_replicate_multi_module(self):
         model = Net()
-        replicate_model = mark_root_module(deepcopy(model))
+        replicate_model = deepcopy(model)
         replicate(replicate_model.fc1)
         replicate(replicate_model.fc2)
         replicate(replicate_model.fc3)
+        self._compare_module(model, replicate_model)
+
+    def test_replicate_with_kwargs(self):
+        model = Net()
+        replicate_model = replicate(
+            deepcopy(model), bucket_cap_mb=1, gradient_as_bucket_view=True
+        )
         self._compare_module(model, replicate_model)
 
 

@@ -1955,7 +1955,6 @@ def tanh(input):
 
     See :class:`~torch.nn.Tanh` for more details.
     """
-    warnings.warn("nn.functional.tanh is deprecated. Use torch.tanh instead.")
     return input.tanh()
 
 
@@ -1966,7 +1965,6 @@ def sigmoid(input):
 
     See :class:`~torch.nn.Sigmoid` for more details.
     """
-    warnings.warn("nn.functional.sigmoid is deprecated. Use torch.sigmoid instead.")
     return input.sigmoid()
 
 
@@ -2764,7 +2762,7 @@ def poisson_nll_loss(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if reduction != "none" and reduction != "mean" and reduction != "sum":
         ret = input
-        raise ValueError(reduction + " is not valid")
+        raise ValueError(reduction + " is not a valid value for reduction")
 
     ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
@@ -4931,6 +4929,7 @@ def multi_head_attention_forward(
     static_k: Optional[Tensor] = None,
     static_v: Optional[Tensor] = None,
     average_attn_weights: bool = True,
+    is_causal: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -4951,6 +4950,8 @@ def multi_head_attention_forward(
         need_weights: output attn_output_weights.
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
+        is_causal: If specified, applies a causal mask as attention mask. Mutually exclusive with providing attn_mask.
+            Default: ``False``.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
@@ -5016,6 +5017,7 @@ def multi_head_attention_forward(
             key_padding_mask=key_padding_mask,
             need_weights=need_weights,
             attn_mask=attn_mask,
+            is_causal=is_causal,
             use_separate_proj_weight=use_separate_proj_weight,
             q_proj_weight=q_proj_weight,
             k_proj_weight=k_proj_weight,
@@ -5175,19 +5177,20 @@ def multi_head_attention_forward(
     # (deep breath) calculate attention and out projection
     #
 
-    B, Nt, E = q.shape
-    q_scaled = q / math.sqrt(E)
     if attn_mask is not None:
-        attn_output_weights = torch.baddbmm(attn_mask, q_scaled, k.transpose(-2, -1))
-    else:
-        attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
-    attn_output_weights = softmax(attn_output_weights, dim=-1)
-    if dropout_p > 0.0:
-        attn_output_weights = dropout(attn_output_weights, p=dropout_p)
+        if attn_mask.size(0) == 1:
+            attn_mask = attn_mask.unsqueeze(0)
+        else:
+            attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
 
-    attn_output = torch.bmm(attn_output_weights, v)
+    q = q.view(bsz, num_heads, tgt_len, head_dim)
+    k = k.view(bsz, num_heads, src_len, head_dim)
+    v = v.view(bsz, num_heads, src_len, head_dim)
 
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
+    attn_output, attn_output_weights = _scaled_dot_product_attention(
+        q, k, v, attn_mask, dropout_p, need_weights, is_causal)
+    attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
+
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
     attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 

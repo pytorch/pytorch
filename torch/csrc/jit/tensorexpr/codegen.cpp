@@ -139,12 +139,12 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
                                           BufPtr b1, BufPtr b2) -> bool {
     return std::get<1>(buf_ranges.at(b1)) < std::get<1>(buf_ranges.at(b2));
   };
-  for (auto buf : bufs_sorted) {
+  for (const auto& buf : bufs_sorted) {
     // If the buf has dynamic shapes, we'll skip it (i.e., allocate memory for
     // it, and there are no future reuses on its memory).
     // TODO: reuse memory for bufs with dynamic shapes
     if (!bufSize(buf)) {
-      buf_allocs.emplace_back(std::make_pair(buf, buf));
+      buf_allocs.emplace_back(buf, buf);
       continue;
     }
 
@@ -193,7 +193,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     // it.
     if (!allocated) {
       buf_mem_map[buf] = buf;
-      buf_allocs.emplace_back(std::make_pair(buf, buf));
+      buf_allocs.emplace_back(buf, buf);
     }
   }
 
@@ -282,17 +282,17 @@ void CodeGen::allocIntermediateBufs() {
   // Identify intermediate buffers that are not allocated yet.
   auto bufs = NodeFinder<Buf>::find(stmt_);
   std::unordered_set<BufPtr> bufs_allocated;
-  for (auto b : buffer_args_) {
+  for (const auto& b : buffer_args_) {
     bufs_allocated.insert(b.buf());
   }
   auto allocs = NodeFinder<Allocate>::find(stmt_);
-  for (auto a : allocs) {
+  for (const auto& a : allocs) {
     bufs_allocated.insert(a->buf());
   }
 
   std::unordered_set<BufPtr> interm_bufs;
   std::unordered_map<BufPtr, std::tuple<int32_t, int32_t>> interm_buf_ranges;
-  for (auto buf : bufs) {
+  for (const auto& buf : bufs) {
     if (!bufs_allocated.count(buf) && !interm_bufs.count(buf)) {
       interm_bufs.insert(buf);
 

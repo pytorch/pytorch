@@ -360,7 +360,7 @@ class BufLiveRange : public IRVisitor {
     }
   }
 
-  void visit(BlockPtr v) {
+  void visit(BlockPtr v) override {
     for (StmtPtr s : *v) {
       curr_index_ += 1;
       findAccAndUpdateLiveRange(s);
