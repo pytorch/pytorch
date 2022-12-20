@@ -366,6 +366,20 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 result = super().run_node(n)
 
+            # require the same stride order for dense outputs,
+            # so that user-land view() will not throw because inductor
+            # output different strides than eager
+            # long term the solution is to make view() always succeed
+            # with infallible strides.
+            if any(user.op == "output" for user in n.users):
+                dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                # requiring a stride order for a non-dense output wouldn't
+                # recreate the same strides, and would fail with view, defer for now.
+                if dense:
+                    result = ir.ExternKernel.require_stride_order(
+                        result, ir.get_stride_order(n.meta["val"].stride())
+                    )
+
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
@@ -404,6 +418,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # there are multiple branches meach with small number of memory
                 # reads, but they converge to a user.
                 result.realize_hint()
+
         return result
 
     def check_platform(self):
