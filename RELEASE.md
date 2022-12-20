@@ -242,7 +242,7 @@ For patch releases issue tracker needs to be created. For patch release, we requ
 
 Only following issues are accepted:
 1. Fixes to regressions against previous major version (e.g. regressions introduced in 1.13.0 from 1.12.0 are pickable for 1.13.1)
-2. Critical fixes for: silent correctness, backwards compatibility, crashes, deadlocks, (large) memory leaks
+2. Low risk critical fixes for: silent correctness, backwards compatibility, crashes, deadlocks, (large) memory leaks
 3. Fixes to new features being introduced in this release
 4. Documentation improvements
 5. Release branch specific changes (e.g. blocking ci fixes, change version identifiers)
