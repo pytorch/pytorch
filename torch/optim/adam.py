@@ -118,7 +118,7 @@ class Adam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=0, amsgrad=False, *, foreach: Optional[bool] = None,
                  maximize: bool = False, capturable: bool = False,
-                 differentiable: bool = False, fused: bool = True):
+                 differentiable: bool = False, fused: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -143,11 +143,11 @@ class Adam(Optimizer):
             p.is_cuda and torch.is_floating_point(p)
             for pg in self.param_groups for p in pg['params']
         ):
-            self.fused = True
+            self.defaults['fused'] = True
         elif not differentiable and all(p.is_cuda for pg in self.param_groups for p in pg['params']):
-            self.foreach = True
+            self.defaults['foreach'] = True
 
-        if self.fused:
+        if self.defaults['fused']:
             if differentiable:
                 raise RuntimeError("`fused` cannot be `differentiable`")
             self._step_supports_amp_scaling = True
