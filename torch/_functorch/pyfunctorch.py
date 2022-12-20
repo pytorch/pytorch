@@ -161,7 +161,7 @@ class JvpInterpreter(FuncTorchInterpreter):
     def prev_fwd_grad_mode(self):
         return self._cptr.prevFwdGradMode()
 
-        
+
 class FunctionalizeInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
         assert cdata.key() == TransformType.Functionalize
@@ -172,7 +172,7 @@ class FunctionalizeInterpreter(FuncTorchInterpreter):
         kernel = op.functorch_table[TransformType.Functionalize]
         return kernel(self, *args, **kwargs)
 
-    def functionalizeAddBackViews(self):
+    def functionalize_add_back_views(self):
         return self._cptr.functionalizeAddBackViews()
 
 
@@ -182,13 +182,10 @@ def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
         return GradInterpreter(cinterpreter)
     if key == TransformType.Vmap:
         return VmapInterpreter(cinterpreter)
-<<<<<<< HEAD
     if key == TransformType.Jvp:
         return JvpInterpreter(cinterpreter)
-=======
     if key == TransformType.Functionalize:
         return FunctionalizeInterpreter(cinterpreter)
->>>>>>> b3e05041a80 ([WIP] support functionalization on torch.cond)
     raise RuntimeError(f"NYI: PyDispatcher has not implemented support for {key}")
 
 
