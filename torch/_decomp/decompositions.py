@@ -144,6 +144,20 @@ def elu_backward(
         )
 
 
+@register_decomposition([aten.fill.Scalar])
+def fill_scalar(self, value):
+    return torch.full_like(self, value)
+
+
+@register_decomposition([aten.fill.Tensor])
+def fill_tensor(self, value: Tensor):
+    utils.check(
+        value.dim() == 0,
+        lambda: f"fill only supports 0-dimension value tensor but got tensor with {value.dim()} dimensions",
+    )
+    return torch.full_like(self, value.item())
+
+
 @register_decomposition(aten.hardsigmoid)
 @pw_cast_for_opmath
 def hardsigmoid(self: Tensor) -> Tensor:
@@ -1332,7 +1346,15 @@ def native_batch_norm_helper(
     new_running_mean = running_mean
     new_running_var = running_var
     if training:
-        output, mean, rstd = normalize(input, reduction_dims, eps)
+        computation_dtype = utils.get_computation_dtype(input.dtype)
+        input_acc = input.to(dtype=computation_dtype)
+        biased_var = torch.var(
+            input_acc, dim=reduction_dims, unbiased=False, keepdim=True
+        )
+        mean = torch.mean(input_acc, dim=reduction_dims, keepdim=True)
+        rstd = torch.rsqrt(biased_var + eps)
+
+        output = (input - mean) * rstd
 
         save_mean = _squeeze_multiple(mean, reduction_dims)
         save_rstd = _squeeze_multiple(rstd, reduction_dims)
@@ -1345,9 +1367,8 @@ def native_batch_norm_helper(
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
-                n / (n - 1)
-            )
+            squeezed_var = _squeeze_multiple(biased_var, reduction_dims)
+            unbiased_var = squeezed_var * (n / (n - 1))
             new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
             if not functional:
                 running_var.copy_(new_running_var)
@@ -1539,7 +1560,7 @@ def _to_copy(
         x = torch._prims.convert_element_type(x, dtype)
     if memory_format is not None:  # no ref/prim for memory format
         out = torch.empty_like(x, memory_format=memory_format)
-        out.copy_(x)
+        out = torch.ops.aten.copy.default(out, x)
         return out  # type: ignore[call-overload]
     return x
 
@@ -2607,6 +2628,16 @@ def upsample_bicubic2d_vec(
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
+@register_decomposition(aten.zero)
+def zero(input: Tensor) -> Tensor:
+    return torch.fill(input, 0)
+
+
+@register_decomposition([aten.zeros_like])
+def zeros_like(self: Tensor, *args, **kwargs) -> Tensor:
+    return torch.full_like(self, 0, *args, **kwargs)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
@@ -2624,3 +2655,4 @@ register_inplace(aten.hardtanh_, aten.hardtanh)
 register_inplace(aten.hardswish_, aten.hardswish)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.silu_, aten.silu)
+register_inplace(aten.zero_, aten.zero)
