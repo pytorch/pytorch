@@ -29,24 +29,6 @@ FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
-"""
-[Note: FSDP State Traversal]
-For the wrapper code path, ``_FSDPState`` is the ``FullyShardedDataParallel``
-module wrapping a fully sharded module, and for the non-wrapper code path,
-``_FSDPState`` is an object that gets embedded on a fully sharded module.
-See [Note: Fully Sharded Module] for the definition.
-
-There are three common traversal idioms: Given a root module,
-- ``_get_fsdp_states()`` returns all ``_FSDPState`` s in the tree.
-- ``get_fsdp_root_states()`` returns all local root ``_FSDPState`` s in the
-tree (i.e. those with ``_is_root == True``).
-- ``_get_fsdp_handles()``returns all ``FlatParamHandle`` s in the tree.
-
-All of these methods must take in the root module (i.e. an ``nn.Module``) and
-not a general ``_FSDPState`` because ``_FSDPState`` does not support a graph
-traversal, whereas ``nn.Module`` has ``nn.Module.modules()`` for traversal.
-"""
-
 
 class _FSDPState(_State):
     def __init__(self) -> None:
@@ -58,6 +40,7 @@ class _FSDPState(_State):
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
+        self._ignored_modules: Set[nn.Module] = set()
         self.rank: int = -1
 
 
@@ -66,40 +49,6 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
     if state is None or not isinstance(state, _FSDPState):
         return None
     return state
-
-
-def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
-    """
-    Returns all ``_FSDPState`` instances in the module tree rooted at
-    ``module`` without any duplicates and following the ``module.modules()``
-    traversal order.
-
-    For the wrapper code path, this returns all ``FullyShardedDataParallel``
-    instances. For the non-wrapper code path, this returns composable state
-    instances.
-
-    NOTE: For now, we must pass an ``nn.Module`` as the argument because
-    ``_FSDPState`` does not support graph traversal.
-    """
-    fsdp_states: List[_FSDPState] = []
-    visited_fsdp_states: Set[_FSDPState] = set()
-    for submodule in module.modules():
-        optional_state = _get_module_fsdp_state(submodule)
-        if optional_state is not None and optional_state not in visited_fsdp_states:
-            visited_fsdp_states.add(optional_state)
-            fsdp_states.append(optional_state)
-    return fsdp_states
-
-
-def _get_fsdp_handles(module: nn.Module) -> List:
-    """
-    Returns all ``FlatParamHandle`` s in the module tree rooted at ``module``.
-    """
-    return [
-        handle
-        for fsdp_state in _get_fsdp_states(module)
-        for handle in fsdp_state._handles
-    ]
 
 
 class TrainingState(Enum):
