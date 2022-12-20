@@ -395,7 +395,7 @@ def vmap(
     """
     _check_randomness_arg(randomness)
     if not (chunk_size is None or chunk_size > 0):
-        raise ValueError("jacrev: `chunk_size` should be greater than 0.")
+        raise ValueError("vmap: `chunk_size` should be greater than 0.")
 
     def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
         split_idxs = (batch_size,)
@@ -426,7 +426,7 @@ def vmap(
 
         if chunk_size is not None:
             chunks_flat_args = _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size)
-            return _vmap_chunked(func, flat_in_dims, chunks_flat_args,
+            return _chunked_vmap(func, flat_in_dims, chunks_flat_args,
                                  args_spec, out_dims, randomness, **kwargs)
 
         # If chunk_size is not specified.
@@ -460,6 +460,13 @@ def _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks):
     assert len(flat_out_dims) == len(flat_output_chunks)
     flat_output = []
     for out_dim in flat_out_dims:
+        # Here, idx of `flat_output_chunks` is always `0`.
+        # This is because we delete the `0` index which shifts
+        # all the remaining elements to the left.
+        # Eg.
+        # >>> a = [1, 2, 3]
+        # >>> del a[0]  # a = [2, 3]
+        # >>> del a[0]  # a = [3]
         flat_output.append(torch.cat(flat_output_chunks[0], dim=out_dim))
         # release source data
         del flat_output_chunks[0]
@@ -468,7 +475,8 @@ def _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks):
     return flat_output
 
 
-def _vmap_chunked(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, randomness, **kwargs):
+# Applies vmap on chunked_input and returns concatenated output over the chunks.
+def _chunked_vmap(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, randomness, **kwargs):
     chunks_output = []
     rs = torch.get_rng_state() if randomness == "same" else None
     for flat_args in chunks_flat_args:
@@ -558,7 +566,7 @@ def chunk_vmap(
         chunks_flat_args = _get_chunk_flat_args(flat_args, flat_in_dims, chunks)
 
         # Apply vmap on chunks
-        return _vmap_chunked(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, randomness, **kwargs)
+        return _chunked_vmap(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, randomness, **kwargs)
 
     return wrapped_with_chunks
 
