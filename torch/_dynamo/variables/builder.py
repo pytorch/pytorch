@@ -77,6 +77,7 @@ from .lists import (
 )
 from .misc import (
     AutogradFunctionVariable,
+    ComptimeVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -226,6 +227,8 @@ class VariableBuilder:
         return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
+        from ..comptime import comptime
+
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
@@ -413,6 +416,8 @@ class VariableBuilder:
                 InspectSignatureVariable.create,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif value is comptime:
+            return ComptimeVariable()
         elif value is dataclasses.fields:
             return LambdaVariable(
                 _dataclasses_fields_lambda,
@@ -751,11 +756,6 @@ def wrap_fx_proxy_cls(
         tx.output.guards.update(options["guards"])
 
     assert "example_value" not in proxy.node.meta
-    if not config.dynamic_propagation:
-        # TODO: This probably doesn't handle subclass correctly
-        if isinstance(example_value, torch.Tensor):
-            options.update(target_cls.specialize(example_value))
-        return target_cls(proxy, **options)
 
     initial_example_value = example_value
 
