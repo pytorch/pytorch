@@ -3689,6 +3689,14 @@ def diag(
         return torch.diagonal_copy(self, offset)
 
 
+def clone_preserve_strides(x):
+    needed_size = utils.compute_required_storage_length(
+        x.size(), x.stride(), x.storage_offset()
+    )
+    buffer = torch.as_strided(x, (needed_size,), (1,), 0).clone()
+    return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+
+
 @register_decomposition(torch.ops.aten.diagonal_scatter)
 @out_wrapper()
 def diagonal_scatter(
@@ -3698,7 +3706,7 @@ def diagonal_scatter(
     dim1: int = 0,
     dim2: int = 1,
 ) -> TensorLikeType:
-    out = input.clone()
+    out = clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
     check(
         diag.shape == src.shape,

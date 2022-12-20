@@ -340,10 +340,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 y = y.t_()
                 return (x + y,)
 
-        x = torch.randn(3, 3, requires_grad=True)
-        x1, x2, x3, x4 = x.clone(), x.clone(), x.clone(), x.clone()
-        y = torch.randn(3, 3, requires_grad=True)
-        y1, y2, y4 = y.clone(), y.clone(), y.clone()
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
 
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
@@ -354,11 +352,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             failure_reason = failure[0]
 
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        # Note: to prevent a recompilation between the two calls,
-        # we need to clone x and y on each use.
-        # fxy mutates the input's metadata, so otherwise dynamo will end up recompiling.
-        fxy(x1, y1)
-        fxy(x2, y2)
+        fxy(x, y)
+        fxy(x, y)
 
         self.assertTrue(failure_reason is None)
 
@@ -371,8 +366,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         fxx = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        fxx(x3, x3)
-        fxx(x4, y4)
+        fxx(x, x)
+        fxx(x, y)
         self.assertEqual(cc.frame_count, 2)
         self.assertEqual(failure_reason, "x is y")
 
