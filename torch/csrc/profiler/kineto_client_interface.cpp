@@ -46,7 +46,7 @@ class LibKinetoClient : public libkineto::ClientInterface {
     (void)disableProfiler();
   }
 
-  void set_withstack(bool withStack) {
+  void set_withstack(bool withStack) override {
     withStack_ = withStack;
   }
 
