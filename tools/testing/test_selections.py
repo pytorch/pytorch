@@ -1,6 +1,5 @@
 import os
 import subprocess
-import sys
 
 from typing import Callable, Dict, List, Optional, Tuple
 
