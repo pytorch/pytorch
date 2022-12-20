@@ -83,6 +83,27 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
+CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
+    *CI_SKIP_AOT_EAGER_TRAINING,
+    "drq",  # assert type(inner_out) == type(user_out)
+    "hf_T5_base",  # fp64_OOM
+    "mobilenet_v2_quantized_qat",  # setStorage
+    "resnet50_quantized_qat",  # setStorage
+    "soft_actor_critic",  # assert type(inner_out) == type(user_out)
+    "tacotron2",  # aten._thnn_fused_lstm_cell.default
+    "tts_angular",  # _VF.lstm
+    "AllenaiLongformerBase",  # assert type(inner_out) == type(user_out)
+    "DebertaV2ForQuestionAnswering",  # OOM
+    "botnet26t_256",  # assert type(inner_out) == type(user_out)
+    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
+    "eca_botnext26ts_256",  # assert type(inner_out) == type(user_out)
+    "eca_halonext26ts",  # assert type(inner_out) == type(user_out)
+    "hrnet_w18",  # torch._C._nn.upsample_nearest2d
+    "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
+    "sebotnet33ts_256",  # assert type(inner_out) == type(user_out)
+    "twins_pcpvt_base",  # timeout
+]
+
 CI_SKIP_INDCUTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
@@ -126,6 +147,22 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "levit_128",  # fp64_OOM
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
+
+
+CI_SKIP_OPTIMIZER = {
+    # TIMM
+    "convmixer_768_32",  # accuracy
+    "sebotnet33ts_256",  # accuracy
+    "tf_mixnet_l",  # This model is non-deterministic with same input + weights,
+    # but without optimizing over multiple iterations, this still passes
+    # TorchBench
+    "dlrm",  # symbolic shapes error
+    "hrnet_w18",  # Stack issue in fx
+    "pnasnet5large",  # Stack issue in fx
+    "MobileBertForMaskedLM",  # Stack issue in fx
+    "MobileBertForQuestionAnswering",  # Stack issue in fx
+    "PegasusForConditionalGeneration",  # OOM
+}
 
 
 def model_specified_by_path(path_and_class_str):
@@ -872,6 +909,7 @@ class BenchmarkRunner:
         self.use_amp = False
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
+        self.optimizer = None
         self._args = None
 
     def setup_amp(self):
@@ -900,16 +938,11 @@ class BenchmarkRunner:
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
 
-    def init_optimizer(self, device, params):
-        self.optimizer = None
-        # TODO - Currently, optimizers are used incorrectly. Fix optimizers with
-        # https://github.com/pytorch/pytorch/pull/87492
-        # param_list = list(params)
-        # if device == "cuda" and len(param_list) != 0:
-        #     # capturable is only supported on cuda at the moment
-        #     self.optimizer = torch.optim.Adam(param_list, capturable=True)
-        # else:
-        #     self.optimizer = None
+    def init_optimizer(self, name, device, params):
+        if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
+            self.optimizer = torch.optim.SGD(params, lr=0.01)
+        else:
+            self.optimizer = None
 
     @property
     def args(self):
@@ -1092,12 +1125,12 @@ class BenchmarkRunner:
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
-            fp64_outputs = self.run_n_iterations(
-                *cast_to_fp64(
-                    deepcopy_and_maybe_ddp(model),
-                    clone_inputs(example_inputs),
-                )
+            model_fp64, inputs_fp64 = cast_to_fp64(
+                deepcopy_and_maybe_ddp(model),
+                clone_inputs(example_inputs),
             )
+            self.init_optimizer(name, current_device, model_fp64.parameters())
+            fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
         except Exception:
             log.warning(
                 f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
@@ -1118,14 +1151,18 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
+            model_copy = deepcopy_and_maybe_ddp(model)
+            self.init_optimizer(name, current_device, model_copy.parameters())
             correct_result = self.run_n_iterations(
-                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+                model_copy, clone_inputs(example_inputs)
             )
 
             # Rerun native pytorch
             reset_rng_state()
+            model_copy = deepcopy_and_maybe_ddp(model)
+            self.init_optimizer(name, current_device, model_copy.parameters())
             correct_rerun_result = self.run_n_iterations(
-                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+                model_copy, clone_inputs(example_inputs)
             )
             if not same(
                 correct_result,
@@ -1138,21 +1175,38 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
-            reset_rng_state()
-            torch._dynamo.reset()
-            try:
-                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+            # Sometime CI fails with random triton compilation failure which disappears after retry
+            # TODO: revisit this after switching to new Triton runtime
+            retries = 2 if self.args.ci else 0
+            for i in range(retries + 1):
+                reset_rng_state()
+                torch._dynamo.reset()
+                try:
+                    model_copy = deepcopy_and_maybe_ddp(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
 
-                new_result = optimized_model_iter_fn(
-                    deepcopy_and_maybe_ddp(model), example_inputs
-                )
-            except Exception as e:
-                accuracy_status = "fail_to_run"
-                print(
-                    "TorchDynamo optimized model failed to run because of following error"
-                )
-                log.exception(e)
-                return record_status(accuracy_status)
+                    new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                    break
+                except Exception as e:
+                    print(
+                        "TorchDynamo optimized model failed to run because of following error"
+                    )
+                    log.exception(e)
+                    if (
+                        isinstance(e, RuntimeError)
+                        and "Internal Triton PTX codegen error" in str(e)
+                    ) or (isinstance(e, KeyError) and str(e) == "'cubin'"):
+                        if i < retries:
+                            time.sleep((i + 1) * 30)
+                            print("Retrying...")
+                        else:
+                            # Skip this kind of random failure for now
+                            accuracy_status = "pass_due_to_skip"
+                            return record_status(accuracy_status)
+                    else:
+                        accuracy_status = "fail_to_run"
+                        return record_status(accuracy_status)
 
             if not same(
                 correct_result,
@@ -1193,6 +1247,7 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
+        self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
@@ -1669,13 +1724,18 @@ def run(runner, args, original_dir=None):
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
+    if args.dynamic_shapes:
+        torch._dynamo.config.dynamic_shapes = True
+        torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
         if args.backend == "aot_eager":
             args.exclude = (
-                CI_SKIP_AOT_EAGER_TRAINING
+                CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
+                if args.training and args.dynamic_shapes
+                else CI_SKIP_AOT_EAGER_TRAINING
                 if args.training
                 else CI_SKIP_AOT_EAGER_INFERENCE
             )
