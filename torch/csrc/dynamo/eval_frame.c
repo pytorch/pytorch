@@ -378,7 +378,9 @@ static PyObject* _custom_eval_frame(
   }
 
   // TODO(jansel): investigate directly using the "fast" representation
-  if (_PyFrame_FastToLocalsWithError(frame) < 0) {
+  // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
+  // even though we should pass a PyFrameObject.
+  if (PyFrame_FastToLocalsWithError(frame) < 0) {
     DEBUG_TRACE("error %s", name(frame));
     return NULL;
   }
