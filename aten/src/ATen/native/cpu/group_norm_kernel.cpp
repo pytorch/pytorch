@@ -1264,8 +1264,13 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
           PT ds_val{0}, db_val{0};
           for (const auto t : c10::irange(num_threads)) {
             PT* buffer_ptr = buffer_data + t * N * 2 * C + n * 2 * C;
-            ds_gamma += buffer_ptr[g * D + d] * (gamma_null ? PT(1) : gamma_data[g * D + d]);
-            db_gamma += buffer_ptr[g * D + d + C] * (gamma_null ? PT(1) : gamma_data[g * D + d]);
+            if (gamma_null) {
+              ds_gamma += buffer_ptr[g * D + d];
+              db_gamma += buffer_ptr[g * D + d + C];
+            } else {
+              ds_gamma += buffer_ptr[g * D + d] *  gamma_data[g * D + d];
+              db_gamma += buffer_ptr[g * D + d + C] * gamma_data[g * D + d];
+            }
             ds_val += buffer_ptr[g * D + d];
             db_val += buffer_ptr[g * D + d + C];
 
@@ -1284,7 +1289,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
         int64_t n{0}, m{0};
         data_index_init(begin, n, N, m, HxW);
         for (const auto i : c10::irange(begin, end)) {
-          for (const auto g : c10::irange(0, G)) {
+          for (const auto g : c10::irange(G)) {
             const T* X_ptr = X_data + i * C + g * D;
             const T* dY_ptr = dY_data + i * C + g * D;
             T* dX_ptr = dX_data + i * C + g * D;
