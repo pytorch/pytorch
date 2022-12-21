@@ -383,10 +383,10 @@ def vmap(
     accept kwargs
 
         >>> x = torch.randn([2, 5])
-        >>> def f(x, scale=4.):
+        >>> def fn(x, scale=4.):
         >>>   return x * scale
         >>>
-        >>> batched_pow = torch.vmap(f)
+        >>> batched_pow = torch.vmap(fn)
         >>> assert torch.allclose(batched_pow(x), x * 4)
         >>> batched_pow(x, scale=x) # scale is not batched, output has shape [2, 2, 5]
 
@@ -532,3 +532,54 @@ def _flat_vmap(func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, r
         return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func)
     finally:
         _vmap_decrement_nesting()
+
+
+# `restore_vmap` is a private helper function. It is vmap but has the following
+# differences:
+# - instead of returning outputs, it returns an (outputs, out_dims) tuple.
+#   out_dims is a pytree of same shape as outputs and contains Optional[int]
+#   specifying where the vmapped dimension, if it exists, is in the corresponding output.
+# - does no validation on in_dims or inputs (vmap expects at least one Tensor to be vmapped).
+#   restore_vmap allows for no inputs to have the vmap dimension
+# - does no validation on outputs (vmap expects only Tensor outputs)
+#   restore_vmap allows for return of arbitrary outputs (not just Tensors)
+#
+# The TL;DR is that restore_vmap is more general than vmap and has a slightly
+# different API. The relaxations are so that we can "pause" vmap in the middle
+# of its execution and then "restore" it later (this is what we do in
+# the generate_vmap_rule=True implementation of autograd.Function).
+#
+# restore_vmap can be technically used in the implementation of vmap, but doing
+# that refactor is a bit technically challenging because:
+# - vmap couples the tensor-wrapping code with error checking
+# - vmap's tensor unwrapping code is in C++; we would need to rewrite part of it
+#   in python because it overlaps with unwrap_batched
+@doesnt_support_saved_tensors_hooks
+def restore_vmap(func, in_dims, batch_size, randomness):
+    def inner(*args, **kwargs):
+        vmap_level = _vmap_increment_nesting(batch_size, randomness)
+        try:
+            batched_inputs = wrap_batched(args, in_dims, vmap_level)
+            batched_outputs = func(*batched_inputs, **kwargs)
+            return unwrap_batched(batched_outputs, vmap_level)
+        finally:
+            _vmap_decrement_nesting()
+    return inner
+
+
+def wrap_batched(args, bdims, level):
+    flat_args, spec = tree_flatten(args)
+    flat_bdims = _broadcast_to_and_flatten(bdims, spec)
+    assert flat_bdims is not None
+    result = _create_batched_inputs(flat_bdims, flat_args, level, spec)
+    return result
+
+
+def unwrap_batched(args, level):
+    flat_args, spec = tree_flatten(args)
+    if len(flat_args) == 0:
+        return args, ()
+    result = [torch._C._functorch._unwrap_batched(arg, level) if isinstance(arg, torch.Tensor)
+              else (arg, None) for arg in flat_args]
+    output, bdims = zip(*result)
+    return tree_unflatten(output, spec), tree_unflatten(bdims, spec)
