@@ -2804,28 +2804,54 @@ class TestVmapOperators(Namespace.TestVmapBase):
     def test_vmap_chunksize(self, in_dim, out_dim, randomness):
 
         x = torch.randn(4, 5, 6)
+        y = torch.randn_like(x)
 
         def f(x):
             y = x.sin()
             if randomness != "error":
                 y = y + torch.rand_like(x)
             return y
+        f_args = (x,)
 
-        rs = torch.get_rng_state()
-        expected = vmap(f, in_dims=in_dim, out_dims=out_dim, randomness=randomness)(x)
+        def f1(pair):
+            x, y = pair
+            z = x.sin() + y.cos()
+            if randomness != "error":
+                z = z + torch.rand_like(z)
+            return z
+        f1_args = ((x, y),)
 
-        for chunk_size in (1, 2, 3, 4, 7, 10, 16, 100):
-            torch.set_rng_state(rs)
-            output = vmap(
-                f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
-            )(x)
-            self.assertEqual(output, expected)
+        def f2(x):
+            y = x.sin()
+            if randomness != "error":
+                y = y + torch.rand_like(x)
+            return {'out': y, 'out1': y + 2}
+        f2_args = (x,)
 
-        for chunk_size in (-1, 0):
-            with self.assertRaisesRegex(ValueError, "vmap: `chunk_size` should be greater than 0."):
-                vmap(
-                    f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
-                )(x)
+        def f3(inp_dict):
+            x = inp_dict['inp']
+            y = inp_dict['inp1']
+            z = x.sin() + y.cos()
+            if randomness != "error":
+                z = z + torch.rand_like(z)
+            return {'z': z, 'tuple': (z, z + 1)}
+        f3_args = ({'inp': x, 'inp1': y},)
+
+        for fn, args in ((f, f_args), (f1, f1_args), (f2, f2_args), (f3, f3_args)):
+            rs = torch.get_rng_state()
+            expected_vmap = vmap(fn, in_dims=in_dim, out_dims=out_dim, randomness=randomness)(*args)
+            for chunk_size in (1, 2, 3, 4, 7, 10, 16, 100):
+                torch.set_rng_state(rs)
+                output = vmap(
+                    fn, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
+                )(*args)
+                self.assertEqual(output, expected_vmap)
+
+            for chunk_size in (-1, 0):
+                with self.assertRaisesRegex(ValueError, "vmap: `chunk_size` should be greater than 0."):
+                    vmap(
+                        fn, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
+                    )(*args)
 
 
 instantiate_parametrized_tests(TestVmapOperators)
@@ -4632,23 +4658,23 @@ class TestRandomness(TestCase):
                 return torch.rrelu(x)
             vmap(f, randomness='same')(z)
 
-    @parametrize('in_dim', [0, 1, 2])
-    @parametrize('out_dim', [0, 1, 2])
-    def test_chunk_vmap(self, in_dim, out_dim):
+    # @parametrize('in_dim', [0, 1, 2])
+    # @parametrize('out_dim', [0, 1, 2])
+    # def test_chunk_vmap(self, in_dim, out_dim):
 
-        randomness = "different"
+    #     randomness = "different"
 
-        x = torch.randn(4, 5, 6)
+    #     x = torch.randn(4, 5, 6)
 
-        def f(x):
-            y = x.sin() + torch.rand_like(x)
-            return y
+    #     def f(x):
+    #         y = x.sin() + torch.rand_like(x)
+    #         return y
 
-        for chunks in [1, 2, 3, 4, 7, 10, 16]:
-            output = chunk_vmap(
-                f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunks=chunks
-            )(x)
-            self._assert_all_slices_unique(output)
+    #     for chunks in [1, 2, 3, 4, 7, 10, 16]:
+    #         output = chunk_vmap(
+    #             f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunks=chunks
+    #         )(x)
+    #         self._assert_all_slices_unique(output)
 
     @parametrize('in_dim', [0, 1, 2])
     @parametrize('out_dim', [0, 1, 2])
