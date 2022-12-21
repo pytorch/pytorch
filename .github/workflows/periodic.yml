@@ -48,6 +48,7 @@ jobs:
         ]}
 
   linux-focal-rocm5_3-py3_8-slow-test:
+    if: false
     name: linux-focal-rocm5.3-py3.8-slow
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm5_3-py3_8-slow-build
@@ -72,6 +73,7 @@ jobs:
         ]}
 
   linux-focal-rocm5_3-py3_8-distributed-test:
+    if: false
     name: linux-focal-rocm5.3-py3.8-distributed
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm5_3-py3_8-distributed-build
