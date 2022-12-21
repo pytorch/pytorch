@@ -2097,11 +2097,8 @@ class TestSparseCSR(TestCase):
                     if not enable_hybrid:
                         res_dense_out = sparse.to_dense().mul(scalar)
                         # BUG: dispatcher ignores mul.Scalar(Tensor, Scalar)
-                        if type(scalar) is not torch.Tensor:
-                            common_dtype = torch.result_type(res_out, res_dense_out)
-                            self.assertEqual(res_out.to_dense().to(common_dtype), res_dense_out.to(common_dtype))
-                        else:
-                            self.assertEqual(res_out.to_dense(), res_dense_out)
+                        # This issues is circumvented in the mul(Tensor, Tensor) kernel.
+                        self.assertEqual(res_out.to_dense(), res_dense_out)
 
                     # TODO: enable hybrid once to_dense supports it.
                     if dtype == torch.result_type(sparse, scalar) and not enable_hybrid:

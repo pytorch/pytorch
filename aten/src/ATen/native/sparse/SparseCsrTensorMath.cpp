@@ -240,7 +240,7 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
 template <typename op_t>
 Tensor binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
   // NOTE: binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
-  const auto result_values = op(sparse.values(), scalar.squeeze());
+  const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::result_type(sparse, scalar));
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
   Tensor compressed_indices, plain_indices;
   std::tie(compressed_indices, plain_indices) = getCompressedPlainIndices(sparse);
