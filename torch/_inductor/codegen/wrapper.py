@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 from .. import codecache, config, ir
 from ..codecache import cpp_compile_command, get_code_path
-from ..utils import dynamo_utils, has_triton, sympy_dot, sympy_product
+from ..utils import cache_on_self, dynamo_utils, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
 from .triton import texpr
@@ -90,6 +90,19 @@ class MemoryPlanningState:
     def push(self, key, item: "FreeIfNotReusedLine"):
         assert not item.is_reused
         self.reuse_pool[key].append(item)
+
+
+@dataclasses.dataclass
+class EnterCudaDeviceContextManagerLine:
+    device_idx: int
+
+    def codegen(self, code: IndentedBuffer):
+        code.writeline(f"with torch.cuda.device({self.device_idx}):")
+
+
+class ExitCudaDeviceContextManagerLine:
+    def codegen(self, code: IndentedBuffer):
+        pass
 
 
 class MemoryPlanningLine:
@@ -259,6 +272,7 @@ class WrapperCodeGen(CodeGen):
                 import random
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
+                from torch._inductor.select_algorithm import extern_kernels
 
                 aten = torch.ops.aten
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
@@ -286,19 +300,6 @@ class WrapperCodeGen(CodeGen):
                     """
                 )
 
-            if config.triton.mm != "aten":
-                self.header.splice(
-                    f"""
-                    from {config.inductor_import}.triton_ops.autotune import mm_heuristics
-                    from {config.inductor_import}.triton_ops.autotune import mm_autotune
-                    """
-                )
-
-            if config.triton.use_bmm:
-                self.header.writeline(
-                    f"from {config.inductor_import}.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
-                )
-
         self.write_prefix()
 
         for name, value in V.graph.constants.items():
@@ -311,6 +312,25 @@ class WrapperCodeGen(CodeGen):
         self.write_get_cuda_stream = functools.lru_cache(None)(
             self.write_get_cuda_stream
         )
+
+        @functools.lru_cache(None)
+        def add_import_once(line):
+            self.header.writeline(line)
+
+        self.add_import_once = add_import_once
+        self._metas = {}
+
+    def add_meta_once(self, meta):
+        meta = repr(meta)
+        if meta not in self._metas:
+            var = f"meta{len(self._metas)}"
+            self._metas[meta] = var
+            self.header.writeline(f"{var} = {meta}")
+        return self._metas[meta]
+
+    @cache_on_self
+    def get_output_refs(self):
+        return [x.codegen_reference() for x in V.graph.graph_outputs]
 
     def write_prefix(self):
         self.prefix.splice(
@@ -424,6 +444,12 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.write_reuse_line(input_buffer, output_buffer)
 
+    def codegen_cuda_device_guard_enter(self, device_idx):
+        self.lines.append(EnterCudaDeviceContextManagerLine(device_idx))
+
+    def codegen_cuda_device_guard_exit(self):
+        self.lines.append(ExitCudaDeviceContextManagerLine())
+
     def generate_return(self, output_refs):
         if output_refs:
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
@@ -432,6 +458,15 @@ class WrapperCodeGen(CodeGen):
 
     def generate_end(self, result):
         return
+
+    def generate_extern_kernel_out(
+        self, output_view, codegen_reference, args, kernel, cpp_kernel
+    ):
+        if output_view:
+            args.append(f"out={output_view.codegen_reference()}")
+        else:
+            args.append(f"out={codegen_reference}")
+        self.writeline(f"{kernel}({', '.join(args)})")
 
     @dynamo_utils.dynamo_timed
     def generate(self):
@@ -464,13 +499,19 @@ class WrapperCodeGen(CodeGen):
                 if isinstance(self.lines[i], MemoryPlanningLine):
                     self.lines[i] = self.lines[i].plan(planning_state)
 
+            device_cm_stack = contextlib.ExitStack()
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
                     line.codegen(self.wrapper_call)
+                elif isinstance(line, EnterCudaDeviceContextManagerLine):
+                    line.codegen(self.wrapper_call)
+                    device_cm_stack.enter_context(self.wrapper_call.indent())
+                elif isinstance(line, ExitCudaDeviceContextManagerLine):
+                    device_cm_stack.close()
                 else:
                     self.wrapper_call.writeline(line)
 
-            output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
+            output_refs = self.get_output_refs()
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
             self.generate_return(output_refs)
@@ -496,7 +537,7 @@ class WrapperCodeGen(CodeGen):
                 f"{name} = rand_strided("
                 f"{V.graph.sizevars.codegen_benchmark_shape_tuple(shape)}, "
                 f"{V.graph.sizevars.codegen_benchmark_shape_tuple(stride)}, "
-                f"device='{device.type}', dtype={dtype})"
+                f"device='{device}', dtype={dtype})"
             )
 
         output.writelines(["", "", 'if __name__ == "__main__":'])
@@ -562,6 +603,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self._call_func_id = next(CppWrapperCodeGen.call_func_id)
         super().__init__()
 
+    @cache_on_self
+    def get_output_refs(self):
+        def has_cpp_codegen_func(x):
+            return hasattr(x, "cpp_wrapper_codegen_reference") and callable(
+                x.cpp_wrapper_codegen_reference
+            )
+
+        return [
+            x.cpp_wrapper_codegen_reference()
+            if has_cpp_codegen_func(x)
+            else x.codegen_reference()
+            for x in V.graph.graph_outputs
+        ]
+
     def write_prefix(self):
         self.prefix.splice(
             """
@@ -576,7 +631,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
         with self.wrapper_call.indent():
             inputs_len = len(V.graph.graph_inputs.keys())
-            output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
+            output_refs = self.get_output_refs()
             if output_refs:
                 if len(output_refs) == 1:
                     output_types = "at::Tensor"
@@ -585,21 +640,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 output_types = "void"
 
+            inputs_types = "std::vector<at::Tensor>"
+            self.wrapper_call.writeline(
+                f"{output_types} call_{self._call_func_id}({inputs_types} args) {{"
+            )
             if inputs_len != 0:
-                inputs_args = ["at::Tensor&"] * len(V.graph.graph_inputs.keys())
-                inputs_args = ", ".join(inputs_args)
-                inputs_args = f"std::tuple<{inputs_args}>"
-
-                self.wrapper_call.writeline(
-                    f"{output_types} call_{self._call_func_id}({inputs_args} args) {{"
-                )
                 inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
                 self.wrapper_call.writeline(f"at::Tensor {inputs_keys_str};")
-                self.wrapper_call.writeline(f"std::tie({inputs_keys_str}) = args;")
-            else:
-                self.wrapper_call.writeline(
-                    f"{output_types} call_{self._call_func_id}(std::tuple<> args) {{"
-                )
+                for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
+                    self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
+
             for name in V.graph.randomness_seeds:
                 self.wrapper_call.writeline(f"at::Tensor {name};")
                 self.wrapper_call.writeline(
@@ -633,7 +683,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
         ext = "so"
         extra = cpp_compile_command("i", "o", vec_isa=picked_vec_isa)
         # \n is required to match with the CodeCache behavior
-        source_code = "\n" + code.getvalue()
+        #  For reductions, the code string gotten from code.getvalue() will use backslash '\'
+        # at the end of lines for readability purpose:
+        #       #pragma omp declare reduction(xxx :\
+        #                       omp_out.value = xxx,\
+        # While the code string loaded during the execution will escape the backslash '\':
+        #       #pragma omp declare reduction(xxx :                omp_out.value = xxx,
+        # Use code.getrawvalue() here to escape the backslash to
+        # make sure the same code string is used during compilation and execution,
+        # so that the hash value is the same.
+        source_code = "\n" + code.getrawvalue()
         _, _, kernel_path = get_code_path(source_code, ext, extra)
         return kernel_path
 
@@ -696,3 +755,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             call = _wrap_func(module.call_{self._call_func_id})
             """
         )
+
+    def generate_extern_kernel_out(
+        self, output_view, codegen_reference, args, kernel, cpp_kernel
+    ):
+        if output_view:
+            output_as_strided = f"{output_view.codegen_reference()}"
+            output_name = f"{output_view.get_name()}_as_strided"
+            self.writeline(f"auto {output_name} = {output_as_strided};")
+
+            args.insert(0, output_name)
+        else:
+            args.insert(0, f"{codegen_reference}")
+        self.writeline(f"{cpp_kernel}({', '.join(args)});")
