@@ -552,8 +552,11 @@ class TestOperators(TestCase):
         self.assertEqual(primal_outs, expected_primal_outs)
         self.assertEqual(tangent_outs, expected_tangent_outs)
 
-        self.assertEqual(noncontig_primal_outs, expected_primal_outs)
-        self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
+        expected_noncontig_primal_outs, expected_noncontig_tangent_outs = \
+            fixme_ref_jvp_local(contig_fn, noncontig_primals, noncontig_tangents)
+
+        self.assertEqual(noncontig_primal_outs, expected_noncontig_primal_outs)
+        self.assertEqual(noncontig_tangent_outs, expected_noncontig_tangent_outs)
 
     @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -965,6 +968,8 @@ class TestOperators(TestCase):
         xfail('tensor_split'),  # data_ptr composite compliance
         xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip('as_strided'),  # Test runner cannot handle this
+        # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
+        xfail('as_strided_scatter'),
         xfail('nn.functional.gaussian_nll_loss'),  # .item or data-dependent control flow
         xfail('scatter'),  # forward-mode AD does not support at::scatter
         xfail('nanquantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
