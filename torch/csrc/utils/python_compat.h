@@ -2,12 +2,6 @@
 
 #include <torch/csrc/python_headers.h>
 
-#define MAYBE_METH_FASTCALL METH_FASTCALL
-#define MAYBE_WRAP_FASTCALL(f) (PyCFunction)(void (*)(void)) f
-
-#define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
-  (PySlice_GetIndicesEx(SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
-
 // Compat macros macros taken from
 // https://docs.python.org/3.11/whatsnew/3.11.html
 
