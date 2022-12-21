@@ -347,6 +347,7 @@ def emit_view_functionalization_body(
         }}
       );
       auto compute_reference_meta =
+        {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
       if (compute_reference_meta) {{
@@ -382,6 +383,7 @@ def emit_view_functionalization_body(
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
       auto compute_reference_meta =
+        {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
       if (compute_reference_meta) {{
