@@ -1652,10 +1652,10 @@ def create_tensor_like(creation_fn):
                 memory_format = (
                     torch.channels_last if len(size) == 4 else torch.channels_last_3d
                 )
-            elif x_layout.is_contiguous_stride_ordered():
-                memory_format = torch.contiguous_format
             else:
-                raise RuntimeError("Unsupported memory format")
+                # TODO: should we assert contiguous_format here?
+                # assert x_layout.is_contiguous_stride_ordered()
+                memory_format = torch.contiguous_format
 
         return creation_fn(
             size,
