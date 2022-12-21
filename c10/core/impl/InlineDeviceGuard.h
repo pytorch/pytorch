@@ -8,6 +8,7 @@
 #include <c10/core/impl/VirtualGuardImpl.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Optional.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
 
 namespace c10 {
 namespace impl {
@@ -109,7 +110,14 @@ class InlineDeviceGuard {
   InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) = delete;
 
   ~InlineDeviceGuard() {
-    impl_.uncheckedSetDevice(original_device_);
+    if(original_device_.is_cuda() && original_device_.index() >= 0) {
+      if (at::cuda::detail::hasPrimaryContext(original_device_.index())) {
+        impl_.uncheckedSetDevice(original_device_);
+      }
+    }
+    else {
+      impl_.uncheckedSetDevice(original_device_);
+    }
   }
 
   /// Sets the device to the given one.
