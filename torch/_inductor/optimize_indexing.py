@@ -234,6 +234,9 @@ def dominated_nodes(
 
 
 def val_expressable_in_32_bits(val):
+    if hasattr(val, "is_Boolean") and val.is_Boolean:
+        return True
+
     if isinstance(val, sympy.Expr):
         assert val.is_constant()
         if val.is_Integer or val.is_Boolean:
@@ -303,6 +306,18 @@ class OptimizeIndexing(object):
     def run(self):
         """Compute Value Ranges and try reduce precision of 'to_dtype' nodes to int32 where possible"""
 
+        int64_dtype_nodes = [
+            node
+            for node in self.all_nodes
+            if (
+                node.target == "to_dtype"
+                and node.args[2] == torch.int64
+                and node not in self.tensor_values_set
+            )
+        ]
+        if not int64_dtype_nodes:
+            return
+
         for node in self.tensor_values_set:
             # we need to evaluate masked_subblock to recurse, and we need to set indirect values
             if (
@@ -315,18 +330,6 @@ class OptimizeIndexing(object):
 
         interpreter = InterpreterShim(self.loop_body.root_block.graph, self.submodules)
         interpreter.run(V.get_ops_handler(), initial_env=self.interp_env)
-
-        # TODO - if this is empty, we should just return. will do in follow up,
-        # want to stress test this pass.
-        int64_dtype_nodes = [
-            node
-            for node in self.all_nodes
-            if (
-                node.target == "to_dtype"
-                and node.args[2] == torch.int64
-                and node not in self.tensor_values_set
-            )
-        ]
 
         # TODO - if dominated node of one to_dtype is not expressible in int32,
         # we should short circuit another to_dtype node if that node also dominates
