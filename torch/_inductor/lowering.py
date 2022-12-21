@@ -558,7 +558,6 @@ def trunc(x):
 
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
-    (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
     assert isinstance(x, TensorBox)
@@ -836,6 +835,21 @@ def glu(x, dim=-1):
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
+
+
+@register_lowering(aten.mm)
+def mm(a: TensorBox, b: TensorBox):
+    return TensorBox.create(ir.MatrixMultiply.create(a, b))
+
+
+@register_lowering(aten.addmm)
+def addmm(inp: TensorBox, a: TensorBox, b: TensorBox, beta=1, alpha=1):
+    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b, beta, alpha))
+
+
+@register_lowering(aten.bmm)
+def bmm(a: TensorBox, b: TensorBox):
+    return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
 def register_onednn_fusion_ops():
@@ -3608,6 +3622,11 @@ register_pointwise(
 )
 
 register_pointwise(
+    aten.tanh,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+register_pointwise(
     aten.log,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     use_libdevice_for_f64=True,
@@ -3700,20 +3719,3 @@ def foobar(self, *args, **kwargs):
 def _realize(x):
     x.realize()
     return clone(x)
-
-
-def _import_kernels():
-    """
-    Need to make sure all these get registered in the lowers dict
-    """
-    import importlib
-    import os
-
-    from . import kernel
-
-    for filename in sorted(os.listdir(os.path.dirname(kernel.__file__))):
-        if filename.endswith(".py") and filename[0] != "_":
-            importlib.import_module(f"{kernel.__name__}.{filename[:-3]}")
-
-
-_import_kernels()

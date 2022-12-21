@@ -276,10 +276,8 @@ def backwards_not_supported(prim):
         g = torch._C._AutoDispatchBelowAutograd()
         try:
             old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
-            torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, True)
             return prim(*args, **kwargs)
         finally:
-            torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, old)
             del g
 
     class BackwardsNotSupported(torch.autograd.Function):
