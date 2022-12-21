@@ -3,8 +3,10 @@
 
 #include <type_traits>
 #include <utility>
+#include <iostream>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
@@ -102,6 +104,7 @@
 #include <ATen/ops/pow.h>
 #include <ATen/ops/remainder.h>
 #include <ATen/ops/remainder_native.h>
+#include <ATen/ops/result_type.h>
 #include <ATen/ops/rshift_native.h>
 #include <ATen/ops/rsub_native.h>
 #include <ATen/ops/sigmoid_backward_native.h>
@@ -1016,9 +1019,18 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
+  auto self_meta = self.to(device_);
+  auto other_meta = other.to(device_);
+  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self_meta, other_meta);
+  self_meta.unsafeGetTensorImpl()->set_wrapped_number(self.unsafeGetTensorImpl()->is_wrapped_number());
+  other_meta.unsafeGetTensorImpl()->set_wrapped_number(other.unsafeGetTensorImpl()->is_wrapped_number());
+  auto result_dtype = at::result_type(other_meta, self_meta);
+  std::cout << result_dtype << "RESULT_DTYPE\n";
+
   auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
-  return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, meta_out.options().device(out_device));
+  auto options = meta_out.options().device(out_device).dtype(result_dtype);
+  std::cout << options << "OPTIONS\n";
+  return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, options);
 }
 
 Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
@@ -1026,28 +1038,33 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::div_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
+  auto self_meta = self.to(device_);
+  auto other_meta = other.to(device_);
+  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self_meta, other_meta);
+  self_meta.unsafeGetTensorImpl()->set_wrapped_number(self.unsafeGetTensorImpl()->is_wrapped_number());
+  other_meta.unsafeGetTensorImpl()->set_wrapped_number(other.unsafeGetTensorImpl()->is_wrapped_number());
+  auto result_dtype = at::result_type(other_meta, self_meta);
 
   if (self._is_zerotensor()) {
     if (other._is_zerotensor()) {
       // 0/0, return full NAN
-      return at::full(meta_out.sizes(), std::numeric_limits<float>::quiet_NaN(), meta_out.options().device(out_device));
+      return at::full(meta_out.sizes(), std::numeric_limits<float>::quiet_NaN(), meta_out.options().dtype(result_dtype).device(out_device));
     }
     else {
       // 0/x, return zero tensor
       auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
-      return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, meta_out.options().device(out_device));
+      return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, meta_out.options().dtype(result_dtype).device(out_device));
     }
   }
   else {
     if (other._is_zerotensor()) {
       // x/0, return full INF
-      return at::full(meta_out.sizes(), std::numeric_limits<float>::infinity(), meta_out.options().device(out_device));
+      return at::full(meta_out.sizes(), std::numeric_limits<float>::infinity(), meta_out.options().dtype(result_dtype).device(out_device));
     }
     else {
       // x/y -- unreachable, see TORCH_INTERNAL_ASSERT above
       auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
-      return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, meta_out.options().device(out_device));
+      return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, meta_out.options().dtype(result_dtype).device(out_device));
     }
   }
 }
@@ -1058,22 +1075,28 @@ Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
   auto self_dev = self.to(device_);
-  self_dev.unsafeGetTensorImpl()->set_wrapped_number(self.unsafeGetTensorImpl()->is_wrapped_number());
   auto other_dev = other.to(device_);
-  other_dev.unsafeGetTensorImpl()->set_wrapped_number(other.unsafeGetTensorImpl()->is_wrapped_number());
   auto meta_out = at::_ops::add_Tensor::redispatch(
       meta_dks, self_dev, other_dev, alpha);
+
+  self_dev.unsafeGetTensorImpl()->set_wrapped_number(self.unsafeGetTensorImpl()->is_wrapped_number());
+  other_dev.unsafeGetTensorImpl()->set_wrapped_number(other.unsafeGetTensorImpl()->is_wrapped_number());
+  auto result_dtype = at::result_type(other_dev, self_dev);
 
   auto get_out_like = [&] (const Tensor& tensor)
   {
       auto sizes = meta_out.sizes();
-      return at::_to_copy(tensor.expand(sizes), meta_out.options().device(out_device));
+      auto copy_options = meta_out.options().device(out_device).dtype(result_dtype);
+      return at::_to_copy(tensor.expand(sizes), copy_options);
   };
 
   if (self._is_zerotensor()) {
     if (other._is_zerotensor()) {
       auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
-      return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, meta_out.options().device(out_device));
+      return at::_efficientzerotensor(
+          meta_out.sizes(),
+          is_wrapped_number,
+          meta_out.options().dtype(result_dtype).device(out_device));
     }
     auto res = get_out_like(other);
     return alpha.equal(1) ? std::move(res) : res.mul(alpha);
@@ -1098,17 +1121,19 @@ Tensor linalg_cross_zerotensor(
   // hack to use the TensorIterator to get the correct broadcasting and type
   // promotion logic (see add_zerotensor)
   auto device = Device(DeviceType::Meta);
-  auto meta_out = at::_ops::linalg_cross::redispatch(
-    c10::DispatchKeySet(at::DispatchKey::Meta),
-    input.to(device),
-    other.to(device),
-    dim);
+  constexpr auto meta_dks = c10::DispatchKeySet(at::DispatchKey::Meta);
+  auto input_meta = input.to(device);
+  auto other_meta = other.to(device);
+  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, input_meta, other_meta);
+  input_meta.unsafeGetTensorImpl()->set_wrapped_number(input.unsafeGetTensorImpl()->is_wrapped_number());
+  other_meta.unsafeGetTensorImpl()->set_wrapped_number(other.unsafeGetTensorImpl()->is_wrapped_number());
+  auto result_dtype = at::result_type(other_meta, input_meta);
 
   auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
   return at::_efficientzerotensor(
     meta_out.sizes(),
     is_wrapped_number,
-    meta_out.options().device(out_device));
+    meta_out.options().dtype(result_dtype).device(out_device));
 }
 
 // multiply, alias for mul
