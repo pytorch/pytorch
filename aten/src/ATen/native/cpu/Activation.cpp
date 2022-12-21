@@ -5,10 +5,12 @@
 
 #include <ATen/native/Activation.h>
 
+
 #include <cmath>
 #include <functional>
 
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
@@ -1202,14 +1204,13 @@ void mish_backward_kernel(TensorIterator& iter) {
   }
 }
 
-void prelu_cpu_kernel(TensorIterator& iter) {
+void prelu_kernel(TensorIterator& iter) {
   if (iter.common_dtype() == kBFloat16) {
     auto zero_vec = Vectorized<float>((float)(0));
-    auto one_vec = Vectorized<float>((float)(1));
     cpu_kernel_vec(
       iter,
-      [=](BFloat16 input, BFloat16 weight) -> BFloat16 {
-        return (float(input) > float(0)) ? float(input) : float(weight) * float(input);
+      [](BFloat16 input, BFloat16 weight) -> BFloat16 {
+        return (input >= 0) ? float(input) : float(weight) * float(input);
       },
       [=](Vectorized<BFloat16> input, Vectorized<BFloat16> weight) -> Vectorized<BFloat16> {
         Vectorized<float> input0, input1;
@@ -1217,48 +1218,39 @@ void prelu_cpu_kernel(TensorIterator& iter) {
         std::tie(input0, input1) = convert_bfloat16_float(input);
         std::tie(weight0, weight1) = convert_bfloat16_float(weight);
 
-        auto res0 = input0 * (Vectorized<float>::blendv(weight0, one_vec, input0 > zero_vec));
-        auto res1 = input1 * (Vectorized<float>::blendv(weight1, one_vec, input1 > zero_vec));
+        auto res0 = Vectorized<float>::blendv(weight0 * input0, input0, input0 >= zero_vec);
+        auto res1 = Vectorized<float>::blendv(weight1 * input1, input1, input1 >= zero_vec);
         return convert_float_bfloat16(res0, res1);
       });
   } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "prelu_cpu", [&]() {
-    using Vec = Vectorized<scalar_t>;
-    auto zero_vec = Vec((scalar_t)(0));
-    auto one_vec = Vec((scalar_t)(1));
-    cpu_kernel_vec(
-      iter,
-      [=](scalar_t input, scalar_t weight) {
-        return (input > scalar_t(0)) ? input : weight * input;
-      },
-      [=](Vec input, Vec weight) {
-        auto r = Vec::blendv(weight, one_vec, input > zero_vec);
-        return input * r;
-      });
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "prelu_cpu", [&] {
+      using Vec = Vectorized<scalar_t>;
+      cpu_kernel_vec(
+        iter,
+        [](scalar_t input, scalar_t weight) {
+          return (input >= scalar_t(0)) ? input : weight * input;
+        },
+        [](Vec input, Vec weight) {
+          return Vec::blendv(weight * input, input, input >= Vec(0));
+        });
     });
   }
 }
 
-void prelu_backward_cpu_kernel(TensorIterator& iter) {
-  if (iter.common_dtype() == kBFloat16) {
-    cpu_kernel_multiple_outputs(
-      iter,
-      [=](BFloat16 input, BFloat16 grad_out, BFloat16 weight) -> std::tuple<BFloat16, BFloat16> {
-        float input_grad = (float(input) > float(0)) ? float(grad_out) : float(weight) * float(grad_out);
-        float weight_grad_collector = (float(input) > float(0)) ? float(0) : float(input) * float(grad_out);
-        return std::tuple<BFloat16, BFloat16>(input_grad, weight_grad_collector);
+void prelu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "prelu_backward_cpu", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    cpu_kernel_multiple_outputs(iter,
+      [](scalar_t input_, scalar_t weight_, scalar_t grad_) -> std::tuple<scalar_t, scalar_t> {
+        opmath_t input = input_;
+        opmath_t weight = weight_;
+        opmath_t grad = grad_;
+        auto mask = input >= 0;
+        auto grad_input = mask ? grad : weight * grad;
+        auto grad_weight = mask ? opmath_t(0) : input * grad;
+        return {scalar_t{grad_input}, scalar_t{grad_weight}};
       });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "prelu_backward_cpu", [&]() {
-    cpu_kernel_multiple_outputs(
-      iter,
-      [=](scalar_t input, scalar_t grad_out, scalar_t weight) -> std::tuple<scalar_t, scalar_t> {
-        scalar_t input_grad = (input > scalar_t(0)) ? grad_out : weight * grad_out;
-        scalar_t weight_grad_collector = (input > scalar_t(0)) ? scalar_t(0) : input * grad_out;
-        return std::tuple<scalar_t, scalar_t>(input_grad, weight_grad_collector);
-      });
-    });
-  }
+  });
 }
 
 } // namespace
@@ -1289,8 +1281,8 @@ REGISTER_DISPATCH(silu_stub, &silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
 REGISTER_DISPATCH(mish_stub, &mish_kernel);
 REGISTER_DISPATCH(mish_backward_stub, &mish_backward_kernel);
-REGISTER_DISPATCH(prelu_cpu_stub, &prelu_cpu_kernel);
-REGISTER_DISPATCH(prelu_backward_cpu_stub, &prelu_backward_cpu_kernel);
+REGISTER_DISPATCH(prelu_stub, &prelu_kernel);
+REGISTER_DISPATCH(prelu_backward_stub, &prelu_backward_kernel);
 
 } // namespace native
 } // namespace at

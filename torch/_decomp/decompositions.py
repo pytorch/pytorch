@@ -286,6 +286,22 @@ def prelu_backward(
     return (input_grad.view_as(self), out)
 
 
+@register_decomposition(aten._prelu_kernel)
+@pw_cast_for_opmath
+def _prelu_kernel(self: Tensor, weight: Tensor) -> Tensor:
+    return torch.where(self >= 0, self, weight * self)
+
+
+@register_decomposition(aten._prelu_kernel_backward)
+@pw_cast_for_opmath
+def _prelu_kernel_backward(
+    self: Tensor, weight: Tensor, grad_output: Tensor
+) -> Tuple[Tensor, Tensor]:
+    input_grad = torch.where(self >= 0, grad_output, weight * grad_output)
+    weight_grad = torch.where(self >= 0, 0.0, self * grad_output)
+    return (input_grad, weight_grad)
+
+
 @register_decomposition(aten.rrelu_with_noise_backward)
 @pw_cast_for_opmath
 def rrelu_with_noise_backward(
