@@ -280,7 +280,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             X2_init = torch.randint(
                 X2_value_min,
                 X2_value_max,
-                conv_module[0](X).size() # Infer the size of tensor to do the add
+                conv_module[0](X).size()  # Infer the size of tensor to do the add
             )
             X2 = X2_scale * (X2_init - X2_zero_point).float()
             X2_q = torch.quantize_per_tensor(
