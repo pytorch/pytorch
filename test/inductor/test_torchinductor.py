@@ -2786,6 +2786,10 @@ class CommonTemplate:
             fn,
             (torch.randn([8, 16]),),
         )
+        self.common(
+            fn,
+            (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+        )
 
     def test_cat_upcasting(self):
         def fn(arg4_1, slice_7):
@@ -5211,15 +5215,26 @@ if HAS_CPU:
                 if isinstance(v, staticmethod):
                     cpp_op_list.append(k)
 
-            self.assertEqual(cpp_op_list.sort(), cpp_vec_op_list.sort())
+            diff = [
+                "index_expr",
+                "signbit",
+                "isinf",
+                "mod",
+                "masked",
+                "randn",
+                "isnan",
+                "rand",
+            ]
+            union = {*cpp_vec_op_list, *diff}
+            self.assertTrue(set(cpp_op_list).issubset(union))
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
-        def test_erf_cpu_only(self):
+        def test_new_vec_op_cpu_only(self):
             def fn(x):
-                return (torch.erf(x),)
+                return (torch.log1p(torch.expm1(torch.erf(x))),)
 
             x = torch.randn((2, 9))
             x[0, 0] = torch.nan
