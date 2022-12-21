@@ -379,7 +379,9 @@ class GraphLowering(torch.fx.Interpreter):
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
                 if dense and len(strides):
-                    result = ir.ExternKernel.require_stride_order(result, ir.get_stride_order(strides))
+                    result = ir.ExternKernel.require_stride_order(
+                        result, ir.get_stride_order(strides)
+                    )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
