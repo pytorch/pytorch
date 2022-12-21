@@ -764,7 +764,7 @@ def conv_transpose2d_input(input: List[int], weight: List[int], bias: Optional[L
     for d in range(2, dim):
         dilation_ = dilation[d - 2] if has_dilation else 1
         kernel = dilation_ * (weight[d] - 1)
-        output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1)
+        output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1 + output_padding[d - 2])
     return output_size
 
 def conv_forwards(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], transposed: bool, output_padding: List[int], groups: int) -> List[int]:
@@ -780,7 +780,7 @@ def conv_forwards(input: List[int], weight: List[int], bias: Optional[List[int]]
         dilation_ = dilation[d - 2] if has_dilation else 1
         if transposed:
             kernel = dilation_ * (weight[d] - 1)
-            output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1)
+            output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1 + output_padding[d - 2])
         else:
             kernel = dilation_ * (weight[d] - 1) + 1
             output_size.append((input[d] + (2 * padding[d - 2]) - kernel) // stride[d - 2] + 1)
