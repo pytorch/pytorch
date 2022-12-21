@@ -307,7 +307,7 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
         )
 
         shader_info_args = [
-            "\"{}\"".format(name),
+            "\"vulkan.{}\"".format(name.replace("_spv", "")),
             "{}_bin".format(name),
             str(sizeBytes),
             "{{{}}}".format(", ".join(shader_info.layouts)),
