@@ -17,10 +17,10 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp._common_utils import (
-    _all_handles,
     _apply_to_modules,
     _FSDPState,
     _get_module_fsdp_state,
@@ -1306,6 +1306,7 @@ def _optim_state_dict(
         :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
         then nonzero ranks return an empty :class:`dict`.
     """
+    _clear_grads_if_needed(traversal_utils._get_fsdp_handles(model))
     to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
     fsdp_osd: Dict[str, Any] = {"state": {}, "param_groups": []} if to_save else {}
     fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
@@ -1328,10 +1329,6 @@ def _optim_state_dict(
         fqn_to_fsdp_param_info,
         merge_keys=use_orig_params,
     )
-
-    for fsdp_param_info in fqn_to_fsdp_param_info.values():
-        if fsdp_param_info.state._is_root:
-            _clear_grads_if_needed(_all_handles(fsdp_param_info.state))
 
     # Iterate in rank 0's flattened parameter ID order to ensure aligned
     # all-gathers across ranks
