@@ -494,9 +494,7 @@ class OptimizeIndexing(object):
             return ValueRanges(-math.inf, math.inf)
 
 
-def indexing_dtype_strength_reduction(
-    loop_body: LoopBody
-):
+def indexing_dtype_strength_reduction(loop_body: LoopBody):
     """
     Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
     intermediaries from int64 to int32
