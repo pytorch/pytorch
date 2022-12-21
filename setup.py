@@ -335,7 +335,7 @@ def check_submodules():
     def check_for_files(folder, files):
         if not any(os.path.exists(os.path.join(folder, f)) for f in files):
             report("Could not find any of {} in {}".format(", ".join(files), folder))
-            report("Did you run 'git submodule update --init --recursive --jobs 0'?")
+            report("Did you run 'git submodule update --init --recursive'?")
             sys.exit(1)
 
     def not_exists_or_empty(folder):
@@ -354,7 +354,7 @@ def check_submodules():
             print(' --- Submodule initialization took {:.2f} sec'.format(end - start))
         except Exception:
             print(' --- Submodule initalization failed')
-            print('Please run:\n\tgit submodule update --init --recursive --jobs 0')
+            print('Please run:\n\tgit submodule update --init --recursive')
             sys.exit(1)
     for folder in folders:
         check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE", "LICENSE.md", "LICENSE.txt"])
