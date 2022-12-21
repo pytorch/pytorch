@@ -262,11 +262,13 @@ conv_configs.append(
         .set_reference_quantized_module(nnqr.Conv2d))
 
 # (2) Conv2d + Add + Relu
+
 # conv2d Y
 #   \   /
 #    add
 #     \
 #     relu
+
 def _fuse_conv_add_relu_left(is_qat, relu, add_pattern):
     add, conv, _ = add_pattern
     return nni.ConvAddReLU2d(relu, add, conv)
@@ -345,6 +347,7 @@ for with_bn, add_op in conv_add_relu_left_optioins:
 #    add
 #     \
 #     relu
+
 def _fuse_conv_add_relu(is_qat, relu, add_pattern):
     add, _, conv = add_pattern
     return nni.ConvAddReLU2d(relu, add, conv)
