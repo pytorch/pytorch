@@ -132,6 +132,8 @@ class RendezvousParameters:
             The minimum number of nodes to admit to the rendezvous.
         max_nodes:
             The maximum number of nodes to admit to the rendezvous.
+        local_addr:
+            The address of the local node.
         **kwargs:
             Additional parameters for the specified backend.
     """
@@ -143,6 +145,7 @@ class RendezvousParameters:
         run_id: str,
         min_nodes: int,
         max_nodes: int,
+        local_addr: Optional[str] = None,
         **kwargs,
     ):
         if not backend:
@@ -164,6 +167,7 @@ class RendezvousParameters:
         self.min_nodes = min_nodes
         self.max_nodes = max_nodes
         self.config = kwargs
+        self.local_addr = local_addr
 
     def get(self, key: str, default: Any = None) -> Any:
         """Returns the value for ``key`` if ``key`` exists, else ``default``."""
