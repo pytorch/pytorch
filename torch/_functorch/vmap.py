@@ -419,15 +419,18 @@ def vmap(
 
     return wrapped
 
+def get_chunk_sizes(total_elems, chunk_size):
+    n_chunks = n_chunks = total_elems // chunk_size
+    chunk_sizes = [chunk_size] * n_chunks
+    # remainder chunk
+    chunk_sizes.append(total_elems % chunk_size)
+    return chunk_sizes
 
 def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
     split_idxs = (batch_size,)
-    if chunk_size is not None and chunk_size > 0:
-        n_chunks = n_chunks = batch_size // chunk_size
-        chunk_numels = [chunk_size] * n_chunks
-        # remainder chunk
-        chunk_numels.append(batch_size % chunk_size)
-        split_idxs = tuple(itertools.accumulate(chunk_numels))
+    if chunk_size is not None:
+        chunk_sizes = get_chunk_sizes(batch_size, chunk_size)
+        split_idxs = tuple(itertools.accumulate(chunk_sizes))
 
     flat_args_chunks = tuple(
         t.tensor_split(split_idxs, dim=in_dim) if in_dim is not None else [t, ] * len(split_idxs)
@@ -472,7 +475,7 @@ def _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks):
 
 # Applies vmap on chunked_input and returns concatenated output over the chunks.
 def _chunked_vmap(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, randomness, **kwargs):
-    
+
     chunks_output = []
     rs = torch.get_rng_state() if randomness == "same" else None
     for flat_args in chunks_flat_args:
