@@ -5,7 +5,7 @@ from .backend_config import BackendConfig
 from .fx import prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 from ._pt2e.utils import (
-    _infer_nn_stack_trace_and_append_on_meta,
+    # _infer_nn_stack_trace_and_append_on_meta,
     _get_renamed_nn_module_stack,
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_addmm,
@@ -20,7 +20,9 @@ def prepare_pt2e(
     backend_config: BackendConfig,
 ):
     # TODO[jerryzh168]: check if the model is using EXIR - aten dialect
-    _infer_nn_stack_trace_and_append_on_meta(model, model, example_inputs)
+    # disabled for now, looks like runing torchdynamo.export twice results in
+    # errors
+    # _infer_nn_stack_trace_and_append_on_meta(model, model, example_inputs)
     # TODO: move this information to fx node itself
     node_name_to_scope: Dict[str, Tuple[str, type]] = {}
     for n in model.graph.nodes:

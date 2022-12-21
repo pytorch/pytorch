@@ -4,7 +4,7 @@ from torch.fx import GraphModule
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 # TODO[jerryzh168]: move this to a more general util function
 from torch.ao.quantization.fx.prepare import (
-    is_activation_post_process_node,
+    _is_activation_post_process_node,
 )
 from collections import OrderedDict
 import copy
@@ -141,7 +141,7 @@ def _rearrange_weight_observer_for_addmm(
             continue
         addmm = node
         maybe_weight_obs = addmm.args[2]
-        if not is_activation_post_process_node(maybe_weight_obs, named_modules):
+        if not _is_activation_post_process_node(maybe_weight_obs, named_modules):
             continue
         transpose_node = maybe_weight_obs.args[0]
         if transpose_node.target != torch.ops.aten.t.default:

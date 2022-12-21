@@ -73,14 +73,14 @@ def get_conv_configs():
         ._set_input_type_to_index({"weight": 1, "bias": 2})
     )
     conv_configs.append(
-        BackendPatternConfig((torch.ops.aten.relu.default, torch.ops.aten.convolution.default))
+        BackendPatternConfig((torch.ops.aten.convolution.default, torch.ops.aten.relu.default))
         .set_observation_type(observation_type)  # noqa: E131
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 1, "bias": 2})
     )
     # TODO: remove when functionalization is supported in PT2 mode
     conv_configs.append(
-        BackendPatternConfig((torch.ops.aten.relu_.default, torch.ops.aten.convolution.default))
+        BackendPatternConfig((torch.ops.aten.convolution.default, torch.ops.aten.relu_.default))
         .set_observation_type(observation_type)  # noqa: E131
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 1, "bias": 2})
@@ -97,7 +97,8 @@ def get_pooling_configs():
         return maxpool
 
     backend_pattern_configs.append(
-        BackendPatternConfig((operator.getitem, torch.ops.aten.max_pool2d_with_indices.default, 0))
+        BackendPatternConfig()
+        ._set_pattern_complex_format((operator.getitem, torch.ops.aten.max_pool2d_with_indices.default, 0))
         .set_observation_type(observation_type)  # noqa: E131
         .set_dtype_configs(dtype_configs)
         ._set_root_node_getter(root_node_getter)
@@ -128,11 +129,10 @@ def get_binary_op_configs():
     }
     for op_with_quantized_bop_scalar_variant in [torch.ops.aten.add.Tensor, torch.ops.aten.add_.Tensor]:
         bop_patterns = [
-            # TODO: add the pattern
-            (torch.ops.aten.relu.default, op_with_quantized_bop_scalar_variant),
+            (op_with_quantized_bop_scalar_variant, torch.ops.aten.relu.default),
             op_with_quantized_bop_scalar_variant,
             # TODO: remove when functionalization is supported in pt2_mode
-            (torch.ops.aten.relu_.default, op_with_quantized_bop_scalar_variant),
+            (op_with_quantized_bop_scalar_variant, torch.ops.aten.relu_.default),
         ]
         for bop_pattern in bop_patterns:
             binary_op_configs.append(
