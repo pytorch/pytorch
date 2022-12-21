@@ -251,7 +251,7 @@ template <typename scalar_t>
 static inline scalar_t compute_scales_value(
     const c10::optional<double> scale,
     int64_t input_size,
-    int64_t output_size) { 
+    int64_t output_size) {
       // see Note [compute_scales_value]
       // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
       return (scale.has_value() && scale.value() > 0.)
