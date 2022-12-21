@@ -296,7 +296,7 @@ def _make_prim(
     prim_autograd_impl.impl(name, _autograd_impl)
     prim_meta_impl.impl(name, meta)
 
-    _prim_packet = getattr(torch._ops.ops.prims, name)
+    _prim_packet = getattr(torch.ops.prims, name)
     _prim = _prim_packet.default
 
     from torch._subclasses.fake_tensor import contains_tensor_types
