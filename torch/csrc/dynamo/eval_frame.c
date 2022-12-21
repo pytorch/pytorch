@@ -24,9 +24,16 @@
 #if IS_PYTHON_3_11_PLUS
 #define THP_EVAL_API_FRAME_OBJECT _PyInterpreterFrame
 
-// The next two functions are taken from frameobject.c
+// The next two functions are taken from
+// https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1182
 // These are not exported by the CPython binary and thus we have
 // to get our own implementation of them.
+// As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
+// us to manually re-check that the function didn't change on the next major version
+#if PY_VERSION_HEX >= 0x030C0000 // 3.12
+#error "Please ensure that the functions below still match the CPython implementation for 3.12"
+#endif
+
 static int
 _PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
 {
