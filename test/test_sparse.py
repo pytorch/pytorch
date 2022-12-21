@@ -4128,8 +4128,9 @@ class TestSparseAny(TestCase):
                                        contiguous_indices, contiguous_values)
                                 if key not in tested_combinations:
                                     untested_combinations.add(
-                                        f'{layout=}, {is_hybrid=}, {is_batch=}, {nontrivial_blocksize=},'
-                                        f' {contiguous_indices=}, {contiguous_values=}')
+                                        f'layout={layout}, is_hybrid={is_hybrid}, is_batch={is_batch},'
+                                        f' nontrivial_blocksize={nontrivial_blocksize},'
+                                        f' contiguous_indices{contiguous_indices}, contiguous_values={contiguous_values}')
         assert not untested_combinations, untested_combinations
 
     @all_sparse_layouts('from_layout', include_strided=False)
