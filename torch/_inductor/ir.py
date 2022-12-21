@@ -2324,7 +2324,7 @@ class ConcatKernel(NopKernel):
             x = inputs[i]
             if is_storage_and_layout(x):
                 if isinstance(x.get_layout(), FixedLayout):
-                    if x.get_layout().is_channels_last_contiguous:
+                    if x.get_layout().is_channels_last_contiguous():
                         # use CL stride for the output
                         output_stride = make_channels_last_strides_for(new_size)
                         break
