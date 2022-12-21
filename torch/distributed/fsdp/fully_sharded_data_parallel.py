@@ -77,12 +77,13 @@ from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
     _flatten_optim_state_dict,
-    _get_param_id_to_param,
     _get_param_id_to_param_from_optim_input,
+    _get_param_key_to_param,
     _get_param_to_param_id,
     _get_param_to_param_id_from_optim_input,
     _optim_state_dict,
     _process_pos_dim_tensor_state,
+    _rekey_named_optim_state_dict,
     _rekey_sharded_optim_state_dict,
 )
 from ._state_dict_utils import _register_all_state_dict_hooks
@@ -1214,9 +1215,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             True,
             use_orig_params,
         )
-
         if is_named_optimizer:
-            return sharded_osd
+            return _rekey_named_optim_state_dict(sharded_osd)
         else:
             return _rekey_sharded_optim_state_dict(
                 sharded_osd,
@@ -1637,11 +1637,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             param_id_to_param = (
                 _get_param_id_to_param_from_optim_input(model, optim_input)
                 if using_optim_input
-                else _get_param_id_to_param(optim)
+                else _get_param_key_to_param(optim)
             )
             param_to_param_name = _get_param_to_fqn(model)
             param_id_to_param_name: List[str] = [
-                param_to_param_name[param] for param in param_id_to_param
+                param_to_param_name[param] for param in param_id_to_param.values()
             ]
             new_osd["state"] = {
                 param_id_to_param_name[param_id]: param_state
