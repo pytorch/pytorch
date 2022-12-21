@@ -777,6 +777,7 @@ def wrap_fx_proxy_cls(
         if example_value is None:
             example_value = get_fake_value(proxy.node, tx)
 
+        # Handle recursive calls here
         elif isinstance(example_value, FakeTensor):
             pass
 

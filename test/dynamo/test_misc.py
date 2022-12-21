@@ -3240,6 +3240,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_nonexistent_tensor_attr(self):
+        def fn(x):
+            try:
+                unsupported = x.nonexistent_tensor_attr
+                x = torch.nn.utils.rnn.PackedSequence(x, unsupported)
+            except:
+                x = x + 1
+            return x
+
+        x = torch.rand(4)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
