@@ -1247,4 +1247,4 @@ import torch.fx.experimental.symbolic_shapes
 from torch import func as func
 
 # Enable trace collection through dynolog
-from torch.profiler.profiler import trace_using_dynolog
+from torch.profiler.profiler import profile_using_dynolog

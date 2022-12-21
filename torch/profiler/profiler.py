@@ -29,7 +29,7 @@ __all__ = [
     "tensorboard_trace_handler",
     "profile",
     "ExecutionGraphObserver",
-    "trace_using_dynolog"
+    "profile_using_dynolog"
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
 
@@ -51,7 +51,7 @@ def _optimizer_post_hook(optimizer, args, kwargs):
     KinetoStepTracker.increment_step("Optimizer")
 
 
-def trace_using_dynolog():
+def profile_using_dynolog():
     """
     To enable tracing via dynolog we register a global optimizer step post
     hook. Requires the 'USE_KINETO_DAEMON' environment variable to be set.
