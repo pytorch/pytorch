@@ -24,11 +24,10 @@ from torch._functorch.make_functional import (
     make_functional_with_buffers,
     make_functional,
     combine_state_for_ensemble,
-    combine_weights_for_ensemble,
     FunctionalModule,
     FunctionalModuleWithBuffers,
 )
 
-from torch._functorch.functional_call import functional_call
+from torch._functorch.functional_call import functional_call, stack_ensembled_state
 
 __version__ = torch.__version__
