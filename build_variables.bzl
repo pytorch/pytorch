@@ -1112,6 +1112,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/cpu/FlushDenormal.cpp",
     "aten/src/ATen/detail/CPUGuardImpl.cpp",
     "aten/src/ATen/detail/CUDAHooksInterface.cpp",
+    "aten/src/ATen/detail/MPSHooksInterface.cpp",
     "aten/src/ATen/detail/HIPHooksInterface.cpp",
     "aten/src/ATen/detail/ORTHooksInterface.cpp",
     "aten/src/ATen/metal/Context.cpp",
