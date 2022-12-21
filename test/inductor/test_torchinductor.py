@@ -5956,26 +5956,23 @@ if HAS_CUDA:
 
             context = DebugContext()
 
-            name_orig = get_graph_being_compiled()
-            # dir name is different for some reason
-            name_orig = name_orig.replace("___", "__")
-
             with patch.object(
                 config.trace, "enabled", True
             ), context, V.set_debug_handler(context):
 
+                dir_name = "/".join(context._path.split("/")[:-1]) + "/"
+                fil = dir_name + "*inference*"
+                existing_dirs = glob.glob(fil)
+
                 fn(*args)
 
                 assert context._path is not None
-                dir_name = "/".join(context._path.split("/")[:-1]) + "/"
-                dir_dbg = list(
-                    filter(
-                        os.path.isdir, glob.glob(dir_name + name_orig + "*inference*")
-                    )
-                )
-                assert len(dir_dbg) == 1
-                full_name = os.path.join(dir_dbg[0], "output_code.py")
 
+                dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
+
+                assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
+
+                full_name = os.path.join(dir_dbg[0], "output_code.py")
                 with open(full_name, "r") as f:
                     return f.read()
 
