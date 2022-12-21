@@ -263,7 +263,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             in_channels_per_group, input_feature_map_size, out_channels_per_group,
             groups, kernel_size, stride, padding, padding_mode, dilation,
             X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
-            use_bias, use_fused, use_channelwise):
+            use_bias, post_op, use_channelwise, X2_scale=1.0, X2_zero_point=0):
         for i in range(len(kernel_size)):
             assume(input_feature_map_size[i] + 2 * padding[i]
                    >= dilation[i] * (kernel_size[i] - 1) + 1)
@@ -274,6 +274,18 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             batch_size, in_channels_per_group, input_feature_map_size,
             out_channels_per_group, groups, kernel_size, X_scale, X_zero_point,
             W_scale, W_zero_point, use_bias, use_channelwise)
+
+        if post_op == "add":
+            (X2_value_min, X2_value_max) = (0, 4)
+            X2_init = torch.randint(
+                X2_value_min,
+                X2_value_max,
+                conv_module[0](X).size() # Infer the size of tensor to do the add
+            )
+            X2 = X2_scale * (X2_init - X2_zero_point).float()
+            X2_q = torch.quantize_per_tensor(
+                X2, scale=X2_scale, zero_point=X2_zero_point, dtype=torch.quint8)
+
         # Make sure the weight shape is correct
         self.assertTrue(qconv_module.weight().shape == W_q.shape)
 
@@ -281,7 +293,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qconv_module.scale = Y_scale
         qconv_module.zero_point = Y_zero_point
 
-        if use_fused:
+        if post_op == "relu" or post_op == "add":
             conv_module[0].weight.data = W
             if use_bias:
                 conv_module[0].bias.data = b
@@ -304,10 +316,16 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(Y_zero_point, qconv_module.zero_point)
 
         # Test forward
-        Y_exp = conv_module(X)
-        Y_exp = torch.quantize_per_tensor(
-            Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
-        Y_act = qconv_module(X_q)
+        if post_op == "add":
+            Y_exp = conv_module(X, X2)
+            Y_exp = torch.quantize_per_tensor(
+                Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
+            Y_act = qconv_module(X_q, X2_q)
+        else:
+            Y_exp = conv_module(X)
+            Y_exp = torch.quantize_per_tensor(
+                Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
+            Y_act = qconv_module(X_q)
 
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
@@ -351,7 +369,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qconv_module.scale, loaded_qconv_module.scale)
         self.assertEqual(qconv_module.zero_point,
                          loaded_qconv_module.zero_point)
-        Y_loaded = loaded_qconv_module(X_q)
+        if post_op == "add":
+            Y_loaded = loaded_qconv_module(X_q, X2_q)
+        else:
+            Y_loaded = loaded_qconv_module(X_q)
         np.testing.assert_array_almost_equal(
             Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
 
@@ -372,7 +393,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(copied_conv.scale, qconv_module.scale)
         self.assertEqual(copied_conv.zero_point,
                          qconv_module.zero_point)
-        Y_copied = copied_conv(X_q)
+        if post_op == "add":
+            Y_copied = copied_conv(X_q, X2_q)
+        else:
+            Y_copied = copied_conv(X_q)
         np.testing.assert_array_almost_equal(
             Y_exp.int_repr().numpy(), Y_copied.int_repr().numpy(), decimal=0)
 
@@ -381,20 +405,34 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(deepcopied_conv.scale, qconv_module.scale)
         self.assertEqual(deepcopied_conv.zero_point,
                          qconv_module.zero_point)
-        Y_deepcopied = copied_conv(X_q)
+        if post_op == "add":
+            Y_deepcopied = deepcopied_conv(X_q, X2_q)
+        else:
+            Y_deepcopied = deepcopied_conv(X_q)
         np.testing.assert_array_almost_equal(
             Y_exp.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
 
         # JIT testing
         self.checkScriptable(
-            qconv_module, [[X_q]],
+            qconv_module, [[X_q, X2_q]] if (post_op == "add") else [[X_q]],
             check_save_load=True)
 
+        class _FusedModule_two_input_args(torch.nn.intrinsic._FusedModule):
+            # Help Module for ConvAdd2d since torch.nn.intrinsic._FusedModule only support one input arg
+            def forward(self, x1, x2):
+                input = self[0](x1, x2)
+                return input
+
         # Test from_float
-        fused_conv_module = torch.nn.intrinsic._FusedModule(conv_module)
+        fused_conv_module = _FusedModule_two_input_args(conv_module) \
+                        if post_op == "add" \
+                        else torch.nn.intrinsic._FusedModule(conv_module)
         fused_conv_module.qconfig = torch.ao.quantization.default_qconfig
         torch.ao.quantization.prepare(fused_conv_module, inplace=True)
-        fused_conv_module(X.float())
+        if post_op == "add":
+            fused_conv_module(X.float(), X2)
+        else:
+            fused_conv_module(X.float())
         converted_qconv_module = fused_conv_module
         reference_mapping = get_default_static_quant_module_mappings()
         reference_mapping[type(conv_module)] = type(qconv_module)
@@ -402,7 +440,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         if use_bias:
-            if use_fused:
+            if post_op in ["relu", "add"]:
                 self.assertEqual(conv_module[0].bias,
                                  converted_qconv_module[0].bias())
             else:
@@ -416,10 +454,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         options = itertools.product(
             ["zeros", "reflect"],  # pad_mode
             [True, False],  # use_bias
-            [True, False],  # use_fused
+            ["none", "relu"],  # post_op
             [True, False],  # use_channelwise
         )
-        for pad_mode, use_bias, use_fused, use_channelwise in options:
+        for pad_mode, use_bias, post_op, use_channelwise in options:
             if torch.backends.quantized.engine == "qnnpack":
                 use_channelwise = False
             batch_size = 2
@@ -449,11 +487,11 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 use_channelwise = False
             # use_fused -> quantized class
             class_map = {
-                True: (nniq.ConvReLU1d, "QuantizedConvReLU1d"),
-                False: (nnq.Conv1d, "QuantizedConv1d")
+                "relu": (nniq.ConvReLU1d, "QuantizedConvReLU1d"),
+                "none": (nnq.Conv1d, "QuantizedConv1d")
             }
 
-            qconv_cls, module_name = class_map[use_fused]
+            qconv_cls, module_name = class_map[post_op]
             qconv_module = qconv_cls(
                 in_channels, out_channels, kernel, stride, pad,
                 dilation, groups, use_bias, padding_mode=pad_mode
@@ -462,7 +500,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             conv_module = nn.Conv1d(
                 in_channels, out_channels, kernel, stride, pad,
                 dilation, groups, use_bias, padding_mode=pad_mode)
-            if use_fused:
+            if post_op == "relu":
                 relu_module = nn.ReLU()
                 conv_module = nni.ConvReLU1d(conv_module, relu_module)
             conv_module = conv_module.float()
@@ -472,17 +510,17 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 in_channels_per_group, input_feature_map_size,
                 out_channels_per_group, groups, kernel_size, stride, pad, pad_mode,
                 dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
-                Y_zero_point, use_bias, use_fused, use_channelwise)
+                Y_zero_point, use_bias, post_op, use_channelwise)
 
     @override_qengines
     def test_conv2d_api(self):
         options = itertools.product(
             ["zeros", "reflect"],  # pad_mode
             [True, False],  # use_bias
-            [True, False],  # use_fused
+            ["none", "relu"],  # post_op
             [True, False],  # use_channelwise
         )
-        for pad_mode, use_bias, use_fused, use_channelwise in options:
+        for pad_mode, use_bias, post_op, use_channelwise in options:
             if torch.backends.quantized.engine == "qnnpack":
                 use_channelwise = False
             batch_size = 2
@@ -514,11 +552,11 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             Y_zero_point = 4
             # use_fused -> quantized class
             class_map = {
-                True: (nniq.ConvReLU2d, "QuantizedConvReLU2d"),
-                False: (nnq.Conv2d, "QuantizedConv2d")
+                "relu": (nniq.ConvReLU2d, "QuantizedConvReLU2d"),
+                "none": (nnq.Conv2d, "QuantizedConv2d")
             }
 
-            qconv_cls, module_name = class_map[use_fused]
+            qconv_cls, module_name = class_map[post_op]
             qconv_module = qconv_cls(
                 in_channels, out_channels, kernel_size, stride, padding,
                 dilation, groups, use_bias, padding_mode=pad_mode
@@ -527,7 +565,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             conv_module = nn.Conv2d(
                 in_channels, out_channels, kernel_size, stride, padding,
                 dilation, groups, use_bias, padding_mode=pad_mode)
-            if use_fused:
+            if post_op == "relu":
                 relu_module = nn.ReLU()
                 conv_module = nni.ConvReLU2d(conv_module, relu_module)
             conv_module = conv_module.float()
@@ -537,16 +575,16 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 in_channels_per_group, input_feature_map_size,
                 out_channels_per_group, groups, kernel_size, stride, padding,
                 pad_mode, dilation, X_scale, X_zero_point, W_scale, W_zero_point,
-                Y_scale, Y_zero_point, use_bias, use_fused, use_channelwise)
+                Y_scale, Y_zero_point, use_bias, post_op, use_channelwise)
 
     @skipIfNoFBGEMM
     def test_conv3d_api(self):
         options = itertools.product(
             [True, False],  # use_bias
-            [True, False],  # use_fused
+            ["relu", "none"],  # post_op
             [True, False],  # use_channelwise
         )
-        for use_bias, use_fused, use_channelwise in options:
+        for use_bias, post_op, use_channelwise in options:
             if torch.backends.quantized.engine == "qnnpack":
                 use_channelwise = False
             batch_size = 2
@@ -583,12 +621,12 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             Y_zero_point = 4
             # use_fused -> quantized class
             class_map = {
-                True: (nniq.ConvReLU3d, "QuantizedConvReLU3d"),
-                False: (nnq.Conv3d, "QuantizedConv3d")
+                "relu": (nniq.ConvReLU3d, "QuantizedConvReLU3d"),
+                "none": (nnq.Conv3d, "QuantizedConv3d")
             }
 
             with override_quantized_engine('fbgemm'):
-                qconv_cls, module_name = class_map[use_fused]
+                qconv_cls, module_name = class_map[post_op]
                 qconv_module = qconv_cls(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode
@@ -597,7 +635,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 conv_module = nn.Conv3d(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode)
-                if use_fused:
+                if post_op == "relu":
                     relu_module = nn.ReLU()
                     conv_module = nni.ConvReLU3d(conv_module, relu_module)
                 conv_module = conv_module.float()
@@ -607,7 +645,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                     in_channels_per_group, input_feature_map_size,
                     out_channels_per_group, groups, kernel_size, stride, padding,
                     pad_mode, dilation, X_scale, X_zero_point, W_scale,
-                    W_zero_point, Y_scale, Y_zero_point, use_bias, use_fused,
+                    W_zero_point, Y_scale, Y_zero_point, use_bias, post_op,
                     use_channelwise)
 
     @skipIfNoONEDNN
@@ -617,10 +655,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             options = itertools.product(
                 ["zeros", "reflect"],  # pad_mode
                 [True, False],  # use_bias
-                [False],  # fused_with_relu
+                ["add"],  # post_op
                 [True, False],  # use_channelwise
             )
-            for pad_mode, use_bias, fused_with_relu, use_channelwise in options:
+            for pad_mode, use_bias, post_op, use_channelwise in options:
                 batch_size = 2
                 in_channels_per_group = 2
                 H = 8
@@ -652,10 +690,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 Y_zero_point = 4
                 # use_fused -> quantized class
                 class_map = {
-                    False: (nniq.ConvAdd2d, "QuantizedConvAdd2d")
+                    "add": (nniq.ConvAdd2d, "QuantizedConvAdd2d")
                 }
 
-                qconv_cls, module_name = class_map[fused_with_relu]
+                qconv_cls, module_name = class_map[post_op]
                 qconv_module = qconv_cls(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode
@@ -664,75 +702,15 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 conv_module = nn.Conv2d(
                     in_channels, out_channels, kernel_size, stride, padding,
                     dilation, groups, use_bias, padding_mode=pad_mode)
+                conv_module = torch.ao.nn.intrinsic.ConvAdd2d(torch.add, conv_module)
                 conv_module = conv_module.float()
 
-                for i in range(len(kernel_size)):
-                    assume(input_feature_map_size[i] + 2 * padding[i]
-                           >= dilation[i] * (kernel_size[i] - 1) + 1)
-
-                in_channels = in_channels_per_group * groups
-                out_channels = out_channels_per_group * groups
-                (X, X_q, W, W_q, b) = _make_conv_test_input(
-                    batch_size, in_channels_per_group, input_feature_map_size,
-                    out_channels_per_group, groups, kernel_size, X_scale, X_zero_point,
-                    W_scale, W_zero_point, use_bias, use_channelwise)
-
-                # Make sure the weight shape is correct
-                self.assertTrue(qconv_module.weight().shape == W_q.shape)
-
-                qconv_module.set_weight_bias(W_q, b)
-                qconv_module.scale = Y_scale
-                qconv_module.zero_point = Y_zero_point
-
-                conv_module.weight.data = W
-                if use_bias:
-                    conv_module.bias.data = b
-
-                # Test members
-                self.assertTrue(module_name == qconv_module._get_name(), module_name + " " + qconv_module._get_name())
-                self.assertTrue(hasattr(qconv_module, '_packed_params'))
-                self.assertTrue(hasattr(qconv_module, 'scale'))
-                self.assertTrue(hasattr(qconv_module, 'zero_point'))
-
-                # Test properties
-                self.assertEqual(W_q, qconv_module.weight())
-                if use_bias:
-                    self.assertEqual(b, qconv_module.bias())
-                self.assertEqual(Y_scale, qconv_module.scale)
-                self.assertEqual(Y_zero_point, qconv_module.zero_point)
-
-                # Test forward
-                Y_exp = conv_module(X)
-
-                (X2_value_min, X2_value_max) = (0, 4)
-                X2_init = torch.randint(
-                    X2_value_min,
-                    X2_value_max,
-                    Y_exp.size()
-                )
-                X2 = X2_scale * (X2_init - X2_zero_point).float()
-                X2_q = torch.quantize_per_tensor(
-                    X2, scale=X2_scale, zero_point=X2_zero_point, dtype=torch.quint8)
-                Y_exp += X2
-
-                Y_exp = torch.quantize_per_tensor(
-                    Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
-
-                Y_act = qconv_module(X_q, X2_q)
-                # Make sure the results match
-                # assert_array_almost_equal compares using the following formula:
-                #     abs(desired-actual) < 1.5 * 10**(-decimal)
-                # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
-                # We use decimal = 0 to ignore off-by-1 differences between reference
-                # and test. Off-by-1 differences arise due to the order of round and
-                # zero_point addition operation, i.e., if addition followed by round is
-                # used by reference and round followed by addition is used by test, the
-                # results may differ by 1.
-                # For example, the result of round(2.5) + 1 is 3 while round(2.5 + 1) is
-                # 4 assuming the rounding mode is round-to-nearest, ties-to-even.
-                # skip numerics checking for reference module
-                np.testing.assert_array_almost_equal(
-                    Y_exp.int_repr().numpy(), Y_act.int_repr().numpy(), decimal=0)
+                self._test_conv_api_impl(
+                    module_name, qconv_module, conv_module, batch_size,
+                    in_channels_per_group, input_feature_map_size,
+                    out_channels_per_group, groups, kernel_size, stride, padding,
+                    pad_mode, dilation, X_scale, X_zero_point, W_scale, W_zero_point,
+                    Y_scale, Y_zero_point, use_bias, post_op, use_channelwise, X2_scale, X2_zero_point)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
