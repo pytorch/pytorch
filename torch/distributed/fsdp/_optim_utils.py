@@ -1378,9 +1378,9 @@ def _gather_orig_param_state(
     This API should only be used when ``use_orig_params`` is True.
     """
     fsdp_state = fsdp_param_info.state
-    assert fsdp_state._use_orig_params, (
-        "_gather_orig_param_state only support use_orig_params=True case"
-    )
+    assert (
+        fsdp_state._use_orig_params
+    ), "_gather_orig_param_state only support use_orig_params=True case"
     flat_param = fsdp_param_info.flat_param
     param_idx = fsdp_param_info.param_indices[fqn]
     if (
@@ -1395,6 +1395,9 @@ def _gather_orig_param_state(
     state_objects = {
         state_name: value for state_name, value in sorted_items(optim_state)
     }
+    if "step" in state_objects and torch.is_tensor(state_objects["step"]):
+        state_objects["step"] = state_objects["step"].item()
+        state_objects["step_is_tensor"] = True
     object_list: List[Dict[str, Any]] = [
         {} for _ in range(cast(int, fsdp_state.world_size))
     ]
@@ -1405,6 +1408,8 @@ def _gather_orig_param_state(
     logging.warning(f"DEBUG1 {fsdp_state.rank} {fqn} {len(object_list)} {time.time()}. semi-done")
     orig_state: Dict[str, Any] = {}
     for state in object_list:
+        if state.pop("step_is_tensor", False):
+            state["step"] = torch.tensor(state["step"])
         for state_name, value in state.items():
             curr_value = orig_state.get(state_name, [])
             if torch.is_tensor(value):
