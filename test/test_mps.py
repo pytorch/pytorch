@@ -3401,13 +3401,19 @@ class TestNLLLoss(TestCase):
                 # clamp to avoid division by 0
                 mps_y = cpu_y.detach().clone().to('mps')
 
-                result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
-                result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
-                self.assertEqual(result_div_mps, result_div_cpu)
+                if (rounding_mode == "floor_divide"):
+                    result_div_cpu = torch.floor_divide(cpu_x, cpu_y)
+                    result_div_mps = torch.floor_divide(mps_x, mps_y)
+                    self.assertEqual(result_div_mps, result_div_cpu)
+                else:
+                    result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
+                    result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
+                    self.assertEqual(result_div_mps, result_div_cpu)
 
         helper((2, 8, 4, 5), None)
         helper((2, 8, 4, 5), "floor")
         helper((2, 8, 4, 5), "trunc")
+        helper((2, 8, 4, 5), "floor_divide")
 
     def test_rounding(self):
         def helper(shape):
@@ -7376,9 +7382,9 @@ class TestConsistency(TestCase):
         'masked.softmin': ['f32'],
         'masked.std': ['f32'],
         'masked.var': ['f32'],
-        'abs': ['f16', 'f32', 'i16', 'i32', 'u8'],
-        'acos': ['f32', 'i16', 'i32', 'u8'],
-        'acosh': ['f32', 'i16', 'i32', 'u8'],
+        'abs': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
+        'acos': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'acosh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'addbmm': ['f32'],
         'addcdiv': ['f32'],
@@ -7397,11 +7403,11 @@ class TestConsistency(TestCase):
         'logsumexp': ['f32'],
         'mean': ['f32'],
         'sum': ['f32'],
-        'asin': ['f32', 'i16', 'i32', 'u8'],
-        'asinh': ['f32', 'i16', 'i32', 'u8'],
-        'atan': ['f32', 'i16', 'i32', 'u8'],
+        'asin': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'asinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'atan': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'atan2': ['f32'],
-        'atanh': ['f32', 'i16', 'i32', 'u8'],
+        'atanh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'atleast_1d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'atleast_2d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'atleast_3d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7425,8 +7431,8 @@ class TestConsistency(TestCase):
         'conj_physical': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'contiguous': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'corrcoef': ['f32'],
-        'cos': ['f32', 'i16', 'i32', 'u8', 'i64'],
-        'cosh': ['f32', 'i16', 'i32', 'u8', 'i64'],
+        'cos': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
+        'cosh': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
         'cov': ['f32'],
         'cumsum': ['f16', 'f32', 'int16', 'int32'],
         'deg2rad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7439,9 +7445,9 @@ class TestConsistency(TestCase):
         'dot': ['f32', 'i16', 'i32', 'i64', 'u8'],
         'einsum': ['f32'],
         'equal': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'erf': ['f32', 'i16', 'i32', 'u8'],
-        'exp': ['f32', 'i16', 'i32', 'u8'],
-        'exp2': ['f16', 'f32', 'i16', 'i32', 'u8'],
+        'erf': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'exp': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'exp2': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'eye': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'fill': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'flatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7450,6 +7456,7 @@ class TestConsistency(TestCase):
         'flipud': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'float': ['f32'],
         'floor': ['f32', 'f16', 'i16', 'i32', 'i64'],
+        'floor_divide': ['f32', 'f16'],
         'frac': ['f16', 'f32'],
         'gradient': ['f16', 'f32', 'i16'],
         'half': ['f16'],
@@ -7466,9 +7473,10 @@ class TestConsistency(TestCase):
         'linalg.svd': ['f32'],
         'linalg.vector_norm': ['f16', 'f32'],
         'linspace': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'log': ['f32', 'i16', 'i32', 'u8'],
-        'log10': ['f32', 'i16', 'i32', 'u8'],
-        'log2': ['f32', 'i16', 'i32', 'u8'],
+        'log': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'log10': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'log1p': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'log2': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'log_softmax': ['f32'],
         'logaddexp': ['f32'],
         'logaddexp2': ['f32'],
@@ -7479,7 +7487,7 @@ class TestConsistency(TestCase):
         'matmul': ['f32'],
         'mm': ['f32'],
         'mv': ['f32'],
-        'neg': ['f16', 'f32', 'i16', 'i32', 'i64'],
+        'neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.adaptive_max_pool1d': ['f32'],
         'nn.functional.adaptive_max_pool2d': ['f32'],
         'nn.functional.binary_cross_entropy': ['f32'],
@@ -7545,7 +7553,7 @@ class TestConsistency(TestCase):
         'pow': ['f16'],
         'rad2deg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'real': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'reciprocal': ['f16', 'f32', 'i16', 'i32', 'u8'],
+        'reciprocal': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'repeat': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'repeat_interleave': ['b8',
                               'f16',
@@ -7560,28 +7568,29 @@ class TestConsistency(TestCase):
         'resolve_neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'rot90': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'round': ['f32', 'f16', 'i16', 'i32', 'i64'],
-        'rsqrt': ['f32', 'i16', 'i32', 'u8'],
+        'rsqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'select_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'sgn': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'short': ['i16'],
-        'sigmoid': ['f32'],
+        'sigmoid': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'sign': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8', 'i64'],
-        'sin': ['f32', 'i16', 'i32', 'u8'],
-        'sinh': ['f32', 'i16', 'i32', 'u8'],
+        'sin': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'sinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'slice_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'softmax': ['f32'],
         'special.ndtr': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'split': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sqrt': ['f32', 'i16', 'i32', 'u8'],
+        'sqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'square': ['f16', 'f32'],
         'squeeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'std': ['f32'],
         'sub': ['f32', 'i16', 'i32', 'i64'],
         'sum_to_size': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'svd': ['f32'],
         't': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'tan': ['i16', 'i32', 'u8'],
-        'tanh': ['f32', 'i16', 'i32', 'u8'],
+        'tan': ['b8', 'i16', 'i32', 'u8'],
+        'tanh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'tensordot': ['f32'],
         'tile': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'topk': ['f32'],
@@ -7595,6 +7604,7 @@ class TestConsistency(TestCase):
         'unbind': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unflatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unsqueeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'var': ['f32'],
         'view': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'view_as': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'vsplit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7606,7 +7616,8 @@ class TestConsistency(TestCase):
         'logical_and': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_or': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8']}
+        'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8']
+    }
 
 
     ALLOWLIST_OP_GRAD = {
@@ -7691,6 +7702,7 @@ class TestConsistency(TestCase):
         'linspace': ['f16', 'f32'],
         'log': ['f32'],
         'log10': ['f32'],
+        'log1p': ['f32'],
         'log2': ['f32'],
         'log_softmax': ['f32'],
         'logaddexp': ['f32'],
@@ -7721,7 +7733,7 @@ class TestConsistency(TestCase):
         'nn.functional.local_response_norm': ['f32'],
         'nn.functional.margin_ranking_loss': ['f32'],
         'nn.functional.mse_loss': ['f32'],
-        'nn.functional.pad': ['f16', 'f32'],
+        'nn.functional.pad': ['f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.pairwise_distance': ['f16', 'f32'],
         'nn.functional.poisson_nll_loss': ['f32'],
         'nn.functional.relu': ['f32'],
@@ -7776,7 +7788,8 @@ class TestConsistency(TestCase):
         'view_as': ['f16', 'f32'],
         'vsplit': ['f16', 'f32'],
         'vstack': ['f16', 'f32'],
-        'zero_': ['f16', 'f32']}
+        'zero_': ['f16', 'f32']
+    }
 
     # These ops that are problematic. So never run them even when
     # generating the new allowlist.
@@ -7811,8 +7824,7 @@ class TestConsistency(TestCase):
         'diag_embed': [torch.uint8],
         'diagonal_scatter': [torch.uint8],
         'index_add': None,
-        'linalg.inv': ['f32'],
-        'log1p': None,
+        'linalg.inv': [torch.float32],
         'long': None,
         'nn.functional.avg_pool1d': [torch.int64],
         'nn.functional.avg_pool2d': [torch.int64],
@@ -7838,6 +7850,7 @@ class TestConsistency(TestCase):
         'tile': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
         '__radd__': ['torch.bool', 'torch.uint8'],
         '__rmul__': ['torch.uint8'],
+        'neg': ['torch.uint8'],
         'add': ['torch.bool', 'torch.uint8'],
         'addr': ['torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
         'diag': ['torch.int64'],

@@ -35,6 +35,7 @@ decompositions = get_decompositions(
         aten.embedding_dense_backward,
         aten.expand_as,
         aten.eye,
+        aten.fill,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
@@ -161,6 +162,14 @@ def pad_dim(x, padded_length, dim):
 
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2, *, beta=1, alpha=1):
+    if config.triton.mm != "aten":
+        out = torch.mm(mat1, mat2)
+        if not isinstance(alpha, numbers.Number) or alpha != 1:
+            out = out * alpha
+        if not isinstance(beta, numbers.Number) or beta != 1:
+            input = input * beta
+        return input + out
+
     if (
         config.shape_padding
         and check_device(mat1, mat2)
@@ -502,17 +511,6 @@ def conj_physical(self):
 @register_decomposition([aten.lift, aten.detach_])
 def lift(self):
     return self
-
-
-@register_decomposition([aten.fill.Scalar])
-def fill_scalar(self, value):
-    return torch.full_like(self, value)
-
-
-@register_decomposition([aten.fill.Tensor])
-def fill_tensor(self, value: Tensor):
-    assert value.dim() == 0, "aten.fill.Tensor only supports 0-dimension value tensor"
-    return torch.full_like(self, value.item())
 
 
 @register_decomposition([aten.bernoulli.default])
