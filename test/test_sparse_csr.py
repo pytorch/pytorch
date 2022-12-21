@@ -2098,13 +2098,13 @@ class TestSparseCSR(TestCase):
                         res_dense_out = sparse.to_dense().mul(scalar)
                         # BUG: dispatcher ignores mul.Scalar(Tensor, Scalar)
                         # This issues is circumvented in the mul(Tensor, Tensor) kernel.
-                        self.assertEqual(res_out.to_dense(), res_dense_out)
+                        self.assertEqual(res_out, res_dense_out)
 
                     # TODO: enable hybrid once to_dense supports it.
                     if dtype == torch.result_type(sparse, scalar) and not enable_hybrid:
                         res_in_dense = sparse.to_dense().mul_(scalar)
-                        res_in = sparse.mul_(scalar)
-                        self.assertEqual(res_in.to_dense(), res_in_dense)
+                        res_in = sparse.clone().mul_(scalar)
+                        self.assertEqual(res_in, res_in_dense)
                     else:
                         res_in = res_out
 
