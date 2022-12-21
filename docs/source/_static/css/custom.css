@@ -3,6 +3,13 @@
     overflow: scroll;
 }
 
+/* pytorch-sphinx-theme and myst-nb weird interaction fix */
+.highlight-ipython3 pre {
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 4px;
+}
+
+/* pytorch-sphinx-theme and myst-nb weird interaction fix */
 div.cell.docutils.container div.cell_input.docutils.container {
   border-bottom-width: 0px;
 }
