@@ -40,7 +40,7 @@ try:
     importlib.import_module("filelock")
 
     import torch._inductor.config
-    from functorch.compile import config as functorch_config, get_graph_being_compiled
+    from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
     from torch._inductor import codecache, config, metrics, test_operators
     from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
