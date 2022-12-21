@@ -53,6 +53,9 @@ def save_state_dict(
         no_dist (bool): If ``True``, distributed checkpoint will not save
             in SPMD style. (Default: ``False``)
 
+    Returns:
+        Metadata: Metadata object for the saved checkpoint.
+
     Example:
         >>> # xdoctest: +SKIP
         >>> my_model = MyModule()
