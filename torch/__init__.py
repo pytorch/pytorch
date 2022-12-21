@@ -48,7 +48,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'compile',
+    'compile', 'profile_using_dynolog',
 ]
 
 ################################################################################
@@ -1248,3 +1248,4 @@ from torch import func as func
 
 # Enable trace collection through dynolog
 from torch.profiler.profiler import profile_using_dynolog
+profile_using_dynolog()
