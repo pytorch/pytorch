@@ -29,6 +29,7 @@ __all__ = [
     "tensorboard_trace_handler",
     "profile",
     "ExecutionGraphObserver",
+    "trace_using_dynolog"
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
 
@@ -46,7 +47,7 @@ def supported_activities():
     return torch.autograd._supported_activities()
 
 
-def optimizer_post_hook(optimizer, args, kwargs):
+def _optimizer_post_hook(optimizer, args, kwargs):
     KinetoStepTracker.increment_step("Optimizer")
 
 
@@ -56,7 +57,7 @@ def trace_using_dynolog():
     hook. Requires the 'USE_KINETO_DAEMON' environment variable to be set.
     """
     if os.environ["USE_KINETO_DAEMON"]:
-        handle = register_optimizer_step_post_hook(optimizer_post_hook)
+        handle = register_optimizer_step_post_hook(_optimizer_post_hook)
 
 
 class _KinetoProfile(object):
