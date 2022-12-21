@@ -495,19 +495,13 @@ class OptimizeIndexing(object):
 
 
 def indexing_dtype_strength_reduction(
-    loop_body: LoopBody, indices: Dict[sympy.Symbol, int]
+    loop_body: LoopBody
 ):
     """
     Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
     intermediaries from int64 to int32
     """
-    index = list(indices.keys())
-    assert len(index) == len(loop_body.var_ranges), (index, loop_body.var_ranges)
-    assert all(v not in loop_body.var_ranges for v in index)
-    replacements = dict(zip(loop_body.var_ranges.keys(), index))
-    indexing = {
-        name: sympy_subs(expr, replacements)
-        for name, expr in loop_body.indexing_exprs.items()
-    }
+    indices = dict(loop_body.var_ranges)
+    indexing = dict(loop_body.indexing_exprs)
     with V.set_ops_handler(ValueRangeAnalysis()):
         OptimizeIndexing(loop_body, indices, indexing).run()
