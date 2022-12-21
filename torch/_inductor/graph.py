@@ -372,13 +372,12 @@ class GraphLowering(torch.fx.Interpreter):
             # long term the solution is to make view() always succeed
             # with infallible strides.
             if any(user.op == "output" for user in n.users):
+                strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
-                if dense:
-                    result = ir.ExternKernel.require_stride_order(
-                        result, ir.get_stride_order(n.meta["val"].stride())
-                    )
+                if dense and len(strides):
+                    result = ir.ExternKernel.require_stride_order(result, ir.get_stride_order(strides))
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
