@@ -95,9 +95,17 @@ class TORCH_API Reducer {
   // Cannot combine with the call of `register_comm_hook`.
   void register_builtin_comm_hook(c10d::BuiltinCommHookType comm_hook_type);
 
+  // If set_to_none=True, reducer will set gradients to None in
+  // finalize_backward callback.
+  void set_grads_to_none(bool set_to_none);
+
   // Runs allreduce or installed communication hook given GradBucket instance.
   c10::intrusive_ptr<c10::ivalue::Future> run_comm_hook(
       GradBucket& grad_bucket);
+
+  // Runs default allreduce hook.
+  c10::intrusive_ptr<c10::ivalue::Future> run_allreduce_hook(
+    GradBucket& grad_bucket);
 
   // Returns gradient buckets in sequential order of buckets_. This is the order
   // in which buckets are reduced across processes. If return_zero_tensors=true,
@@ -512,6 +520,7 @@ class TORCH_API Reducer {
   // are rebuilt after which this mapping is static.
   mutable std::unordered_map<size_t, std::vector<at::Tensor>> cached_variables_for_bucket_;
 
+  bool set_grads_to_none_{false};
   friend class Logger;
 };
 
