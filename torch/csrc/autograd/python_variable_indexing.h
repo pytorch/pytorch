@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Exceptions.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/Exception.h>
 #include <pybind11/detail/common.h>
