@@ -1332,13 +1332,12 @@ class TritonScheduling:
                 elif node is EnableReduction:
                     stack.close()
                 else:
-                    ranges = kernel.split_and_set_ranges(node.get_ranges())
                     # TODO - mostly works but needs a couple fixes
                     if not config.dynamic_shapes:
                         indexing_dtype_strength_reduction(
-                            node._body, node.ranges_from_index_vars(ranges)
+                            node._body, node._body.var_ranges
                         )
-                    node.codegen(ranges)
+                    kernel.split_and_set_ranges(node.get_ranges())
 
         wrapper = V.graph.wrapper_code
         src_code = kernel.codegen_kernel()
