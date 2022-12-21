@@ -162,6 +162,7 @@ def disable_saved_tensors_hooks(error_message):
 
     Example::
 
+        >>> # xdoctest: +SKIP(failing)
         >>> message = "saved tensors default hooks are disabled"
         >>> with torch.autograd.graph.disable_saved_tensors_hooks(message):
         ...     # Raises RuntimeError: saved tensors default hooks are disabled

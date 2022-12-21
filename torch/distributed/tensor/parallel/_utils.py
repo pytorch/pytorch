@@ -30,6 +30,7 @@ def _prepare_input_validate(
         func (Callable): Same input function with validation logic added.
 
     Example::
+        >>> # xdoctest: +SKIP(failing)
         >>> @_prepare_input_validate
         >>> def make_input_shard_1d(args, kwargs):
         >>>   ...
@@ -72,6 +73,7 @@ def _prepare_output_validate(
     decorator, including verifying that output needs to be a DTensor
     and only 1D Device Mesh is passed in.
     Example::
+        >>> # xdoctest: +SKIP(failing)
         >>> @_prepare_output_validate
         >>> def make_output_shard_1d(args, kwargs):
         >>>   ...

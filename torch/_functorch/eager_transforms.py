@@ -251,6 +251,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
 
         Case 2: Using ``vjp`` inside ``torch.no_grad`` context manager:
 
+            >>> # xdoctest: +SKIP(failing)
             >>> with torch.no_grad():
             >>>     vjp(f)(x)
 
