@@ -35,7 +35,7 @@ void GroupNormKernelImplInternal(
     int64_t C,
     int64_t HxW,
     int64_t group,
-    T eps,
+    double eps,
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
@@ -163,7 +163,7 @@ inline void CalcMeanVar(
   param_t* mean_ptr,
   param_t* rstd_ptr,
   int64_t C) {
-  using Vec = vec::Vectorized<vec::vec_scalar_t<param_t>>;
+  using Vec = vec::Vectorized<scalar_t>;
   vec::map2<scalar_t>(
           [](Vec x, Vec y) { return x + y; },
           mean_ptr,
@@ -230,7 +230,7 @@ inline void ApplyScaleBias(
   const param_t* scale_ptr,
   const param_t* bias_ptr,
   int64_t C) {
-  using Vec = vec::Vectorized<vec::vec_scalar_t<param_t>>;
+  using Vec = vec::Vectorized<scalar_t>;
   vec::map3<scalar_t>(
     [](Vec x, Vec scale, Vec bias) { return x * scale + bias; },
     Y_ptr,
@@ -285,7 +285,7 @@ void GroupNormKernelImplChannelsLastInternal(
     int64_t C,
     int64_t HxW,
     int64_t group,
-    T eps,
+    double eps,
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
@@ -497,10 +497,10 @@ void GroupNormKernelImpl(
         using param_t = at::opmath_type<scalar_t>;
         if (mixed_type) {
           GroupNormKernelImplInternal<scalar_t, param_t>(
-              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
+              X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
         } else {
           GroupNormKernelImplInternal<scalar_t, scalar_t>(
-              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
+              X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
         }
       });
       break;
@@ -511,10 +511,10 @@ void GroupNormKernelImpl(
         using param_t = at::opmath_type<scalar_t>;
         if (mixed_type) {
           GroupNormKernelImplChannelsLastInternal<scalar_t, param_t>(
-              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
+              X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
         } else {
           GroupNormKernelImplChannelsLastInternal<scalar_t, scalar_t>(
-              X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
+              X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
         }
       });
       break;
@@ -1339,8 +1339,9 @@ void GroupNormBackwardKernelImpl(
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND(
         ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
+        using param_t = at::opmath_type<scalar_t>;
         if(mixed_type) {
-          GroupNormBackwardKernelImplInternal<BFloat16, float>(
+          GroupNormBackwardKernelImplInternal<scalar_t, param_t>(
               dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
         } else {
           GroupNormBackwardKernelImplInternal<scalar_t, scalar_t>(
@@ -1353,8 +1354,9 @@ void GroupNormBackwardKernelImpl(
     case at::MemoryFormat::ChannelsLast3d: {
       AT_DISPATCH_FLOATING_TYPES_AND(
         ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
+        using param_t = at::opmath_type<scalar_t>;
         if(mixed_type) {
-          GroupNormBackwardKernelImplChannelsLastInternal<BFloat16, float>(
+          GroupNormBackwardKernelImplChannelsLastInternal<scalar_t, param_t>(
               dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
         } else {
           GroupNormBackwardKernelImplChannelsLastInternal<scalar_t, scalar_t>(
