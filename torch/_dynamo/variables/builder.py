@@ -786,7 +786,7 @@ def wrap_fx_proxy_cls(
         assert example_value is not None
 
         # Handle recursive calls here
-        elif isinstance(example_value, FakeTensor):
+        if isinstance(example_value, FakeTensor):
             pass
 
         elif isinstance(example_value, torch.Tensor):
