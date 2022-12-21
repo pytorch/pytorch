@@ -117,6 +117,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_seeds: List[str] = []
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
+        self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
 
