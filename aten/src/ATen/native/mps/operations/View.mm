@@ -53,9 +53,14 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
                                                                                shape: inputShape
                                                                             dataType: inputType] autorelease];
     if (needsScatter) {
+      auto updatesType = getMPSScalarType(src.scalar_type());
+      if (updatesType == MPSDataTypeUInt8 || updatesType == MPSDataTypeBool) {
+        updatesType = MPSDataTypeInt8;
+      }
+
       feeds[cachedGraph->updatesTensor] = [[[MPSGraphTensorData alloc] initWithMTLBuffer: sourceBuffer
                                                                                    shape: getMPSShape(src.numel())
-                                                                                dataType: getMPSDataType(src.scalar_type())] autorelease];
+                                                                                dataType: updatesType] autorelease];
     }
     MPSScalar storageOffsetScalar = getMPSScalar(storage_offset, ScalarType::Int);
     feeds[cachedGraph->storageOffsetTensor] = getMPSGraphTensorFromScalar(stream, storageOffsetScalar);
@@ -224,8 +229,8 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, const Tensor &update
             // Workaround for MPSShaderLibrary bug
             // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
             auto inputType = getMPSScalarType(self.scalar_type());
-            if (inputType ==  MPSDataTypeUInt8) {
-                inputType =  MPSDataTypeInt8;
+            if (inputType == MPSDataTypeUInt8) {
+                inputType = MPSDataTypeInt8;
             }
             auto needsBoolCast = inputType == MPSDataTypeBool;
             // Self is the input tensor we are creating view of
@@ -236,6 +241,9 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, const Tensor &update
             }
             if (needsScatter) {
               auto updatesType = getMPSScalarType(updates.scalar_type());
+              if (updatesType == MPSDataTypeUInt8) {
+                updatesType = MPSDataTypeInt8;
+              }
               newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, updatesType);
               updatesTensor = newCachedGraph->updatesTensor;
               if (inputType != updatesType) {
