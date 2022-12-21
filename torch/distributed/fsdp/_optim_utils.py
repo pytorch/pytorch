@@ -17,6 +17,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
@@ -131,7 +132,7 @@ def _unflatten_optim_state(
         otherwise. The final optimizer state dict will need to map these
         entries using the proper unflattened parameter IDs.
     """
-    _clear_grads_if_needed(fsdp_module._fsdp_handles(fsdp_module))
+    _clear_grads_if_needed(traversal_utils._get_fsdp_handles(fsdp_module))
     consolidated_state = _communicate_optim_state(
         flat_param,
         flat_param_state,
@@ -1204,6 +1205,7 @@ def _unflatten_process_groups(
 def _optim_state_dict(
     model: torch.nn.Module,
     optim: torch.optim.Optimizer,
+    optim_state_dict: Dict[str, Any],
     optim_input: Optional[
         Union[
             List[Dict[str, Any]],
@@ -1242,7 +1244,6 @@ def _optim_state_dict(
         :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
         then nonzero ranks return an empty :class:`dict`.
     """
-    optim_state_dict = optim.state_dict()
     to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
     fsdp_osd: Dict = {"state": {}, "param_groups": []} if to_save else {}
     fsdp_osd_state = fsdp_osd["state"] if to_save else None

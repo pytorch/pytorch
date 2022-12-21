@@ -28,6 +28,4 @@ from torch._functorch.make_functional import (
     FunctionalModuleWithBuffers,
 )
 
-from torch._functorch.functional_call import functional_call, stack_ensembled_state
-
 __version__ = torch.__version__
