@@ -510,6 +510,9 @@ def chunk_vmap(
     everything) and map (which executes things sequentially). ``chunk_vmap`` vectorizes the input with number of
     chunks at a time. For more details about vectorizing map, see :func:`vmap`.
 
+    .. note::
+        It is recommended to use :func:`vmap` with :attr:`chunk_size` argument.
+
     Args:
         func (function): A Python function that takes one or more arguments.
             Must return one or more Tensors.
