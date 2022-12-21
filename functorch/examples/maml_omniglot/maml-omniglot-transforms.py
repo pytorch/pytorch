@@ -28,8 +28,7 @@ https://github.com/bamos/HowToTrainYourMAMLPytorch
 """
 
 from support.omniglot_loaders import OmniglotNShot
-from functorch import vmap, grad, functional_call
-import functorch
+from torch.func import vmap, grad, functional_call
 import torch.optim as optim
 import torch.nn.functional as F
 from torch import nn
@@ -44,10 +43,6 @@ import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
 plt.style.use('bmh')
-
-
-# Squash the warning spam
-torch._C._functorch._set_vmap_fallback_warning_enabled(False)
 
 
 def main():
