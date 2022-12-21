@@ -424,7 +424,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 return input
 
         # Test from_float
-        fused_conv_module = _FusedModule_two_input_args(conv_module) if post_op == ["add", "add_relu"] else torch.nn.intrinsic._FusedModule(conv_module)
+        fused_conv_module = _FusedModule_two_input_args(conv_module) \
+            if post_op == ["add", "add_relu"] else torch.nn.intrinsic._FusedModule(conv_module)
+
         fused_conv_module.qconfig = torch.ao.quantization.default_qconfig
         torch.ao.quantization.prepare(fused_conv_module, inplace=True)
         if post_op in ["add", "add_relu"]:
