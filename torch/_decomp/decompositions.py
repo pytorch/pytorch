@@ -2034,7 +2034,9 @@ def _compute_upsample_nearest_indices(input, output_size):
         # input_index = floor(output_index * scale)
         # Same as OpenCV INTER_NEAREST
         osize = sym_float(output_size[d])
-        output_indices = torch.arange(sym_int(osize), dtype=input.dtype, device=input.device)
+        output_indices = torch.arange(
+            sym_int(osize), dtype=input.dtype, device=input.device
+        )
         isize = sym_float(input.shape[-num_spatial_dims + d])
         scale = isize / osize
         input_indices = torch.floor(output_indices * scale).to(torch.int64)
@@ -2052,7 +2054,7 @@ def upsample_nearest1d(
     output_size: List[Union[int, float]],
     scales: Optional[float] = None,
 ) -> Tensor:
-    l_indices, = _compute_upsample_nearest_indices(input, output_size)
+    (l_indices,) = _compute_upsample_nearest_indices(input, output_size)
     result = input[:, :, l_indices]
     return result
 
@@ -2092,7 +2094,9 @@ def upsample_nearest3d(
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
-    d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(input, output_size)
+    d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
+        input, output_size
+    )
     result = input[:, :, d_indices, h_indices, w_indices]
 
     # convert output to correct memory format, if necessary
