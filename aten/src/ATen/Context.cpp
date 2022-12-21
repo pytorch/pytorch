@@ -21,10 +21,6 @@
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
 
-#ifdef USE_MPS
-#include <ATen/mps/MPSDevice.h>
-#endif
-
 namespace at {
 
 Context::Context() = default;
@@ -265,14 +261,6 @@ bool Context::hasMKL() {
 bool Context::hasMKLDNN() {
 #if AT_MKLDNN_ENABLED()
   return true;
-#else
-  return false;
-#endif
-}
-
-bool Context::hasMPS() {
-#if USE_MPS
-  return at::mps::is_available();
 #else
   return false;
 #endif
