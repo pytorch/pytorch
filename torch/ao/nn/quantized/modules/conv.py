@@ -236,7 +236,7 @@ class _ConvNd(WeightedQuantizedModule):
                 "Input float module must have qconfig defined."
             activation_post_process = None if not hasattr(
                 mod, "activation_post_process") else mod.activation_post_process
-            if type(mod) == cls._NNI_CONV_RELU_MODULE:
+            if type(mod) in [cls._NNI_CONV_RELU_MODULE, cls._NNI_CONV_ADD_MODULE, cls._NNI_CONV_ADD_RELU_MODULE]:
                 mod = mod[0]
             weight_post_process = mod.qconfig.weight()
         return cls.get_qconv(mod, activation_post_process, weight_post_process)
@@ -306,6 +306,8 @@ class Conv1d(_ConvNd):
     _FLOAT_MODULE = nn.Conv1d
     _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn1d
     _NNI_CONV_RELU_MODULE = nni.ConvReLU1d
+    _NNI_CONV_ADD_MODULE = None
+    _NNI_CONV_ADD_RELU_MODULE = None
 
     def __init__(self,
                  in_channels: int,
@@ -416,6 +418,8 @@ class Conv2d(_ConvNd):
     _FLOAT_MODULE = nn.Conv2d
     _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn2d
     _NNI_CONV_RELU_MODULE = nni.ConvReLU2d
+    _NNI_CONV_ADD_MODULE = nni.ConvAdd2d
+    _NNI_CONV_ADD_RELU_MODULE = nni.ConvAddReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -514,6 +518,8 @@ class Conv3d(_ConvNd):
     _FLOAT_MODULE = nn.Conv3d
     _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn3d
     _NNI_CONV_RELU_MODULE = nni.ConvReLU3d
+    _NNI_CONV_ADD_MODULE = None
+    _NNI_CONV_ADD_RELU_MODULE = None
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
