@@ -11529,6 +11529,36 @@ Example::
 )
 
 add_docstr(
+    torch.softmax,
+    r"""
+softmax(input, dim=\, *, out=None) -> Tensor
+
+Returns a new tensor with the softmax of the elements of the tensor along a specific dimension.
+of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \softmax(\text{input}_{i})
+"""
+    + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-1.1454, -0.2365, -0.3093,  0.7086])
+    >>> torch.tanh(a, 0)
+    tensor([0.0821, 0.2038, 0.1895, 0.5245])
+""".format(
+        **common_args
+    ),
+)
+
+add_docstr(
     torch.topk,
     r"""
 topk(input, k, dim=None, largest=True, sorted=True, *, out=None) -> (Tensor, LongTensor)
