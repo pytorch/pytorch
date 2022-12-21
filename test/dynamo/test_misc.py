@@ -3245,7 +3245,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             try:
                 unsupported = x.nonexistent_tensor_attr
                 x = torch.nn.utils.rnn.PackedSequence(x, unsupported)
-            except:
+            except AttributeError:
                 x = x + 1
             return x
 
