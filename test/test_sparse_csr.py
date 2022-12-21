@@ -2083,11 +2083,15 @@ class TestSparseCSR(TestCase):
 
     @parametrize('enable_hybrid', [True, False])
     @all_sparse_compressed_layouts()
-    @dtypes(*all_types_and_complex_and())
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
     def test_mul_scalar(self, layout, device, dtype, enable_hybrid):
         for sparse in self.generate_simple_inputs(
                 layout, device=device, dtype=dtype, index_dtype=torch.int32, enable_hybrid=enable_hybrid):
-            for scalar_dtype in all_types_and_complex_and():
+            for scalar_dtype in all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half):
+                # ComplexHalf is experimental
+                if dtype is torch.half and scalar_dtype.is_complex:
+                    continue
+
                 scalar_t = torch.tensor(2, dtype=scalar_dtype)
                 for scalar in (scalar_t, scalar_t.item()):
                     res_out = sparse.mul(scalar)
