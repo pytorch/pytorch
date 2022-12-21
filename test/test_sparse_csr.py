@@ -2081,7 +2081,8 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(torch.mul, 100, [100, 1])
         _test_spadd_shape(torch.mul, 100, [1, 100])
 
-    @parametrize('enable_hybrid', [True, False])
+    #TODO: enable hybrid once to_dense supports it
+    @parametrize('enable_hybrid', [False])
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
     def test_mul_scalar(self, layout, device, dtype, enable_hybrid):
@@ -2097,22 +2098,16 @@ class TestSparseCSR(TestCase):
                     res_out = sparse.mul(scalar)
                     self.assertEqual(res_out, scalar * sparse)
 
-                    # TODO: enable hybrid once to_dense supports it.
-                    if not enable_hybrid:
-                        res_dense_out = sparse.to_dense().mul(scalar)
-                        # BUG: dispatcher ignores mul.Scalar(Tensor, Scalar)
-                        # This issues is circumvented in the mul(Tensor, Tensor) kernel.
-                        self.assertEqual(res_out, res_dense_out)
+                    res_dense_out = sparse.to_dense().mul(scalar)
+                    # BUG: dispatcher ignores mul.Scalar(Tensor, Scalar)
+                    # This issues is circumvented in the mul(Tensor, Tensor) kernel.
+                    self.assertEqual(res_out, res_dense_out)
 
-                    # TODO: enable hybrid once to_dense supports it.
-                    if dtype == torch.result_type(sparse, scalar) and not enable_hybrid:
+                    if dtype == torch.result_type(sparse, scalar):
                         res_in_dense = sparse.to_dense().mul_(scalar)
                         res_in = sparse.clone().mul_(scalar)
                         self.assertEqual(res_in, res_in_dense)
-                    else:
-                        res_in = res_out
-
-                    self.assertEqual(res_out, res_in)
+                        self.assertEqual(res_out, res_in)
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
