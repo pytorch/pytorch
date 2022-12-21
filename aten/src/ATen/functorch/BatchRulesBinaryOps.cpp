@@ -287,6 +287,24 @@ void fill__Tensor_batch_rule(
   std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
 }
 
+std::tuple<Tensor,optional<int64_t>> fill_Tensor_batch_rule(
+    Tensor& self,
+    optional<int64_t> self_bdim,
+    const Tensor& other,
+    optional<int64_t> other_bdim) {
+  if (!other_bdim.has_value()) {
+    // Optimization: fill is faster than the other path which does
+    // reshaping + copy_
+    return std::make_tuple(at::fill(self, other), self_bdim);
+  }
+  auto self_and_other = _binary_pointwise_helper(
+      self, self_bdim, other, other_bdim, /*do_type_promotion*/false);
+  auto self_and_other_broadcasted = at::broadcast_tensors(
+      {std::get<0>(self_and_other), std::get<1>(self_and_other)});
+  auto result = at::empty_like(self_and_other_broadcasted[0]);
+  return std::make_tuple(result.copy_(self_and_other_broadcasted[1]), 0);
+}
+
 std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
   Tensor& grad, optional<int64_t> grad_bdim,
   Tensor& self, optional<int64_t> self_bdim,
@@ -495,6 +513,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(masked_select_backward, masked_select_backward_batch_rule);
 
   VMAP_SUPPORT2(fill_, Tensor, fill__Tensor_batch_rule);
+  VMAP_SUPPORT2(fill, Tensor, fill_Tensor_batch_rule);
 }
 
 }}

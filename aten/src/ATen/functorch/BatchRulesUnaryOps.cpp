@@ -188,6 +188,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE_ALL(tanh);
 
   POINTWISE_BOXED(fill_.Scalar);
+  POINTWISE_BOXED(fill.Scalar);
   POINTWISE_BOXED(zero_);
 
 #undef UNARY_POINTWISE

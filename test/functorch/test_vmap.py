@@ -3368,7 +3368,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
-        xfail('fill'),
         # Batch norm got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
@@ -3619,23 +3618,25 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         check_vmap_fallback(self, test, torch.slogdet)
 
-    def test_fill__Tensor(self, device):
-        # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
-        def test():
+    @parametrize('typ', ['outplace', 'inplace'])
+    def test_fill_Tensor(self, device, typ):
+        # There's no OpInfo for fill.Tensor and fill_.Tensor so here's an extra test for it.
+        def test(op):
             B = 2
             args = (torch.randn(B, 3, device=device), torch.randn(B))
-            self.vmap_inplace_test(Tensor.fill_, args, {}, (0, 0))
+            self.vmap_outplace_test(op, args, {}, (0, 0))
 
             args = (torch.randn(3, B, device=device), torch.randn(B))
-            self.vmap_inplace_test(Tensor.fill_, args, {}, (-1, 0))
+            self.vmap_outplace_test(op, args, {}, (-1, 0))
 
             args = (torch.randn(3, device=device), torch.randn(B))
-            self.vmap_inplace_test(Tensor.fill_, args, {}, (None, 0))
+            self.vmap_outplace_test(op, args, {}, (None, 0))
 
             args = (torch.randn(3, B, device=device), torch.randn([]))
-            self.vmap_inplace_test(Tensor.fill_, args, {}, (1, None))
+            self.vmap_outplace_test(op, args, {}, (1, None))
 
-        check_vmap_fallback(self, test, Tensor.fill_)
+        op = torch.fill if 'outplace' else Tensor.fill_
+        check_vmap_fallback(self, functools.partial(test, op), op)
 
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
