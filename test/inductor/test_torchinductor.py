@@ -2786,6 +2786,10 @@ class CommonTemplate:
             fn,
             (torch.randn([8, 16]),),
         )
+        self.common(
+            fn,
+            (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+        )
 
     def test_cat_upcasting(self):
         def fn(arg4_1, slice_7):
