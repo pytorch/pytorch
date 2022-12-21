@@ -297,6 +297,7 @@ __all__ = [
 
 Tensor = torch.Tensor
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
+aten = torch._ops.ops.aten
 
 
 def _broadcast_shapes(*_shapes):
@@ -432,7 +433,7 @@ def _make_inplace(fn):
 
     inplace_name = f"{fn.__name__}_"
     _fn.__name__ = inplace_name
-    _fn = register_decomposition(getattr(torch.ops.aten, inplace_name))(_fn)
+    _fn = register_decomposition(getattr(aten, inplace_name))(_fn)
 
     # We access the __all__ attribute of the module where fn is defined
     # There may be a cleaner way of doing this...
@@ -489,7 +490,7 @@ def ceil(a):
     return prims.ceil(a)
 
 
-@register_decomposition(torch.ops.aten.conj_physical)
+@register_decomposition(aten.conj_physical)
 @out_wrapper()
 def conj_physical(input: TensorLikeType):
     if not utils.is_complex_dtype(input.dtype):
@@ -657,7 +658,7 @@ def isreal(a: TensorLikeType) -> TensorLikeType:
 
 # TODO: if this is special maybe it should be defined there and imported here?
 @_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i0
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=aten.special_i0
 )
 def i0(a):
     return prims.bessel_i0(a)
@@ -723,7 +724,7 @@ def logsumexp(
     return result
 
 
-@register_decomposition(torch.ops.aten.nan_to_num)
+@register_decomposition(aten.nan_to_num)
 @out_wrapper()
 def nan_to_num(
     a: TensorLikeType,
@@ -938,7 +939,7 @@ def _make_elementwise_binary_reference(
 
 
 # Add has its own implementation because it has an alpha argument
-@register_decomposition(torch.ops.aten.add)
+@register_decomposition(aten.add)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
@@ -1045,7 +1046,7 @@ def copysign(
 # complex =  _make_elementwise_binary_reference(prims.complex, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 
 
-@register_decomposition(torch.ops.aten.div)
+@register_decomposition(aten.div)
 @out_wrapper()
 def div(
     a: Union[TensorLikeType, NumberType],
@@ -1553,7 +1554,7 @@ def rsub(
 # TODO: add docstring
 # TODO: consider refactoring this with add impl
 # sub has its own implementation because it has an alpha argument
-@register_decomposition(torch.ops.aten.sub)
+@register_decomposition(aten.sub)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
@@ -1597,7 +1598,7 @@ def true_divide(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.div(a, b)
 
 
-@register_decomposition(torch.ops.aten.xlogy)
+@register_decomposition(aten.xlogy)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
@@ -1643,7 +1644,7 @@ def trunc_divide(
 #
 
 
-@register_decomposition(torch.ops.aten.addcdiv)
+@register_decomposition(aten.addcdiv)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "tensor1", "tensor2"),
@@ -1673,7 +1674,7 @@ def addcdiv(
     return self + value * tensor1 / tensor2
 
 
-@register_decomposition(torch.ops.aten.addcmul)
+@register_decomposition(aten.addcmul)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "tensor1", "tensor2"),
@@ -1703,7 +1704,7 @@ def addcmul(
     return self + value * tensor1 * tensor2
 
 
-@register_decomposition(torch.ops.aten.clamp)
+@register_decomposition(aten.clamp)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "min", "max"),
@@ -1735,7 +1736,7 @@ def clamp(
     return a
 
 
-@register_decomposition(torch.ops.aten.clamp_min)
+@register_decomposition(aten.clamp_min)
 @out_wrapper()
 def clamp_min(
     self: TensorLikeType,
@@ -1744,7 +1745,7 @@ def clamp_min(
     return torch.clamp(self, min=min)  # type: ignore[arg-type]
 
 
-@register_decomposition(torch.ops.aten.clamp_max)
+@register_decomposition(aten.clamp_max)
 @out_wrapper()
 def clamp_max(
     self: TensorLikeType,
@@ -1759,7 +1760,7 @@ def clamp_max(
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
-@register_decomposition(torch.ops.aten.where)
+@register_decomposition(aten.where)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
@@ -1788,7 +1789,7 @@ def where(
 #
 # Data Movement References
 #
-@register_decomposition(torch.ops.aten.clone)
+@register_decomposition(aten.clone)
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
@@ -1806,7 +1807,7 @@ def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     return prims.copy_to(a, b)
 
 
-@register_decomposition(torch.ops.aten.item)
+@register_decomposition(aten.item)
 def item(a: TensorLikeType) -> NumberType:
     if a.numel() != 1:
         msg = f"Can't convert a tensor with {a.numel()} elements to a number!"
@@ -2068,7 +2069,7 @@ def _make_copy_from_view(fn):
 
     copy_name = f"{name}_copy"
     _fn.__name__ = copy_name
-    _fn = register_decomposition(getattr(torch.ops.aten, copy_name))(_fn)
+    _fn = register_decomposition(getattr(aten, copy_name))(_fn)
     return _fn
 
 
@@ -2076,7 +2077,7 @@ def _make_copy_from_view(fn):
 py_all = all
 
 
-@register_decomposition(torch.ops.aten.all)
+@register_decomposition(aten.all)
 @out_wrapper()
 def all(
     a: TensorLikeType,
@@ -2102,7 +2103,7 @@ def all(
 py_any = any
 
 
-@register_decomposition(torch.ops.aten.any)
+@register_decomposition(aten.any)
 @out_wrapper()
 def any(
     a: TensorLikeType,
@@ -2119,7 +2120,7 @@ def any(
     return result
 
 
-@register_decomposition(torch.ops.aten.sum)
+@register_decomposition(aten.sum)
 def sum(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -2169,7 +2170,7 @@ def sum_to_size(
     return torch.sum(a, dim=reduce_dims, keepdim=True, dtype=None)
 
 
-@register_decomposition(torch.ops.aten.prod)
+@register_decomposition(aten.prod)
 def prod(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -2197,7 +2198,7 @@ def prod(
     )
 
 
-@register_decomposition(torch.ops.aten.amin)
+@register_decomposition(aten.amin)
 def amin(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -2221,7 +2222,7 @@ def amin(
     )
 
 
-@register_decomposition(torch.ops.aten.amax)
+@register_decomposition(aten.amax)
 def amax(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -2255,7 +2256,7 @@ def _dim_var_dispatch(dim=None, unbiased=None):
     return dim, unbiased
 
 
-@register_decomposition(torch.ops.aten.var)
+@register_decomposition(aten.var)
 @out_wrapper()
 def var(
     a: TensorLikeType,
@@ -2317,7 +2318,7 @@ def std(
     return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
 
 
-@register_decomposition(torch.ops.aten.mean)
+@register_decomposition(aten.mean)
 def mean(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -2368,7 +2369,7 @@ def mean(
     return result
 
 
-@register_decomposition(torch.ops.aten.std_mean.correction)
+@register_decomposition(aten.std_mean.correction)
 def std_mean(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -2383,7 +2384,7 @@ def std_mean(
     return s, m
 
 
-@register_decomposition(torch.ops.aten.var_mean)
+@register_decomposition(aten.var_mean)
 def var_mean(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -2398,7 +2399,7 @@ def var_mean(
     return v, m
 
 
-@register_decomposition(torch.ops.aten.addr)
+@register_decomposition(aten.addr)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "vec1", "vec2"),
@@ -2520,7 +2521,7 @@ def as_strided(
     return prims.as_strided(a, size, stride, storage_offset_int)
 
 
-@register_decomposition(torch.ops.aten.as_strided_scatter)
+@register_decomposition(aten.as_strided_scatter)
 def as_strided_scatter(
     input: TensorLikeType,
     src: TensorLikeType,
@@ -2536,8 +2537,8 @@ def broadcast_shapes(*shapes) -> ShapeType:
     return torch.Size(_broadcast_shapes(*shapes))
 
 
-@torch.ops.aten.broadcast_tensors.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-@torch.ops.aten.broadcast_tensors.default.py_impl(DispatchKey.Meta)
+@aten.broadcast_tensors.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.broadcast_tensors.default.py_impl(DispatchKey.Meta)
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     if len(tensors) == 1 and not isinstance(tensors[0], Tensor):
         tensors = tensors[0]
@@ -2551,7 +2552,7 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     return prims.broadcast_in_dim(a, size, dims)
 
 
-@register_decomposition(torch.ops.aten.cat)
+@register_decomposition(aten.cat)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("tensors",),
@@ -2629,7 +2630,7 @@ def conj(input: TensorLikeType) -> TensorLikeType:
 
 
 # This replicates at::constant_pad_nd, defined in ATen/native/PadNd.cpp
-@register_decomposition(torch.ops.aten.constant_pad_nd)
+@register_decomposition(aten.constant_pad_nd)
 def constant_pad_nd(
     input: TensorLikeType, pad: List[int], value: NumberType = 0
 ) -> TensorLikeType:
@@ -2726,7 +2727,7 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 2)
 
 
-@register_decomposition(torch.ops.aten.expand)
+@register_decomposition(aten.expand)
 def expand(a: Tensor, *shape) -> Tensor:
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
@@ -2807,7 +2808,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
     return prims.collapse(a, start_dim, end_dim + 1)
 
 
-@register_decomposition(torch.ops.aten.flip)
+@register_decomposition(aten.flip)
 def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     if not isinstance(dims, tuple) and not isinstance(dims, list):
         raise ValueError("dims has to be a sequence of ints")
@@ -2910,7 +2911,7 @@ def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeTyp
     return x
 
 
-@register_decomposition(torch.ops.aten.native_group_norm.default)
+@register_decomposition(aten.native_group_norm.default)
 def native_group_norm(
     input: Tensor,
     weight: Optional[Tensor],
@@ -2963,7 +2964,7 @@ def native_group_norm(
     return (out, mean, rstd)
 
 
-@register_decomposition(torch.ops.aten.native_layer_norm)
+@register_decomposition(aten.native_layer_norm)
 def native_layer_norm(
     input: Tensor,
     normalized_shape: ShapeType,
@@ -3034,7 +3035,7 @@ def native_layer_norm(
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
 # test/test_eager_transforms.py::TestFunctionalizeCPU::test_functionalize_fx_transpose_simple_cpu
-@register_decomposition(torch.ops.aten.permute)
+@register_decomposition(aten.permute)
 def permute(a: TensorLikeType, *dims) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(
         a.ndim, utils.extract_dims_from_varargs(dims)
@@ -3071,7 +3072,7 @@ def _get_unfold_shape_stride(
     return shape, strides
 
 
-@register_decomposition(torch.ops.aten.repeat)
+@register_decomposition(aten.repeat)
 def repeat(a: Tensor, *repeat_shape) -> Tensor:
     repeat_shape = utils.extract_shape_from_varargs(repeat_shape, validate=False)
     utils.check(
@@ -3249,7 +3250,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
     return self.reshape(other.size())
 
 
-@register_decomposition(torch.ops.aten.roll)
+@register_decomposition(aten.roll)
 def roll(
     a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
 ) -> TensorLikeType:
@@ -3295,7 +3296,7 @@ def roll(
     return torch.cat((t0, t1), dim)
 
 
-@register_decomposition(torch.ops.aten.rot90)
+@register_decomposition(aten.rot90)
 def rot90(
     a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
 ) -> TensorLikeType:
@@ -3335,7 +3336,7 @@ def _check_stack_inputs(tensors: TensorSequenceType) -> None:
         )
 
 
-@register_decomposition(torch.ops.aten.stack)
+@register_decomposition(aten.stack)
 @out_wrapper()
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     assert len(tensors) > 0, "stack expects a non-empty TensorList"
@@ -3394,7 +3395,7 @@ def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
     return a.view(tuple(a.shape[:dim]) + tuple(sizes) + tuple(a.shape[dim + 1 :]))
 
 
-@register_decomposition(torch.ops.aten.unbind)
+@register_decomposition(aten.unbind)
 def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     dim = utils.canonicalize_dim(t.ndim, dim)
     check(
@@ -3407,7 +3408,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     )
 
 
-@register_decomposition(torch.ops.aten.index_copy)
+@register_decomposition(aten.index_copy)
 @out_wrapper()
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return x.clone(memory_format=torch.contiguous_format).index_copy_(
@@ -3415,7 +3416,7 @@ def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     )
 
 
-@register_decomposition(torch.ops.aten.index_copy_)
+@register_decomposition(aten.index_copy_)
 def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     dim = utils.canonicalize_dims(x.ndim, dim)
     utils.check(
@@ -3429,14 +3430,14 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return x
 
 
-@register_decomposition(torch.ops.aten.index_fill)
+@register_decomposition(aten.index_fill)
 def index_fill(
     x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
 ):
     return x.clone().index_fill_(dim, index, value)  # type: ignore[arg-type]
 
 
-@register_decomposition(torch.ops.aten.index_fill_)
+@register_decomposition(aten.index_fill_)
 def index_fill_(
     x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
 ):
@@ -3459,7 +3460,7 @@ def index_fill_(
     return x
 
 
-@register_decomposition(torch.ops.aten.index_add)
+@register_decomposition(aten.index_add)
 @out_wrapper()
 def index_add(
     x: TensorLike,
@@ -3475,7 +3476,7 @@ def index_add(
     )
 
 
-@register_decomposition(torch.ops.aten.index_select)
+@register_decomposition(aten.index_select)
 @out_wrapper()
 def index_select(x: TensorLike, dim: int, index: TensorLike):
     dim = utils.canonicalize_dims(x.ndim, dim)
@@ -3488,12 +3489,12 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         # we cannot write `x.unsqueeze(0)[index].squeeze(0).clone()`
         # as tensor[index] will trigger index.item() if index is a 0-dim tensor
         # and .item() cannot be symbolically traced with FakeTensor.
-        return torch.ops.aten.index(x.unsqueeze(0), [index]).squeeze(0).clone()
+        return aten.index(x.unsqueeze(0), [index]).squeeze(0).clone()
     idx = (slice(None),) * dim + (index,)
     return x[idx]
 
 
-@register_decomposition(torch.ops.aten.squeeze)
+@register_decomposition(aten.squeeze)
 def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
     if dim is not None:
         dim = utils.canonicalize_dim(a.ndim, dim)
@@ -3673,7 +3674,7 @@ def vsplit(
     return tensor_split(a, split_sizes, 0)
 
 
-@register_decomposition(torch.ops.aten.diag.out)
+@register_decomposition(aten.diag.out)
 @out_wrapper()
 def diag(
     self: TensorLikeType,
@@ -3689,7 +3690,7 @@ def diag(
         return torch.diagonal_copy(self, offset)
 
 
-@register_decomposition(torch.ops.aten.diagonal_scatter)
+@register_decomposition(aten.diagonal_scatter)
 @out_wrapper()
 def diagonal_scatter(
     input: TensorLikeType,
@@ -3709,7 +3710,7 @@ def diagonal_scatter(
     return out
 
 
-@register_decomposition(torch.ops.aten.diagonal)
+@register_decomposition(aten.diagonal)
 def diagonal(
     self: TensorLikeType,
     offset: int = 0,
@@ -3754,7 +3755,7 @@ def diagonal(
 diagonal_copy = _make_copy_from_view(diagonal)
 
 
-@register_decomposition(torch.ops.aten.diag_embed)
+@register_decomposition(aten.diag_embed)
 @out_wrapper()
 def diag_embed(
     t: TensorLikeType,
@@ -3826,7 +3827,7 @@ def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     return tensor_split(a, sections, 2)
 
 
-@register_decomposition(torch.ops.aten.t.default)
+@register_decomposition(aten.t.default)
 def t(a: TensorLikeType):
     # TODO: Add sparse support
     # if a.is_sparse:
@@ -3857,7 +3858,7 @@ def T(a: TensorLikeType) -> TensorLikeType:
     return a.t()
 
 
-@register_decomposition(torch.ops.aten.transpose)
+@register_decomposition(aten.transpose)
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
@@ -3874,7 +3875,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 swap_axes = transpose
 
 
-@register_decomposition(torch.ops.aten.unfold)
+@register_decomposition(aten.unfold)
 def unfold(
     self: TensorLikeType, dimension: int, size: int, step: int
 ) -> TensorLikeType:
@@ -3884,7 +3885,7 @@ def unfold(
     return self.as_strided(shape, strides)
 
 
-@register_decomposition(torch.ops.aten.unfold_copy)
+@register_decomposition(aten.unfold_copy)
 @out_wrapper()
 def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
     return self.unfold(dimension, size, step).clone(
@@ -3892,7 +3893,7 @@ def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
     )
 
 
-@register_decomposition(torch.ops.aten.cumsum)
+@register_decomposition(aten.cumsum)
 def cumsum(
     a: TensorLikeType,
     dim: int,
@@ -3917,7 +3918,7 @@ def cumsum(
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
-@register_decomposition(torch.ops.aten.unsqueeze)
+@register_decomposition(aten.unsqueeze)
 def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     # Note that unsqueeze canonicalizes with rank + 1 because it allows
     # a new innermost dimension to be specified
@@ -3930,7 +3931,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # Tensor.view(a, b, c) or Tensor.view((a, b, c)) Function call torch.view
 # doesn't support unpacked shapes
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
-@register_decomposition(torch.ops.aten.view)
+@register_decomposition(aten.view)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
 
@@ -3945,7 +3946,7 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
-@register_decomposition(torch.ops.aten.empty.memory_format)
+@register_decomposition(aten.empty.memory_format)
 @out_wrapper()
 def empty(
     *shape,
@@ -3985,7 +3986,7 @@ def empty(
     )
 
 
-@register_decomposition(torch.ops.aten.new_empty)
+@register_decomposition(aten.new_empty)
 def new_empty(
     a: TensorLikeType,
     size: ShapeType,
@@ -4009,7 +4010,7 @@ def new_empty(
     )
 
 
-@register_decomposition(torch.ops.aten.new_empty_strided)
+@register_decomposition(aten.new_empty_strided)
 def new_empty_strided(
     a: TensorLikeType,
     size: ShapeType,
@@ -4038,7 +4039,7 @@ def new_empty_strided(
     )
 
 
-@register_decomposition(torch.ops.aten.zeros.default)
+@register_decomposition(aten.zeros.default)
 @out_wrapper()
 def zeros(
     *size,
@@ -4064,7 +4065,7 @@ def zeros(
     )
 
 
-@register_decomposition(torch.ops.aten.new_zeros)
+@register_decomposition(aten.new_zeros)
 def new_zeros(
     a: TensorLikeType,
     size: ShapeType,
@@ -4090,7 +4091,7 @@ def new_zeros(
     )
 
 
-@register_decomposition(torch.ops.aten.ones.default)
+@register_decomposition(aten.ones.default)
 @out_wrapper()
 def ones(
     *size,
@@ -4116,7 +4117,7 @@ def ones(
     )
 
 
-@register_decomposition(torch.ops.aten.new_ones)
+@register_decomposition(aten.new_ones)
 def new_ones(
     a: TensorLikeType,
     size: ShapeType,
@@ -4142,7 +4143,7 @@ def new_ones(
     )
 
 
-@register_decomposition(torch.ops.aten.new_full)
+@register_decomposition(aten.new_full)
 def new_full(
     a: TensorLikeType,
     size: ShapeType,
@@ -4167,7 +4168,7 @@ def new_full(
     )
 
 
-@register_decomposition(torch.ops.aten.empty_like)
+@register_decomposition(aten.empty_like)
 def empty_like(
     a: TensorLikeType,
     *,
@@ -4211,9 +4212,9 @@ def empty_like(
 
 @register_decomposition(
     [
-        torch.ops.aten.arange.default,
-        torch.ops.aten.arange.start,
-        torch.ops.aten.arange.start_step,
+        aten.arange.default,
+        aten.arange.start,
+        aten.arange.start_step,
     ]
 )
 @out_wrapper()
@@ -4246,7 +4247,7 @@ def arange(
     )
 
 
-@register_decomposition(torch.ops.aten.lerp)
+@register_decomposition(aten.lerp)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("start", "end", "weight"),
@@ -4277,7 +4278,7 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     return coeff * (end - start) + base
 
 
-@register_decomposition(torch.ops.aten.linspace)
+@register_decomposition(aten.linspace)
 @out_wrapper()
 def linspace(
     start: NumberType,
@@ -4344,7 +4345,7 @@ def linspace(
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
-@register_decomposition(torch.ops.aten.logspace)
+@register_decomposition(aten.logspace)
 @out_wrapper()
 def logspace(
     start: NumberType,
@@ -4394,7 +4395,7 @@ def meshgrid(*tensors: TensorLikeType, indexing: str):
     pass
 
 
-@register_decomposition(torch.ops.aten.meshgrid)
+@register_decomposition(aten.meshgrid)
 def meshgrid(
     *tensors: Union[TensorLikeType, List[TensorLikeType], Tuple[TensorLikeType]],
     indexing: str,
@@ -4524,7 +4525,7 @@ def movedim(
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
-@register_decomposition(torch.ops.aten.empty_strided)
+@register_decomposition(aten.empty_strided)
 def empty_strided(
     shape: Union[ShapeType, Tuple[ShapeType]],
     strides: StrideType,
@@ -4552,7 +4553,7 @@ def empty_strided(
     )
 
 
-@register_decomposition(torch.ops.aten.eye)
+@register_decomposition(aten.eye)
 @out_wrapper()
 def eye(
     n: int,
@@ -4594,7 +4595,7 @@ def eye(
     # result.requires_grad_(requires_grad)
 
 
-@register_decomposition(torch.ops.aten.full)
+@register_decomposition(aten.full)
 @out_wrapper()
 def full(
     shape: ShapeType,
@@ -4652,7 +4653,7 @@ zeros_like = partial(full_like, fill_value=False)
 ones_like = partial(full_like, fill_value=True)
 
 
-@register_decomposition(torch.ops.aten.randn.default)
+@register_decomposition(aten.randn.default)
 @out_wrapper()
 def randn(
     *shape,
@@ -4720,9 +4721,7 @@ def _uniform_helper(
     return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
 
 
-@register_decomposition(
-    [torch.ops.aten.masked_fill.Scalar, torch.ops.aten.masked_fill.Tensor]
-)
+@register_decomposition([aten.masked_fill.Scalar, aten.masked_fill.Tensor])
 def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
     python_type = utils.dtype_to_type(a.dtype)
     if isinstance(value, Number):
@@ -4831,7 +4830,7 @@ def norm(
         return torch.linalg.vector_norm(input, p, dim, keepdim, dtype=dtype)
 
 
-@register_decomposition(torch.ops.aten.trace)
+@register_decomposition(aten.trace)
 def trace(self: TensorLikeType) -> TensorLikeType:
     utils.check(
         self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
@@ -4854,7 +4853,7 @@ rfloordiv = _make_r_binary_op(floor_divide)
 rpow = _make_r_binary_op(pow)
 
 
-@register_decomposition(torch.ops.aten.triu)
+@register_decomposition(aten.triu)
 @out_wrapper()
 def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
     utils.check(
@@ -4871,7 +4870,7 @@ def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
     return utils.mask_tensor(mask, a).contiguous()
 
 
-@register_decomposition(torch.ops.aten.tril)
+@register_decomposition(aten.tril)
 @out_wrapper()
 def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
     utils.check(
@@ -4928,7 +4927,7 @@ def _trilu_checks(
 
 
 # This is based on tril_indices_cuda in aten/src/ATen/native/cuda/TensorFactories.cu
-@register_decomposition(torch.ops.aten.tril_indices)
+@register_decomposition(aten.tril_indices)
 def tril_indices(
     row: int,
     col: int,
@@ -4987,7 +4986,7 @@ def _get_triu_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
     return trapezoid_size, rectangle_size, m_first_row
 
 
-@register_decomposition(torch.ops.aten.triu_indices)
+@register_decomposition(aten.triu_indices)
 def triu_indices(
     row: int,
     col: int,
@@ -5029,7 +5028,7 @@ def triu_indices(
     )
 
 
-@register_decomposition(torch.ops.aten.bucketize)
+@register_decomposition(aten.bucketize)
 @out_wrapper(exact_dtype=True)
 def bucketize(
     a: TensorLikeType,
