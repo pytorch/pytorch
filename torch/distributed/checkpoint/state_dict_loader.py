@@ -22,10 +22,10 @@ def load_state_dict(
     planner: LoadPlanner = None,
 ) -> None:
     """
-    Loads a distributed state_dict in SPMD style.
+    Loads a distributed ``state_dict`` in SPMD style.
 
     Each rank will try to read the least amount of data necessary
-    to fullfill the requested `state_dict`. When loading ShardedTensor
+    to fullfill the requested `state_dict`. When loading :class:`ShardedTensor`
     instances, each rank only reads data for their local shards.
 
     .. warning::
