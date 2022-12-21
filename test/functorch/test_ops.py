@@ -1357,7 +1357,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
-        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('symeig', ''),  # NYI: forward AD for symeig
@@ -1482,7 +1481,6 @@ class TestOperators(TestCase):
         xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_5'),  # vmap: inplace into a regular tensor
         xfail('nanquantile'),  # Batching rule not implemented for aten::equal
-        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
         # RuntimeError: Batch norm got a batched tensor as input while the
         # running_mean or running_var, which will be updated in place,
         # were not batched.
