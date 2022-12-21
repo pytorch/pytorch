@@ -1406,6 +1406,66 @@ class LinearBnLeakyReluModel(torch.nn.Module):
     def get_example_inputs(self) -> Tuple[Any, ...]:
         return (torch.rand(1, 5),)
 
+class ConvBnAddReluModel(torch.nn.Module):
+    def __init__(self,
+                 with_bn=True,
+                 with_relu=True,
+                 left_conv=True,
+                 two_conv=True,
+                 use_torch_add=True):
+        super().__init__()
+        self.conv = nn.Conv2d(5, 5, (2, 2))
+        self.conv2 = nn.Conv2d(5, 5, (2, 2))
+        self.bn = nn.BatchNorm2d(5)
+        self.relu = nn.ReLU()
+        self.with_bn = with_bn
+        self.with_relu = with_relu
+        self.two_conv = two_conv
+        self.left_conv = left_conv
+        self.use_torch_add = use_torch_add
+
+    def forward(self, x1, x2):
+        if self.two_conv:
+            if self.use_torch_add:
+                if self.with_bn:
+                    x = torch.add(self.bn(self.conv(x1)), self.conv2(x1))
+                else:
+                    x = torch.add(self.conv(x1), self.conv2(x1))
+            else:
+                if self.with_bn:
+                    x = self.bn(self.conv(x1)) + self.conv2(x1)
+                else:
+                    x = self.conv(x1) + self.conv2(x1)
+        else:
+            if self.use_torch_add:
+                if self.left_conv:
+                    if self.with_bn:
+                        x = torch.add(self.bn(self.conv(x1)), x2)
+                    else:
+                        x = torch.add(self.conv(x1), x2)
+                else:
+                    if self.with_bn:
+                        x = torch.add(x2, self.bn(self.conv(x1)))
+                    else:
+                        x = torch.add(x2, self.conv(x1))
+            else:
+                if self.left_conv:
+                    if self.with_bn:
+                        x = self.bn(self.conv(x1)) + x2
+                    else:
+                        x = self.conv(x1) + x2
+                else:
+                    if self.with_bn:
+                        x = x2 + self.bn(self.conv(x1))
+                    else:
+                        x = x2 + self.conv(x1)
+        if self.with_relu:
+            x = self.relu(x)
+        return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5, 3, 3), torch.rand(1, 5, 2, 2))
+
 # TODO: self.fc should be self.conv
 class ConvReluModel(torch.nn.Module):
     def __init__(self):
