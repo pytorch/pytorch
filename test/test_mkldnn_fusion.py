@@ -283,7 +283,7 @@ class TestMkldnnFusion(JitTestCase):
                         attr = pointwise_info.attr
                         scalars = pointwise_info.scalars
                         algorithm = pointwise_info.algorithm
-                        conv_param = torch.ops.mkldnn._conv_param_generation(
+                        conv_param = torch.ops.mkldnn._create_conv_param(
                             x, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                             mod.conv.groups, attr, scalars, algorithm
                         )
@@ -373,7 +373,7 @@ class TestMkldnnFusion(JitTestCase):
                             ref.relu_()
                             unary_attr = "relu"
                         attr = pointwise_name
-                        conv_param = torch.ops.mkldnn._conv_param_generation_binary(
+                        conv_param = torch.ops.mkldnn._create_conv_param_binary(
                             x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                             mod.conv.groups, attr, None, unary_attr, [], None
                         )
