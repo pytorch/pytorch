@@ -156,6 +156,7 @@ from torch.testing._internal.common_quantization import (
     LinearReluLinearModel,
     LinearReluModel,
     LinearBnLeakyReluModel,
+    ConvBnAddReluModel,
     QuantizationTestCase,
     skipIfNoFBGEMM,
     skipIfNoQNNPACK,
@@ -405,6 +406,115 @@ class TestFuseFx(QuantizationTestCase):
                 m,
                 expected_node_list=expected_nodes,
                 expected_node_occurrence=expected_occurrence)
+
+    @skipIfNoONEDNN
+    def test_fuse_conv_bn_add_relu_onednn(self):
+        # conv - bn - add - relu is fused for onednn backend only
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        expected_nodes = [
+            ns.call_module(nni.ConvAdd2d),
+        ]
+        expected_occurrence = {
+            ns.call_module(nni.ConvAdd2d): 1,
+            ns.call_module(nn.BatchNorm2d): 0,
+        }
+
+        options = itertools.product(
+            [True, False],  # with_bn
+            [False],  # with_relu
+            [True, False],  # conv in the left
+            [True, False],  # with_two_conv
+            [True, False],  # use_torch_add
+        )
+        for with_bn, with_relu, left_conv, two_conv, use_torch_add in options:
+            # test eval mode
+            m = ConvBnAddReluModel(
+                with_bn=with_bn,
+                with_relu=with_relu,
+                left_conv=left_conv,
+                two_conv=two_conv,
+                use_torch_add=use_torch_add).eval()
+
+            m = fuse_fx(m,
+                        backend_config=get_onednn_backend_config())
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=expected_nodes,
+                expected_node_occurrence=expected_occurrence)
+
+    def test_fuse_conv_bn_add_relu_by_default(self):
+        options = itertools.product(
+            [True, False],  # with_bn
+            [False],  # with_relu
+            [True, False],  # conv in the left
+            [True, False],  # with_two_conv
+            [True, False],  # use_torch_add
+        )
+        for with_bn, with_relu, left_conv, two_conv, use_torch_add in options:
+            # test eval mode
+            expected_nodes = [
+                ns.call_module(nn.Conv2d),
+            ]
+            expected_occurrence = {
+                ns.call_module(nni.ConvAdd2d): 0,
+            }
+            m = ConvBnAddReluModel(
+                with_bn=with_bn,
+                with_relu=with_relu,
+                left_conv=left_conv,
+                two_conv=two_conv,
+                use_torch_add=use_torch_add).eval()
+            m = fuse_fx(m)
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=expected_nodes,
+                expected_node_occurrence=expected_occurrence)
+
+    @skipIfNoONEDNN
+    def test_fuse_conv_bn_add_relu_lowering(self):
+        """ Test fusion and lowering of Conv2d - (bn -) ReLU
+            by FX. For onednn backedn only.
+        """
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        qconfig_mapping = get_default_qconfig_mapping('onednn')
+        with override_quantized_engine('onednn'):
+            options = itertools.product(
+                [True, False],  # with_bn
+                [False],  # with_relu
+                [True, False],  # conv in the left
+                [True, False],  # two_conv
+                [True, False],  # use_torch_add
+            )
+            for with_bn, with_relu, left_conv, two_conv, use_torch_add in options:
+                node_occurrence = {
+                    ns.call_function(torch.quantize_per_tensor): 1 if two_conv else 2,
+                    ns.call_method("dequantize"): 1,
+                    ns.call_module(nniq.ConvAdd2d): 1,
+                    ns.call_module(nn.Conv2d): 0,
+                    ns.call_module(nn.ReLU): 0,
+                }
+                node_occurrence_ref = {
+                    ns.call_function(torch.quantize_per_tensor): 3,
+                    ns.call_method("dequantize"): 3,
+                }
+
+                # test eval mode
+                m = ConvBnAddReluModel(
+                    with_bn=with_bn,
+                    with_relu=with_relu,
+                    left_conv=left_conv,
+                    two_conv=two_conv,
+                    use_torch_add=use_torch_add).eval()
+                example_x = m.get_example_inputs()
+                m = prepare_fx(m, qconfig_mapping,
+                               example_inputs=example_x,
+                               backend_config=get_onednn_backend_config())
+                m_copy = copy.deepcopy(m)
+                m = convert_fx(m, backend_config=get_onednn_backend_config())
+                m_ref = convert_to_reference_fx(m_copy)
+                self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+                self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
+                m(*example_x)
 
     def test_fuse_convtranspose_bn_eval(self):
 
