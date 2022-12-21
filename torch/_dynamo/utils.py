@@ -791,7 +791,6 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                breakpoint()
                 log.warning(f"Similarity score={score.cpu().detach().item()}")
             return score >= 0.99
         else:
@@ -819,7 +818,7 @@ def same(
                     # Similary, for 1x1 kenerls, there seems to be high noise with amp.
                     multiplier = 3.0
 
-                passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
+                passes_test = res_error <= (multiplier * ref_error + 1e-4)
                 if not passes_test:
                     log.error(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
