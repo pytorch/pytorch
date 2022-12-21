@@ -27,10 +27,12 @@ from torch.fx.passes.tools_common import legalize_graph
 from . import config, ir  # noqa: F811, this is needed
 from .scheduler import (
     BaseSchedulerNode,
+    ExternKernelSchedulerNode,
     FusedSchedulerNode,
     NopKernelSchedulerNode,
     OutputNode,
     SchedulerNode,
+    TemplateSchedulerNode,
 )
 from .utils import dynamo_config, dynamo_debug_utils, dynamo_utils
 from .virtualized import V
@@ -108,10 +110,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     group: Any = None
     # create call_function node for each Buffer and Kernel
     for snode in snodes:
-        if snode.is_extern():
+        if isinstance(snode, ExternKernelSchedulerNode):
             node_type = "extern"
             group = node_type
-        elif snode.is_template():
+        elif isinstance(snode, TemplateSchedulerNode):
             node_type = "template"
             group = node_type
         elif isinstance(snode, NopKernelSchedulerNode):

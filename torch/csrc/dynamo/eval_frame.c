@@ -6,17 +6,22 @@
 // see https://bugs.python.org/issue35886
 #if PY_VERSION_HEX >= 0x03080000
 #define Py_BUILD_CORE
-#define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt
 #include <internal/pycore_pystate.h>
+
+// These headers were added in 3.11
+#if IS_PYTHON_3_11_PLUS
 #include <internal/pycore_frame.h>
+#define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt
 #include <internal/pycore_opcode.h>
 #undef NEED_OPCODE_TABLES
-#undef Py_BUILD_CORE
 #endif
+
+#undef Py_BUILD_CORE
+#endif // PY_VERSION_HEX >= 0x03080000
 
 // All the eval APIs change in 3.11 so we need to decide which one to use on the fly
 // https://docs.python.org/3/c-api/init.html#c._PyFrameEvalFunction
-#if PY_VERSION_HEX >= 0x030B00A7 // 3.11+
+#if IS_PYTHON_3_11_PLUS
 #define THP_EVAL_API_FRAME_OBJECT _PyInterpreterFrame
 
 // The next two functions are taken from frameobject.c
@@ -283,7 +288,7 @@ static inline PyObject* call_callback(
     THP_EVAL_API_FRAME_OBJECT* frame,
     long cache_len) {
 
-#if PY_VERSION_HEX >= 0x030B00A7 // 3.11+
+#if IS_PYTHON_3_11_PLUS
   // Only the pointer to the frame is passed back to python here and it is
   // casted back into a _PyInterpreterFrame in real_callback in eval_frame.py
   PyObject* args = Py_BuildValue("(Lll)", frame, cache_len, _PyInterpreterFrame_LASTI(frame));
@@ -448,7 +453,7 @@ inline static PyObject* eval_custom_code(
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
   PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
-  #if PY_VERSION_HEX >= 0x030B00A7 // 3.11+
+  #if IS_PYTHON_3_11_PLUS
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
   #else
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
@@ -457,7 +462,7 @@ inline static PyObject* eval_custom_code(
     return NULL;
   }
 
-  #if PY_VERSION_HEX >= 0x030B00A7 // 3.11+
+  #if IS_PYTHON_3_11_PLUS
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
   #else

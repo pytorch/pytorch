@@ -64,6 +64,7 @@ class GuardFail(NamedTuple):
 
 class GuardFn(Protocol):
     closure_vars: OrderedDict[str, object]
+    args: List[str]
     code_parts: List[str]
     verbose_code_parts: List[str]
     global_scope: Dict[str, object]
