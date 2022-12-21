@@ -1042,7 +1042,6 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('complex'),
-        xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
         xfail('index_fill'),
@@ -1119,7 +1118,6 @@ class TestOperators(TestCase):
         xfail('cummax'),
         xfail('cummin'),
         xfail('cumprod'),
-        xfail('fill'),
         xfail('nansum'),
         xfail('nanmean'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
