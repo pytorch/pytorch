@@ -24,7 +24,7 @@ from torch.utils._pytree import tree_flatten
 
 
 @dataclass
-class UnsupportedMutationException(RuntimeError):
+class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
 
@@ -161,12 +161,12 @@ def cond_python_dispatcher(*args):
 def _has_potential_branch_input_mutation(branch, fake_inputs):
     """
     Dispatch-trace the branch with fake inputs and check if
-    producing graph has mutable op on the input or its' alias. This is
+    producing graph has mutable op on the input. This is
     bit restrictive as the branch must be traceable.
     """
     try:
         gm = make_fx(branch)(*fake_inputs)
-    except UnsupportedMutationException:
+    except UnsupportedAliasMutationException:
         # this can happen when nested cond is
         # functionalized
         return True
@@ -194,7 +194,7 @@ def _has_potential_branch_input_alias(branch, fake_inputs):
     """
     try:
         gm = make_fx(branch)(*fake_inputs)
-    except UnsupportedMutationException:
+    except UnsupportedAliasMutationException:
         # this can happen when nested cond is
         # functionalized
         return True
@@ -239,15 +239,15 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
                     return ft_mode.fake_tensor_converter(ft_mode, x)
                 fake_inputs = pytree.tree_map_only(torch.Tensor, convert, unwrapped_inputs)
                 if _has_potential_branch_input_mutation(branch, fake_inputs):
-                    raise UnsupportedMutationException("One of torch.cond branch "
-                                                       "might be modifying the input!")
+                    raise UnsupportedAliasMutationException("One of torch.cond branch "
+                                                            "might be modifying the input!")
             for branch in [true_fn, false_fn]:
                 def convert(x):
                     return ft_mode.fake_tensor_converter(ft_mode, x)
                 fake_inputs = pytree.tree_map_only(torch.Tensor, convert, unwrapped_inputs)
                 if _has_potential_branch_input_alias(branch, fake_inputs):
-                    raise UnsupportedMutationException("One of torch.cond branch "
-                                                       "might be aliasing the input!")
+                    raise UnsupportedAliasMutationException("One of torch.cond branch "
+                                                            "might be aliasing the input!")
 
         cond_return = cond(unwrapped_pred, functional_true_fn, functional_false_fn, unwrapped_inputs)
         return _wrap_all_tensors_to_functional(cond_return, level=interpreter.level())

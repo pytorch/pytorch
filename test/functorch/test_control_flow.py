@@ -2,7 +2,7 @@
 import torch
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
-from functorch.experimental.control_flow import UnsupportedMutationException
+from functorch.experimental.control_flow import UnsupportedAliasMutationException
 from functorch.experimental import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -100,13 +100,13 @@ class TestControlFlowTraced(TestCase):
             if node.op == "call_function":
                 all_ops_in_true_branch.append(node.target)
 
-        self.assertFalse(torch.ops.aten.add_.Tensor in all_ops_in_true_branch)
-        self.assertFalse(torch.ops.aten.add_.Scalar in all_ops_in_true_branch)
         self.assertFalse(any([op._schema.is_mutable for op in all_ops_in_true_branch]))
 
     def test_cond_functionalized_nested(self):
         def true_true_fn(x):
-            return x.sin().max()
+            y = x.cos()
+            y.add_(4)
+            return x.sin().max() + y.sin().max()
 
         def true_false_fn(x):
             return x.cos().min()
@@ -128,6 +128,15 @@ class TestControlFlowTraced(TestCase):
 
         graph_module = make_fx(functionalize(f))(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
+
+        gm_true_true_branch = graph_module.true_graph_0.true_graph_0
+
+        all_ops = []
+        for node in gm_true_true_branch.graph.nodes:
+            if node.op == "call_function":
+                all_ops.append(node.target)
+
+        self.assertFalse(any([op._schema.is_mutable for op in all_ops]))
 
     def test_cond_functionalized_data_dependent_pred(self):
         def true_fn(x):
@@ -162,10 +171,10 @@ class TestControlFlowTraced(TestCase):
 
         example_inputs = (torch.ones(4, 5),)
         functional_f = functionalize(f)
-        with self.assertRaisesRegex(UnsupportedMutationException, "One of torch.cond branch"):
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             functional_f(*example_inputs)
 
-        with self.assertRaisesRegex(UnsupportedMutationException, "One of torch.cond branch"):
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             make_fx(functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_input_mutation_on_false_branch(self):
@@ -183,10 +192,10 @@ class TestControlFlowTraced(TestCase):
 
         example_inputs = (torch.ones(5, 5),)
         functional_f = functionalize(f)
-        with self.assertRaisesRegex(UnsupportedMutationException, "One of torch.cond branch"):
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             functional_f(*example_inputs)
 
-        with self.assertRaisesRegex(UnsupportedMutationException, "One of torch.cond branch"):
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             make_fx(functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_output_alias_input(self):
@@ -204,10 +213,10 @@ class TestControlFlowTraced(TestCase):
         example_inputs = (torch.ones(5, 5),)
         functional_f = functionalize(f)
 
-        with self.assertRaisesRegex(UnsupportedMutationException, "One of torch.cond branch might be aliasing"):
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
             functional_f(*example_inputs)
 
-        with self.assertRaisesRegex(UnsupportedMutationException, "One of torch.cond branch might be aliasing"):
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
             make_fx(functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_nested_input_mutation(self):
@@ -231,10 +240,10 @@ class TestControlFlowTraced(TestCase):
 
         example_inputs = (torch.ones(4, 5),)
         functional_f = functionalize(f)
-        with self.assertRaisesRegex(UnsupportedMutationException, "One of torch.cond branch"):
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             functional_f(*example_inputs)
 
-        with self.assertRaisesRegex(UnsupportedMutationException, "One of torch.cond branch"):
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             make_fx(functionalize(f))(*example_inputs)
 
     def test_cond_nested_traced_other_inputs(self):
