@@ -3401,13 +3401,19 @@ class TestNLLLoss(TestCase):
                 # clamp to avoid division by 0
                 mps_y = cpu_y.detach().clone().to('mps')
 
-                result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
-                result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
-                self.assertEqual(result_div_mps, result_div_cpu)
+                if (rounding_mode == "floor_divide"):
+                    result_div_cpu = torch.floor_divide(cpu_x, cpu_y)
+                    result_div_mps = torch.floor_divide(mps_x, mps_y)
+                    self.assertEqual(result_div_mps, result_div_cpu)
+                else:
+                    result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
+                    result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
+                    self.assertEqual(result_div_mps, result_div_cpu)
 
         helper((2, 8, 4, 5), None)
         helper((2, 8, 4, 5), "floor")
         helper((2, 8, 4, 5), "trunc")
+        helper((2, 8, 4, 5), "floor_divide")
 
     def test_rounding(self):
         def helper(shape):
@@ -3635,6 +3641,15 @@ class TestNLLLoss(TestCase):
         r_mps = m(input_mps)
         self.assertEqual(r_cpu, r_mps.to("cpu"))
 
+        # Arbitrary input dimensions
+        pad = (1, 1, 0, 0, 0, 0)
+        value = 3.5
+        input_cpu = torch.randn((1, 1, 3, 3, 3, 3, 3, 3, 3, 3))
+        input_mps = input_cpu.detach().clone().to("mps")
+        r_cpu = F.pad(input_cpu, pad=pad, value=value)
+        r_mps = F.pad(input_mps, pad=pad, value=value)
+        self.assertEqual(r_cpu, r_mps.to("cpu"))
+
     def test_circular_pad(self):
         # https://github.com/pytorch/pytorch/issues/80856
         k_cpu = torch.ones(3, 3, 9, 9)
@@ -3700,6 +3715,14 @@ class TestNLLLoss(TestCase):
         helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ConstantPad2d)
         # input size < pad size
         helper((1, 2, 3), (0, 0, 0, 1), nn.ConstantPad2d)
+        # pad dims < input dims
+        helper((50, 9, 300), (0, 0, 0, 31), nn.ConstantPad2d)
+        # pad dims == input dims
+        helper((1, 3), (0, 2, 0, 1), nn.ConstantPad2d)
+        # input.numel() == 0 but output.numel() > 0
+        helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
+        # pad dims < input dims - 2
+        helper((1, 2, 3, 4), (1, 2), nn.ConstantPad2d)
 
         # 3D Padding
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
@@ -3707,6 +3730,8 @@ class TestNLLLoss(TestCase):
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReplicationPad3d)
         # Constant Pad 3D
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
+        # input size < pad size
+        helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
 
     # Test stack forward
     def test_stack(self):
@@ -4709,6 +4734,21 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), diag=-1)
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
+
+    # Test inverse
+    def test_inverse(self):
+        def helper(n):
+            cpu_input = torch.randn(n, n, device='cpu')
+            mps_input = cpu_input.to('mps')
+
+            cpu_result = torch.linalg.inv(cpu_input)
+            mps_result = torch.linalg.inv(mps_input)
+            self.assertEqual(cpu_result, mps_result)
+
+        helper(2)
+        helper(6)
+        helper(3)
+        helper(8)
 
     # Test tril
     def test_tril(self):
@@ -7416,6 +7456,7 @@ class TestConsistency(TestCase):
         'flipud': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'float': ['f32'],
         'floor': ['f32', 'f16', 'i16', 'i32', 'i64'],
+        'floor_divide': ['f32', 'f16'],
         'frac': ['f16', 'f32'],
         'gradient': ['f16', 'f32', 'i16'],
         'half': ['f16'],
@@ -7777,6 +7818,7 @@ class TestConsistency(TestCase):
         'diag_embed': [torch.uint8],
         'diagonal_scatter': [torch.uint8],
         'index_add': None,
+        'linalg.inv': ['f32'],
         'log1p': None,
         'long': None,
         'nn.functional.avg_pool1d': [torch.int64],
@@ -7794,7 +7836,6 @@ class TestConsistency(TestCase):
         'sigmoid': [torch.int64],
         'slice_scatter': [torch.uint8],
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8],  # moved from section below
-
 
         # ALLOW_LIST doesn't know about variants
         'nn.functional.padconstant': None,
@@ -7877,6 +7918,14 @@ class TestConsistency(TestCase):
         'take_along_dim': None,
     }
 
+    # Those ops worked on MacOS12, but broken on MacOS13
+    VENTURA_BLOCKLIST = {
+        'masked.softmax': [torch.float32],
+        'masked.softmin': [torch.float32],
+        'masked.log_softmax': [torch.float32],
+        'dot': [torch.int64],
+    }
+
     # Used for accept mode only
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
@@ -7888,6 +7937,10 @@ class TestConsistency(TestCase):
             self.skipTest("MPS is not available")
 
         key = op.name + op.variant_test_name
+
+        if key in self.VENTURA_BLOCKLIST and torch.backends.mps.is_macos13_or_newer():
+            if dtype in self.VENTURA_BLOCKLIST[key]:
+                self.skipTest(f"{key}_{dtype} fails on Ventura, see https://github.com/pytorch/pytorch/issues/85758")
         if key in self.BLOCKLIST:
             if self.BLOCKLIST[key] is None or dtype in self.BLOCKLIST[key]:
                 self.skipTest(f"Running test with {op.name} hangs so skipping")
