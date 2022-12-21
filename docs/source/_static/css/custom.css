@@ -1,0 +1,8 @@
+.codeblock-height-limiter {
+    max-height: 500px;
+    overflow: scroll;
+}
+
+div.cell.docutils.container div.cell_input.docutils.container {
+  border-bottom-width: 0px;
+}

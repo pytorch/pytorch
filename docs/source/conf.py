@@ -59,7 +59,6 @@ extensions = [
     'sphinx.ext.autosectionlabel',
     'sphinx_copybutton',
     'sphinx_panels',
-    # 'myst_parser',
     'IPython.sphinxext.ipython_console_highlighting',
     'myst_nb',
 ]
@@ -473,6 +472,7 @@ html_static_path = ['_static']
 
 html_css_files = [
     'css/jit.css',
+    'css/custom.css',
 ]
 
 from sphinx.ext.coverage import CoverageBuilder
