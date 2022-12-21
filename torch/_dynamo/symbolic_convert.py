@@ -278,9 +278,20 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            if truth_fn(value.value):
-                push and self.push(value)
-                self.jump(inst)
+            if "__bool__" in value.value.__class__.__dict__:
+                result = self.inline_user_function_return(
+                    UserFunctionVariable(getattr(value.value, "__bool__").__func__),
+                    [value],
+                    {},
+                )
+                assert isinstance(result, ConstantVariable)
+                if truth_fn(result.value):
+                    push and self.push(value)
+                    self.jump(inst)
+            else:
+                if truth_fn(True):
+                    push and self.push(value)
+                    self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):

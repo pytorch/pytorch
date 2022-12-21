@@ -3017,15 +3017,15 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_if_cond_user_defined_object(self):
         class A(object):
-            pass
+            def __init__(self, x):
+                self.x = x
 
         class B(object):
-            def __bool__(self):
-                return True
+            def __init__(self, x):
+                self.x = x
 
-        class C(object):
             def __bool__(self):
-                return False
+                return self.x > 0
 
         def fn(x, obj):
             if not obj:
@@ -3034,11 +3034,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return x - 1
 
         x = torch.rand(4)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
-        for obj in [A(), B(), C(), None]:
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        obj1 = A(0.5)
+        obj2 = B(0.5)
+        obj3 = B(-0.5)
+        for obj in [obj1, obj2, obj3, obj3, obj2]:
             ref = fn(x, obj)
             res = opt_fn(x, obj)
             self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_class_has_instancecheck_method(self):
         class A(object):
