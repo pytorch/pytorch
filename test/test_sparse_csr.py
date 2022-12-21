@@ -360,6 +360,7 @@ class TestSparseCompressed(TestCase):
                 for dtype in [torch.float32, torch.float64]:
                     for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(
                             layout, device=device, dtype=dtype, index_dtype=index_dtype, enable_hybrid=enable_hybrid,
+                            enable_non_contiguous_indices=False, enable_non_contiguous_values=False,
                             enable_zero_sized=False, output_tensor=False, patterns=patterns):
                         size = tuple(kwargs['size'])
                         block_ndim = 2 if layout in {torch.sparse_bsr, torch.sparse_bsc} else 0
@@ -591,21 +592,14 @@ class TestSparseCompressed(TestCase):
                tensor([0, 1, 0, 2]),
                values([1, 2, 3, 4]),
                shape((2, 3)),
-               'expected compressed_indices to be a strided and contiguous tensor')
+               'expected compressed_indices to be a contiguous tensor per batch')
 
         yield ('incontiguous plain_indices',
                tensor([0, 2, 4]),
                tensor([0, -1, 1, -1, 0, -1, 2, -1])[::2],
                values([1, 2, 3, 4]),
                shape((2, 3)),
-               'expected plain_indices to be a strided and contiguous tensor')
-
-        yield ('incontiguous values',
-               tensor([0, 2, 4]),
-               tensor([0, 1, 0, 2]),
-               values([1, 1, 2, 2, 3, 3, 4, 4])[::2],
-               shape((2, 3)),
-               'expected values to be a strided and contiguous tensor')
+               'expected plain_indices to be a contiguous tensor per batch')
 
         yield ('0-D compressed_indices',
                tensor(0),
