@@ -19,11 +19,12 @@ from torch.distributed._tensor.placement_types import (
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
     skip_unless_torch_gpu,
-    with_comms,
 )
-
+from torch.testing._internal.common_distributed import (
+    MultiThreadedTestCase,
+    DEFAULT_WORLD_SIZE,
+)
 
 def no_op():
     return None
@@ -73,7 +74,18 @@ def deepcopy_convert_from_dtensor(val: Any) -> Any:
     return pytree.tree_map(f, [val])[0]
 
 
-class DistElementwiseOpsTest(DTensorTestBase):
+class DistElementwiseOpsTest(MultiThreadedTestCase):
+    @property
+    def world_size(self) -> int:
+        return DEFAULT_WORLD_SIZE
+
+    @property
+    def device_type(self) -> str:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    def build_device_mesh(self):
+        return DeviceMesh(self.device_type, list(range(self.world_size)))
+
     def _compare_pairwise_ops(
         self,
         *,
@@ -113,7 +125,7 @@ class DistElementwiseOpsTest(DTensorTestBase):
 
         collected_result = deepcopy_convert_from_dtensor(dist_result)
 
-        self.assertEqual(reference_result, collected_result)
+        self.assertEqualOnRank(reference_result, collected_result)
 
     # TODO: We need to add CPU tests for ops in the future.
     def _run_sharded_elementwise_ops(
@@ -144,7 +156,6 @@ class DistElementwiseOpsTest(DTensorTestBase):
             kwargs=kwargs,
         )
 
-    @with_comms
     def test_activations(self):
         device_mesh = self.build_device_mesh()
         self._run_sharded_elementwise_ops(
@@ -184,7 +195,6 @@ class DistElementwiseOpsTest(DTensorTestBase):
             op=torch.sigmoid,
         )
 
-    @with_comms
     @skip("testing RNG based ops is broken: https://github.com/pytorch/tau/issues/494")
     def test_dropout(self):
         device_mesh = self.build_device_mesh()
@@ -211,7 +221,6 @@ class DistElementwiseOpsTest(DTensorTestBase):
             training=True,
         )
 
-    @with_comms
     @skip_unless_torch_gpu
     def test_dropout_backward(self):
         device_mesh = self.build_device_mesh()
@@ -244,7 +253,6 @@ class DistElementwiseOpsTest(DTensorTestBase):
             ),
         )
 
-    @with_comms
     def test_dropout_errors(self):
         device_mesh = self.build_device_mesh()
         with self.assertRaisesRegex(RuntimeError, "supported"):
@@ -255,7 +263,6 @@ class DistElementwiseOpsTest(DTensorTestBase):
                 op=torch.nn.functional.dropout,
             )
 
-    @with_comms
     def test_mul_out(self):
         device_mesh = self.build_device_mesh()
         torch.manual_seed(self.rank)
