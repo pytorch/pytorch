@@ -3236,6 +3236,32 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = combine_state_for_ensemble(models)
 
+    def test_stack_ensembled_state_smoke(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        _ = stack_ensembled_state(models)
+
+    def test_stack_ensembled_state_error(self):
+        in_features = 2
+        out_features = 2
+
+        models = []
+        with self.assertRaisesRegex(RuntimeError, "stack_ensembled_state:.* Expected at least one model"):
+            _ = stack_ensembled_state(models)
+
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[1].eval()
+        with self.assertRaisesRegex(RuntimeError, "stack_ensembled_state:.* same training/eval mode."):
+            _ = stack_ensembled_state(models)
+
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[1] = torch.nn.Conv2d(3, 3, (3, 3))
+        with self.assertRaisesRegex(RuntimeError, "stack_ensembled_state:.* models to be of the same class"):
+            _ = stack_ensembled_state(models)
+
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_make_functional_state_correctly_returned_after_forward(self, mechanism):
         class Net(nn.Module):
