@@ -1205,6 +1205,7 @@ def _unflatten_process_groups(
 def _optim_state_dict(
     model: torch.nn.Module,
     optim: torch.optim.Optimizer,
+    optim_state_dict: Dict[str, Any],
     optim_input: Optional[
         Union[
             List[Dict[str, Any]],
@@ -1243,7 +1244,6 @@ def _optim_state_dict(
         :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
         then nonzero ranks return an empty :class:`dict`.
     """
-    optim_state_dict = optim.state_dict()
     to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
     fsdp_osd: Dict = {"state": {}, "param_groups": []} if to_save else {}
     fsdp_osd_state = fsdp_osd["state"] if to_save else None

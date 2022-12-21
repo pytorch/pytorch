@@ -1332,6 +1332,7 @@ class TestFSDPOptimState(FSDPTest):
                 FSDP.flatten_sharded_optim_state_dict(
                     fsdp_osd,
                     wrapped_model,
+                    wrapped_optim,
                 )
         # Full optim state dict
         if should_check_method_fn("full_optim_state_dict"):
