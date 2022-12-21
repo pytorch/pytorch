@@ -24,11 +24,19 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
+def p0(line):
+    if dist.get_rank() == 0:
+        print(line)
+
+
 class FsdpOptimStateCheckpoint(DTensorTestBase):
     def _create_new_dist_group(self):
         world_size = dist.get_world_size()
+        print(world_size)
         group1 = [i for i in range(world_size) if i % 2 == 0]
         group2 = [i for i in range(world_size) if i % 2 != 0]
+        p0(f"group1: {group1}")
+        p0(f"group1: {group2}")
 
         # create new fsdp group for resharding
         fsdp_0 = dist.new_group(ranks=group1)
@@ -103,27 +111,29 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
                 optimizer_key="optim",
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             )
+            print(f"rank:{dist.get_rank()}, {optim_state}")
 
             flattened_osd = FSDP.flatten_sharded_optim_state_dict(
                 optim_state["optim"], model_2, optim_2
             )
-            optim_2.load_state_dict(flattened_osd)
+            print(f"rank:{dist.get_rank()}, flattened_osd: {flattened_osd}")
+        #     optim_2.load_state_dict(flattened_osd)
 
-        with FSDP.summon_full_params(model):
-            with FSDP.summon_full_params(model_2):
-                self.assertEqual(model.weight, model_2.weight)
-                self.assertEqual(model.bias, model_2.bias)
+        # with FSDP.summon_full_params(model):
+        #     with FSDP.summon_full_params(model_2):
+        #         self.assertEqual(model.weight, model_2.weight)
+        #         self.assertEqual(model.bias, model_2.bias)
 
-        def opt_at(opt, idx):
-            return list(iter(opt.state.values()))[idx]
+        # def opt_at(opt, idx):
+        #     return list(iter(opt.state.values()))[idx]
 
-        # Adam lazily creates its state
-        self.assertEqual(
-            opt_at(optim, 0)["exp_avg"], opt_at(optim_2, 0)["exp_avg"]
-        )
-        self.assertEqual(
-            opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
-        )
+        # # Adam lazily creates its state
+        # self.assertEqual(
+        #     opt_at(optim, 0)["exp_avg"], opt_at(optim_2, 0)["exp_avg"]
+        # )
+        # self.assertEqual(
+        #     opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
+        # )
 
 
 if __name__ == "__main__":
