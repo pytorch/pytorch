@@ -906,6 +906,10 @@ def _broadcast_unsharded_pos_dim_tensor_state(
 
 
 def _rekey_named_optim_state_dict(optim_state_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Rekeys the optimizer state dict from _OptimStateKey to FQN. This API is only
+    used when the optimizer is a NamedOptimizer which expects FQN as the keys.
+    """
     osd = {"state": {}, "param_groups": optim_state_dict["param_groups"]}
     for k, state in optim_state_dict["state"].items():
         assert len(k.unflat_param_names) == 1, (

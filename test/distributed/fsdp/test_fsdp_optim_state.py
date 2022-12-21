@@ -1441,7 +1441,7 @@ class TestFSDPOptimState(FSDPTest):
         optim.step()
 
     @skip_if_lt_x_gpu(2)
-    def test_compatible_with_named_optimizer(self):
+    def _test_compatible_with_named_optimizer(self):
         class TestDummyModel(torch.nn.Module):
             def __init__(self):
                 super(TestDummyModel, self).__init__()
