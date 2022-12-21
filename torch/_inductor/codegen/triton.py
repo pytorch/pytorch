@@ -470,7 +470,8 @@ class IterationRangesRoot(IterationRanges):
                     f"{self.name} = {x}offset + {self.ranges_code()}",
                 ]
             )
-        code.writeline(f"{x}mask = {self.name} < {x}numel")
+        if self.numel != 1:
+            code.writeline(f"{x}mask = {self.name} < {x}numel")
 
 
 class IterationRangesEntry(IterationRanges):
@@ -785,6 +786,11 @@ class TritonKernel(Kernel):
             # https://github.com/openai/triton/issues/633
             mask_vars = set()
 
+        for tree in self.range_trees:
+            # Masks are superfluous if we only have one element
+            if tree.numel == 1:
+                mask_vars.discard(f"{tree.prefix}mask")
+
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
         return index_str, mask_vars, mask_str
 
@@ -877,7 +883,7 @@ class TritonKernel(Kernel):
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
-        masks = [f"{tree.prefix}mask" for tree in self.range_trees]
+        masks = [f"{tree.prefix}mask" for tree in self.range_trees if tree.numel != 1]
         if self._load_mask:
             masks.append(self._load_mask)
         sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
