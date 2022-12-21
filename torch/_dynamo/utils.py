@@ -699,14 +699,6 @@ from torch._subclasses import (  # noqa: F401
 )
 
 
-def make_fake_tensor(
-    e, fake_mode, static_shapes=False, tx=None, ignore_subclass=False, *, sname: str
-):
-    return fake_mode.from_tensor(
-        e, static_shapes=static_shapes, ignore_subclass=ignore_subclass, sname=sname
-    )
-
-
 def wrap_fake_exception(fn):
     try:
         return fn()
@@ -716,30 +708,6 @@ def wrap_fake_exception(fn):
         msg = f"Unsupported: {e.reason} with fake tensor propagation."
         log.warning(msg)
         raise unimplemented(msg) from e
-
-
-def wrap_to_fake_tensor_and_record(
-    e, tx, ignore_subclass=False, *, sname: str, static_shapes=False
-):
-    if type(e) in (torch.Tensor, torch.nn.Parameter) or (
-        ignore_subclass and isinstance(e, torch.Tensor)
-    ):
-        static_shapes = static_shapes or config.dynamic_shapes is False
-        if type(e) is torch.nn.Parameter:
-            # Always static for params
-            static_shapes = True
-        return wrap_fake_exception(
-            lambda: make_fake_tensor(
-                e,
-                tx.fake_mode,
-                static_shapes,
-                tx,
-                ignore_subclass=ignore_subclass,
-                sname=sname,
-            )
-        )
-    else:
-        return e
 
 
 def deepcopy_to_fake_tensor(obj, fake_mode):
@@ -823,7 +791,6 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                breakpoint()
                 log.warning(f"Similarity score={score.cpu().detach().item()}")
             return score >= 0.99
         else:
@@ -851,7 +818,7 @@ def same(
                     # Similary, for 1x1 kenerls, there seems to be high noise with amp.
                     multiplier = 3.0
 
-                passes_test = res_error <= (multiplier * ref_error + 1e-4)
+                passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log.error(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
