@@ -9,23 +9,25 @@ extern "C" {
 
 // PyTorch-only compat functions
 
+#define IS_PYTHON_3_11_PLUS PY_VERSION_HEX >= 0x030B00C1
+
 PYCAPI_COMPAT_STATIC_INLINE(int)
 PyCode_GetNCellvars(PyCodeObject* code) {
 // gh-26364 added co_ncellvars to Python 3.11.0rc1
-#if PY_VERSION_HEX < 0x030B00C1 && !defined(PYPY_VERSION)
-  return PyTuple_GET_SIZE(code->co_cellvars);
-#else
+#if IS_PYTHON_3_11_PLUS
   return code->co_ncellvars;
+#else
+  return PyTuple_GET_SIZE(code->co_cellvars);
 #endif
 }
 
 PYCAPI_COMPAT_STATIC_INLINE(int)
 PyCode_GetNFreevars(PyCodeObject* code) {
 // gh-26364 added co_nfreevars to Python 3.11.0rc1
-#if PY_VERSION_HEX < 0x030B00C1 && !defined(PYPY_VERSION)
-  return PyTuple_GET_SIZE(code->co_freevars);
-#else
+#if IS_PYTHON_3_11_PLUS
   return code->co_nfreevars;
+#else
+  return PyTuple_GET_SIZE(code->co_freevars);
 #endif
 }
 
