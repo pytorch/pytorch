@@ -267,6 +267,7 @@ def _unflatten_communicated_optim_state(
                 views = flat_param_views[state_name]
             optim_state: Union[torch.Tensor, ShardedTensor] = next(views)
             if shard_state:
+                assert fsdp_state.process_group is not None
                 optim_state = _ext_chunk_tensor(
                     optim_state,
                     fsdp_state.rank,
@@ -1505,6 +1506,7 @@ def _gather_orig_param_state(
                 )
             )
         if shard_state:
+            assert fsdp_state.process_group is not None
             value = _ext_chunk_tensor(
                 value,
                 fsdp_state.rank,
