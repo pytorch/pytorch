@@ -181,7 +181,7 @@ void div_mode_template(const Tensor& self, const Tensor& other,
     assert(0 && "Invalid rounding mode\n");
     return nullptr;
   };
-  binaryOpTensor(self, other, Scalar(1.0), output, op_name + "_out_mps:" + (rounding_mode.has_value() ? c10::str(*rounding_mode) : ""), div_mode_op_block);
+  binaryOpTensor(self, other, Scalar(1.0), output, op_name + "_mps:" + (rounding_mode.has_value() ? c10::str(*rounding_mode) : ""), div_mode_op_block);
 }
 
 void add_sub_template(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output, std::string op_name)
@@ -287,11 +287,11 @@ CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_out_mps, logicalXOR, Tensor);
 
 
 TORCH_IMPL_FUNC(div_out_mode_mps) (const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode, const Tensor& output) {
-  mps::div_mode_template(self, other, rounding_mode, output, "div_mode");
+  mps::div_mode_template(self, other, rounding_mode, output, "div_mode_out");
 }
 
 TORCH_IMPL_FUNC(div_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::div_mode_template(self, other, c10::nullopt, output, "div");
+  mps::div_mode_template(self, other, c10::nullopt, output, "div_out");
 }
 
 TORCH_IMPL_FUNC(add_out_mps) (const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
@@ -302,6 +302,20 @@ TORCH_IMPL_FUNC(sub_out_mps) (const Tensor& self, const Tensor& other, const Sca
   mps::add_sub_template(self, other, alpha, output, "sub");
 }
 
+Tensor& floor_divide_out_mps(const Tensor& self, const Tensor& other, Tensor& result) {
+  mps::div_mode_template(self, other, "floor", result, "floor_divide_out");
+  return result;
+}
+
+Tensor floor_divide_mps(const Tensor& self, const Tensor& other) {
+  Tensor output = at::empty_like(self);
+  mps::div_mode_template(self, other, "floor", output, "floor_divide");
+  return output;
+}
+
+Tensor& floor_divide_mps_(Tensor& self, const Tensor& other) {
+  return floor_divide_out_mps(self, other, self);
+}
 
 TORCH_IMPL_FUNC(logaddexp_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)
 {
