@@ -3016,7 +3016,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_if_cond_user_defined_object(self):
-        class A(object):
+        class A(object):  # noqa: B903
             def __init__(self, x):
                 self.x = x
 
