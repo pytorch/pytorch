@@ -25,6 +25,7 @@ except ImportError:
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
 log_level = logging.WARNING
 
+# log compiled function + graphs at level INFO
 output_code = False
 
 # the name of a file to write the logs to
@@ -69,9 +70,6 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
-
-# Run the FX graph as it is created to get better type information
-dynamic_propagation = True
 
 # run FX normalization passes in optimizer
 normalize_ir = False
@@ -210,3 +208,10 @@ class _AccessLimitingConfig(ModuleType):
 
 _allowed_config_names = {*globals().keys()}
 sys.modules[__name__].__class__ = _AccessLimitingConfig
+
+from .config_utils import get_config_serialization_fns
+
+save_config, load_config = get_config_serialization_fns(
+    sys.modules[__name__],
+    ignore_set={"repro_after", "repro_level"},
+)

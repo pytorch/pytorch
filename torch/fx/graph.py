@@ -633,7 +633,7 @@ class _PyTreeCodeGen(CodeGen):
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
         function_args = self.pytree_info.orig_args
-        has_orig_self = (function_args[0] == 'self')
+        has_orig_self = (function_args[0] == 'self') if len(function_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, 'self')
         function_definition = super().gen_fn_def(function_args[:], maybe_return_annotation)
