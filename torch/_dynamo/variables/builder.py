@@ -774,8 +774,16 @@ def wrap_fx_proxy_cls(
         return value
 
     with preserve_rng_state():
+        '''
         if example_value is None:
-            example_value = get_fake_value(proxy.node, tx)
+            try:
+                example_value = get_fake_value(proxy.node, tx)
+            except KeyError:
+                print(f"(dberard) NODE IS {proxy.node} {dir(proxy.node)} {proxy.node.meta}")
+                raise
+        '''
+        # see above, assert "example_value" not in proxy.node.meta; so trying to get_fake_value would fail anyway...
+        assert example_value is not None
 
         # Handle recursive calls here
         elif isinstance(example_value, FakeTensor):
