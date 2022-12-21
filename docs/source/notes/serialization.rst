@@ -224,7 +224,7 @@ this:
 
           def forward(self, input):
             if input.dim() > 1:
-            return torch.tensor(0)
+                return torch.tensor(0)
 
             out0 = self.l0(input)
             out0_relu = torch.nn.functional.relu(out0)
