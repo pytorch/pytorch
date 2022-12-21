@@ -1042,6 +1042,7 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('complex'),
+        xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
         xfail('index_fill'),
@@ -1118,6 +1119,7 @@ class TestOperators(TestCase):
         xfail('cummax'),
         xfail('cummin'),
         xfail('cumprod'),
+        xfail('fill'),
         xfail('nansum'),
         xfail('nanmean'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
@@ -1357,7 +1359,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
-        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('symeig', ''),  # NYI: forward AD for symeig
@@ -1374,6 +1375,8 @@ class TestOperators(TestCase):
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
         xfail('native_dropout_backward'),  # NYI
+        xfail('CubeGenVmapAutogradFunction'),  # NYI
+        xfail('SortGenVmapAutogradFunction'),  # NYI
 
     }))
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
@@ -1482,7 +1485,6 @@ class TestOperators(TestCase):
         xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_5'),  # vmap: inplace into a regular tensor
         xfail('nanquantile'),  # Batching rule not implemented for aten::equal
-        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
         # RuntimeError: Batch norm got a batched tensor as input while the
         # running_mean or running_var, which will be updated in place,
         # were not batched.
@@ -1542,6 +1544,9 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
         xfail('native_dropout_backward'),
         xfail('nn.functional.prelu'),
+
+        xfail('CubeGenVmapAutogradFunction'),  # NYI
+        xfail('SortGenVmapAutogradFunction'),  # NYI
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1987,9 +1992,9 @@ class TestOperators(TestCase):
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
             generator = generate_vmap_inputs(args, kwargs, batch_size=B)
-            for batched_args, in_dims, kwargs in generator:
-                inner_vmapped_op = vmap(op, in_dims)
-                inner_mapped_op = functools.partial(loop, op, in_dims, 0, B)
+            for batched_args, inner_in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, inner_in_dims)
+                inner_mapped_op = functools.partial(loop, op, inner_in_dims, 0, B)
                 generator = generate_vmap_inputs(batched_args, kwargs)
                 for batched_args, in_dims, kwargs in generator:
                     # strategy: compare vjp(vmap(vmap(op)) vs vjp(map(map(op))
@@ -2007,6 +2012,7 @@ class TestOperators(TestCase):
                     _, vjp_fn = vjp(mapped_fn, *primals)
                     expected_vjps = vjp_fn(cotangents)
 
+                    print(inner_in_dims, in_dims)
                     _, vjp_fn = vjp(vmapped_fn, *primals)
                     result_vjps = vjp_fn(cotangents)
 
