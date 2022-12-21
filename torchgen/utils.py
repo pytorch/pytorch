@@ -7,7 +7,7 @@ import sys
 import textwrap
 from argparse import Namespace
 from dataclasses import fields, is_dataclass
-from enum import Enum
+from enum import auto, Enum
 from typing import (
     Any,
     Callable,
@@ -64,21 +64,18 @@ class YamlLoader(Loader):
 # This is an OPEN enum (we may add more cases to it in the future), so be sure
 # to explicitly specify with Union[Literal[Target.XXX]] what targets are valid
 # for your use.
-Target = Enum(
-    "Target",
-    (
-        # top level namespace (not including at)
-        "DEFINITION",
-        "DECLARATION",
-        # TORCH_LIBRARY(...) { ... }
-        "REGISTRATION",
-        # namespace { ... }
-        "ANONYMOUS_DEFINITION",
-        # namespace cpu { ... }
-        "NAMESPACED_DEFINITION",
-        "NAMESPACED_DECLARATION",
-    ),
-)
+class Target(Enum):
+    # top level namespace (not including at)
+    DEFINITION = auto()
+    DECLARATION = auto()
+    # TORCH_LIBRARY(...) { ... }
+    REGISTRATION = auto()
+    # namespace { ... }
+    ANONYMOUS_DEFINITION = auto()
+    # namespace cpu { ... }
+    NAMESPACED_DEFINITION = auto()
+    NAMESPACED_DECLARATION = auto()
+
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurrence of a parameter in the derivative formula

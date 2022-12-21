@@ -20,7 +20,6 @@ from typing import (
     Union,
 )
 
-import sympy
 from typing_extensions import Protocol
 
 import torch.nn
@@ -41,7 +40,7 @@ from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, LocalSource, Source
+from .source import ConstantSource, LocalSource, ShapeEnvSource, Source
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,
@@ -53,7 +52,7 @@ from .utils import (
     same,
 )
 from .variables.base import VariableTracker
-from .variables.builder import GraphArg, VariableBuilder, wrap_fx_proxy
+from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     DynamicShapeVariable,
@@ -76,6 +75,7 @@ CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 class OutputGraphState(NamedTuple):
     graphargs: List[GraphArg]
+    tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     side_effects: SideEffects
@@ -196,7 +196,22 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         super(OutputGraph, self).__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
-        self.tracing_context: TracingContext = TracingContext()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            throw_on_data_dependent_ops=True,
+            shape_env=ShapeEnv() if config.dynamic_shapes else None,
+        )
+        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        if config.dynamic_shapes:
+            # Register a SHAPE_ENV guard to make sure we setup shape guards
+            # that show up in ShapeEnv
+            self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
+        # tracked_fakes says where any tensor that was wrapped to fake came
+        # from.  It is similar to GraphArg, in that all GraphArgs will get
+        # will get added to TrackedFakes, but TrackedFakes also contains
+        # GraphArgs that got pruned, and things like Tensor attributes which
+        # aren't explicit graph inputs.  Used by shape guard
+        self.tracked_fakes: List[TrackedFake] = []
         # Although we prune unused graphargs before sending graphs to
         # compilers, we may have legitimately triggered shape guards
         # on "unused" inputs that we must keep track of.  So after
@@ -229,8 +244,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.unspec_variable_map: Dict[
             str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
         ] = {}
-        self.shape_env = ShapeEnv() if config.dynamic_shapes else None
-        self.intermediary_symbols: Dict[sympy.Expr, None] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -245,6 +258,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     @property
     def fake_mode(self):
         return self.root_tx.fake_mode
+
+    @property
+    def shape_env(self):
+        return self.tracing_context.fake_mode.shape_env
 
     @property
     def guards(self) -> Set[Guard]:
@@ -266,6 +283,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         state = OutputGraphState(
             list(self.graphargs),
+            list(self.tracked_fakes),
             guards_graph_state,
             dict(self.nn_modules),
             self.side_effects.clone(),
@@ -279,6 +297,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             self.graphargs,
+            self.tracked_fakes,
             guards_state,
             self.nn_modules,
             self.side_effects,
@@ -382,7 +401,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             # Attrs that are tenors and symints and such need to be migrated to have their
             # own storage
             # alas, this is like this for now
-            self.intermediary_symbols.update({target.get_pyobj().expr: None})
 
             def wrap_name(module_key):
                 return DynamicShapeVariable.create(
@@ -566,12 +584,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["calls_captured"] += ncalls
         counters["stats"]["fusions_possible"] += ncalls - 1
 
-        if config.dynamic_propagation:
-            # free a bit of memory
-            for node in self.graph.nodes:
-                if "example_value" in node.meta:
-                    del node.meta["example_value"]
-            self.real_value_cache.clear()
+        # free a bit of memory
+        for node in self.graph.nodes:
+            if "example_value" in node.meta:
+                del node.meta["example_value"]
+        self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
@@ -708,7 +725,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.real_value_cache.pop(node, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
-        # NB: self.orig_graphargs is the original graphargs
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
