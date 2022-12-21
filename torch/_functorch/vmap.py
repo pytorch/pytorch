@@ -401,25 +401,6 @@ def vmap(
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("vmap: `chunk_size` should be greater than 0.")
 
-    def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
-        split_idxs = (batch_size,)
-        if chunk_size is not None and chunk_size > 0:
-            n_chunks = n_chunks = batch_size // chunk_size
-            chunk_numels = [chunk_size] * n_chunks
-            # remainder chunk
-            chunk_numels.append(batch_size % chunk_size)
-            split_idxs = tuple(itertools.accumulate(chunk_numels))
-
-        flat_args_chunks = tuple(
-            t.tensor_split(split_idxs, dim=in_dim) if in_dim is not None else [t, ] * len(split_idxs)
-            for t, in_dim in zip(flat_args, flat_in_dims)
-        )
-
-        # transpose chunk dim and flatten structure
-        # chunks_flat_args is a list of flatten args
-        chunks_flat_args = zip(*flat_args_chunks)
-        return chunks_flat_args
-
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
         lazy_load_decompositions()
@@ -437,6 +418,26 @@ def vmap(
         )
 
     return wrapped
+
+
+def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
+    split_idxs = (batch_size,)
+    if chunk_size is not None and chunk_size > 0:
+        n_chunks = n_chunks = batch_size // chunk_size
+        chunk_numels = [chunk_size] * n_chunks
+        # remainder chunk
+        chunk_numels.append(batch_size % chunk_size)
+        split_idxs = tuple(itertools.accumulate(chunk_numels))
+
+    flat_args_chunks = tuple(
+        t.tensor_split(split_idxs, dim=in_dim) if in_dim is not None else [t, ] * len(split_idxs)
+        for t, in_dim in zip(flat_args, flat_in_dims)
+    )
+
+    # transpose chunk dim and flatten structure
+    # chunks_flat_args is a list of flatten args
+    chunks_flat_args = zip(*flat_args_chunks)
+    return chunks_flat_args
 
 
 def _flatten_chunks_output(chunks_output_):
@@ -461,43 +462,35 @@ def _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks):
     flat_out_dims = _broadcast_to_and_flatten(out_dims, arg_spec)
     assert len(flat_out_dims) == len(flat_output_chunks)
     flat_output = []
-    for out_dim in flat_out_dims:
-        # Here, idx of `flat_output_chunks` is always `0`.
-        # This is because we delete the `0` index which shifts
-        # all the remaining elements to the left.
-        # Eg.
-        # >>> a = [1, 2, 3]
-        # >>> del a[0]  # a = [2, 3]
-        # >>> del a[0]  # a = [3]
-        flat_output.append(torch.cat(flat_output_chunks[0], dim=out_dim))
-        # release source data
-        del flat_output_chunks[0]
-    del flat_output_chunks
+    for idx, out_dim in enumerate(flat_out_dims):
+        flat_output.append(torch.cat(flat_output_chunks[idx], dim=out_dim))
+        # release tensors
+        flat_output_chunks[idx] = None
 
     return flat_output
 
 
 # Applies vmap on chunked_input and returns concatenated output over the chunks.
 def _chunked_vmap(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, randomness, **kwargs):
-    chunks_output = []
-    rs = torch.get_rng_state() if randomness == "same" else None
-    for flat_args in chunks_flat_args:
-        batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
-        if batch_size == 0:
-            continue
+    def _flat_vmap_over_chunks():
+        chunks_output = []
+        rs = torch.get_rng_state() if randomness == "same" else None
+        for flat_args in chunks_flat_args:
+            batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
+            if batch_size == 0:
+                continue
 
-        if rs is not None:
-            torch.set_rng_state(rs)
-        chunks_output.append(
-            _flat_vmap(
-                func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
+            if rs is not None:
+                torch.set_rng_state(rs)
+            chunks_output.append(
+                _flat_vmap(
+                    func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
+                )
             )
-        )
 
-    flat_output_chunks, arg_spec = _flatten_chunks_output(chunks_output)
+        return chunks_output
 
-    # Removing temporary variables helps to reduce memory usage on device like CUDA
-    del chunks_output
+    flat_output_chunks, arg_spec = _flatten_chunks_output(_flat_vmap_over_chunks())
 
     # concat chunks on out_dim
     flat_output = _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks)
