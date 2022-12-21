@@ -987,7 +987,7 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
 
         xfail('nn.functional.prelu'),
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # Trying to in-place a batched tensor into non-batched tensor
         # ----------------------------------------------------------------------
     }
 
@@ -1459,6 +1459,7 @@ class TestOperators(TestCase):
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
 
         # Potential bugs/errors
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # Trying to in-place a batched tensor into non-batched tensor
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided', 'partial_views'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
@@ -1930,7 +1931,6 @@ class TestOperators(TestCase):
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_vmapvjpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
     })
     def test_vmapvjpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -1975,7 +1975,6 @@ class TestOperators(TestCase):
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_vjpvmapvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
     })
     def test_vjpvmapvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)

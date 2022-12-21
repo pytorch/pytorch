@@ -7,11 +7,9 @@ from torch._C._functorch import (
     _wrap_for_grad,
     _unwrap_for_grad,
     _unwrap_batched,
+    _add_batch_dim,
 )
-from torch._functorch.vmap import (
-    _broadcast_to_and_flatten,
-    _create_batched_inputs,
-)
+from torch._functorch.vmap import _broadcast_to_and_flatten
 from torch.autograd.forward_ad import _set_fwd_grad_enabled
 from typing import NamedTuple
 
@@ -100,16 +98,17 @@ def generate_single_level_function(interpreter, autograd_function):
         # the transform. _SingleLevelFunction will turn off both fwd and bwd
         # gradient computation and we need to turn it back on here.
         with torch.enable_grad(), _set_fwd_grad_enabled(True), interpreter.lower():
-            output = custom_function_call(autograd_function, *unwrapped_operands)
+            unwrapped_output = custom_function_call(autograd_function, *unwrapped_operands)
 
-        # autograd.Function's ctx.mark_dirty expect a returned input
-        # to have the same object identity as the input.
-        # Mode-only functorch will greatly simplify this logic.
+        # See NOTE [mark_dirty object identity check]
+        def wrap_fn(output):
+            return _wrap_for_grad(output, level)
+
         return wrap_outputs_maintaining_identity(
-            output,
+            unwrapped_output,
             unwrapped_operands,
             operands,
-            level)
+            wrap_fn)
 
     def setup_context(ctx, outputs, *operands):
         return autograd_function.setup_context(ctx, outputs, *operands)
@@ -141,11 +140,11 @@ def generate_single_level_function(interpreter, autograd_function):
     )
     return Generated
 
+# NOTE [mark_dirty object identity check]
 # autograd.Function's ctx.mark_dirty expect a returned input
 # to have the same object identity as the input.
 # Mode-only functorch will greatly simplify this logic.
-def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, level):
-    flat_output, _ = pytree.tree_flatten(outputs)
+def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, wrap_fn, out_dims=None):
     flat_unwrapped_inputs, _ = pytree.tree_flatten(unwrapped_inputs)
     flat_orig_inputs, _ = pytree.tree_flatten(orig_inputs)
 
@@ -157,14 +156,21 @@ def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, le
     flat_outputs, spec = pytree.tree_flatten(outputs)
     result = []
 
-    for output in flat_outputs:
+    if out_dims is not None:
+        flat_out_dims = _broadcast_to_and_flatten(out_dims, spec)
+
+    for i, output in enumerate(flat_outputs):
         if not isinstance(output, torch.Tensor):
             result.append(output)
             continue
         if id(output) in unwrapped_input_to_orig_input:
             result.append(unwrapped_input_to_orig_input[id(output)])
             continue
-        result.append(_wrap_for_grad(output, level))
+        if out_dims is not None:
+            assert flat_out_dims is not None
+            result.append(wrap_fn(output, flat_out_dims[i]))
+        else:
+            result.append(wrap_fn(output))
 
     return pytree.tree_unflatten(result, spec)
 
@@ -243,8 +249,20 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
     with interpreter.lower():
         unwrapped_output, out_dims = autograd_function.vmap(info, in_dims, *unwrapped_operands)
 
-    output = wrap_batched(unwrapped_output, out_dims, current_level)
-    return output
+    # See NOTE [mark_dirty object identity check]
+    def wrap_fn(output, out_dim):
+        return output if out_dim is None else _add_batch_dim(output, out_dim, current_level)
+
+    # TODO: raise better error message to the user when they don't follow the API.
+    # Should probably mimic the logic of _process_batched_inputs,
+    # but that one is hyperspecialized on error messages.
+    # https://github.com/pytorch/pytorch/issues/90224
+    return wrap_outputs_maintaining_identity(
+        unwrapped_output,
+        unwrapped_operands,
+        operands,
+        wrap_fn,
+        out_dims=out_dims)
 
 
 def unwrap_batched(args, level):
@@ -255,18 +273,6 @@ def unwrap_batched(args, level):
               else (arg, None) for arg in flat_args]
     output, bdims = zip(*result)
     return pytree.tree_unflatten(output, spec), pytree.tree_unflatten(bdims, spec)
-
-
-def wrap_batched(args, bdims, level):
-    # TODO: raise better error message to the user when they don't follow the API.
-    # Should probably mimic the logic of _process_batched_inputs,
-    # but that one is hyperspecialized on error messages.
-    # https://github.com/pytorch/pytorch/issues/90224
-    flat_args, spec = pytree.tree_flatten(args)
-    flat_bdims = _broadcast_to_and_flatten(bdims, spec)
-    assert flat_bdims is not None
-    result = _create_batched_inputs(flat_bdims, flat_args, level, spec)
-    return result
 
 
 @custom_function_call.py_impl(TransformType.Functionalize)
