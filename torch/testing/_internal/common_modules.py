@@ -6,6 +6,7 @@ from functools import wraps, partial
 from itertools import chain, product
 import itertools
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_padded_sequence
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDNN
 from torch.testing._internal.common_dtype import floating_types, floating_and_complex_types_and
@@ -955,6 +956,13 @@ def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, tr
             ModuleInput(
                 constructor_input=FunctionInput(**cons_args),
                 forward_input=FunctionInput(make_input((2, 2))),
+                reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
+            )
+        )
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**cons_args),
+                forward_input=FunctionInput(pack_padded_sequence(make_input((5, 2, 2)), torch.tensor([5, 3]))),
                 reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
             )
         )
