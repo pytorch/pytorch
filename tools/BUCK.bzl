@@ -211,18 +211,6 @@ def define_tools_targets(
         srcs = [
             "gen_vulkan_spv.py",
         ],
-        base_module = "",
-        deps = [
-            torchgen_deps,
-            ":gen_aten_vulkan_glsl_lib",
-        ],
-    )
-
-    python_library(
-        name = "gen_aten_vulkan_glsl_lib",
-        srcs = [
-            "gen_vulkan_glsl.py",
-        ],
         base_module = "tools",
         deps = [
             torchgen_deps,
@@ -231,12 +219,11 @@ def define_tools_targets(
 
     python_binary(
         name = "gen_aten_vulkan_spv_bin",
-        main_module = "gen_vulkan_spv",
+        main_module = "tools.gen_vulkan_spv",
         visibility = [
             "PUBLIC",
         ],
         deps = [
-            ":gen_aten_vulkan_glsl_lib",
             ":gen_aten_vulkan_spv_lib",
         ],
     )
@@ -249,7 +236,6 @@ def define_tools_targets(
         contacts = contacts,
         visibility = ["PUBLIC"],
         deps = [
-            ":gen_aten_vulkan_glsl_lib",
             ":gen_aten_vulkan_spv_lib",
         ],
     )

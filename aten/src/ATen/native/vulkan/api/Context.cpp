@@ -42,7 +42,7 @@ Context::~Context() {
 
 DescriptorSet Context::submit_compute_prologue(
     CommandBuffer& command_buffer,
-    const ShaderSource& shader_descriptor,
+    const ShaderInfo& shader_descriptor,
     const utils::uvec3& local_workgroup_size) {
   const VkDescriptorSetLayout shader_layout =
       shader_layout_cache().retrieve(shader_descriptor.kernel_layout);

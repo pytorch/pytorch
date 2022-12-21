@@ -168,7 +168,7 @@ class Context final {
 
   DescriptorSet submit_compute_prologue(
       CommandBuffer&,
-      const ShaderSource&,
+      const ShaderInfo&,
       const utils::uvec3&);
 
   void submit_compute_epilogue(
@@ -190,7 +190,7 @@ class Context final {
 
   template <typename... Arguments>
   void submit_compute_job(
-      const ShaderSource&,
+      const ShaderInfo&,
       const PipelineBarrier&,
       const utils::uvec3&,
       const utils::uvec3&,
@@ -395,7 +395,7 @@ inline void Context::submit_copy(
 
 template <typename... Arguments>
 inline void Context::submit_compute_job(
-    const ShaderSource& shader,
+    const ShaderInfo& shader,
     const PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_work_group,
     const utils::uvec3& local_work_group_size,
