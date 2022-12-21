@@ -3240,6 +3240,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_aliased_method(self):
+        class C:
+            def __init__(self, x):
+                self.x = x
+
+            def fn(self, y):
+                return self.x + y
+
+        f = C(3).fn
+
+        def g(x):
+            return f(x)
+
+        inp = torch.randn(10)
+        self.assertTrue(
+            torch.allclose(
+                torch._dynamo.optimize("eager", nopython=True)(g)(inp),
+                inp + 3,
+            )
+        )
+
     def test_builder_for_class_with_metaclass(self):
         class ExampleMeta(type):
             pass
