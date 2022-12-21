@@ -472,25 +472,27 @@ def _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks):
 
 # Applies vmap on chunked_input and returns concatenated output over the chunks.
 def _chunked_vmap(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, randomness, **kwargs):
-    def _flat_vmap_over_chunks():
-        chunks_output = []
-        rs = torch.get_rng_state() if randomness == "same" else None
-        for flat_args in chunks_flat_args:
-            batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
-            if batch_size == 0:
-                continue
+    
+    chunks_output = []
+    rs = torch.get_rng_state() if randomness == "same" else None
+    for flat_args in chunks_flat_args:
+        batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
+        if batch_size == 0:
+            continue
 
-            if rs is not None:
-                torch.set_rng_state(rs)
-            chunks_output.append(
-                _flat_vmap(
-                    func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
-                )
+        if rs is not None:
+            torch.set_rng_state(rs)
+        chunks_output.append(
+            _flat_vmap(
+                func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
             )
+        )
 
-        return chunks_output
+    flat_output_chunks, arg_spec = _flatten_chunks_output(chunks_output)
 
-    flat_output_chunks, arg_spec = _flatten_chunks_output(_flat_vmap_over_chunks())
+    # chunked output tensors are held by both `flat_output_chunks` and `chunks_output`.
+    # eagerly remove the reference from `chunks_output`.
+    del chunks_output
 
     # concat chunks on out_dim
     flat_output = _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks)
