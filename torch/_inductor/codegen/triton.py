@@ -247,6 +247,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.expm1({x})"
 
     @staticmethod
+    def tanh(x):
+        return f"tl.libdevice.tanh({x})"
+
+    @staticmethod
     def sigmoid(x):
         return f"tl.sigmoid({x})"
 
