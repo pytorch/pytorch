@@ -168,7 +168,7 @@ def _get_weights_and_functional_call_with_buffers(net, mechanism):
 
         # this makes it so the function from make_functional and this call have the same signature
         def net_func(weights, buffers, data):
-            return functional_call(net, {**weights, **buffers}, (data,))
+            return functional_call(net, (weights, buffers), (data,))
 
         return net_func, dict(net.named_parameters()), dict(net.named_buffers())
 
