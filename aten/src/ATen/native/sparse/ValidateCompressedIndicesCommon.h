@@ -269,8 +269,6 @@ void _validate_compressed_sparse_indices_kernel(
     const auto batch_idx =
         at::arange(batch_count, cidx.options()).view(batch_dims).unsqueeze_(-1);
 
-    const auto idx_stride = idx.stride(idx.dim() - 2);
-
     const Tensor batch_shape = at::tensor(batch_dims, idx.options());
     const Tensor batch_idx_stride =
         at::tensor(idx.strides().slice(0, idx.dim() - 1), idx.options());
@@ -301,12 +299,12 @@ void _validate_compressed_sparse_indices_kernel(
                     .build();
 
     AT_DISPATCH_INDEX_TYPES(
-        idx.scalar_type(), NAME, [&iter, &idx, dim, nnz, idx_stride]() {
+        idx.scalar_type(), NAME, [&iter, &idx, dim, nnz]() {
           const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
           const auto zero = index_t{0};
           KernelLauncher::launch(
               iter,
-              [zero, dim, nnz, idx_stride, ptr_idx] FUNCAPI(
+              [zero, dim, nnz, ptr_idx] FUNCAPI(
                   index_t cidx_first,
                   index_t cidx_last,
                   index_t cidx_curr,
