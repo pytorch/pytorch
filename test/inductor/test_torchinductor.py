@@ -2786,6 +2786,10 @@ class CommonTemplate:
             fn,
             (torch.randn([8, 16]),),
         )
+        self.common(
+            fn,
+            (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+        )
 
     def test_cat_upcasting(self):
         def fn(arg4_1, slice_7):
@@ -5250,18 +5254,30 @@ if HAS_CPU:
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_compare_op_cpu_only(self):
             def fn(x):
-                y1 = torch.eq(x, 1)
+                y1 = torch.eq(x, 1.0)
                 x = torch.where(y1, x, -x)
-                y2 = torch.ne(x, 0)
+                y2 = torch.ne(x, 0.0)
                 x = torch.where(y2, x, -x)
-                y3 = torch.lt(x, 5)
-                x = torch.where(y3, x, x - 1)
-                y4 = torch.gt(x, -2)
-                x = torch.where(y4, x, x + 1)
-                y5 = torch.le(x, 8)
-                x = torch.where(y5, x, x - 1)
-                y6 = torch.ge(x, -3)
-                x = torch.where(y6, x, x + 1)
+                y3 = torch.lt(x, 5.0)
+                x = torch.where(y3, x, x - 1.0)
+                y4 = torch.gt(x, -2.0)
+                x = torch.where(y4, x, x + 1.0)
+                y5 = torch.le(x, 8.0)
+                x = torch.where(y5, x, x - 1.0)
+                y6 = torch.ge(x, -3.0)
+                x = torch.where(y6, x, x + 1.0)
+                y7 = x == 1.0
+                x = torch.where(y7, x, -x)
+                y8 = x != 0.0
+                x = torch.where(y8, x, -x)
+                y9 = x < 5.0
+                x = torch.where(y9, x, x - 1.0)
+                y10 = x > -2.0
+                x = torch.where(y10, x, x + 1.0)
+                y11 = x <= 8.0
+                x = torch.where(y11, x, x - 1.0)
+                y12 = x >= -3.0
+                x = torch.where(y12, x, x + 1.0)
                 return (x,)
 
             x = torch.randn((2, 9))

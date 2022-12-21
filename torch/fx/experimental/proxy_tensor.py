@@ -661,9 +661,11 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
                 # TODO: it would be nice to line these up with the names
                 # FX will choose for the placeholders, but we don't
                 # actually know what the names will be at this point yet
-                sname = f"input{arg_count}"
+                # NB: the Source here is actually meaningless
+                from torch._dynamo.source import ConstantSource
+                source = ConstantSource(f"input{arg_count}")
                 arg_count += 1
-                return fake_tensor_mode.from_tensor(x, sname=sname)  # type: ignore[attr-defined]
+                return fake_tensor_mode.from_tensor(x, source=source)  # type: ignore[attr-defined]
 
             return x
 
