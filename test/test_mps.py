@@ -7583,6 +7583,7 @@ class TestConsistency(TestCase):
         'square': ['f16', 'f32'],
         'squeeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'std': ['f32'],
         'sub': ['f32', 'i16', 'i32', 'i64'],
         'sum_to_size': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'svd': ['f32'],
@@ -7602,6 +7603,7 @@ class TestConsistency(TestCase):
         'unbind': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unflatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unsqueeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'var': ['f32'],
         'view': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'view_as': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'vsplit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7613,7 +7615,8 @@ class TestConsistency(TestCase):
         'logical_and': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_or': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8']}
+        'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8']
+    }
 
 
     ALLOWLIST_OP_GRAD = {
@@ -7783,7 +7786,8 @@ class TestConsistency(TestCase):
         'view_as': ['f16', 'f32'],
         'vsplit': ['f16', 'f32'],
         'vstack': ['f16', 'f32'],
-        'zero_': ['f16', 'f32']}
+        'zero_': ['f16', 'f32']
+    }
 
     # These ops that are problematic. So never run them even when
     # generating the new allowlist.
