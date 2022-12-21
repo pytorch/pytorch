@@ -2894,8 +2894,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 )(x)
 
         # Incorrect `out_dims`
-        msg = (fr"vmap\(fs, ..., out_dims=\({out_dim}, {out_dim}\)\)\(<inputs>\):"
-               " out_dims is not compatible with the structure of `outputs`")
+        msg = "out_dims is not compatible with the structure of `outputs`"
         with self.assertRaisesRegex(ValueError, msg):
             vmap(
                 f, in_dims=in_dim, out_dims=(out_dim, out_dim), randomness=randomness, chunk_size=2
