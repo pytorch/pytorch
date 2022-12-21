@@ -127,8 +127,8 @@ class NumpyExp_(torch.autograd.Function):
     def setup_context(ctx, inputs, outputs):
         x, = inputs
         ctx.mark_dirty(x)
-        ctx.save_for_backward(outputs)
-        ctx.save_for_forward(outputs)
+        ctx.save_for_backward(*outputs)
+        ctx.save_for_forward(*outputs)
 
     @staticmethod
     def backward(ctx, grad_output):

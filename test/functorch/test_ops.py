@@ -307,7 +307,6 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
-    xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
 }
 
 aliasing_ops = {
@@ -450,7 +449,7 @@ class TestOperators(TestCase):
         xfail('nn.functional._scaled_dot_product_attention', device_type='cuda'),
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: calling in-place operation that would mutate a captured Tensor
 
         # --- Non-Contiguous Failures! ---
         # This is expected to fail as the operator
@@ -1357,7 +1356,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
-        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('symeig', ''),  # NYI: forward AD for symeig
@@ -1482,7 +1480,6 @@ class TestOperators(TestCase):
         xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_5'),  # vmap: inplace into a regular tensor
         xfail('nanquantile'),  # Batching rule not implemented for aten::equal
-        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
         # RuntimeError: Batch norm got a batched tensor as input while the
         # running_mean or running_var, which will be updated in place,
         # were not batched.
@@ -2017,7 +2014,6 @@ class TestOperators(TestCase):
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_vjpvjpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
     })
     def test_vjpvjpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)

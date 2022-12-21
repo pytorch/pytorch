@@ -102,13 +102,16 @@ def generate_single_level_function(interpreter, autograd_function):
         with torch.enable_grad(), _set_fwd_grad_enabled(True), interpreter.lower():
             output = custom_function_call(autograd_function, *unwrapped_operands)
 
-        return pytree.tree_map_only(
-            torch.Tensor,
-            lambda x: _wrap_for_grad(x, level),
-            output)
+        # autograd.Function's ctx.mark_dirty expect a returned input
+        # to have the same object identity as the input.
+        # Mode-only functorch will greatly simplify this logic.
+        return wrap_outputs_maintaining_identity(
+            output,
+            unwrapped_operands,
+            operands,
+            level)
 
     def setup_context(ctx, outputs, *operands):
-        ctx.mark_dirty = mark_dirty_error
         return autograd_function.setup_context(ctx, outputs, *operands)
 
     # backward is only used if the transform is TransformType.Grad
@@ -138,24 +141,32 @@ def generate_single_level_function(interpreter, autograd_function):
     )
     return Generated
 
+# autograd.Function's ctx.mark_dirty expect a returned input
+# to have the same object identity as the input.
+# Mode-only functorch will greatly simplify this logic.
+def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, level):
+    flat_output, _ = pytree.tree_flatten(outputs)
+    flat_unwrapped_inputs, _ = pytree.tree_flatten(unwrapped_inputs)
+    flat_orig_inputs, _ = pytree.tree_flatten(orig_inputs)
 
-# https://github.com/pytorch/pytorch/issues/90225
-# If an input was marked as dirty, and the autograd.Function returns the input
-# from the forward, then the grad rule for custom_function_call must also
-# return the corresponding input from the forward() of the Generated autograd.Function
-#
-# We haven't figured out how to do this yet. One possibility is to rely
-# on if the return from the redispatched custom_function_call in Generated.forward
-# has the same object id as one of the inputs,
-# but https://github.com/pytorch/pytorch/issues/90209 means we cannot rely on
-# that property.
-def mark_dirty_error(*args, **kwargs):
-    raise RuntimeError(
-        'NYI: we do not yet support ctx.mark_dirty with functorch transforms. '
-        'Please try to avoid modifying inputs to the autograd.Function in-place '
-        'by using out-of-place operations or by cloning the inputs. '
-        'Please see https://github.com/pytorch/pytorch/issues/90209 for more details'
-    )
+    unwrapped_input_to_orig_input = {
+        id(unwrapped): orig
+        for unwrapped, orig in zip(flat_unwrapped_inputs, flat_orig_inputs)
+    }
+
+    flat_outputs, spec = pytree.tree_flatten(outputs)
+    result = []
+
+    for output in flat_outputs:
+        if not isinstance(output, torch.Tensor):
+            result.append(output)
+            continue
+        if id(output) in unwrapped_input_to_orig_input:
+            result.append(unwrapped_input_to_orig_input[id(output)])
+            continue
+        result.append(_wrap_for_grad(output, level))
+
+    return pytree.tree_unflatten(result, spec)
 
 
 # NOTE: [functorch vjp and autograd interaction]
