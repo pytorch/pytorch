@@ -4,7 +4,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import contract
-from torch.distributed._composable_state import _get_module_state, _insert_module_state
+from torch.distributed._composable_state import _insert_module_state
 from torch.distributed.fsdp._common_utils import _FSDPState
 from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,

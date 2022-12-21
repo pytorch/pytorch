@@ -1274,6 +1274,18 @@ def _optim_state_dict(
     The flattened parameters in ``FSDP`` modules contained in ``model``
     are mapped back to their unflattened parameters.
 
+    Parameter keys are not well-defined. For a regular optimizer, the optimizer
+    state_dict contains a mapping from parameter IDs to parameter states.
+    Parameter IDs are the order of parameters in ``optim.param_groups()`` across
+    all the groups. This API also allows user to pass ``optim_input`` for the
+    mapping between parameters and parameter IDs. Using ``optim_input`` is being
+    deprecated.
+
+    If the optimizer is a ``NamedOptimizer``, the optimizer state_dict does not
+    contain parameter IDs mapping but a mapping from parameter FQNs to parameter
+    states. This API finds the mapping from FQNs to parameters if the optimizer
+    is a ``NamedOptimizer``.
+
     Args:
         model (nn.Module): Root module (which may or may not be a
             :class:`FullyShardedDataParallel` instance) whose parameters
