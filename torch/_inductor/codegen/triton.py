@@ -1334,9 +1334,7 @@ class TritonScheduling:
                 else:
                     # TODO - mostly works but needs a couple fixes
                     if not config.dynamic_shapes:
-                        indexing_dtype_strength_reduction(
-                            node._body, node._body.var_ranges
-                        )
+                        indexing_dtype_strength_reduction(node._body)
                     kernel.split_and_set_ranges(node.get_ranges())
 
         wrapper = V.graph.wrapper_code
