@@ -240,6 +240,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.expm1({x})"
 
     @staticmethod
+    def tanh(x):
+        return f"tl.libdevice.tanh({x})"
+
+    @staticmethod
     def sigmoid(x):
         return f"tl.sigmoid({x})"
 
@@ -1352,6 +1356,9 @@ class TritonScheduling:
             wrapper.define_kernel(kernel_name, src_code)
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
+
+    def codegen_sync(self):
+        V.graph.wrapper_code.writeline("torch.cuda.synchronize()")
 
     @staticmethod
     @functools.lru_cache(32)

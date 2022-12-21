@@ -6,7 +6,7 @@ import traceback
 import types
 import weakref
 from traceback import FrameSummary
-from typing import cast, Dict, List, Optional
+from typing import cast, Dict, List, Optional, Set
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -363,9 +363,13 @@ def _compile(
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
+
     output: Optional[OutputGraph] = None
+    # This is shared across restarts
+    mutated_closure_cell_contents: Set[str] = set()
 
     # from .utils import print_once;  print_once(code.co_filename)
+
     def transform(instructions, code_options):
         nonlocal output
         tracer = InstructionTranslator(
@@ -378,6 +382,7 @@ def _compile(
             compiler_fn,
             one_graph,
             export,
+            mutated_closure_cell_contents,
         )
         tracer.run()
         output = tracer.output
@@ -434,7 +439,6 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
             output,
-            output.guards,
             locals,
             globals,
             hooks.guard_fail_fn if hooks else None,
@@ -477,10 +481,11 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):
-            pass
+            log.info("converting frame raised unsupported, leaving it unconverted")
         except Exception:
             if not config.suppress_errors:
                 raise
+            log.info("converting frame raised error, suppressing error")
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -506,10 +511,10 @@ def replay(filename):
             record.globals,
             record.locals,
             record.builtins,
-            eager,
-            hooks,
+            compiler_fn=eager,
             one_graph=False,
             export=False,
+            hooks=Hooks(),
             frame=None,
         )
     except Exception:

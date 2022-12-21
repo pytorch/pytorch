@@ -9,7 +9,7 @@ from torch import optim
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 
-__all__ : List[str] = []
+__all__: List[str] = []
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,7 @@ class _NamedOptimizer(optim.Optimizer):
     ) -> None:
         torch._C._log_api_usage_once("torch.distributed.optim._NamedOptimizer")
         self.param_groups: Collection[Mapping[str, Any]] = param_groups  # type: ignore[assignment]
+        self._param_groups_check()
         self.named_parameters = dict(named_parameters)
         params_for_optimizer = (
             self.named_parameters.values() if param_groups is None else param_groups
@@ -74,7 +75,6 @@ class _NamedOptimizer(optim.Optimizer):
             *args,
             **kwargs,
         )
-        # TODO: Add param_groups validations and unit tests.
         if param_groups is None:
             self.ordered_param_keys = list(self.named_parameters.keys())
         else:
@@ -92,6 +92,25 @@ class _NamedOptimizer(optim.Optimizer):
                         )
                     ordered_param_keys.append(param_to_key[param])
             self.ordered_param_keys = ordered_param_keys
+        # Update param_groups from optimizer.
+        self.param_groups = self._optimizer.param_groups
+
+    def _param_groups_check(self):
+        if self.param_groups is not None:
+            for param_group in self.param_groups:
+                assert isinstance(param_group, dict), "param group must be a dict"
+                assert "params" in param_group, "param group must contain key params"
+                params = param_group["params"]
+                if isinstance(params, torch.Tensor):
+                    params = [params]
+                params = list(params)
+                for param in params:
+                    if not isinstance(param, torch.Tensor):
+                        raise TypeError(
+                            "optimizer can only optimize Tensors, "
+                            "but one of the params is " + torch.typename(param)
+                        )
+                param_group["params"] = params
 
     def state_dict(self) -> Dict[str, Any]:
         """
@@ -170,10 +189,9 @@ class _NamedOptimizer(optim.Optimizer):
                 f"Expects equal length as {len(new_state)} in `state_dict` state length but found {len(state)}."
             )
         for idx, param_key in enumerate(self.ordered_param_keys):
+            # When the conditional training is performed, not all parameters are updated in the optim.
             if param_key not in state.keys():
-                raise ValueError(
-                    f"Expect {param_key} as a parameter in `state_dict` state but not found."
-                )
+                continue
             if len(state[param_key]) != len(new_state[idx]):
                 raise ValueError(
                     f"Expects equal length as {len(new_state[idx])} for parameter {param_key} but found: {len(state[param_key])}"

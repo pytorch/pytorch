@@ -9,7 +9,7 @@ from typing import Dict, List
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
-from ..source import AttrSource, GetItemSource
+from ..source import AttrSource, ConstantSource, GetItemSource
 from ..utils import make_cell
 from .base import typestr, VariableTracker
 
@@ -119,6 +119,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         options = VariableTracker.propagate([self])
         wrap = functools.partial(wrap_bound_arg, options=options)
 
+        tx = parent.output.root_tx
+
         fn: types.FunctionType = self.fn
         fake_func = types.FunctionType(
             fn.__code__,
@@ -146,7 +148,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             if name == "__class__":
                 result[name] = variables.UserDefinedClassVariable(cell.cell_contents)
             else:
-                var = parent.output.root_tx.match_nested_cell(name, cell)
+                var = tx.match_nested_cell(name, cell)
                 if var is not None:
                     # optimization for cleaner codegen
                     result[name] = var
@@ -163,15 +165,31 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                         closure_cell_contents = AttrSource(
                             closure_cell, "cell_contents"
                         )
+                        contents_var = VariableBuilder(parent, closure_cell_contents)(
+                            cell.cell_contents
+                        )
+
+                        if (
+                            closure_cell_contents.name()
+                            not in tx.mutated_closure_cell_contents
+                        ):
+                            # Optimistically don't allocate the cell, to
+                            # reduce the number of side effects.  This is
+                            # important for cond, as without it, any accesses
+                            # to closures create side effects and cond doesn't
+                            # support side effects.  If we're wrong and this
+                            # closure cell gets written to, we will restart
+                            # the analysis with this cell's name in the
+                            # mutated list here
+                            result[name] = contents_var
+                            continue
 
                         # cells are written to with "cell_contents",
                         # so the source should just be the closure_cell, not its contents
                         out = side_effects.track_cell_existing(closure_cell, cell)
                         side_effects.store_cell(
                             out,
-                            VariableBuilder(parent, closure_cell_contents)(
-                                cell.cell_contents
-                            ),
+                            contents_var,
                         )
 
                     result[name] = out
@@ -277,6 +295,7 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
     return tx.output.register_attr_or_module(
         res,
         name,
+        source=ConstantSource(name),
         **options,
     )
 

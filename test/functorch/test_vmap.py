@@ -50,6 +50,9 @@ from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
 from functorch.experimental import chunk_vmap
 from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
+from torch.testing._internal.autograd_function_db import autograd_function_db
+from torch.autograd.function import _set_autograd_function_extension_enabled
+from torch._functorch.vmap import restore_vmap
 
 FALLBACK_REGEX = 'There is a performance drop'
 
@@ -1073,6 +1076,47 @@ class TestVmapAPI(TestCase):
     @skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_vmap_autocast_cuda(self):
         self._test_vmap_autocast("cuda")
+
+    def test_restore_vmap_pytree_input_output(self):
+        def f(x, y):
+            output0 = x[0] + x[1]
+            output1 = y
+            return {'a': output0, 'b': output1}
+
+        B = 2
+        x0 = torch.randn(B, 3)
+        x1 = torch.randn(B)
+        y = torch.randn(4, B)
+
+        out, out_dims = restore_vmap(f, ((0, 0), 1), B, 'error')((x0, x1), y)
+        expected = vmap(f, in_dims=((0, 0), 1), out_dims={'a': 0, 'b': 1})((x0, x1), y)
+        self.assertEqual(out, expected)
+        self.assertEqual(out_dims, {'a': 0, 'b': 1})
+
+    def test_restore_vmap_no_vmapped_inputs(self):
+        def f(x, y, z):
+            return x, y * z, z
+
+        B = 2
+        # Mix of tensor and non-tensor inputs
+        x = torch.randn(3)
+        y = torch.randn(4)
+        z = 5
+        out, out_dims = restore_vmap(f, (None, None, None), B, 'error')(x, y, z)
+        self.assertEqual(out, f(x, y, z))
+        self.assertEqual(out_dims, (None, None, None))
+
+    def test_restore_vmap_unexpanded_outputs(self):
+        def f(x, y):
+            # Mix of tensor and non-tensor outputs
+            return 3 * y, y.sum(), None
+
+        B = 2
+        x = torch.randn(B, 3)
+        y = torch.randn(4)
+        out, out_dims = restore_vmap(f, (0, None), B, 'error')(x, y)
+        self.assertEqual(out, f(None, y))
+        self.assertEqual(out_dims, (None, None, None))
 
 
 def slice_inputs(inputs, bdims, i):
@@ -3238,6 +3282,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
+        xfail("NumpyCubeNotComposableAutogradFunction"),  # Not composable autograd.Function
         skip('_softmax_backward_data'),
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
@@ -3281,8 +3326,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         # ---------------------------------------------------------------------
     }
 
+    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', (
         tol1('linalg.det',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
@@ -3310,7 +3356,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False,
                               skip_inplace=inplace_failure_list)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @_set_autograd_function_extension_enabled()
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
         tol1('linalg.det',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
@@ -3321,6 +3368,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
+        xfail('fill'),
         # Batch norm got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
@@ -3927,10 +3975,12 @@ class TestVmapOperatorsOpInfo(TestCase):
             escaped = x
             return x ** 2
 
-        x = torch.randn(3)
+        x = torch.randn([3, 3, 3, 3, 3])
         vmap(f)(x)
 
         common_message = r"your tensor may have escaped from inside a function being vmapped.*{0}.*"
+
+        # Note: These are not a complete set of tests for all possible functions calling 'vmap_check_escaped'
 
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing")):
             escaped.sin()
@@ -3940,6 +3990,20 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_inplace_plumbing")):
             escaped.mul_(1)
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("binary_cross_entropy_plumbing")):
+            torch.nn.functional.binary_cross_entropy(escaped, torch.zeros([3, 3, 3, 3]))
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_existing_bdim_all_batch_rule")):
+            torch.nn.functional.adaptive_max_pool2d(escaped, output_size=(1, 1))
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_reduction_batch_rule")):
+            escaped.argmin()
+
+        a = torch.zeros([4, 4, 4, 4])
+        b = torch.zeros([4, 4, 4, 4], dtype=torch.long)
+        with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_all_tensors_have_optional_bdim")):
+            torch.ops.aten.adaptive_max_pool2d_backward(escaped, a, b)
 
         vmap(f)(torch.tensor([[0, 0], [0, 0]], dtype=torch.int))
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing_no_returns")):

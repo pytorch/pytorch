@@ -1,10 +1,12 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager
+from typing import ContextManager, Optional
 
 import torch
+from torch._guards import Source
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import WeakIdRef
 
 
 def safe_is_leaf(t):
@@ -58,39 +60,6 @@ def assert_metadata_eq(assert_eq, m1, m2, *, skip_symbolic=False):
     return go(m1, m2)
 
 
-# torch.Tensors cannot be used as a key in a dictionary
-# because they define a custom __eq__ function which when used
-# to resolve hash collisions will throw when comparing tensors:
-# "RuntimeError: bool value of Tensor with more than one value is ambiguous."
-# To avoid that, we use an object which will hold a Tensor and use
-# its id for both hashing and equality.
-# In order to use this as a weak key reference, we cannot
-# simply use weakref.WeakKeyDictionary because the newly constructed
-# WeakTensorRefKey only use would be a dictionary so it would have no strong
-# references.
-# To get around this issue, we can use it as a normal key, and then set
-# `weakref.finalize` to delete the key when its contained tensor dies.
-
-
-class WeakTensorRefKey(object):
-    def __init__(self, ten):
-        self.ten = weakref.ref(ten)
-        # store id since as soon as ten is deallocated
-        # the old id will no longer be recoverable, and
-        # we need to be able to remove the WeakTensorRefKey
-        # from the dictionary by hashing it to the same
-        # value it had when ten was alive
-        self.id = id(self.ten())
-
-    def __hash__(self):
-        return self.id
-
-    def __eq__(self, other):
-        if id(self) == id(other):
-            return True
-        return self.id == other.id
-
-
 # This is a class for converting multiple tensors into meta tensors which
 # share the same view/storage structure.  The operation model is you allocate
 # one of these, and then call it repeatedly on all the tensors you want to
@@ -134,7 +103,7 @@ class MetaConverter:
         )
 
     def get_tensor_memo(self, t):
-        return self.tensor_memo.get(WeakTensorRefKey(t), None)
+        return self.tensor_memo.get(WeakIdRef(t), None)
 
     def set_tensor_memo(self, t, v):
         # hold a weak ref to self, otherwise it will be kept alive
@@ -144,7 +113,7 @@ class MetaConverter:
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
-        tensor_ref_key = WeakTensorRefKey(t)
+        tensor_ref_key = WeakIdRef(t)
 
         def del_ten():
             # tensor outlives the converter
@@ -185,7 +154,20 @@ class MetaConverter:
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
-    def meta_tensor(self, t, shape_env=None, callback=lambda t: t()):
+    # NB: name here is used in a conventional way by Dynamo; it corresponds
+    # precisely to the Source.name() of the tensor we're fakeifying and
+    # corresponds to a valid Python expression.  When we construct sub-names
+    # as part of this process, we will maintain this invariant!  (Even though
+    # other users of this may not need it this property to be upheld.)
+    def meta_tensor(
+        self, t, shape_env=None, callback=lambda t: t(), source: Optional[Source] = None
+    ):
+        if source is None:
+            from torch._dynamo.source import ConstantSource
+
+            # TODO: make a dedicated UnknownSource for this?
+            source = ConstantSource(f"__unknown_tensor{len(self.tensor_memo)}")
+
         # This indicates you set no_dispatch() before calling into this
         # function.  This is an error: we may be creating fake tensors and
         # will perform operations on them which need fake tensor mode to
@@ -228,7 +210,7 @@ class MetaConverter:
 
         def sym_sizes_strides_storage_offset(t):
             if make_symbolic:
-                return shape_env.create_symbolic_sizes_strides_storage_offset(t)
+                return shape_env.create_symbolic_sizes_strides_storage_offset(t, source)
             return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
@@ -288,7 +270,11 @@ class MetaConverter:
                     # version counters to get shared.
                     assert t._is_view()
 
-                    base = self.meta_tensor(t._base, shape_env, callback)
+                    from torch._dynamo.source import AttrSource
+
+                    base = self.meta_tensor(
+                        t._base, shape_env, callback, source=AttrSource(source, "_base")
+                    )
 
                     def is_c_of_r(complex_dtype, real_dtype):
                         return (
@@ -442,7 +428,14 @@ class MetaConverter:
                             r.set_(r_s, storage_offset, sizes, strides)
 
                 if safe_grad(t) is not None:
-                    r.grad = self.meta_tensor(safe_grad(t), shape_env, callback)
+                    from torch._dynamo.source import AttrSource
+
+                    r.grad = self.meta_tensor(
+                        safe_grad(t),
+                        shape_env,
+                        callback,
+                        source=AttrSource(source, "grad"),
+                    )
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
             # This can be skipped if necessary for performance reasons
@@ -452,7 +445,13 @@ class MetaConverter:
         return self.get_tensor_memo(t)
 
     def __call__(
-        self, t, shape_env=None, *, callback=lambda t: t(), ignore_subclass=False
+        self,
+        t,
+        shape_env=None,
+        *,
+        callback=lambda t: t(),
+        ignore_subclass=False,
+        source=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
@@ -500,7 +499,9 @@ class MetaConverter:
                 if ignore_subclass:
                     ctx = torch._C.DisableTorchFunction()
                 with ctx:
-                    r = self.meta_tensor(t, shape_env=shape_env, callback=callback)
+                    r = self.meta_tensor(
+                        t, shape_env=shape_env, callback=callback, source=source
+                    )
                 # TODO: this is suspicious, now that we have callback argument
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(r, requires_grad=r.requires_grad)

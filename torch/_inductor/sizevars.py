@@ -2,7 +2,7 @@ import dataclasses
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Tuple
 
 import sympy
 from sympy import Expr
@@ -11,7 +11,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import ir
 from .codegen.common import IndentedBuffer
-from .utils import sympy_dot, sympy_subs, sympy_symbol, VarRanges
+from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -47,13 +47,12 @@ class SizeVarAllocator(object):
         self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.need_seed = False
-        self.maybe_stride_and_offset_vars = (
-            self.make_maybe_stride_and_offset_vars_cache()
-        )
+        self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
         self.declare = ""
         self.ending = ""
+        self.as_strided = "as_strided"
 
     def seed(self):
         """
@@ -193,7 +192,7 @@ class SizeVarAllocator(object):
         """
         sizes = list(map(self.simplify, sizes))
 
-        strides = [self.maybe_stride_vars(x, index_vars) for x in index_formulas]
+        strides = [self.stride_vars(x, index_vars) for x in index_formulas]
         assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
 
         for i in range(len(sizes)):
@@ -203,9 +202,6 @@ class SizeVarAllocator(object):
 
         def can_merge_dims(a, b):
             for k in range(len(strides)):
-                if strides[k][a] is None or strides[k][b] is None:
-                    return False
-
                 if self.simplify(strides[k][a] * sizes[a]) == self.simplify(
                     strides[k][b]
                 ):
@@ -365,7 +361,7 @@ class SizeVarAllocator(object):
         return int(right)
 
     def __getitem__(self, val: int) -> Expr:
-        return self.shape_env.create_symbol(val)
+        return self.shape_env.duck_int(val)
 
     def size_hint(self, expr: Expr) -> int:
         out = sympy_subs(sympy.expand(expr), self.var_to_val)
@@ -389,79 +385,58 @@ class SizeVarAllocator(object):
 
         return wrapper
 
-    def make_maybe_stride_and_offset_vars_cache(self):
-        cache = self._lru_cache(self._maybe_stride_and_offset_vars)
+    def make_stride_vars_cache(self):
+        cache = self._lru_cache(self._stride_vars)
 
-        def maybe_stride_and_offset_vars(
-            index: Expr, vars: List[sympy.Symbol]
-        ) -> List[Expr]:
+        def stride_vars(index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
             return cache(index, tuple(vars))
 
-        return maybe_stride_and_offset_vars
+        return stride_vars
 
-    def _maybe_stride_and_offset_vars(
-        self, index: sympy.Expr, vars: List[sympy.Symbol]
-    ) -> Tuple[List[Optional[sympy.Expr]], Optional[sympy.Expr]]:
-        """Convert an indexing expression back into strides and offset"""
-        index = self.simplify(index)
+    def _stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
+        """Convert an indexing expression back into strides
 
-        # TODO: vars aren't always symbols
-        assert all(isinstance(v, sympy.Symbol) or v == 0 for v in vars)
-        var_symbols = [v for v in vars if isinstance(v, sympy.Symbol)]
+        NOTE: This is only valid if the index is a standard strided offset
+        calculation. e.g. 10 * ModularIndexing(i0 + 1, 1, 2) would give a
+        stride of -10 because the index wraps around after the first element
 
-        stride_symbols = [sympy.Wild(f"stride{i}") for i in range(len(var_symbols))]
-        var_to_stride = {v: s for v, s in zip(var_symbols, stride_symbols)}
-        offset_symbol = sympy.Wild("offset")
-        index_pattern = offset_symbol + sympy_dot(var_symbols, stride_symbols)
-
-        match = index.match(index_pattern)
-        if match is None:
-            # Index calculation is not strided
-            return [None] * len(vars), None
-
+        """
         strides = []
-        for v in vars:
-            if v not in var_to_stride:
-                stride = 0 if v == 0 else None
+        index = self.simplify(index)
+        # remove any offset
+        index = index - sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
+        for i in range(len(vars)):
+            # drop all the other dims
+            index_dim = sympy_subs(
+                index,
+                {
+                    vars[j]: sympy.Integer(0)
+                    for j in range(len(vars))
+                    if i != j and vars[j] != 0
+                },
+            )
+            v = vars[i]
+            if v == 0:
+                strides.append(sympy.Integer(0))
             else:
-                stride = match.get(var_to_stride[v], None)
-            strides.append(stride)
-
-        offset = match[offset_symbol]
-
-        # If any vars appear in the offset terms, they are not strided
-        vars_set = set(vars)
-        if vars_set & offset.free_symbols:
-            for i, v in enumerate(vars):
-                if v in offset.free_symbols:
-                    strides[i] = None
-
-            offset = None
-
-        return strides, offset
-
-    def maybe_stride_vars(
-        self, index: Expr, vars: List[sympy.Symbol]
-    ) -> List[Optional[Expr]]:
-        """Convert an indexing expression back into strides"""
-        strides, offset = self.maybe_stride_and_offset_vars(index, vars)
+                # TODO(jansel): should we use sympy.diff here?
+                strides.append(
+                    sympy_subs(index_dim, {v: sympy.Integer(1)})
+                    - sympy_subs(index_dim, {v: sympy.Integer(0)})
+                )
         return strides
 
-    def maybe_offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Optional[Expr]:
+    def offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
-        strides, offset = self.maybe_stride_and_offset_vars(index, vars)
-        return offset
+        index = self.simplify(index)
+        return sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
 
     def stride_hints(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         for v in index.free_symbols:
             if v.name.startswith("indirect"):
                 index = sympy_subs(index, {v: 0})
         result = []
-        for s in self.maybe_stride_vars(index, vars):
-            if s is None:
-                result.append(0)
-                continue
-
+        for s in self.stride_vars(index, vars):
             try:
                 result.append(self.size_hint(s))
             except TypeError:
@@ -612,6 +587,7 @@ class CppSizeVarAllocator(SizeVarAllocator):
         super().__init__(shape_env)
         self.declare = "auto "
         self.ending = ";"
+        self.as_strided = "at::as_strided"
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
