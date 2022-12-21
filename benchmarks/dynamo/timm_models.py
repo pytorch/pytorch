@@ -68,7 +68,7 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256", "gernet_1", "resnest101e")
+REQUIRE_HIGHER_TOLERANCE = {"botnet26t_256", "gernet_1", "resnest101e"}
 
 SKIP = {
     # Unusual training setup
