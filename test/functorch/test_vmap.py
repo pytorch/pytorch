@@ -2877,6 +2877,33 @@ class TestVmapOperators(Namespace.TestVmapBase):
     @parametrize('in_dim', [0, 1])
     @parametrize('out_dim', [0, 1])
     @parametrize('randomness', ['error', 'same'])
+    def test_vmap_chunksize_error(self, in_dim, out_dim, randomness):
+        x = torch.randn(4, 5, 6)
+
+        def f(x):
+            y = x.sin()
+            if randomness != "error":
+                y = y + torch.rand_like(x)
+            return y
+
+        # Incorrect `chunk_size`
+        for chunk_size in (-1, 0):
+            with self.assertRaisesRegex(ValueError, "vmap: `chunk_size` should be greater than 0."):
+                vmap(
+                    f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
+                )(x)
+
+        # Incorrect `out_dims`
+        msg = (fr"vmap\(fs, ..., out_dims=\({out_dim}, {out_dim}\)\)\(<inputs>\):"
+               " out_dims is not compatible with the structure of `outputs`")
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(
+                f, in_dims=in_dim, out_dims=(out_dim, out_dim), randomness=randomness, chunk_size=2
+            )(x)
+
+    @parametrize('in_dim', [0, 1])
+    @parametrize('out_dim', [0, 1])
+    @parametrize('randomness', ['error', 'same'])
     def test_vmap_chunksize_composition(self, in_dim, out_dim, randomness):
         x = torch.randn(4, 5, 6)
         y = torch.randn_like(x)
