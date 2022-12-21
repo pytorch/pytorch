@@ -155,6 +155,9 @@ class TensorVariable(VariableTracker):
         elif name == "T":
             args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
             result = self.call_method(tx, "permute", args, {})
+        elif name == "mT":
+            args = [variables.ConstantVariable(i) for i in [-2, -1]]
+            result = self.call_method(tx, "transpose", args, {})
 
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
