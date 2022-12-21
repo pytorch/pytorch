@@ -251,7 +251,7 @@ template <typename scalar_t>
 static inline scalar_t compute_scales_value(
     const c10::optional<double> scale,
     int64_t input_size,
-    int64_t output_size) {
+    int64_t output_size) { 
       // see Note [compute_scales_value]
       // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
       return (scale.has_value() && scale.value() > 0.)
@@ -427,13 +427,13 @@ static inline scalar_t cubic_interp1d(
   return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3];
 }
 
-template<typename scalar_t>
+template<typename scalar_t, typename opmath_t>
 static inline void compute_source_index_and_lambda(
     int64_t& input_index0,
     int64_t& input_index1,
     scalar_t& lambda0,
     scalar_t& lambda1,
-    scalar_t ratio,
+    opmath_t ratio,
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
@@ -445,7 +445,6 @@ static inline void compute_source_index_and_lambda(
     lambda0 = static_cast<scalar_t>(1);
     lambda1 = static_cast<scalar_t>(0);
   } else {
-    using opmath_t = at::opmath_type<scalar_t>;
     const auto real_input_index =
         area_pixel_compute_source_index<opmath_t>(
             ratio, output_index, align_corners, /*cubic=*/false);
