@@ -152,6 +152,107 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
     return 0;
 }
 
+// We need to be able to return the _PyInterpreterFrame to python so create
+// a python binding for it
+
+typedef struct THPPyInterpreterFrame {
+  PyObject_HEAD
+  _PyInterpreterFrame* frame; // Borrowed reference
+} THPPyInterpreterFrame;
+
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame);
+
+#define DECLARE_PYOBJ_ATTR(name) \
+static PyObject* THPPyInterpreterFrame_##name(THPPyInterpreterFrame* self, PyObject* _noargs) { \
+  PyObject* res = (PyObject*)self->frame->name; \
+  Py_XINCREF(res); \
+  return res; \
+}
+
+DECLARE_PYOBJ_ATTR(f_func)
+DECLARE_PYOBJ_ATTR(f_globals)
+DECLARE_PYOBJ_ATTR(f_builtins)
+DECLARE_PYOBJ_ATTR(f_locals)
+DECLARE_PYOBJ_ATTR(f_code)
+DECLARE_PYOBJ_ATTR(frame_obj)
+
+#undef DECLARE_PYOBJ_ATTR
+
+static THPPyInterpreterFrame* THPPyInterpreterFrame_previous(THPPyInterpreterFrame* self, PyObject* _noargs) {
+  THPPyInterpreterFrame* res = THPPyInterpreterFrame_New(self->frame->previous);
+  Py_XINCREF(res);
+  return res;
+}
+
+// This is not a true attribute of the class but we do access it in python and it is hard to implement
+// on the python side, so do it here:
+static PyObject* THPPyInterpreterFrame_f_lasti(THPPyInterpreterFrame* self, PyObject* _noargs) {
+  return PyLong_FromLong(_PyInterpreterFrame_LASTI(self->frame));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
+static struct PyGetSetDef THPDevice_properties[] = {
+    {"f_func", (getter)THPPyInterpreterFrame_f_func, NULL, NULL, NULL},
+    {"f_globals", (getter)THPPyInterpreterFrame_f_globals, NULL, NULL, NULL},
+    {"f_builtins", (getter)THPPyInterpreterFrame_f_builtins, NULL, NULL, NULL},
+    {"f_locals", (getter)THPPyInterpreterFrame_f_locals, NULL, NULL, NULL},
+    {"f_code", (getter)THPPyInterpreterFrame_f_code, NULL, NULL, NULL},
+    {"frame_obj", (getter)THPPyInterpreterFrame_frame_obj, NULL, NULL, NULL},
+    {"previous", (getter)THPPyInterpreterFrame_previous, NULL, NULL, NULL},
+    {"f_lasti", (getter)THPPyInterpreterFrame_f_lasti, NULL, NULL, NULL},
+    {NULL}};
+
+PyTypeObject THPPyInterpreterFrameType = {
+    PyVarObject_HEAD_INIT(NULL, 0) "torch._C.dynamo.eval_frame._PyInterpreterFrame", /* tp_name */
+    sizeof(THPPyInterpreterFrame), /* tp_basicsize */
+    0, /* tp_itemsize */
+    NULL, /* tp_dealloc */
+    0, /* tp_vectorcall_offset */
+    NULL, /* tp_getattr */
+    NULL, /* tp_setattr */
+    NULL, /* tp_reserved */
+    NULL, /* tp_repr */
+    NULL, /* tp_as_number */
+    NULL, /* tp_as_sequence */
+    NULL, /* tp_as_mapping */
+    NULL, /* tp_hash  */
+    NULL, /* tp_call */
+    NULL, /* tp_str */
+    NULL, /* tp_getattro */
+    NULL, /* tp_setattro */
+    NULL, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT, /* tp_flags */
+    NULL, /* tp_doc */
+    NULL, /* tp_traverse */
+    NULL, /* tp_clear */
+    NULL, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    NULL, /* tp_iter */
+    NULL, /* tp_iternext */
+    NULL, /* tp_methods */
+    NULL, /* tp_members */
+    THPDevice_properties, /* tp_getset */
+    NULL, /* tp_base */
+    NULL, /* tp_dict */
+    NULL, /* tp_descr_get */
+    NULL, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    NULL, /* tp_init */
+    NULL, /* tp_alloc */
+    NULL, /* tp_new */
+};
+
+
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
+  PyTypeObject* type = (PyTypeObject*)&THPPyInterpreterFrameType;
+  THPPyInterpreterFrame* self = (THPPyInterpreterFrame*)type->tp_alloc(type, 0);
+  if (!self)
+    return NULL;
+  self->frame = frame;
+  return self;
+}
+
+
 #else
 #define THP_EVAL_API_FRAME_OBJECT PyFrameObject
 
@@ -292,16 +393,15 @@ inline static void enable_eval_frame_default(PyThreadState* tstate) {
 
 static inline PyObject* call_callback(
     PyObject* callable,
-    THP_EVAL_API_FRAME_OBJECT* frame,
+    THP_EVAL_API_FRAME_OBJECT* _frame,
     long cache_len) {
 
 #if IS_PYTHON_3_11_PLUS
-  // Only the pointer to the frame is passed back to python here and it is
-  // casted back into a _PyInterpreterFrame in real_callback in eval_frame.py
-  PyObject* args = Py_BuildValue("(Lll)", frame, cache_len, _PyInterpreterFrame_LASTI(frame));
+  THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
 #else
-  PyObject* args = Py_BuildValue("(Oll)", frame, cache_len, frame->f_lasti);
+  PyFrameObject* frame = _frame;
 #endif
+  PyObject* args = Py_BuildValue("(Ol)", frame, cache_len);
   if (args == NULL) {
     return NULL;
   }
@@ -768,5 +868,15 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
 
   noargs = PyTuple_New(0);
   dotzerokey = PyUnicode_InternFromString(".0");
-  return PyModule_Create(&_module);
+  PyObject* module = PyModule_Create(&_module);
+
+  if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
+    return NULL;
+  }
+  Py_INCREF(&THPPyInterpreterFrameType);
+  if (PyModule_AddObject(module, "_PyInterpreterFrame", (PyObject*)&THPPyInterpreterFrameType) != 0) {
+    return NULL;
+  }
+
+  return module;
 }

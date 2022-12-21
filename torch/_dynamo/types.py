@@ -1,4 +1,3 @@
-import ctypes
 import dataclasses
 import sys
 import types
@@ -7,55 +6,9 @@ from typing import Callable, Dict, List, NamedTuple, Optional, OrderedDict, Unio
 from typing_extensions import Protocol
 
 if sys.version_info >= (3, 11):
-    # In latest CPython version, the eval frame API was changed to
-    # provide this struct instead of the types.FrameType.
-    # This structure mimicks the current version in
-    # https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Include/internal/pycore_frame.h#L49
-    # If this code is updated in CPython, the the ctypes.Structure below will need to be updated
-    # to match the new CPython definition.
-    _original_struct = """
-typedef struct _PyInterpreterFrame {
-    /* "Specials" section */
-    PyFunctionObject *f_func; /* Strong reference */
-    PyObject *f_globals; /* Borrowed reference */
-    PyObject *f_builtins; /* Borrowed reference */
-    PyObject *f_locals; /* Strong reference, may be NULL */
-    PyCodeObject *f_code; /* Strong reference */
-    PyFrameObject *frame_obj; /* Strong reference, may be NULL */
-    /* Linkage section */
-    struct _PyInterpreterFrame *previous;
-    // NOTE: This is not necessarily the last instruction started in the given
-    // frame. Rather, it is the code unit *prior to* the *next* instruction. For
-    // example, it may be an inline CACHE entry, an instruction we just jumped
-    // over, or (in the case of a newly-created frame) a totally invalid value:
-    _Py_CODEUNIT *prev_instr;
-    int stacktop;     /* Offset of TOS from localsplus  */
-    bool is_entry;  // Whether this is the "root" frame for the current _PyCFrame.
-    char owner;
-    /* Locals and stack */
-    PyObject *localsplus[1];
-} _PyInterpreterFrame;
-"""
+    from torch._C._dynamo import eval_frame
 
-    class _PyInterpreterFrame(ctypes.Structure):
-        pass
-
-    _PyInterpreterFrame._fields_ = [
-        ("f_func", ctypes.py_object),
-        ("f_globals", ctypes.py_object),
-        ("f_builtins", ctypes.py_object),
-        ("f_locals", ctypes.py_object),
-        ("f_code", ctypes.py_object),
-        ("frame_obj", ctypes.py_object),
-        ("previous", ctypes.POINTER(_PyInterpreterFrame)),
-        ("prev_instr", ctypes.c_ushort),
-        ("stacktop", ctypes.c_int),
-        ("is_entry", ctypes.c_bool),
-        ("owner", ctypes.c_char),
-        ("localsplus", ctypes.py_object * 1),
-    ]
-
-    DynamoFrameType = _PyInterpreterFrame
+    DynamoFrameType = eval_frame._PyInterpreterFrame
 else:
     DynamoFrameType = types.FrameType
 
@@ -88,7 +41,9 @@ class GuardedCode:
 
 class DynamoCallbackFn(Protocol):
     def __call__(
-        self, frame: DynamoFrameType, cache_size: int, lasti: int
+        self,
+        frame: DynamoFrameType,
+        cache_size: int,
     ) -> Optional[GuardedCode]:
         ...
 

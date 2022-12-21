@@ -974,53 +974,8 @@ def print_box(msg):
         print('|{}{}|'.format(l, ' ' * (size - len(l))))
     print('-' * (size + 2))
 
-def pre_build_checks():
-    if sys.version_info >= (3, 11):
-        # Dynamo is using internal data structures from CPython.
-        # We ensure here that there were no ABI changes in the CPython
-        # version being used to compile PyTorch.
-        def get_py_interpreter_struct(file):
-            res = []
-            record = False
-            with open(file) as f:
-                for l in f:
-                    if "typedef struct _PyInterpreterFrame" in l:
-                        record = True
-                    if record:
-                        res.append(l)
-                    if "} _PyInterpreterFrame;" in l:
-                        break
-            if not res:
-                raise RuntimeError(f"Could not find the _PyInterpreterFrame struct in {file}")
-            return res
-
-        python_header = os.path.join(cmake_python_include_dir, "internal", "pycore_frame.h")
-        pytorch_types = os.path.join(cwd, "torch", "_dynamo", "types.py")
-
-        if not os.path.exists(python_header):
-            raise RuntimeError("Could not find CPython internal headers which are required "
-                               "for building PyTorch 3.11+. Make sure to have CPython properly "
-                               "installed and if this header was removed in a recent version of "
-                               "CPython, update PyTorch to support it.")
-
-        if not os.path.exists(pytorch_types):
-            raise RuntimeError("Could not find the dynamo.types module. If you removed it, please "
-                               "update the build script to point to the new location of the _PyInterpreterFrame struct")
-
-        python_struct = get_py_interpreter_struct(python_header)
-        pytorch_struct = get_py_interpreter_struct(pytorch_types)
-
-        if python_struct != pytorch_struct:
-            raise RuntimeError("The _PyInterpreterFrame structures from CPython and PyTorch  do not match. "
-                               "This is most likely because CPython updated that structure and we need to "
-                               f"change it on the PyTorch side as well. See {pytorch_types} for details on the next steps.")
-
-
 
 def main():
-    # Run pre-build verifications
-    pre_build_checks()
-
     # the list of runtime dependencies required by this built package
     install_requires = [
         'typing_extensions',
