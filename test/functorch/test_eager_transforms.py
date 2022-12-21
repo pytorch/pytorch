@@ -31,7 +31,7 @@ from functorch import (
     grad, vjp, vmap, jacrev, jacfwd, grad_and_value, hessian,
     jvp, make_functional, make_functional_with_buffers,
     combine_state_for_ensemble, make_fx, functional_call,
-    combine_weights_for_ensemble
+    stack_ensembled_state
 )
 from torch._functorch.make_functional import (
     functional_init, functional_init_with_buffers
@@ -169,7 +169,7 @@ def _get_weights_and_functional_call_with_buffers(net, mechanism):
 
         # this makes it so the function from make_functional and this call have the same signature
         def net_func(weights, buffers, data):
-            return functional_call(net, {**weights, **buffers}, (data,))
+            return functional_call(net, (weights, buffers), (data,))
 
         return net_func, dict(net.named_parameters()), dict(net.named_buffers())
 
@@ -3406,7 +3406,7 @@ class TestExamplesCorrectness(TestCase):
             if mechanism == "make_functional":
                 return combine_state_for_ensemble(models)[1]
             else:
-                return combine_weights_for_ensemble(models)[0]
+                return stack_ensembled_state(models)[0]
 
         def slice_weights(batched_weights, index):
             return tree_map(lambda weight: weight[index].detach().requires_grad_(), batched_weights)
@@ -3486,7 +3486,7 @@ class TestExamplesCorrectness(TestCase):
             if mechanism == "make_functional":
                 return combine_state_for_ensemble(models)[1]
             else:
-                return combine_weights_for_ensemble(models)[0]
+                return stack_ensembled_state(models)[0]
 
         batched_weights = init_fn(num_models=2)
         parallel_train_step_fn = vmap(train_step_fn, in_dims=(0, None, None, 0), randomness="same")
