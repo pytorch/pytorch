@@ -681,11 +681,11 @@ TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, 
 
 Tensor prelu(const Tensor& self, const Tensor& weight_) {
   TORCH_INTERNAL_ASSERT(weight_.defined());
-  if (weight_.numel() != 1) {
+  if (weight_.sym_numel() != 1) {
     TORCH_CHECK(self.dim() > 0, "Not allow zero-dim input tensor.");
 
-    int64_t channel_size = self.dim() > 1 ? self.size(1) : 1; // channel_size default to 1
-    TORCH_CHECK(channel_size == weight_.numel(),
+    auto channel_size = self.dim() > 1 ? self.sym_size(1) : 1; // channel_size default to 1
+    TORCH_CHECK(channel_size == weight_.sym_numel(),
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_.numel(),
       " and channel size = ", channel_size, ".");
   }

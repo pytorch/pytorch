@@ -197,6 +197,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(resolve_neg);
   OP_DECOMPOSE(row_stack);
   OP_DECOMPOSE(rrelu);
+  OP_DECOMPOSE(prelu);
   OP_DECOMPOSE2(softmax, int);
   OP_DECOMPOSE(special_gammainc);
   OP_DECOMPOSE(special_gammaincc);
