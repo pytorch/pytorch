@@ -362,9 +362,9 @@ def _conv_add_relu_extra_inputs_getter(pattern):
     _, extra_input, conv = add_pattern
     return [extra_input]
 
-# conv2d
-#  \
-#  bn   Y
+#      conv2d
+#        /
+#  Y    bn
 #   \   /
 #    add
 #     \
