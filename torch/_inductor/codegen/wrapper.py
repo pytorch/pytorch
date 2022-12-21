@@ -249,7 +249,6 @@ class WrapperCodeGen(CodeGen):
         self._names_iter = count()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
-        self.kernel_declaration = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
         self.kernels = {}
         self.lines = []
@@ -451,6 +450,7 @@ class WrapperCodeGen(CodeGen):
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
+        result.splice(self.prefix)
 
         out_names = V.graph.get_output_names()
         with contextlib.ExitStack() as stack:
@@ -487,11 +487,6 @@ class WrapperCodeGen(CodeGen):
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
             self.generate_return(output_refs)
-
-        result.splice(self.prefix)
-        self.generate_kernel_init_func_ending(result)
-        result.splice(self.kernel_declaration)
-        self.generate_kernel_class_def_ending(result)
 
         with result.indent():
             result.splice(self.wrapper_call)
@@ -552,12 +547,6 @@ class WrapperCodeGen(CodeGen):
     def wrap_kernel_call(self, name, call_args):
         return "{}({})".format(name, ", ".join(call_args))
 
-    def generate_kernel_init_func_ending(self, result):
-        return
-
-    def generate_kernel_class_def_ending(self, result):
-        return
-
     def generate_kernel_call(self, name, call_args):
         self.writeline(
             self.wrap_kernel_call(name, call_args),
@@ -610,13 +599,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             '''
             #include <dlfcn.h>
             #include <assert.h>
-            """
-        )
-        self.prefix.splice(
-            f"""
-            class LoadKernel_call{self._call_func_id}{{
-              public:
-                LoadKernel_call{self._call_func_id}() {{
+
+            template <typename KernelFunc>
+            KernelFunc load_cpp_kernel(const char* so_filename) {
+                KernelFunc kernel_cpp;
+                auto kernel_cpp_lib = dlopen(so_filename, RTLD_NOW);
+                assert(kernel_cpp_lib != nullptr);
+                *(void **) (&kernel_cpp) = dlsym(kernel_cpp_lib, "kernel");
+                return kernel_cpp;
+            }
+
             """
         )
         with self.wrapper_call.indent():
@@ -646,9 +638,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"{name} = at::randint(std::pow(2, 31), {{}}, at::ScalarType::Long);"
                 )
             V.graph.sizevars.codegen(self.wrapper_call, V.graph.graph_inputs)
-            self.wrapper_call.writeline(
-                f"static LoadKernel_call{self._call_func_id} load_kernel_;"
-            )
 
     def write_allocate_line(self, buffer):
         self.writeline(CppAllocateLine(buffer))
@@ -691,33 +680,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         kernel_path = self.get_kernel_path(kernel)
-        with self.prefix.indent():
-            self.prefix.writeline(
-                f'auto {name}_lib = dlopen("{kernel_path}", RTLD_NOW);'
-            )
-            self.prefix.writeline(f"assert({name}_lib != nullptr);")
-            self.prefix.writeline(
-                f'*(void **) (&{name}) = dlsym({name}_lib, "kernel");'
-            )
-
-        self.kernel_declaration.writeline(f"void (*{name})({arg_types});")
+        self.writeline(
+            f'static auto {name} = load_cpp_kernel<void (*)({arg_types})>("{kernel_path}");'
+        )
 
     def wrap_kernel_call(self, name, call_args):
-        return "{}({});".format("load_kernel_.%s" % name, ", ".join(call_args))
-
-    def generate_kernel_init_func_ending(self, result):
-        result.splice(
-            """
-            }
-            """
-        )
-
-    def generate_kernel_class_def_ending(self, result):
-        result.splice(
-            """
-            };
-            """
-        )
+        return "{}({});".format(name, ", ".join(call_args))
 
     def generate_return(self, output_refs):
         if output_refs:
