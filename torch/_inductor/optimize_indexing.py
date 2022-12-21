@@ -45,14 +45,10 @@ class ValueRanges(object):
         """map upper and lower bounds accessing corresponding values of inputs"""
         x, y = cls.wrap(x), cls.wrap(y)
 
-        try:
-            return ValueRanges(
-                fn(x.lower, y.lower),
-                fn(x.upper, y.upper),
-            )
-        except Exception as e:
-            breakpoint()
-            raise
+        return ValueRanges(
+            fn(x.lower, y.lower),
+            fn(x.upper, y.upper),
+        )
 
     @classmethod
     def binary_map_products(cls, a, b, fn):
@@ -213,7 +209,6 @@ class ValueRangeAnalysis(object):
         return ValueRanges.unary_map(x, sympy.functions.elementary.integers.ceiling)
 
     def __getattr__(self, name):
-        breakpoint()
         log.warning(f"unhandled ValueRange op {name}")
         return self.default_handler
 
@@ -365,7 +360,6 @@ class OptimizeIndexing(object):
                         index_val = self.replacement_vals[index]
 
                         if math.isinf(index_val.lower) or math.isinf(index_val.upper):
-                            breakpoint()
                             return
 
                         # all indices are integers, so make sure that we
@@ -377,11 +371,9 @@ class OptimizeIndexing(object):
                             int(index_val.lower), int(index_val.upper)
                         )
                         if not range_expressable_in_32_bits(index_val_int):
-                            breakpoint()
                             return
 
             if not range_expressable_in_32_bits(self.interp_env[dominated]):
-                breakpoint()
                 return
 
         args = list(node.args)
@@ -423,8 +415,6 @@ class OptimizeIndexing(object):
         return interp.env[output[0]]
 
     def set_indirect(self, var, new_var):
-        # if "IndexingDiv" in repr(new_var):
-        #     breakpoint()
         self.replace_indirect(var, new_var)
         return new_var
 
@@ -434,8 +424,6 @@ class OptimizeIndexing(object):
         self.replacement_vals[old] = new
 
     def get_index(self, name):
-        # if "index3" in name:
-        #     breakpoint()
         if name in self.replacement_vals:
             return self.replacement_vals[name]
 
@@ -506,11 +494,20 @@ class OptimizeIndexing(object):
             return ValueRanges(-math.inf, math.inf)
 
 
-def indexing_dtype_strength_reduction(loop_body: LoopBody):
+def indexing_dtype_strength_reduction(
+    loop_body: LoopBody, indices: Dict[sympy.Symbol, int]
+):
     """
     Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
     intermediaries from int64 to int32
     """
-    indexing = loop_body.indexing_exprs
+    index = list(indices.keys())
+    assert len(index) == len(loop_body.var_ranges), (index, loop_body.var_ranges)
+    assert all(v not in loop_body.var_ranges for v in index)
+    replacements = dict(zip(loop_body.var_ranges.keys(), index))
+    indexing = {
+        name: sympy_subs(expr, replacements)
+        for name, expr in loop_body.indexing_exprs.items()
+    }
     with V.set_ops_handler(ValueRangeAnalysis()):
-        OptimizeIndexing(loop_body, loop_body.var_ranges, indexing).run()
+        OptimizeIndexing(loop_body, indices, indexing).run()
