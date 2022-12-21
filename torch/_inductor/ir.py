@@ -1631,6 +1631,17 @@ class Layout(IRNode):
                 return False
         return True
 
+    def is_channels_last_contiguous(self):
+        ndim = len(self.size)
+        if ndim not in [4, 5]:
+            return False
+        for left, right, size in zip(
+            self.stride, make_channels_last_strides_for(self.size), self.size
+        ):
+            if size != 1 and left != right:
+                return False
+        return True
+
     def is_transposed(self):
         for left, right, size in zip(
             self.stride,
@@ -2307,9 +2318,16 @@ class ConcatKernel(NopKernel):
                     )
             offsets_end.append(new_size[dim])
 
-        with V.graph.fake_mode:
-            x_fake = [ir_node_to_tensor(x, guard_shape=True) for x in inputs]
-            output = torch.ops.aten.cat(x_fake, dim)
+        output_stride = FlexibleLayout.contiguous_strides(new_size)
+        # If any of the inputs is in CL format, use CL format for the output
+        for i in range(len(inputs)):
+            x = inputs[i]
+            if is_storage_and_layout(x):
+                if isinstance(x.get_layout(), FixedLayout):
+                    if x.get_layout().is_channels_last_contiguous:
+                        # use CL stride for the output
+                        output_stride = make_channels_last_strides_for(new_size)
+                        break
 
         kernel = ConcatKernel(
             name=None,
@@ -2317,7 +2335,7 @@ class ConcatKernel(NopKernel):
                 device=device,
                 dtype=dtype,
                 size=new_size,
-                stride=output.stride(),
+                stride=output_stride,
             ),
             inputs=[],
         )

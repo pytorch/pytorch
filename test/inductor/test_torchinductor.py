@@ -2823,6 +2823,38 @@ class CommonTemplate:
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
 
+    def test_cat_of_loops_and_extern_kernel(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    3,
+                    5,
+                    1,
+                    **kwargs,
+                )
+                self.max_pool2d = torch.nn.MaxPool2d(2)
+
+            def forward(self, x, y):
+                x1 = self.conv(x)
+                y1 = self.max_pool2d(y)
+                return torch.cat([x1, y1], 1)
+
+        mod = M()
+        opt_mod = torch._dynamo.optimize("inductor")(mod)
+        memory_format = torch.channels_last
+        inputs = (
+            torch.randn([1, 3, 16, 16]).to(memory_format=memory_format),
+            torch.randn([1, 3, 32, 32]).to(memory_format=memory_format),
+        )
+        y = mod(*inputs)
+        opt_y = opt_mod(*inputs)
+        self.assertEqual(y, opt_y)
+        self.assertEqual(y.stride(), opt_y.stride())
+
     def test_stack(self):
         def fn(a, b):
             return torch.stack(
