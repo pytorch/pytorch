@@ -952,6 +952,7 @@ class TestOperators(TestCase):
         # skip because this is flaky depending on what the max_norm is!
         skip('nn.functional.embedding', ''),
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # vmap: inplace into a regular tensor
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -987,7 +988,6 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
 
         xfail('nn.functional.prelu'),
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # Trying to in-place a batched tensor into non-batched tensor
         # ----------------------------------------------------------------------
     }
 
@@ -1457,9 +1457,9 @@ class TestOperators(TestCase):
 
         # Not actually a problem
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # vmap: inplace into a regular tensor
 
         # Potential bugs/errors
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # Trying to in-place a batched tensor into non-batched tensor
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided', 'partial_views'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
