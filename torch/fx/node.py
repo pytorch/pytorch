@@ -7,7 +7,6 @@ import builtins
 import types
 import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
-from .._ops import ops as _ops
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -32,9 +31,9 @@ Argument = Optional[Union[
 
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
-    _ops.profiler._record_function_enter,
-    _ops.profiler._record_function_enter_new,
-    _ops.profiler._record_function_exit}
+    torch.ops.profiler._record_function_enter,
+    torch.ops.profiler._record_function_enter_new,
+    torch.ops.profiler._record_function_exit}
 
 # this is fixed on master, WAR for 1.5
 def _find_module_of_method(orig_method: Callable[..., Any]) -> str:

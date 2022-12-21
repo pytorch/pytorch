@@ -26,7 +26,7 @@ pytree = torch.utils._pytree
 T = TypeVar("T")
 TensorWeakRef = Any
 
-aten = torch._ops.ops.aten
+aten = torch.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
 

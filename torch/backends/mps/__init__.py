@@ -17,14 +17,3 @@ def is_available() -> bool:
 def is_macos13_or_newer() -> bool:
     r"""Returns a bool indicating whether MPS is running on MacOS 13 or newer."""
     return torch._C._is_mps_on_macos_13_or_newer()
-
-
-# Register prims as implementation of var_mean and group_norm
-if is_built():
-    from ...library import Library
-    from ..._refs import var_mean, native_group_norm
-    from ..._decomp.decompositions import native_group_norm_backward
-    _lib = Library("aten", "IMPL")
-    _lib.impl("var_mean.correction", var_mean, "MPS")
-    _lib.impl("native_group_norm", torch._refs.native_group_norm, "MPS")
-    _lib.impl("native_group_norm_backward", native_group_norm_backward, "MPS")

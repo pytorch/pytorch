@@ -42,7 +42,7 @@ __all__ = [
     "xlog1py",
     "zeta",
 ]
-aten = torch._ops.ops.aten
+aten = torch.ops.aten
 
 
 @_make_elementwise_unary_reference(

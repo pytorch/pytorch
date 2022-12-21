@@ -28,7 +28,7 @@ DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 # from torch._decomps
 __all__: List[str] = []
 
-aten = torch._ops.ops.aten
+aten = torch.ops.aten
 
 
 class Reduction(Enum):
