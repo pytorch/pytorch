@@ -1068,7 +1068,7 @@ class DistributedDataParallel(Module):
                 "Communication hook: return annotation should be torch.futures.Future[torch.Tensor].",
             )
 
-        if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook",] and (
+        if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"] and (
             (torch.version.cuda is None and torch.version.hip is None)
             or (
                 torch.version.cuda is not None
