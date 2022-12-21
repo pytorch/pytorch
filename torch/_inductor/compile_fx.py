@@ -413,6 +413,10 @@ def compile_fx(
     with overrides.patch_functions():
         model_ = overrides.replace_fx(model_)
         model_ = overrides.fuse_fx(model_, example_inputs_)
+        # Experimental
+        # fuse 'dq - op(s) - q' pattern to a quantized op
+        # e.g. 'dq - aten.convolution - q' -> quantized.convNd
+        model_ = overrides.fuse_quantization(model_)
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes

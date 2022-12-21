@@ -3881,6 +3881,40 @@ def _realize(x):
     return clone(x)
 
 
+@register_lowering(torch.ops.quantized_decomposed.quantize_per_tensor.tensor)
+def quantize_per_tensor_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
+    quant_min_tensor = full_like(input, quant_min)
+    quant_max_tensor = full_like(input, quant_max)
+
+    def clamp(v):
+        return maximum(quant_min_tensor, minimum(quant_max_tensor, v))
+
+    output = clamp(add(round(div(input, scale)), zero_point))
+    output = to_dtype(output, dtype)
+    return output
+
+
+@register_lowering(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor)
+def dequantize_per_tensor_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
+    output = mul(sub(input, zero_point), scale)
+    output = to_dtype(output, torch.float32)
+    return output
+
+
+def _import_kernels():
+    """
+    Need to make sure all these get registered in the lowers dict
+    """
+    import importlib
+    import os
+
+    from . import kernel
+
+    for filename in sorted(os.listdir(os.path.dirname(kernel.__file__))):
+        if filename.endswith(".py") and filename[0] != "_":
+            importlib.import_module(f"{kernel.__name__}.{filename[:-3]}")
+
+
 try:
     import torch.distributed._functional_collectives
 

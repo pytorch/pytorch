@@ -17,6 +17,7 @@ from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from torch.overrides import TorchFunctionMode
+from torch.fx import subgraph_rewriter
 
 from . import config
 from .fx_utils import matches_module_function_pattern
@@ -575,3 +576,71 @@ replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: ra
 # Keep track of any replacement functions that use triton random,
 # so they can be avoided when fallback_random is set
 replacements_using_triton_random = {lowmem_dropout, rand_like}
+
+
+'''
+Quantization part for experiment
+TODO: Maybe move to a separate file
+'''
+def is_quantized_graph_module(gm: torch.fx.GraphModule):
+    found_quantize = False
+    quantize_ops = (
+        torch.ops.quantized_decomposed.quantize_per_tensor,
+        torch.ops.quantized_decomposed.quantize_per_channel,
+    )
+    for node in gm.graph.nodes:
+        if node.target in quantize_ops:
+            found_quantize = True
+            break
+    return found_quantize
+
+def fuse_quantization(gm: torch.fx.GraphModule):
+    # skip if gm is not a quantized graph module
+    if not is_quantized_graph_module(gm):
+        return gm
+
+    gm = fuse_reference_quantized_conv_relu(gm)
+
+    return gm
+
+def fuse_reference_quantized_conv_relu(gm: torch.fx.GraphModule):
+    """
+    For experiment
+    Currently, quantized.convNd_prepck and quantized.convNd cannot be traced by meta tensor
+    and cannot be lowered either.
+    """
+    aten = torch.ops.aten
+    quantized_decomposed = torch.ops.quantized_decomposed
+    convolution = aten.convolution.default
+    relu = aten.relu.default
+    quantize_per_tensor = quantized_decomposed.quantize_per_tensor
+    dequantize_per_tensor = quantized_decomposed.dequantize_per_tensor
+    quantize_per_channel = quantized_decomposed.quantize_per_channel
+    dequantize_per_channel = quantized_decomposed.dequantize_per_channel
+
+    def pattern(
+        qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype,
+        qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype,
+        bias, stride, padding, dilation, is_transposed, out_padding, groups,
+            y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
+        x = dequantize_per_tensor(qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype)
+        w = dequantize_per_channel(qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype)
+        y = convolution(x, w, bias, stride, padding, dilation, is_transposed, out_padding, groups)
+        y = relu(y)
+        qy = quantize_per_tensor(y, y_scale, y_zp, y_quant_min, y_quant_max, y_dtype)
+        return qy
+
+    def replacement(
+        qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype,
+        qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype,
+        bias, stride, padding, dilation, is_transposed, out_padding, groups,
+            y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
+        # TODO: aten.convolution can be used for all conv1d/2d/3d but the spatial dim info
+        # is lost. Here we hardcode conv2d for experiment.
+        quantized = torch.ops.quantized
+        w_packed = quantized.conv2d_prepack(qw, bias, stride, padding, dilation, groups)
+        qy = quantized.conv2d_relu.new(qx, w_packed, y_scale, y_zp)
+        return qy
+
+    subgraph_rewriter.replace_pattern(gm, pattern, replacement)
+    return gm
