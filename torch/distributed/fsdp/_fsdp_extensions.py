@@ -39,7 +39,7 @@ class FSDPExtensions(ABC):
         rank: int,
         world_size: int,
         num_devices_per_node: int,
-        pg: dist.ProcessGroup,
+        pg: Optional[dist.ProcessGroup],
     ) -> torch.Tensor:
         """Shards a tensor to chunks and returns the local chunk."""
         ...
@@ -88,7 +88,7 @@ def _ext_chunk_tensor(
     rank: int,
     world_size: int,
     num_devices_per_node: int,
-    pg: dist.ProcessGroup,
+    pg: Optional[dist.ProcessGroup],
 ) -> torch.Tensor:
     chunk_tensor_fn = (
         _extensions.chunk_tensor

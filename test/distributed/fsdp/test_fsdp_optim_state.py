@@ -783,7 +783,7 @@ class TestFSDPOptimState(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def _test_use_orig_params(self) -> None:
+    def test_use_orig_params(self) -> None:
         """Tests :meth:`optim_state_dict` for an FSDP-root nested model."""
         self._test_load_optim_state(
             _ModelClass.NESTED,
@@ -928,8 +928,8 @@ class TestFSDPOptimState(FSDPTest):
                 optim=optim2,
             )
         elif osd_comm_method == _OSDCommMethod.OPTIM_STATE_DICT:
-            sharded_osd1 = FSDP._load_optim_state_dict(fsdp_osd1, model2, optim2)
-            sharded_osd2 = FSDP._load_optim_state_dict(fsdp_osd2, model2, optim2)
+            sharded_osd1 = FSDP._optim_state_dict_to_load(fsdp_osd1, model2, optim2)
+            sharded_osd2 = FSDP._optim_state_dict_to_load(fsdp_osd2, model2, optim2)
 
         # As a sanity check, check that sharding the second model's full/sharded
         # optimizer state dict according to itself is equivalent to its local

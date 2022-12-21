@@ -211,7 +211,7 @@ def _create_chunk_sharded_tensor(
     rank: int,
     world_size: int,
     num_devices_per_node: int,
-    pg: dist.ProcessGroup,
+    pg: Optional[dist.ProcessGroup],
 ) -> ShardedTensor:
     """
     Shard a tensor to chunks along the first dimension. The local rank will gets its

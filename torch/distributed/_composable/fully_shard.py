@@ -87,10 +87,7 @@ def fully_shard(
     _register_pre_forward_hooks(state, modules)
     _register_post_forward_hooks(state, modules)
     _register_root_pre_forward_hook(state, module)  # prepend last
-    for submodule in module.modules():
-        if (
-            submodule not in state._ignored_modules
-            and _get_module_state(submodule) is None
-        ):
-            _insert_module_state(submodule, state)
+    # Insert all comm_modules to the module to state mapping.
+    for submodule in state._fully_sharded_module_to_handles.keys():
+        _insert_module_state(submodule, state)
     return module

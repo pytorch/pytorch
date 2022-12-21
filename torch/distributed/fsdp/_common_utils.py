@@ -9,12 +9,13 @@ from typing import Callable, Dict, Generator, List, no_type_check, Optional, Set
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
+import torch.distributed as dist
 from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 
-from .api import FullStateDictConfig, StateDictConfig, StateDictType
+from .api import FullStateDictConfig, StateDictConfig, StateDictType, ShardingStrategy
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -31,6 +32,10 @@ class _FSDPState(_State):
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._is_root: Optional[bool] = None
         self.rank: int = -1
+        self.world_size: int = -1
+        self.sharding_strategy = ShardingStrategy.FULL_SHARD
+        self.compute_device = torch.device("cuda", torch.cuda.current_device())
+        self.process_group: Optional[dist.ProcessGroup] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
