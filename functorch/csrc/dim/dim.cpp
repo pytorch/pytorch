@@ -1519,11 +1519,7 @@ static PyObject* _dims(PyObject *self,
     auto f = py::obj<PyFrameObject>::steal(PyThreadState_GetFrame(state));
     auto c = py::obj<PyCodeObject>::steal(PyFrame_GetCode(f.ptr()));
     auto code = _PyCode_CODE(c.ptr());
-#if PY_VERSION_HEX >= 0x030a00f0
-    int first = PyFrame_GetLasti(f.ptr()) + 1;
-#else
     int first = PyFrame_GetLasti(f.ptr()) /  2 + 1;
-#endif
     auto unpack = code[first];
     int names_start = first;
     if (relevant_op(unpack)) {
