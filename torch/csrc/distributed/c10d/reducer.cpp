@@ -884,10 +884,9 @@ c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_allreduce_hook(
-  GradBucket& grad_bucket
-) {
-    _AllReduceBySumCommHook allreduce_hook(process_group_);
-    return allreduce_hook.runHook(grad_bucket);
+    GradBucket& grad_bucket) {
+  _AllReduceBySumCommHook allreduce_hook(process_group_);
+  return allreduce_hook.runHook(grad_bucket);
 }
 
 void Reducer::all_reduce_bucket(Bucket& bucket) {
@@ -1458,7 +1457,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         RECORD_FUNCTION(
             "torch.distributed.ddp.reducer::copy_bucket_to_grad",
             std::vector<c10::IValue>({variable}));
-        copy_bucket_to_grad(variable, bucket, intra_bucket_index, global_unused);
+        copy_bucket_to_grad(
+            variable, bucket, intra_bucket_index, global_unused);
       }
     } else {
       const auto& bucket_view_out = bucket.bucket_views_out[intra_bucket_index];
