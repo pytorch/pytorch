@@ -272,6 +272,7 @@ class WrapperCodeGen(CodeGen):
                 import random
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
+                from torch._inductor.select_algorithm import extern_kernels
 
                 aten = torch.ops.aten
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
@@ -299,19 +300,6 @@ class WrapperCodeGen(CodeGen):
                     """
                 )
 
-            if config.triton.mm != "aten":
-                self.header.splice(
-                    f"""
-                    from {config.inductor_import}.triton_ops.autotune import mm_heuristics
-                    from {config.inductor_import}.triton_ops.autotune import mm_autotune
-                    """
-                )
-
-            if config.triton.use_bmm:
-                self.header.writeline(
-                    f"from {config.inductor_import}.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
-                )
-
         self.write_prefix()
 
         for name, value in V.graph.constants.items():
@@ -324,6 +312,21 @@ class WrapperCodeGen(CodeGen):
         self.write_get_cuda_stream = functools.lru_cache(None)(
             self.write_get_cuda_stream
         )
+
+        @functools.lru_cache(None)
+        def add_import_once(line):
+            self.header.writeline(line)
+
+        self.add_import_once = add_import_once
+        self._metas = {}
+
+    def add_meta_once(self, meta):
+        meta = repr(meta)
+        if meta not in self._metas:
+            var = f"meta{len(self._metas)}"
+            self._metas[meta] = var
+            self.header.writeline(f"{var} = {meta}")
+        return self._metas[meta]
 
     @cache_on_self
     def get_output_refs(self):
