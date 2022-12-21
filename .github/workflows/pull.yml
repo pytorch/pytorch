@@ -301,7 +301,7 @@ jobs:
 
   linux-focal-rocm5_3-py3_8-build:
     # don't run build twice on master
-    if: github.event_name == 'pull_request'
+    if: false && github.event_name == 'pull_request'
     name: linux-focal-rocm5.3-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
