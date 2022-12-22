@@ -147,7 +147,21 @@ int run(
                         {problem_size.m(), problem_size.n(),
                          problem_size.k() / kSparse / kElementsPerElementE});
 
-  tensor_e_reordered.sync_device();
+  // tensor_e_reordered.sync_device();
+
+  auto tensor_e_reordered_pt = at::empty(
+      {problem_size.m(), problem_size.k() / kSparse / kElementsPerElementE},
+      at::TensorOptions().dtype(at::kShort));
+
+  int16_t* eptr = tensor_e_reordered_pt.data_ptr<int16_t>();
+  uint16_t* eptr_cutlass = tensor_e_reordered.host_ref().data();
+  for (size_t i = 0; i < tensor_e_reordered_pt.numel(); i++) {
+    eptr[i] = static_cast<int16_t>(eptr_cutlass[i]);
+  }
+
+  tensor_e_reordered_pt = tensor_e_reordered_pt.to(tensor_a.device());
+
+//  std::cout << "tensor_e_reordered_pt: " << tensor_e_reordered_pt << std::endl;
 
   // Initialize alpha and beta for dot product computation
   float alpha = 1;
@@ -165,6 +179,9 @@ int run(
   auto tensor_c_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutOutput>((cutlass::half_t*)tensor_c.data_ptr<at::Half>(), layout_c);
   auto tensor_d_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutOutput>((cutlass::half_t*)tensor_d.data_ptr<at::Half>(), layout_d);
 
+  ReorderedLayoutInputE layout_e;
+  auto tensor_e_reordered_pt_device_ref = cutlass::TensorRef<uint16_t, ReorderedLayoutInputE>((uint16_t*)tensor_e_reordered_pt.data_ptr<int16_t>(), layout_e);
+
   // Create a tuple of gemm kernel arguments. This is later passed as arguments to launch
   // instantiated CUTLASS kernel
   typename Gemm::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
@@ -172,32 +189,31 @@ int run(
                                      tensor_b_device_ref,  // <- reference to matrix B on device
                                      tensor_c_device_ref,  // <- reference to matrix C on device
                                      tensor_d_device_ref,  // <- reference to matrix D on device
-                                     tensor_e_reordered.device_ref(),  // <- reference to matrix E on device
+                                     // tensor_e_reordered.device_ref(),  // <- reference to matrix E on device
+                                     tensor_e_reordered_pt_device_ref,  // <- reference to matrix E on device
                                      {alpha, beta},          // <- tuple of alpha and beta
                                      split_k_slices};        // <- k-dimension split factor
 
-  // Using the arguments, query for extra workspace required for matrix multiplication computation
-  size_t workspace_size = Gemm::get_workspace_size(arguments);
-
-  // Allocate workspace memory
-  cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
-
-  // Instantiate CUTLASS kernel depending on templates
   Gemm gemm_op;
 
-  // Check the problem size is supported or not
-  cutlass::Status status = gemm_op.can_implement(arguments);
-  CUTLASS_CHECK(status);
+  cutlass::Status status =
+      gemm_op.initialize(arguments, nullptr, at::cuda::getCurrentCUDAStream());
+  TORCH_CHECK(
+      status != cutlass::Status::kErrorWorkspaceNull,
+      "Failed to initialize CUTLASS Grouped GEMM kernel due to workspace.");
+  TORCH_CHECK(
+      status != cutlass::Status::kErrorInternal,
+      "Failed to initialize CUTLASS Grouped GEMM kernel due to internal error.");
+  TORCH_CHECK(
+      status == cutlass::Status::kSuccess,
+      "Failed to initialize CUTLASS Grouped GEMM kernel.");
 
-  // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm_op.initialize(arguments, workspace.get());
-  CUTLASS_CHECK(status);
+  status = gemm_op.run(at::cuda::getCurrentCUDAStream());
+  TORCH_CHECK(
+      status == cutlass::Status::kSuccess,
+      "Failed to run CUTLASS Grouped GEMM kernel.");
 
-  // Launch initialized CUTLASS kernel
-  status = gemm_op();
-  CUTLASS_CHECK(status);
-  return 0;
-
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 namespace at {
@@ -205,9 +221,8 @@ namespace native {
 
 // TODO: Pull back in device and cuda version constraints.
 Tensor _cusparselt_linear(const Tensor& sparse, const Tensor& dense) {
-  auto result = sparse.new_empty({sparse.size(0), dense.size(1)}).fill_(1);
-  auto init = sparse.new_empty({sparse.size(0), dense.size(1)}).fill_(2);
-  run(sparse, dense, init, result);
+  auto result = sparse.new_empty({sparse.size(0), dense.size(1)}); //.fill_(1);
+  run(sparse, dense, result, result);
   return result;
 }
 
