@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import unittest
 import contextlib
 import copy
 import functools
@@ -719,44 +720,53 @@ class TestFSDPOptimStateDict(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
-    def _test_optim_state_dict_save_load(self):
-        orig_model = CompositeParamModel(device=torch.device("cuda"))
-
-        composable_model = copy.deepcopy(orig_model)
-        fully_shard(composable_model, policy=ModuleWrapPolicy({UnitModule}))
-        composable_optim = torch.optim.Adam(composable_model.parameters(), lr=1e-2)
-
-        orig_model = FSDP(orig_model)
-        orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-2)
-
+    def _test_optim_state_save_load(self, model1, optim1, model2, optim2) -> None:
         batch = torch.randn(2, 100, device="cuda")
         for model, optim in (
-            (orig_model, orig_optim),
-            (composable_model, composable_optim),
+            (model1, optim1),
+            (model2, optim2),
         ):
             optim.zero_grad(set_to_none=True)
             model(batch).sum().backward()
             optim.step()
 
-        orig_optim_state_dict = FSDP._optim_state_dict(orig_model, orig_optim)
-        composable_optim_state_dict = FSDP._optim_state_dict(
-            composable_model, composable_optim
-        )
+        optim_state_dict1 = FSDP._optim_state_dict(model1, optim1)
+        optim_state_dict2 = FSDP._optim_state_dict(model2, optim2)
 
-        self.assertEqual(
-            len(orig_optim_state_dict["state"]),
-            len(composable_optim_state_dict["state"]),
-        )
-        for fqn, state in orig_optim_state_dict["state"].items():
-            self.assertEqual(state, composable_optim_state_dict["state"][fqn], fqn)
+        self.assertEqual(len(optim_state_dict1["state"]), len(optim_state_dict2["state"]))
+        for fqn, state in optim_state_dict1["state"].items():
+            self.assertEqual(state, optim_state_dict2["state"][fqn], fqn)
 
         for group1, group2 in itertools.zip_longest(
-            orig_optim_state_dict["param_groups"],
-            composable_optim_state_dict["param_groups"],
+            optim_state_dict1["param_groups"], optim_state_dict2["param_groups"]
         ):
             for key, value in group1.items():
                 self.assertEqual(value, group2[key])
+
+    @unittest.SkipTest("The test currently fails on CI.")
+    @skip_if_lt_x_gpu(2)
+    def test_optim_state_dict_save_load(self):
+        orig_model = CompositeParamModel(device=torch.device("cuda"))
+        composable_model = copy.deepcopy(orig_model)
+        fully_shard(composable_model, policy=ModuleWrapPolicy({UnitModule}))
+        composable_optim = torch.optim.Adam(composable_model.parameters(), lr=1e-2)
+        orig_model = FSDP(orig_model)
+        orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-2)
+
+        self._test_optim_state_save_load(orig_model, orig_optim, composable_model, composable_optim)
+
+    @unittest.SkipTest("The test currently fails on CI.")
+    @skip_if_lt_x_gpu(2)
+    def test_optim_state_dict_submodule_fully_shard(self):
+        orig_model = CompositeParamModel(device=torch.device("cuda"))
+        composable_model = copy.deepcopy(orig_model)
+        fully_shard(composable_model.u1)
+        fully_shard(composable_model.u2)
+        composable_optim = torch.optim.Adam(composable_model.parameters(), lr=1e-2)
+        orig_model = FSDP(orig_model)
+        orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-2)
+
+        self._test_optim_state_save_load(orig_model, orig_optim, composable_model, composable_optim)
 
 
 if __name__ == "__main__":
