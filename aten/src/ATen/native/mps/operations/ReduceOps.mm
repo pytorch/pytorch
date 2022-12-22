@@ -1104,9 +1104,12 @@ Tensor min_max_mps(const Tensor& input_t,
   using CachedGraph = MPSUnaryCachedGraph;
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-      num_in_elements *= input_shape[i];
+  IntArrayRef input_shape = input_t.sizes();
+  int64_t num_in_elements = c10::multiply_integers(input_shape);
+
   Tensor output_t = at::native::empty_mps({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-  if (output_t.numel() == 0 || input_t.numel() == 0) {
+
+  if (output_t.numel() == 0 || num_in_elements == 0) {
     return output_t;
   }
 
@@ -1121,7 +1124,7 @@ Tensor min_max_mps(const Tensor& input_t,
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* inputTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(input_t.scalar_type()));
+          MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input_t.scalar_type()));
 
           MPSGraphTensor* outputTensor = nil;
           MPSGraphTensor* castInputTensor = nil;
@@ -1238,7 +1241,7 @@ void min_max_out_mps(const Tensor& input_t,
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-              MPSGraphTensor* inputTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(input_t.scalar_type()));
+          MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input_t.scalar_type()));
           MPSGraphTensor* outputTensor = nil;
           if (reduction_type == MPSReductionType::MAX) {
             outputTensor = [mpsGraph reductionMaximumWithTensor:inputTensor
