@@ -9,7 +9,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 from weakref import ReferenceType
 
 import torch
-from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch._subclasses.meta_utils import MetaConverter
@@ -26,7 +25,7 @@ pytree = torch.utils._pytree
 T = TypeVar("T")
 TensorWeakRef = Any
 
-aten = torch.ops.aten
+aten = torch._ops.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -216,7 +215,7 @@ class FakeTensorConverter(object):
         shape_env=None,
         ignore_subclass=False,
         *,
-        source=None,
+        sname=None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -249,7 +248,7 @@ class FakeTensorConverter(object):
             shape_env=shape_env,
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
-            source=source,
+            sname=sname,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -285,7 +284,7 @@ class FakeTensorConverter(object):
         make_constant=False,
         shape_env=None,
         ignore_subclass=False,
-        source=None,
+        sname=None,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -293,7 +292,7 @@ class FakeTensorConverter(object):
             make_constant,
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
-            source=source,
+            sname=sname,
         )
 
 
@@ -1059,18 +1058,18 @@ class FakeTensorMode(TorchDispatchMode):
         tensor,
         static_shapes=False,
         ignore_subclass=False,
-        source: Optional[Source] = None,
+        sname: Optional[str] = None,
     ):
         if static_shapes:
             return self.fake_tensor_converter(
-                self, tensor, ignore_subclass=ignore_subclass, source=source
+                self, tensor, ignore_subclass=ignore_subclass, sname=sname
             )
         return self.fake_tensor_converter(
             self,
             tensor,
             shape_env=self.shape_env,
             ignore_subclass=ignore_subclass,
-            source=source,
+            sname=sname,
         )
 
 
