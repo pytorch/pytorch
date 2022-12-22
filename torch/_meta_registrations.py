@@ -2063,9 +2063,19 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     full_output_size = upsample_common_check(
         input.size(), output_size, num_spatial_dims=2
     )
-    return input.new_empty(full_output_size).to(
-        memory_format=utils.suggest_memory_format(input)
-    )
+    output = input.new_empty(full_output_size)
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(input)
+
+    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
+    _, n_channels, _, _ = input.shape
+    if input.device.type == "cuda" and n_channels < 4:
+        memory_format = torch.contiguous_format
+
+    output = output.contiguous(memory_format=memory_format)
+
+    return output
 
 
 @register_meta(aten.upsample_nearest3d.default)
