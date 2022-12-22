@@ -190,32 +190,6 @@ void check_shape_except_dim(const Tensor &first, const Tensor &second,
   }
 }
 
-inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) {
-  c10::optional<c10::MemoryFormat> format = c10::nullopt;
-  for (auto &t : inputs) {
-    auto f = t.suggest_memory_format();
-    if (!format.has_value()) {
-      format = f;
-      continue;
-    }
-    if (format.value() == f) {
-      continue;
-    }
-    bool contiguous = (format.value() == c10::MemoryFormat::Contiguous || f == c10::MemoryFormat::Contiguous || format.value() != f);
-    if (contiguous) {
-      return c10::MemoryFormat::Contiguous;
-    }
-  }
-  return format.value();
-}
-
-//Tensor cat_mps(TensorList inputs, int64_t dimension) {
-  //ScalarType high_type = result_type(inputs);
-  //Tensor out = at::empty({0}, inputs.front().options().dtype(high_type));
-  //at::native::cat_out_mps(inputs, dimension, out);
-  //return out;
-//}
-
 TORCH_IMPL_FUNC(cat_out_mps)
       (const ITensorListRef& inputs,
        int64_t dimension,
@@ -229,6 +203,8 @@ TORCH_IMPL_FUNC(cat_out_mps)
   if (out.numel() == 0) {
     return;
   }
+
+  Tensor out_;
 
   auto materialized_inputs = inputs.materialize();
 
@@ -319,10 +295,6 @@ TORCH_IMPL_FUNC(cat_out_mps)
       " and out is on ",
       out.device());
 
-  // TODO: memory_format is now an argument?
-  // // TODO: Factor out `compute_output_memory_format`
-  // c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
-
   std::vector<int64_t> size(notSkippedTensor->sizes().vec());
 
   // Compute size of the result in the cat dimension
@@ -342,12 +314,18 @@ TORCH_IMPL_FUNC(cat_out_mps)
   size[dimension] = cat_dim_size;
 
   // skip resizing if size of result is same as expected
-  if (out.sizes() != size) {
+  if (out.sizes() != size || !out.is_contiguous(memory_format)) {
     out.resize_(size, memory_format);
   }
 
   if (out.numel() == 0) {
     return;
+  }
+
+  if (out.is_contiguous()){
+    out_ = out;
+  } else{
+    out_ = at::empty_like(out, c10::MemoryFormat::Contiguous);
   }
 
   // Get stream
@@ -445,7 +423,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
       i++;
     }
 
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out_);
 
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
     for (int i = 0; i < inputPlaceholders.size(); i++) {
@@ -457,7 +435,9 @@ TORCH_IMPL_FUNC(cat_out_mps)
 
     mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
-
+  if (!out.is_contiguous()){
+    out.copy_(out_);
+  }
 }
 
 void upsample_backward_out_mps(const Tensor& grad_output,
