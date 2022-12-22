@@ -56,7 +56,6 @@ class FsdpCheckpoint(DTensorTestBase):
             torch.nn.Linear(8, 8, device="meta"), process_group=process_group
         )
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
-        p0(optim_2)
 
         with FSDP.summon_full_params(model):
             with FSDP.summon_full_params(model_2):
@@ -88,10 +87,11 @@ class FsdpCheckpoint(DTensorTestBase):
                 optimizer_key="optim",
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             )
-
+            p0(f"optim_state['optim']: {optim_state['optim']}")
             flattened_osd = FSDP.flatten_sharded_optim_state_dict(
                 optim_state["optim"], model_2, optim_2
             )
+            p0(f"flattened_osd: {flattened_osd}")
             optim_2.load_state_dict(flattened_osd)
 
         with FSDP.summon_full_params(model):
@@ -100,24 +100,25 @@ class FsdpCheckpoint(DTensorTestBase):
                 self.assertEqual(model.bias, model_2.bias)
 
         def opt_at(opt, idx):
-            return list(iter(opt.state.values()))[idx]
+            return list(opt.state.values())[idx]
 
-        p0(len(opt_at(optim, 0)["exp_avg"]))
-        p0(len(opt_at(optim_2, 0)["exp_avg"]))
+        p0(f"len(opt_at(optim, 0)['exp_avg']): {len(opt_at(optim, 0)['exp_avg'])}")
+        p0(f"len(opt_at(optim_2, 0)['exp_avg']): {len(opt_at(optim_2, 0)['exp_avg'])}")
 
-        # # Adam lazily creates its state
-        # self.assertEqual(
-        #     opt_at(optim, 0)["exp_avg"], opt_at(optim_2, 0)["exp_avg"]
-        # )
-        # self.assertEqual(
-        #     opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
-        # )
+        # Adam lazily creates its state
+        self.assertEqual(
+            opt_at(optim, 0)["exp_avg"], opt_at(optim_2, 0)["exp_avg"]
+        )
+        self.assertEqual(
+            opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
+        )
 
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    @with_temp_dir
-    def test_fsdp_checkpoint_no_resharding(self):
-        self._test_fsdp_checkpoint(process_group=None)
+    # @with_comms
+    # @skip_if_lt_x_gpu(4)
+    # @with_temp_dir
+    # def test_fsdp_checkpoint_no_resharding(self):
+    #     # the test without resharding works fine. 
+    #     self._test_fsdp_checkpoint(process_group=None)
 
     def _create_new_dist_group(self):
         world_size = dist.get_world_size()
