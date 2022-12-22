@@ -867,7 +867,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule(self):
         forward_inputs: Dict[str, nn.Module] = {}
-        float16 = MixedPrecision(param_dtype=torch.float16)
+        float16 = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)
 
         model = SaveForwardInputsModel(
             forward_inputs,
@@ -927,6 +927,93 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         ):
             fsdp(x).sum().backward()
 
+    @skip_if_lt_x_gpu(2)
+    def test_submodules_with_different_precisions_error(self):
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        float16 = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)
+        float32 = MixedPrecision(param_dtype=torch.float32, cast_forward_inputs=True)
+
+        model = SaveForwardInputsModel(
+            forward_inputs=forward_inputs, cast_forward_inputs=False
+        ).cuda()
+        c1, c2 = model.c1, model.c2
+        x = torch.zeros(2, 100, device="cuda")
+
+        # For submodules with different precisions, right now current design
+        # does not support the case when the root FSDP instance wraps a submodule
+        # that is not the first one executed. Because for that submodule, its inputs
+        # (or previous submodule's outputs) have no way to be casted, instead,
+        # the root module's inputs are casted upfront before entering
+        # root module's forward
+        model.c1 = FSDP(model.c1, mixed_precision=float16)
+        fsdp = FSDP(model, mixed_precision=float32)
+        with self.assertRaisesRegex(
+            RuntimeError, "mat1 and mat2 must have the same dtype"
+        ):
+            fsdp(x).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_submodules_with_different_precisions(self):
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        float16 = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)
+        float32 = MixedPrecision(param_dtype=torch.float32, cast_forward_inputs=True)
+
+        model = SaveForwardInputsModel(
+            forward_inputs=forward_inputs, cast_forward_inputs=False
+        ).cuda()
+        c1, c2 = model.c1, model.c2
+        x = torch.zeros(2, 100, device="cuda")
+
+        model.c2 = FSDP(model.c2, mixed_precision=float16)
+        fsdp = FSDP(model, mixed_precision=float32)
+
+        fsdp(x).sum().backward()
+
+        self.assertEqual(forward_inputs[model].dtype, torch.float32)
+        self.assertEqual(forward_inputs[c1].dtype, torch.float32)
+        self.assertEqual(forward_inputs[c2].dtype, torch.float16)
+
+    @skip_if_lt_x_gpu(2)
+    def test_submodules_with_external_inputs(self):
+        class ToyModule(nn.Module):
+            def __init__(self, forward_inputs: Dict[str, torch.Tensor]) -> None:
+                super().__init__()
+                self.l = nn.Linear(100, 100)
+                self.forward_inputs = forward_inputs
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                self.forward_inputs["l2_input_x"] = x
+                self.forward_inputs["l2_input_y"] = y
+                return self.l(x)
+
+        class ToyModel(nn.Module):
+            def __init__(self, forward_inputs: Dict[str, torch.Tensor]) -> None:
+                super().__init__()
+                self.l1 = nn.Linear(100, 100)
+                self.l2 = ToyModule(forward_inputs)
+                self.forward_inputs = forward_inputs
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.forward_inputs["model_input_x"] = x
+                y = torch.ones(2, 100, device="cuda", dtype=torch.float32)
+                return self.l2(self.l1(x), y)
+
+        forward_inputs: Dict[str, torch.Tensor] = {}
+
+        float16 = MixedPrecision(param_dtype=torch.float16)
+        model = ToyModel(forward_inputs).cuda()
+        x = torch.zeros(2, 100, device="cuda", dtype=torch.float32)
+        model.l2 = FSDP(model.l2, mixed_precision=float16)
+        fsdp = FSDP(model, mixed_precision=float16)
+
+        fsdp(x).sum().backward()
+
+        # Inputs are casted in root module in default, inputs of submodules are not
+        # explicitly casted, so the external inputs ``y`` of module ``self.l2`` is
+        # not casted.
+        self.assertEqual(forward_inputs["model_input_x"].dtype, torch.float16)
+        self.assertEqual(forward_inputs["l2_input_x"].dtype, torch.float16)
+        self.assertEqual(forward_inputs["l2_input_y"].dtype, torch.float32)
 
 if __name__ == "__main__":
     run_tests()
