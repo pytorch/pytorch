@@ -2787,6 +2787,10 @@ class CommonTemplate:
             fn,
             (torch.randn([8, 16]),),
         )
+        self.common(
+            fn,
+            (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+        )
 
     def test_cat_upcasting(self):
         def fn(arg4_1, slice_7):
@@ -3109,6 +3113,26 @@ class CommonTemplate:
                 torch.tensor([0, 2, 1], dtype=torch.int64),
             ),
         )
+
+    def test_output_strides(self):
+        def fn(x):
+            y = x.permute(0, 2, 3, 1).contiguous()
+            torch._dynamo.graph_break()
+            return y.view(-1, 4)
+
+        inp = torch.rand([4, 4, 4, 4], device=self.device)
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+
+        self.assertEqual(fn(inp), fn_opt(inp))
+        self.assertEqual(fn(inp).stride(), fn_opt(inp).stride())
+
+        # no redundant copy
+        def foo(x):
+            return x[0:2:2].T[3:].squeeze(0)
+
+        foo_opt = torch._dynamo.optimize("inductor")(foo)
+        out = foo_opt(inp)
+        self.assertEqual(inp.storage(), out.storage())
 
     def test_index_select(self):
         def fn(a, b):
