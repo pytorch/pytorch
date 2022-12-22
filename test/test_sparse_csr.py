@@ -2075,6 +2075,34 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(torch.mul, 100, [100, 1])
         _test_spadd_shape(torch.mul, 100, [1, 100])
 
+    # TODO: enable hybrid once to_dense supports it
+    @parametrize('enable_hybrid', [False])
+    @all_sparse_compressed_layouts()
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
+    def test_mul_scalar(self, layout, device, dtype, enable_hybrid):
+        for sparse in self.generate_simple_inputs(
+                layout, device=device, dtype=dtype, index_dtype=torch.int32, enable_hybrid=enable_hybrid):
+            for scalar_dtype in all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half):
+                # ComplexHalf is experimental
+                if dtype is torch.half and scalar_dtype.is_complex:
+                    continue
+
+                scalar_t = torch.tensor(2, dtype=scalar_dtype)
+                for scalar in (scalar_t, scalar_t.item()):
+                    res_out = sparse.mul(scalar)
+                    self.assertEqual(res_out, scalar * sparse)
+
+                    res_dense_out = sparse.to_dense().mul(scalar)
+                    # BUG: dispatcher ignores mul.Scalar(Tensor, Scalar)
+                    # This issues is circumvented in the mul(Tensor, Tensor) kernel.
+                    self.assertEqual(res_out, res_dense_out)
+
+                    if dtype == torch.result_type(sparse, scalar):
+                        res_in_dense = sparse.to_dense().mul_(scalar)
+                        res_in = sparse.clone().mul_(scalar)
+                        self.assertEqual(res_in, res_in_dense)
+                        self.assertEqual(res_out, res_in)
+
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
