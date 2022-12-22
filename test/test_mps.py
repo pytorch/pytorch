@@ -4405,14 +4405,14 @@ class TestNLLLoss(TestCase):
 
     # Test index add
     def test_index_add(self):
-        def helper(shape, dim, index, source_shape, alpha, idx_dtype=torch.int32):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+        def helper(shape, dim, index, source_shape, alpha, x_dtype=torch.float32, idx_dtype=torch.int32):
+            cpu_x = torch.randn(shape, device='cpu', dtype=x_dtype, requires_grad=False)
             x = cpu_x.detach().clone().to('mps')
 
             cpu_idx = torch.tensor(index, device='cpu', dtype=idx_dtype)
             idx = cpu_idx.detach().clone().to('mps')
 
-            cpu_source = torch.randn(source_shape, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_source = torch.randn(source_shape, device='cpu', dtype=x_dtype, requires_grad=False)
             source = cpu_source.detach().clone().to('mps')
 
             idx_result = torch.index_add(x, dim=dim, index=idx, source=source, alpha=alpha)
@@ -4428,6 +4428,8 @@ class TestNLLLoss(TestCase):
         # test result dim=1
         helper((2,), 0, [1], (1,), 6.0)
         helper(2, 0, 1, 1, 6)
+        # test float16
+        helper((2,), 0, [1], (1,), 6.0, x_dtype=torch.float16)
 
     # Test flip
     def test_flip(self):
@@ -7461,7 +7463,8 @@ class TestConsistency(TestCase):
         'gradient': ['f16', 'f32', 'i16'],
         'half': ['f16'],
         'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'index_select': ['f32', 'i16', 'i32', 'i64'],
+        'index_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'index_add': ['f16', 'f32', 'i16', 'i32'],
         'int': ['i32'],
         'isclose': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'isfinite': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7690,7 +7693,8 @@ class TestConsistency(TestCase):
         'gradient': ['f32'],
         'half': ['f16'],
         'hstack': ['f16', 'f32'],
-        'index_select': ['f32'],
+        'index_select': ['f16', 'f32'],
+        'index_add': ['f16', 'f32'],
         'isclose': ['f16', 'f32'],
         'isfinite': ['f16', 'f32'],
         'isinf': ['f16', 'f32'],
@@ -7810,7 +7814,6 @@ class TestConsistency(TestCase):
         'std': [torch.float16],
         'stft': [torch.float32], 'var': [torch.float16],
         # + forward when requires_grad=True or running backward
-        'index_select': [torch.float16],
         'nn.functional.embedding': [torch.float32, torch.float16],
         '__rpow__': [torch.int64],
         'masked.std': [torch.int32],
