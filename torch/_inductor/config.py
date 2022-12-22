@@ -4,6 +4,12 @@ import sys
 # add some debug printouts
 debug = False
 
+# Whether to disable a progress bar for autotuning
+disable_progress = True
+
+# Whether to enable printing the source code for each future
+verbose_progress = False
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -29,15 +35,6 @@ inplace_buffers = True
 
 # codegen benchmark harness
 benchmark_harness = True
-
-# fuse pointwise into templates
-epilogue_fusion = False
-
-# do epilogue fusions before other fusions
-epilogue_fusion_first = False
-
-# enable slow autotuning passes to select algorithms
-max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
@@ -146,8 +143,11 @@ class triton:
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
 
-    # choose conv backend, "aten" or "triton"
+    # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"
+
+    # choose mm backend, "aten" or "triton" or "autotune"
+    mm = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
     # Set default as True because otherwise will encouter `map::at` error
@@ -159,9 +159,10 @@ class triton:
     # limit tiling dimensions
     max_tiles = 2
 
-    # use triton.autotune for pointwise ops with complex layouts
-    # this should only be disabled for debugging/testing
-    autotune_pointwise = True
+    # use triton.autotune?
+    autotune = True
+
+    use_bmm = False
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -208,25 +209,33 @@ class trace:
 
 class InductorConfigContext:
     static_memory: bool
+    matmul_tune: str
     matmul_padding: bool
-    max_autotune: bool
+    triton_autotune: bool
+    triton_bmm: bool
+    triton_mm: str
     triton_convolution: str
     rematerialize_threshold: int
     rematerialize_acc_threshold: int
 
     def _save(self):
         self.static_memory = triton.cudagraphs
+        self.matmul_tune = triton.mm
         self.matmul_padding = shape_padding
-        self.max_autotune = max_autotune
+        self.triton_autotune = triton.autotune
+        self.triton_bmm = triton.use_bmm
+        self.triton_mm = triton.mm
         self.triton_convolution = triton.convolution
         self.rematerialize_threshold = realize_reads_threshold
         self.rematerialize_acc_threshold = realize_acc_reads_threshold
 
     def _apply(self):
-        global shape_padding, realize_reads_threshold, realize_acc_reads_threshold, max_autotune
         triton.cudagraphs = self.static_memory
+        triton.mm = self.matmul_tune
         shape_padding = self.matmul_padding
-        max_autotune = self.max_autotune
+        triton.autotune = self.triton_autotune
+        triton.use_bmm = self.triton_bmm
+        triton.mm = self.triton_mm
         triton.convolution = self.triton_convolution
         realize_reads_threshold = self.rematerialize_threshold
         realize_acc_reads_threshold = self.rematerialize_acc_threshold
@@ -245,7 +254,11 @@ class InductorConfigContext:
                 self.static_memory = True
 
             def max_autotune():
-                self.max_autotune = True
+                self.static_memory = False
+                self.matmul_padding = True
+                self.triton_convolution = "autotune"
+                self.triton_mm = "autotune"
+                self.matmul_padding = True
 
             modes = {
                 x.__name__.replace("_", "-"): x
