@@ -49,7 +49,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'compile', 'sym_int', 'sym_float', 'sym_sqrt', 'sym_floor', 'sym_ceil',
+    'compile', 'vmap', 'sym_int', 'sym_float', 'sym_sqrt', 'sym_floor', 'sym_ceil',
 ]
 
 ################################################################################
@@ -1151,8 +1151,6 @@ del register_after_fork
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg as lobpcg
 
-from ._vmap_internals import vmap as vmap
-
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
 # class usage. We add these lines here to preserve backward compatibility.
@@ -1278,3 +1276,6 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.symbolic_shapes
+
+from torch import func as func
+from torch.func import vmap
