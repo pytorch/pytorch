@@ -823,7 +823,7 @@ class TritonKernel(Kernel):
         index, mask = self.indexing(index)
 
         # Keep the variable in cache if we are going to reuse it
-        # Lezcano: Rather than evict_last it'd be even better to use no_allocate, 
+        # Lezcano: Rather than evict_last it'd be even better to use no_allocate,
         # but triton does not support it
         ep_str = "first" if name in self.current_node.last_usage else "last"
         ep = ", eviction_policy='evict_{}'".format(ep_str)
@@ -863,11 +863,13 @@ class TritonKernel(Kernel):
         var = self.args.output(name)
         index, mask = self.indexing(index, dense_indexing=True)
 
+        # Lezcano: This is not useful ATM and not supported by triton MLIR
+        # Revisit in the future in case it's supported and becomes useful
         # Keep the variable in cache if we are going to reuse it
-        ep_str = "first" if name in self.current_node.last_usage else "last"
-        ep = "eviction_policy='evict_{}'".format(ep_str)
+        # ep_str = "first" if name in self.current_node.last_usage else "last"
+        # ep = "eviction_policy='evict_{}'".format(ep_str)
         if mode is None:
-            line = f"tl.store({var} + ({index}), {value}, {mask}, {ep})"
+            line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
             line = f"tl.atomic_add({var} + ({index}), {value}, {mask})"
         else:

@@ -111,7 +111,9 @@ class BaseSchedulerNode:
                 result[id(use.node)] = use
         self.users = list(result.values())
 
-    def set_last_usage(self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]):
+    def set_last_usage(
+        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
+    ):
         used_buffers = self.used_buffer_names()
         used_buffers = {mutation_real_name.get(k, k) for k in used_buffers}
         self.last_usage = used_buffers - future_used_buffers
@@ -463,7 +465,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
             f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
         )
 
-    def set_last_usage(self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]):
+    def set_last_usage(
+        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
+    ):
         # Set self.last_usage using the global information
         # This will be used for inter-kernel optimisations
         super().set_last_usage(future_used_buffers, mutation_real_name)
