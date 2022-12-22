@@ -1971,7 +1971,7 @@ def all_gather_object(object_list, obj, group=None):
     Args:
         object_list (list[Any]): Output list. It should be correctly sized as the
             size of the group for this collective and will contain the output.
-        object (Any): Pickable Python object to be broadcast from current process.
+        obj (Any): Pickable Python object to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
 

@@ -129,7 +129,7 @@ def _validate_linear_op_param(args, kwargs):
 
     Args:
         input: input of the linear layer.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         kwargs: same as normal Linear.
 
     Return: None.
@@ -186,7 +186,7 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     Args:
         input: matrix to be multiplied with the sharded weight.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         rank: # of cuda process.
         local_shard_t: row-wise shared local weight used for lookup.
         bias: bias term of linear op.
@@ -244,7 +244,7 @@ def _handle_row_wise_sharding_tensor(
     Args:
         input: matrix to be multiplied with the sharded weight.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         rank: # of cuda process.
         local_shard_t: row-wise shared local weight used for lookup.
         bias: bias term of linear op.
@@ -328,7 +328,7 @@ def _handle_row_wise_sharding_sharded_tensor(
     Args:
         input: matrix to be multiplied with the sharded weight.
         world_size: number of ranks.
-        weight: shareded weight tensor.
+        weight: sharded weight tensor.
         local_shard_t: row-wise shared local weight used for lookup.
         bias: bias term of linear op.
         pg: process group.
