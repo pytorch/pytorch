@@ -287,13 +287,11 @@ def prelu_backward(
 
 
 @register_decomposition(aten._prelu_kernel)
-@pw_cast_for_opmath
 def _prelu_kernel(self: Tensor, weight: Tensor) -> Tensor:
     return torch.where(self >= 0, self, weight * self)
 
 
 @register_decomposition(aten._prelu_kernel_backward)
-@pw_cast_for_opmath
 def _prelu_kernel_backward(
     self: Tensor, weight: Tensor, grad_output: Tensor
 ) -> Tuple[Tensor, Tensor]:

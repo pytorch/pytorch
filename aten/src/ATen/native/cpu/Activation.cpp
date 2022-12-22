@@ -1205,50 +1205,27 @@ void mish_backward_kernel(TensorIterator& iter) {
 }
 
 void prelu_kernel(TensorIterator& iter) {
-  if (iter.common_dtype() == kBFloat16) {
-    auto zero_vec = Vectorized<float>((float)(0));
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "prelu_cpu", [&] {
+    using Vec = Vectorized<scalar_t>;
     cpu_kernel_vec(
       iter,
-      [](BFloat16 input, BFloat16 weight) -> BFloat16 {
-        return (input >= 0) ? float(input) : float(weight) * float(input);
+      [](scalar_t input, scalar_t weight) {
+        return (input >= scalar_t(0)) ? input : weight * input;
       },
-      [=](Vectorized<BFloat16> input, Vectorized<BFloat16> weight) -> Vectorized<BFloat16> {
-        Vectorized<float> input0, input1;
-        Vectorized<float> weight0, weight1;
-        std::tie(input0, input1) = convert_bfloat16_float(input);
-        std::tie(weight0, weight1) = convert_bfloat16_float(weight);
-
-        auto res0 = Vectorized<float>::blendv(weight0 * input0, input0, input0 >= zero_vec);
-        auto res1 = Vectorized<float>::blendv(weight1 * input1, input1, input1 >= zero_vec);
-        return convert_float_bfloat16(res0, res1);
+      [](Vec input, Vec weight) {
+        return Vec::blendv(weight * input, input, input >= Vec(0));
       });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "prelu_cpu", [&] {
-      using Vec = Vectorized<scalar_t>;
-      cpu_kernel_vec(
-        iter,
-        [](scalar_t input, scalar_t weight) {
-          return (input >= scalar_t(0)) ? input : weight * input;
-        },
-        [](Vec input, Vec weight) {
-          return Vec::blendv(weight * input, input, input >= Vec(0));
-        });
-    });
-  }
+  });
 }
 
 void prelu_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "prelu_backward_cpu", [&]() {
-    using opmath_t = at::opmath_type<scalar_t>;
     cpu_kernel_multiple_outputs(iter,
-      [](scalar_t input_, scalar_t weight_, scalar_t grad_) -> std::tuple<scalar_t, scalar_t> {
-        opmath_t input = input_;
-        opmath_t weight = weight_;
-        opmath_t grad = grad_;
-        auto mask = input >= 0;
+      [](scalar_t input, scalar_t weight, scalar_t grad) -> std::tuple<scalar_t, scalar_t> {
+        auto mask = input >= scalar_t{0};
         auto grad_input = mask ? grad : weight * grad;
-        auto grad_weight = mask ? opmath_t(0) : input * grad;
-        return {scalar_t{grad_input}, scalar_t{grad_weight}};
+        auto grad_weight = mask ? scalar_t{0} : input * grad;
+        return {grad_input, grad_weight};
       });
   });
 }

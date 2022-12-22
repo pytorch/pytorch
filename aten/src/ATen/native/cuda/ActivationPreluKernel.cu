@@ -24,28 +24,21 @@ namespace native {
 // -----------------------------------
 void prelu_kernel(TensorIterator &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "prelu_cuda", [&] {
-    using opmath_t = at::opmath_type<scalar_t>;
     gpu_kernel(iter,
-      [] GPU_LAMBDA (scalar_t input_, scalar_t weight_) -> scalar_t {
-        const opmath_t input = input_;
-        const opmath_t weight = weight_;
-        return (input_ >= 0) ? input : weight * input;
+      [] GPU_LAMBDA (scalar_t input, scalar_t weight) -> scalar_t {
+        return (input >= 0) ? input : weight * input;
       });
   });
 }
 
 void prelu_backward_kernel(TensorIterator &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "prelu_backward_cuda", [&] {
-    using opmath_t = at::opmath_type<scalar_t>;
     gpu_kernel_multiple_outputs(iter,
-      [] GPU_LAMBDA (scalar_t input_, scalar_t weight_, scalar_t grad_) -> thrust::tuple<scalar_t, scalar_t> {
-        opmath_t input = input_;
-        opmath_t weight = weight_;
-        opmath_t grad = grad_;
+      [] GPU_LAMBDA (scalar_t input, scalar_t weight, scalar_t grad) -> thrust::tuple<scalar_t, scalar_t> {
         auto mask = input >= 0;
         auto grad_input = mask ? grad : weight * grad;
-        auto grad_weight = mask ? opmath_t(0) : input * grad;
-        return {scalar_t{grad_input}, scalar_t{grad_weight}};
+        auto grad_weight = mask ? scalar_t{0} : input * grad;
+        return {grad_input, grad_weight};
       });
   });
 }
