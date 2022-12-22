@@ -182,7 +182,7 @@ class Backend(object):
             raise ValueError("Backend name must be a string, but got: {}".format(name))
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
-        if value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
+        if value not in (Backend.GLOO, Backend.NCCL, Backend.UCC, Backend.MPI):
             value = name.lower()
         return value
 
