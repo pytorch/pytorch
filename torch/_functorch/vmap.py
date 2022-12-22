@@ -399,7 +399,7 @@ def vmap(
     """
     _check_randomness_arg(randomness)
     if not (chunk_size is None or chunk_size > 0):
-        raise ValueError("vmap: `chunk_size` should be greater than 0.")
+        raise ValueError(f"vmap: chunk_size should be None or greater than 0. (got {chunk_size})")
 
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
@@ -423,7 +423,9 @@ def get_chunk_sizes(total_elems, chunk_size):
     n_chunks = n_chunks = total_elems // chunk_size
     chunk_sizes = [chunk_size] * n_chunks
     # remainder chunk
-    chunk_sizes.append(total_elems % chunk_size)
+    remainder = total_elems % chunk_size
+    if remainder != 0:
+        chunk_sizes.append(remainder)
     return chunk_sizes
 
 def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
@@ -480,6 +482,17 @@ def _chunked_vmap(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, ran
     rs = torch.get_rng_state() if randomness == "same" else None
     for flat_args in chunks_flat_args:
         batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
+
+        # The way we compute split the input in `_get_chunked_inputs`,
+        # we may get a tensor with `0` batch-size. We skip any computation
+        # in that case.
+        # Eg.
+        # >>> chunk_size = 1
+        # >>> batch_size = 6
+        # >>> t = torch.zeros(batch_size, 1)
+        # >>> t.tensor_split([1, 2, 3, 4, 5, 6])
+        # (tensor([[0.]]), tensor([[0.]]), tensor([[0.]]), tensor([[0.]]),
+        #  tensor([[0.]]), tensor([[0.]]), tensor([], size=(0, 1)))
         if batch_size == 0:
             continue
 
@@ -516,7 +529,7 @@ def chunk_vmap(
     chunks at a time. For more details about vectorizing map, see :func:`vmap`.
 
     .. note::
-        It is recommended to use :func:`vmap` with :attr:`chunk_size` argument.
+        Please use :func:vmap with ``chunk_size`` argument instead of this API.
 
     Args:
         func (function): A Python function that takes one or more arguments.
