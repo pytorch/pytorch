@@ -3,8 +3,10 @@ from typing import Dict, Union, Any, Tuple
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch._functorch.utils import exposed_in
 
 
+@exposed_in("torch.func")
 def functional_call(
     module: 'torch.nn.Module',
     parameter_and_buffer_dicts: Union[Dict[str, Tensor], Tuple[Dict[str, Tensor], ...]],
@@ -76,6 +78,8 @@ def functional_call(
 
     return nn.utils.stateless.functional_call(module, parameters_and_buffers, args, kwargs)
 
+
+@exposed_in("torch.func")
 def stack_ensembled_state(models):
     """stack_ensembled_state(models) -> params, buffers
 
