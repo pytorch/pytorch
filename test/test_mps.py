@@ -5422,13 +5422,11 @@ class TestNNMPS(NNTestCase):
 
         with torch.enable_grad():
             x = x.detach().requires_grad_()
-
             out = 5.5 * x
-
             out = conv_in(out)
-            out = out+norm(out)
-            out = out+norm(out)
-            out = out+norm(out)
+            out = out + norm(out)
+            out = out + norm(out)
+            out = out + norm(out)
             out = F.interpolate(out, scale_factor=8.0, mode="nearest")
             out = norm(out)
             out = conv_out(out)
