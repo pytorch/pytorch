@@ -42,6 +42,7 @@ def sample_inputs_softmax_variant(
         ((S, S), (1,)),
         ((S, S), (-1,)),
         ((S, M, S), (2,)),
+        ((S, 0, 0), (-1,)),
     ]
     kwargs = dict(dtype=torch.float64) if with_dtype else None
 
