@@ -1,7 +1,5 @@
 from collections import defaultdict
 from typing import cast, List, Optional, Dict, Tuple
-import warnings
-import itertools
 
 import torch
 from torch import Tensor
@@ -110,9 +108,9 @@ class Adam(Optimizer):
         fused (bool, optional): whether the fused implementation (CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. Since the fused implementation is usually significantly faster than
-            the for-loop implementation, we default to using it whenever possible (all
-            parameters are on CUDA and are of a supported type. Else, we fall back to the
-            for-loop implementation. (default: True)
+            the for-loop implementation, we try to use it whenever possible (all parameters
+            are on CUDA and are of a supported type). Else, we continue with the for-loop
+            implementation. (default: None)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
@@ -123,7 +121,7 @@ class Adam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=0, amsgrad=False, *, foreach: Optional[bool] = None,
                  maximize: bool = False, capturable: bool = False,
-                 differentiable: bool = False, fused: bool = True):
+                 differentiable: bool = False, fused: Optional[bool] = None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -135,30 +133,6 @@ class Adam(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
-        def all_params(params, lambda_fn):
-            if isinstance(params, Tensor):
-                return lambda_fn(params)
-            if isinstance(params, dict):
-                return all_params(params.values(), lambda_fn)
-            # should be an iterable, unless it sets a default, in which case it's not relevant 🤷🏻‍♀️
-            try:
-                return all([all_params(p, lambda_fn) for p in params])
-            except TypeError:
-                return True
-
-        params, params_copy = itertools.tee(params)
-    
-        # The fused implementation is fastest but is only available when the parameters are floats on CUDA.
-        # The fused implementation is also not differentiable. We default back to for-loop impl in both cases.
-        if fused:
-            if differentiable:
-                fused = False
-                warnings.warn("`fused` cannot be `differentiable`, falling back to for-loop implementation")
-            elif not all_params(params_copy, lambda p: p.is_cuda and torch.is_floating_point(p)):
-                fused = False
-                warnings.warn("FusedAdam requires all the params to be CUDA, floating point. "
-                              "Falling back to for-loop implementation")
-
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
                         maximize=maximize, foreach=foreach, capturable=capturable,
@@ -166,11 +140,18 @@ class Adam(Optimizer):
         super(Adam, self).__init__(params, defaults)
 
         if fused:
+            if differentiable:
+                raise RuntimeError("`fused` cannot be `differentiable`")
+            self._step_supports_amp_scaling = True
             # TODO(crcrpar): [low prec params & their higher prec copy]
             # Suppor AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
-            self._step_supports_amp_scaling = True
+            if not all(
+                p.is_cuda and torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
+            ):
+                raise RuntimeError("FusedAdam requires all the params to be CUDA, floating point")
             
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -311,7 +292,7 @@ def adam(params: List[Tensor],
          foreach: Optional[bool] = None,
          capturable: bool = False,
          differentiable: bool = False,
-         fused: bool = False,
+         fused: Optional[bool] = None,
          grad_scale: Optional[_MultiDeviceReplicator] = None,
          found_inf: Optional[_MultiDeviceReplicator] = None,
          *,
@@ -325,6 +306,17 @@ def adam(params: List[Tensor],
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
+
+    # We try to use the fused implementation whenever we can since it is fastest. 
+    # It's only available when the tensors are floats on the same CUDA device
+    # and when differentiable=False. 
+    # We still respect when the user inputs False for fused.
+    if fused is None:
+        if not differentiable and all(
+                p.is_cuda and torch.is_floating_point(p)
+                for p in params + grads + exp_avgs + exp_avg_sqs + max_exp_avg_sqs + state_steps
+            ):
+            fused = True
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
