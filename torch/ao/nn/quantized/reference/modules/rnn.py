@@ -15,7 +15,7 @@ def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Ten
 def _get_weight_and_quantization_params(module, wn):
     weight = getattr(module, wn)
     params = [weight]
-    for param_name in [wn + n for n in ["_qscheme", "_dtype", "_scale", "_zero_point", "_axis"]]:
+    for param_name in [wn + n for n in ["_qscheme", "_dtype", "_scale", "_zero_point", "_axis_int"]]:
         if hasattr(module, param_name):
             param = getattr(module, param_name)
         else:
@@ -41,6 +41,7 @@ class RNNCellBase(nn.RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int,
                  device=None, dtype=None, weight_qparams_dict=None) -> None:
         super().__init__(input_size, hidden_size, bias, num_chunks, device=device, dtype=dtype)
+        # TODO(jerryzh168): maybe make this arg a required arg
         if weight_qparams_dict is None:
             weight_qparams = {
                 "qscheme": torch.per_tensor_affine,
@@ -50,14 +51,18 @@ class RNNCellBase(nn.RNNCellBase):
             }
             weight_qparams_dict = {
                 "weight_ih": weight_qparams,
-                "weight_hh": weight_qparams
+                "weight_hh": weight_qparams,
+                "is_decomposed": False,
             }
-        assert len(weight_qparams_dict) == 2, "Expected length for weight_qparams_dict to be 2 for QuantizedRNNCellBase(Reference)"
+        assert len(weight_qparams_dict) == 3, "Expected length for weight_qparams_dict to be 3 for QuantizedRNNCellBase(Reference)"
         self._init_weight_qparams_dict(weight_qparams_dict, device)
 
     def _init_weight_qparams_dict(self, weight_qparams_dict, device):
         assert weight_qparams_dict is not None
+        self.is_decomposed = weight_qparams_dict["is_decomposed"]
         for key, weight_qparams in weight_qparams_dict.items():
+            if key == "is_decomposed":
+                continue
             # TODO: refactor the duplicated code to utils.py
             weight_qscheme = weight_qparams["qscheme"]
             weight_dtype = weight_qparams["dtype"]
@@ -86,6 +91,7 @@ class RNNCellBase(nn.RNNCellBase):
                     # added for TorchScriptability, not used
                     self.register_buffer(
                         key + "_axis", torch.tensor(0, dtype=torch.int, device=device))
+                setattr(self, key + "_axis_int", getattr(self, key + "_axis").item())
 
     def _get_name(self):
         return "QuantizedRNNCellBase(Reference)"
@@ -109,7 +115,7 @@ class RNNCell(RNNCellBase):
     e.g. weight_ih, to the weight_qparams for that weight
     """
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
-                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Any]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, num_chunks=1, **factory_kwargs)
         self.nonlinearity = nonlinearity
@@ -176,7 +182,7 @@ class LSTMCell(RNNCellBase):
     e.g. weight_ih, to the weight_qparams for that weight
     """
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
-                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Any]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
@@ -228,7 +234,7 @@ class GRUCell(RNNCellBase):
     e.g. weight_ih, to the weight_qparams for that weight
     """
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
-                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Any]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
 
@@ -278,11 +284,12 @@ class RNNBase(nn.RNNBase):
                  num_layers: int = 1, bias: bool = True, batch_first: bool = False,
                  dropout: float = 0., bidirectional: bool = False, proj_size: int = 0,
                  device=None, dtype=None,
-                 weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+                 weight_qparams_dict: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(
             mode, input_size, hidden_size, num_layers, bias, batch_first, dropout,
             bidirectional, proj_size, device, dtype
         )
+        # TODO(jerryzh168): maybe make this arg a required arg
         if weight_qparams_dict is None:
             weight_qparams = {
                 'qscheme': torch.per_tensor_affine,
@@ -290,14 +297,17 @@ class RNNBase(nn.RNNBase):
                 'scale': 1.0,
                 'zero_point': 0
             }
-            weight_qparams_dict = {}
+            weight_qparams_dict = {"is_decomposed": False}  # type: ignore[dict-item]
             for wn in self._flat_weights_names:
                 if wn.startswith("weight"):
                     weight_qparams_dict[wn] = weight_qparams
         self._init_weight_qparams_dict(weight_qparams_dict, device)
 
     def _init_weight_qparams_dict(self, weight_qparams_dict, device):
+        self.is_decomposed = weight_qparams_dict["is_decomposed"]
         for key, weight_qparams in weight_qparams_dict.items():
+            if key == "is_decomposed":
+                continue
             weight_qscheme = weight_qparams["qscheme"]
             weight_dtype = weight_qparams["dtype"]
             setattr(self, key + "_qscheme", weight_qscheme)
@@ -319,6 +329,7 @@ class RNNBase(nn.RNNBase):
                     # added for TorchScriptability, not used
                     self.register_buffer(
                         key + "_axis", torch.tensor(0, dtype=torch.int, device=device))
+                setattr(self, key + "_axis_int", getattr(self, key + "_axis").item())
 
 class LSTM(RNNBase):
     """ Reference Quantized LSTM Module

@@ -2307,13 +2307,17 @@ class ConcatKernel(NopKernel):
                     )
             offsets_end.append(new_size[dim])
 
+        with V.graph.fake_mode:
+            x_fake = [ir_node_to_tensor(x, guard_shape=True) for x in inputs]
+            output = torch.ops.aten.cat(x_fake, dim)
+
         kernel = ConcatKernel(
             name=None,
             layout=FixedLayout(
                 device=device,
                 dtype=dtype,
                 size=new_size,
-                stride=FlexibleLayout.contiguous_strides(new_size),
+                stride=output.stride(),
             ),
             inputs=[],
         )
@@ -3413,8 +3417,6 @@ def _prepare_convolution_fusion_create(
     stride_: List[int],
     dilation_: List[int],
     groups: int,
-    transposed: bool = False,
-    output_padding_: List[int] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -3427,8 +3429,6 @@ def _prepare_convolution_fusion_create(
     padding = tuple(padding_)
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
-    output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
-
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
@@ -3442,8 +3442,8 @@ def _prepare_convolution_fusion_create(
             stride,
             padding,
             dilation,
-            transposed,
-            output_padding,
+            False,
+            [0, 0],
             groups,
         )
         output_size = output.size()
@@ -3462,8 +3462,6 @@ def _prepare_convolution_fusion_create(
         output_stride,
     )
     constant_args = [padding, stride, dilation, groups]
-    if transposed:
-        constant_args.insert(1, output_padding)
 
     if bias is not None:
         inputs.append(bias)
@@ -3798,62 +3796,6 @@ class LinearBinary(ExternKernelAlloc):
         pass
 
 
-class ConvolutionTransposeUnary(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
-
-    def __init__(
-        self,
-        layout,
-        inputs,
-        constant_args=(),
-        kernel="torch.ops.mkldnn._convolution_transpose_pointwise",
-    ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
-
-    def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
-        )
-
-    @classmethod
-    def create(
-        cls,
-        x: "TensorBox",
-        weight: "TensorBox",
-        bias: "TensorBox",
-        padding_: List[int],
-        output_padding_: List[int],
-        stride_: List[int],
-        dilation_: List[int],
-        groups_: int,
-        attr,
-        scalars,
-        algorithm,
-    ):
-        kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
-        transposed = True
-        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
-            cls,
-            x,
-            weight,
-            bias,
-            padding_,
-            stride_,
-            dilation_,
-            groups_,
-            transposed,
-            output_padding_,
-        )
-        constant_args = constant_args + [attr, scalars, algorithm]
-        return ConvolutionTransposeUnary(
-            layout=kernel_layout,
-            inputs=inputs,
-            constant_args=constant_args,
-            kernel=kernel,
-        )
-
-
 @dataclasses.dataclass
 class MutableBox(IRNode):
     """
@@ -4081,6 +4023,8 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):
+            self.name = "CaptureIndexing"
+
             def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, "reads", name)
                 return self._inner.load(name, index)
@@ -4163,6 +4107,7 @@ class LoopBodyBlock:
                 self.garbage_collect_values = False
                 self.env = {}
                 self.fetch_attr = submodules.__getitem__
+                self.name = V.get_ops_handler().name
 
         return InterpreterShim().run(V.get_ops_handler())
 
