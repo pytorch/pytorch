@@ -1173,38 +1173,32 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
-            # Sometime CI fails with random triton compilation failure which disappears after retry
+            # Sometime CI fails with random triton compilation failure which will be skipped for now
             # TODO: revisit this after switching to new Triton runtime
-            retries = 2 if self.args.ci else 0
-            for i in range(retries + 1):
-                reset_rng_state()
-                torch._dynamo.reset()
-                try:
-                    model_copy = deepcopy_and_maybe_ddp(model)
-                    self.init_optimizer(name, current_device, model_copy.parameters())
-                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-
-                    new_result = optimized_model_iter_fn(model_copy, example_inputs)
-                    break
-                except Exception as e:
+            reset_rng_state()
+            torch._dynamo.reset()
+            try:
+                model_copy = deepcopy_and_maybe_ddp(model)
+                self.init_optimizer(name, current_device, model_copy.parameters())
+                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                new_result = optimized_model_iter_fn(model_copy, example_inputs)
+            except Exception as e:
+                log.exception(e)
+                if self.args.ci and (
+                    (
+                        isinstance(e, RuntimeError)
+                        and "Internal Triton PTX codegen error" in str(e)
+                    )
+                    or (isinstance(e, KeyError) and "cubin" in str(e))
+                ):
+                    accuracy_status = "pass_due_to_skip"
+                    return record_status(accuracy_status)
+                else:
                     print(
                         "TorchDynamo optimized model failed to run because of following error"
                     )
-                    log.exception(e)
-                    if (
-                        isinstance(e, RuntimeError)
-                        and "Internal Triton PTX codegen error" in str(e)
-                    ) or (isinstance(e, KeyError) and "cubin" in str(e)):
-                        if i < retries:
-                            time.sleep((i + 1) * 30)
-                            print("Retrying...")
-                        else:
-                            # Skip this kind of random failure for now
-                            accuracy_status = "pass_due_to_skip"
-                            return record_status(accuracy_status)
-                    else:
-                        accuracy_status = "fail_to_run"
-                        return record_status(accuracy_status)
+                    accuracy_status = "fail_to_run"
+                    return record_status(accuracy_status)
 
             if not same(
                 correct_result,
