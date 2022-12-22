@@ -35,10 +35,12 @@ from functorch import (
 from torch._functorch.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from torch._functorch.eager_transforms import enable_fwd_grad, _slice_argnums
+from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
 from torch._ops import PyOperator
 from torch._functorch.utils import enable_autograd_function
+from torch.autograd.function import _set_autograd_function_extension_enabled
+import torch.autograd.forward_ad as fwAD
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -978,6 +980,295 @@ class TestGradTransform(TestCase):
         self.assertEqual(z, 2)
 
 
+class TestAutogradFunction(TestCase):
+    @_set_autograd_function_extension_enabled()
+    def test_set_materialize_grads(self, device):
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(x, y):
+                return x, y
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                ctx.set_materialize_grads(False)
+
+            @staticmethod
+            def backward(ctx, gx, gy):
+                self.assertIsNotNone(gx)
+                self.assertIsNone(gy)
+                return gx, gy
+
+        def f(y, x):
+            x, y = A.apply(x, y)
+            return x ** 2
+
+        x = torch.tensor(2., device=device)
+        y = torch.tensor(3., device=device)
+        # grad differentiates w.r.t. arg 0 by default
+        grad(f)(y, x)
+        grad(grad(f))(y, x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_needs_input_grads(self, device):
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(x, y):
+                return x * y
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                return
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                self.assertTrue(ctx.needs_input_grad[0])
+                self.assertFalse(ctx.needs_input_grad[1])
+                return None, None
+
+        x = torch.tensor(2., device=device)
+        y = torch.tensor(3., device=device)
+        # grad differentiates w.r.t. arg 0 by default
+        grad(A.apply)(x, y)
+        grad(grad(A.apply))(x, y)
+
+    def _get_NumpyCubeNotComposable(self):
+        class NumpyCubeNotComposable(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                input_np = input.cpu().numpy()
+                return torch.tensor(input_np ** 3, device=input.device), input_np
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                ctx.input_np = outputs[1]
+                ctx.device = inputs[0].device
+
+            @staticmethod
+            @torch.autograd.function.once_differentiable
+            def backward(ctx, grad_output, grad_saved):
+                result_np = 3 * (ctx.input_np ** 2)
+                return torch.tensor(result_np, device=ctx.device)
+
+        return NumpyCubeNotComposable
+
+    @_set_autograd_function_extension_enabled()
+    def test_once_differentiable_autograd_vjp(self, device):
+        NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
+
+        def f(x):
+            y, _ = NumpyCubeNotComposable.apply(x)
+            return y
+
+        # regular autograd x vjp
+        x = torch.randn([], requires_grad=True, device=device)
+        grad_y = torch.randn_like(x, requires_grad=True)
+        _, vjp_fn = vjp(f, x)
+        gx, = vjp_fn(grad_y)
+
+        with self.assertRaisesRegex(RuntimeError, "marked with @once_differentiable"):
+            gx.backward()
+
+    # TODO: support torch.autograd.function.once_differentiable
+    # (or, if impossible, figure out how to raise a nice error)
+    # https://github.com/pytorch/pytorch/issues/90224
+    @unittest.expectedFailure
+    @_set_autograd_function_extension_enabled()
+    def test_once_differentiable_grad_vjp(self, device):
+        NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
+
+        # grad x vjp
+        x = torch.randn([], device=device)
+        grad_y = torch.randn_like(x)
+
+        def h(x, grad_y):
+            _, vjp_fn = vjp(f, x)
+            gx, = vjp_fn(grad_y)
+            return gx
+
+        grad(h, argnums=(0, 1))(x, grad_y)
+
+    @_set_autograd_function_extension_enabled()
+    def test_grad_fn_name(self, device):
+        names = []
+
+        class FooBar(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                return
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def f(x):
+            y = FooBar.apply(x)
+            names.append(type(y.grad_fn).__name__)
+            return y
+
+        x = torch.tensor(1.)
+        grad(f)(x)
+        self.assertEqual(names, ['FooBarGeneratedBackward'])
+
+
+class TestAutogradFunctionVmapAPI(TestCase):
+    @_set_autograd_function_extension_enabled()
+    def test_no_vmap_staticmethod_and_no_generate_vmap_rule(self, device):
+        class NumpyCube(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                input_np = to_numpy(input)
+                dinput = torch.tensor(3 * input_np ** 2, device=input.device)
+                return torch.tensor(input_np ** 3, device=input.device), dinput
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                ctx.save_for_backward(input, outputs[1])
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                raise RuntimeError("foobar")
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'does not have a vmap rule defined'):
+            vmap(NumpyCube.apply)(x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_has_vmap_staticmethod_and_has_generate_vmap_rule(self, device):
+        class NumpyCube(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(input):
+                input_np = to_numpy(input)
+                dinput = torch.tensor(3 * input_np ** 2, device=input.device)
+                return torch.tensor(input_np ** 3, device=input.device), dinput
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                ctx.save_for_backward(input, outputs[1])
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                raise RuntimeError("foobar")
+
+            @staticmethod
+            def vmap(infos, in_dims, x):
+                raise RuntimeError("foobar")
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'generate_vmap_rule=True and a vmap staticmethod'):
+            vmap(NumpyCube.apply)(x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_info_object(self, device):
+        batch_size = 10
+
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                pass
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                self.assertEqual(info.batch_size, batch_size)
+                self.assertEqual(info.randomness, randomness)
+                return input, in_dims[0]
+
+        x = torch.randn(batch_size, 3, device=device)
+
+        for randomness in ('error', 'different', 'same'):
+            vmap(Id.apply, randomness=randomness)(x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_in_dims_single_input(self, device):
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                pass
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                self.assertEqual(in_dims, (1,))
+                return input, in_dims[0]
+
+        B = 10
+        x = torch.randn(3, B, device=device)
+        vmap(Id.apply, in_dims=1)(x)
+        vmap(Id.apply, in_dims=(1,))(x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_in_dims_multiple_inputs(self, device):
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                pass
+
+            @staticmethod
+            def setup_context(ctx, outputs, x, y):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, x, y):
+                self.assertEqual(in_dims, (0, [0, 0]))
+                self.assertTrue(isinstance(in_dims, tuple))
+                self.assertTrue(isinstance(in_dims[1], list))
+                return (x, y), in_dims
+
+        x = torch.randn(2, device=device)
+        vmap(Id.apply)(x, [x, x])
+
+    @_set_autograd_function_extension_enabled()
+    def test_skips_empty_layer(self, device):
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                raise RuntimeError("expected to not be called")
+
+        def f(x):
+            y = torch.tensor(1.)
+            y = Id.apply(y)
+            return x * 1
+
+        x = torch.randn(2, 3)
+        vmap(f)(x)
+
+
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
         def compute_loss(weight, x, t):
@@ -1608,6 +1899,41 @@ class TestJac(TestCase):
         out_val = out(x, y, z)
         self.assertEqual(out_val, expected_out)
 
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        y = torch.randn(1, 2, device=device)
+
+        def f(x, y):
+            return (x.sin(), x + y), (x + 2, x.sum())
+
+        for chunk_size in (1, 2, 3, 4, 7, 10, 1000):
+            expected = jacrev(f, argnums=(0, 1))(x, y)
+            actual = jacrev(f, argnums=(0, 1),
+                            chunk_size=chunk_size,
+                            _preallocate_and_copy=_preallocate_and_copy)(x, y)
+            self.assertEqual(actual, expected)
+
+        err_msg = "jacrev: `chunk_size` should be greater than 0."
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
+
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=-2)(x, y)
+
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev_composition(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        chunk_size = 3
+
+        def f(x):
+            return (x.sin(), x), (x + 2, x.sum())
+
+        expected = vmap(jacrev(jacrev(f)))(x)
+        actual = vmap(jacrev(jacrev(f, chunk_size=chunk_size,
+                             _preallocate_and_copy=_preallocate_and_copy), chunk_size=chunk_size))(x)
+        self.assertEqual(actual, expected)
+
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
@@ -1910,28 +2236,13 @@ class TestJvp(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
                 _ = jvp(lambda x: (x, [x, aux]), (x, ), (t, ), has_aux=True)
 
-    def test_fwd_grad_enabled(self, device):
-        # Tests some private helper functions to enable/disable fwd grad mode
-        enabled = torch._C._functorch.get_fwd_grad_enabled()
-        self.assertTrue(enabled)
-
-        try:
-            torch._C._functorch.set_fwd_grad_enabled(False)
-            enabled = torch._C._functorch.get_fwd_grad_enabled()
-            self.assertFalse(enabled)
-        finally:
-            torch._C._functorch.set_fwd_grad_enabled(True)
-
-        enabled = torch._C._functorch.get_fwd_grad_enabled()
-        self.assertTrue(enabled)
-
     def test_autograd_function_disables_fwd_grad(self, device):
         # Sanity check. We don't really assume this anywhere so
         # it's fine if this breaks one day.
         class MySquare(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                enabled = torch._C._functorch.get_fwd_grad_enabled()
+                enabled = fwAD._is_fwd_grad_enabled()
                 self.assertFalse(enabled)
                 return x * x
 
@@ -1942,32 +2253,16 @@ class TestJvp(TestCase):
         x = torch.randn(3, requires_grad=True)
         MySquare.apply(x)
 
-    def test_enable_fwd_grad(self, device):
-        # Tests a private helper function
-        try:
-            torch._C._functorch.set_fwd_grad_enabled(False)
-            enabled = torch._C._functorch.get_fwd_grad_enabled()
-            self.assertFalse(enabled)
-
-            with enable_fwd_grad():
-                enabled = torch._C._functorch.get_fwd_grad_enabled()
-                self.assertTrue(enabled)
-
-            enabled = torch._C._functorch.get_fwd_grad_enabled()
-            self.assertFalse(enabled)
-        finally:
-            torch._C._functorch.set_fwd_grad_enabled(True)
-
     def test_disable_fwd_grad_outside(self, device):
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
-        with enable_fwd_grad(False):
+        with fwAD._set_fwd_grad_enabled(False):
             _, y = jvp(torch.sin, (x,), (t,))
         self.assertEqual(y, x.cos())
 
     def test_disable_fwd_grad_inside(self, device):
         def f(x):
-            with enable_fwd_grad(False):
+            with fwAD._set_fwd_grad_enabled(False):
                 shift = x ** 2
             return x ** 2 - shift
 
@@ -1980,13 +2275,13 @@ class TestJvp(TestCase):
 
     def test_disable_fwd_grad_mixed(self, device):
         def f(x):
-            with enable_fwd_grad(False):
+            with fwAD._set_fwd_grad_enabled(False):
                 shift = x ** 2
             return x ** 2 - shift
 
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
-        with enable_fwd_grad():
+        with fwAD._set_fwd_grad_enabled(True):
             _, y = jvp(f, (x,), (t,))
 
         self.assertEqual(y, 2 * x)
@@ -2181,6 +2476,163 @@ class TestVmapJvpInplaceView(TestCase):
 
         self.assertEqual(tangents[0], yt.movedim(2, 0)[:, 0])
         self.assertEqual(tangents[1], yt.movedim(2, 0))
+
+
+# Use for testing miscellaneous helper functions
+class TestHelpers(TestCase):
+    def test_CtxWithSavedTensors_error_if_name_collision(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device, requires_grad=True)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx._pt_inner_ctx = 1
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, (y,))
+                return gy
+
+        class B(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx._pt_new_saved_tensors = 1
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, (y,))
+                return gy
+
+        out = A.apply(x)
+        with self.assertRaisesRegex(RuntimeError, 'name collision'):
+            out.backward()
+        out = B.apply(x)
+        with self.assertRaisesRegex(RuntimeError, 'name collision'):
+            out.backward()
+
+    def test_CtxWithSavedTensors_nesting(self, device):
+        CtxWithSavedTensors = torch._functorch.autograd_function.CtxWithSavedTensors
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device)
+        z = torch.randn([], device=device)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                ctx_y = CtxWithSavedTensors(ctx, (y,))
+                # Can't use self.assertEqual because that relies on TLS
+                # that is not available in multithread autograd
+                assert len(ctx_y.saved_tensors) == 1
+                assert torch.allclose(ctx_y.saved_tensors[0], y)
+
+                wrapped = CtxWithSavedTensors(ctx_y, (z,))
+
+                assert len(wrapped.saved_tensors) == 1
+                assert torch.allclose(wrapped.saved_tensors[0], z)
+
+                assert len(ctx_y.saved_tensors) == 1
+                assert torch.allclose(ctx_y.saved_tensors[0], y)
+
+                return gy * wrapped.saved_tensors[0]
+
+        out = A.apply(x)
+        out.backward()
+        self.assertEqual(x.grad, z)
+
+    def test_CtxWithSavedTensors_overrides_saved_tensors(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                # The override can be literally anything
+                override = (1, 2, 3)
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, override)
+                assert wrapped.saved_tensors == override
+                return gy
+
+        out = A.apply(x)
+        out.backward()
+
+    def test_CtxWithSavedTensors_passthrough(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x, y)
+                return x * y
+
+            @staticmethod
+            def backward(ctx, gz):
+                # The override can be literally anything
+                override = (1, 2, 3)
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, override)
+
+                assert wrapped.needs_input_grad[0] == ctx.needs_input_grad[0]
+                assert wrapped.needs_input_grad[1] == ctx.needs_input_grad[1]
+                wrapped.foo = 'bar'
+                assert wrapped.foo == 'bar'
+                assert ctx.foo == 'bar'
+                return gz, gz
+
+        out = A.apply(x, y)
+        out.backward()
+
+    def test_reductify_leaf(self, device):
+        reductify_leaf = torch._functorch.autograd_function.reductify_leaf
+        B = 2
+
+        # grad_input None case
+        output = reductify_leaf(None, None, 0, (3,), B)
+        self.assertIsNone(output)
+        output = reductify_leaf(None, None, None, (4, 3), B)
+        self.assertIsNone(output)
+
+        # grad_input has bdim, input does not have bdim
+        grad_input = torch.randn([B, 3, 4], device=device)
+        output = reductify_leaf(grad_input, 0, None, (3, 4), B)
+        self.assertEqual(output, grad_input.sum(0))
+
+        grad_input = torch.randn([3, B, 4], device=device)
+        output = reductify_leaf(grad_input, 1, None, (3,), B)
+        self.assertEqual(output, grad_input.sum(1))
+
+        # grad_input does not have bdim, input has bdim
+        # This can happen if the user returns a fresh Tensor from the backward pass
+        # that is unrelated to the input
+        grad_input = torch.randn([3, 4], device=device)
+        output = reductify_leaf(grad_input, None, 1, (3, 4), B)
+        self.assertEqual(output, grad_input.view(3, 1, 4).expand(3, B, 4))
+
+        grad_input = torch.randn([3, 4], device=device)
+        output = reductify_leaf(grad_input, None, 1, (4,), B)
+        self.assertEqual(output, grad_input.view(3, 4, 1).expand(3, 4, B).sum(0))
+
+        # grad_input has bdim, input has bdim
+        grad_input = torch.randn([B, 3, 4], device=device)
+        output = reductify_leaf(grad_input, 0, 1, (3, 4), B)
+        self.assertEqual(output, grad_input.movedim(0, 1))
+
+        grad_input = torch.randn([3, 4, 5, B], device=device)
+        output = reductify_leaf(grad_input, 3, 0, (5,), B)
+        self.assertEqual(output, grad_input.movedim(-1, 2).sum(0).sum(0))
 
 
 class TestComposability(TestCase):
@@ -2404,20 +2856,42 @@ class TestComposability(TestCase):
 
         x = torch.randn([])
 
-        # by default, autograd.Function is disabled in a functorch transform
-        with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
-            grad(MySin.apply)(x)
+        with torch.autograd.function._set_autograd_function_extension_enabled(False):
+            # by default, autograd.Function is disabled in a functorch transform
+            with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
+                grad(MySin.apply)(x)
 
-        # we have a debug switch to allow it
-        self.assertFalse(torch._C._functorch.get_autograd_function_allowed())
-        try:
-            torch._C._functorch.set_autograd_function_allowed(True)
-            self.assertTrue(torch._C._functorch.get_autograd_function_allowed())
-            y = grad(MySin.apply)(x)
-        finally:
-            torch._C._functorch.set_autograd_function_allowed(False)
-        self.assertFalse(torch._C._functorch.get_autograd_function_allowed())
-        self.assertEqual(y, x.cos())
+            # we have a debug switch to allow it
+            self.assertFalse(torch._C._functorch.get_autograd_function_allowed())
+            try:
+                torch._C._functorch.set_autograd_function_allowed(True)
+                self.assertTrue(torch._C._functorch.get_autograd_function_allowed())
+                y = grad(MySin.apply)(x)
+            finally:
+                torch._C._functorch.set_autograd_function_allowed(False)
+            self.assertFalse(torch._C._functorch.get_autograd_function_allowed())
+            self.assertEqual(y, x.cos())
+
+    @_set_autograd_function_extension_enabled()
+    @parametrize('transform', [
+        'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
+    ])
+    def test_autograd_function_no_setup_context(self, device, transform):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, gy):
+                x, = ctx.saved_tensors
+                return gy * x.cos()
+
+        x = torch.randn(3, device=device)
+        transform = getattr(functorch, transform)
+        with self.assertRaisesRegex(RuntimeError, 'must have a setup_context'):
+            transform(MySin.apply)(x)
 
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
@@ -3243,7 +3717,7 @@ class TestFunctionalize(TestCase):
             z = y2[0]
             z.add_(tmp)
             return y
-        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device), skip_vmap=True)
 
     # See https://github.com/pytorch/functorch/issues/780
     def test_linear(self, device):
@@ -3366,6 +3840,7 @@ def forward(self, x_1) -> torch.Tensor:
     view_copy = torch.ops.aten.view_copy.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view_copy, ones);  view_copy = ones = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4, 2]);  add = None
+    view_copy_2 = torch.ops.aten.view_copy.default(view_copy_1, [4, 2])
     copy_ = torch.ops.aten.copy_.default(x_1, view_copy_1);  x_1 = None
     return view_copy_1
     """)
@@ -3409,6 +3884,7 @@ def forward(self, inpt_1) -> torch.Tensor:
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4]);  add = None
     add_1 = torch.ops.aten.add.Tensor(view_copy_1, 1);  view_copy_1 = None
     view_copy_2 = torch.ops.aten.view_copy.default(add_1, [4]);  add_1 = None
+    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4])
     return view_copy_2
     """)
 
@@ -3438,6 +3914,7 @@ def forward(self, inpt_1) -> torch.Tensor:
     getitem = aminmax[0]
     getitem_1 = aminmax[1];  aminmax = None
     view_copy_2 = torch.ops.aten.view_copy.default(getitem_1, [2, 2]);  getitem_1 = None
+    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4])
     return (view_copy_2, getitem)
     """)
 
@@ -3460,6 +3937,7 @@ def forward(self, x_1) -> torch.Tensor:
     view = torch.ops.aten.view.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
     view_1 = torch.ops.aten.view.default(add, [4, 2]);  add = None
+    view_2 = torch.ops.aten.view.default(view_1, [4, 2])
     copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = None
     return view_1
     """)
@@ -3568,7 +4046,7 @@ def construct_sum_pyop():
     def mysum_grad_rule(interpreter, x, dim):
         level = interpreter.level()
 
-        class MySum(torch.autograd.Function):
+        class MySum(torch.autograd.function._SingleLevelFunction):
             @staticmethod
             def forward(ctx, x, dim):
                 ctx.x_shape = x.shape
@@ -3711,6 +4189,21 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestFunctionalize,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestAutogradFunction,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestAutogradFunctionVmapAPI,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestHelpers,
     globals(),
     only_for=only_for,
 )

@@ -188,7 +188,7 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, TupleVariable
+        from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
 
         kwargs = dict(kwargs)
@@ -337,6 +337,24 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif (
+            name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
+        ):
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, args + [kwargs["alpha"]], {}
+            )
+            return self.call_method(tx, "add_", [result], {})
+        elif (
+            name == "addcdiv_"
+            and len(args) == 2
+            and len(kwargs) == 1
+            and "value" in kwargs
+        ):
+            result = TorchVariable(torch.div, **options).call_function(tx, args, {})
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, [result, kwargs["value"]], {}
+            )
+            return self.call_method(tx, "add_", [result], {})
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
