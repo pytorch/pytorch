@@ -88,7 +88,8 @@ int run(
     at::Tensor tensor_a,
     at::Tensor tensor_b,
     at::Tensor tensor_c,
-    at::Tensor tensor_d) {
+    at::Tensor tensor_d,
+    at::Tensor meta) {
   // tensor a is m x (k // kSparse); tensor b is k x n
   const int length_m = tensor_a.size(0);
   const int length_k = tensor_b.size(0);
@@ -119,8 +120,16 @@ int run(
   // Create a tuple of problem size for matrix multiplication
   cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
 
-  // TODO:
-  // Feed tensor_e as CPU int16 Tensor.
+  TORCH_CHECK(meta.size(0) == problem_size.m(), "meta.size(0) expected to be ", problem_size.m(), " but got ", meta.size(0));
+  TORCH_CHECK(meta.size(1) == (problem_size.k() / kSparse / kElementsPerElementE), "meta.size(0) expected to be ", (problem_size.k() / kSparse / kElementsPerElementE), " but got ", meta.size(0));
+  TORCH_CHECK(meta.dtype() == at::kShort, "Expected meta dtype to be int16, but got ", meta.dtype());
+
+  TORCH_CHECK(tensor_a.device() == tensor_b.device(), "Check 0: Expected all Tensors to live on the GPU.");
+  TORCH_CHECK(tensor_b.device() == tensor_c.device(), "Check 1: Expected all Tensors to live on the GPU.");
+  TORCH_CHECK(tensor_c.device() == tensor_d.device(), "Check 2: Expected all Tensors to live on the GPU.");
+  TORCH_CHECK(tensor_d.device() == meta.device(),     "Check 3: Expected all Tensors to live on the GPU.");
+
+  // TODO
   // Try various valid 2:4 meta configurations
   // 0x4 0100
   // 0x8 1000
@@ -129,48 +138,14 @@ int run(
   // 0xd 1101
   // 0xe 1110
 
-  // Create matrix E with dimensions M x (K / 2 / kElementsPerElementE). This one is used by reference computing.
-  cutlass::HostTensor<ElementInputE, LayoutInputE> tensor_e(
-      cutlass::make_Coord(problem_size.m(), problem_size.k() / kSparse / kElementsPerElementE));
-  // Same size as the above.  The above one needs to be reordered and stored in this one.
-  cutlass::HostTensor<ElementInputE, ReorderedLayoutInputE> tensor_e_reordered(
-      cutlass::make_Coord(problem_size.m(), problem_size.k() / kSparse / kElementsPerElementE));
-
-  cutlass::reference::host::TensorFillRandomSparseMeta(
-      tensor_e.host_view(),
-      1,
-      kMetaSizeInBits);   // <- Fill matrix E on host with uniform-distribution random meta data
-
-  // Reorder the meta data matrix so that we can use ldmatrix to load them to tensor core
-  // instructions.
-  cutlass::reorder_meta(tensor_e_reordered.host_ref(), tensor_e.host_ref(),
-                        {problem_size.m(), problem_size.n(),
-                         problem_size.k() / kSparse / kElementsPerElementE});
-
-  // tensor_e_reordered.sync_device();
-
-  auto tensor_e_reordered_pt = at::empty(
-      {problem_size.m(), problem_size.k() / kSparse / kElementsPerElementE},
-      at::TensorOptions().dtype(at::kShort));
-
-  int16_t* eptr = tensor_e_reordered_pt.data_ptr<int16_t>();
-  uint16_t* eptr_cutlass = tensor_e_reordered.host_ref().data();
-  for (size_t i = 0; i < tensor_e_reordered_pt.numel(); i++) {
-    eptr[i] = static_cast<int16_t>(eptr_cutlass[i]);
-  }
-
-  tensor_e_reordered_pt = tensor_e_reordered_pt.to(tensor_a.device());
-
-//  std::cout << "tensor_e_reordered_pt: " << tensor_e_reordered_pt << std::endl;
-
   // Initialize alpha and beta for dot product computation
   float alpha = 1;
   float beta  = 0;
 
-  LayoutInputA layout_a;
-  LayoutInputB layout_b;
-  LayoutOutput layout_c;
-  LayoutOutput layout_d;
+  LayoutInputA layout_a(tensor_a.stride(0));
+  LayoutInputB layout_b(tensor_b.stride(0));
+  LayoutOutput layout_c(tensor_c.stride(0));
+  LayoutOutput layout_d(tensor_d.stride(0));
 
   // Split K dimension into 1 partitions
   int split_k_slices = 1;
@@ -180,7 +155,7 @@ int run(
   auto tensor_d_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutOutput>((cutlass::half_t*)tensor_d.data_ptr<at::Half>(), layout_d);
 
   ReorderedLayoutInputE layout_e;
-  auto tensor_e_reordered_pt_device_ref = cutlass::TensorRef<uint16_t, ReorderedLayoutInputE>((uint16_t*)tensor_e_reordered_pt.data_ptr<int16_t>(), layout_e);
+  auto tensor_e_reordered_pt_device_ref = cutlass::TensorRef<uint16_t, ReorderedLayoutInputE>((uint16_t*)meta.data_ptr<int16_t>(), layout_e);
 
   // Create a tuple of gemm kernel arguments. This is later passed as arguments to launch
   // instantiated CUTLASS kernel
@@ -220,9 +195,9 @@ namespace at {
 namespace native {
 
 // TODO: Pull back in device and cuda version constraints.
-Tensor _cusparselt_linear(const Tensor& sparse, const Tensor& dense) {
+Tensor _cusparselt_linear(const Tensor& sparse, const Tensor& dense, const Tensor& meta) {
   auto result = sparse.new_empty({sparse.size(0), dense.size(1)}); //.fill_(1);
-  run(sparse, dense, result, result);
+  run(sparse, dense, result, result, meta);
   return result;
 }
 

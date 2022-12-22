@@ -3798,7 +3798,7 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
-- func: _cusparselt_linear(Tensor sparse, Tensor dense) -> Tensor
+- func: _cusparselt_linear(Tensor sparse, Tensor dense, Tensor meta) -> Tensor
   dispatch:
     CUDA: _cusparselt_linear
 
