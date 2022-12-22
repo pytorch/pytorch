@@ -48,7 +48,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'compile',
+    'compile', 'vmap',
 ]
 
 ################################################################################
@@ -746,6 +746,32 @@ def is_warn_always_enabled():
     """
     return _C._get_warnAlways()
 
+def enable_check_sparse_tensor_invariants(enable: bool = True):
+    r"""Enable or disable sparse tensor invariants check in
+    sparse tensor constructors.
+
+    .. note::
+
+      By default, the sparse tensor invariants check flag is
+      disabled. Use :func:`is_check_sparse_tensor_invariants_enabled`
+      to get the current state of the flag.
+
+    .. note::
+
+      The sparse tensor invariants check flag has global effect in the
+      sense that it is effective to all sparse tensor constructors,
+      both in Python and ATen.
+
+      The flag can be locally overridden by the ``check_invariants``
+      optional argument of the sparse tensor constructor functions.
+    """
+    torch._C._set_check_sparse_tensor_invariants(enable)
+
+def is_check_sparse_tensor_invariants_enabled() -> bool:
+    r"""Returns True if the sparse tensor invariants check is enabled.
+    """
+    return torch._C._check_sparse_tensor_invariants()
+
 ################################################################################
 # Define numeric constants
 ################################################################################
@@ -1116,8 +1142,6 @@ del register_after_fork
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg as lobpcg
 
-from ._vmap_internals import vmap as vmap
-
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
 # class usage. We add these lines here to preserve backward compatibility.
@@ -1245,3 +1269,4 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 import torch.fx.experimental.symbolic_shapes
 
 from torch import func as func
+from torch.func import vmap

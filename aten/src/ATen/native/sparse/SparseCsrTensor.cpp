@@ -480,9 +480,6 @@ Tensor sparse_compressed_tensor(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
 
-  if (!at::globalContext().checkSparseTensorInvariants()) {
-    _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout_);
-  } // otherwise arguments are validated in _sparse_compressed_tensor_unsafe
   return at::native::_sparse_compressed_tensor_unsafe(
       compressed_indices,
       plain_indices,
@@ -514,9 +511,6 @@ Tensor sparse_compressed_tensor(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
 
-  if (!at::globalContext().checkSparseTensorInvariants()) {
-    _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout_);
-  } // otherwise arguments are validated in _sparse_compressed_tensor_unsafe
   return at::native::_sparse_compressed_tensor_unsafe(
       compressed_indices,
       plain_indices,

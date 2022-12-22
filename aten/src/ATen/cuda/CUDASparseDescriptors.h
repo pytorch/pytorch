@@ -143,9 +143,9 @@ class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
 class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
     : public CuSparseDescriptor<cusparseSpMatDescr, &cusparseDestroySpMat> {};
 
-#endif //AT_USE_HIPSPARSE_GENERIC_52_API() || (AT_USE_CUSPARSE_GENERIC_API() || AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS())
+//AT_USE_HIPSPARSE_GENERIC_52_API() || (AT_USE_CUSPARSE_GENERIC_API() && AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS())
 
-#if AT_USE_CUSPARSE_CONST_DESCRIPTORS()
+#elif AT_USE_CUSPARSE_CONST_DESCRIPTORS()
   class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
       : public ConstCuSparseDescriptor<
             cusparseDnMatDescr,

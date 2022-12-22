@@ -2233,6 +2233,22 @@ class TestCase(expecttest.TestCase):
         check_if_enable(self)
         set_rng_seed(SEED)
 
+        # Save global check sparse tensor invariants state that can be
+        # restored from dearDown:
+        self._check_invariants = torch.is_check_sparse_tensor_invariants_enabled()
+
+        # Enable invariant checks for all sparse tensors constructions
+        # including the unsafe ones. If this is not desired for some
+        # test case, use check_invariants=False optional argument to
+        # sparse tensor constructors or
+        # @CheckSparseTensorInvariants(False) decorator from
+        # test/test_sparse.py to disable the invariant checks.
+        torch.enable_check_sparse_tensor_invariants(True)
+
+    def dearDown(self):
+        # Restore the global check sparse tensor invariants state
+        torch.enable_check_sparse_tensor_invariants(self._check_invariants)
+
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
                            *, device, dtype, random=True):
