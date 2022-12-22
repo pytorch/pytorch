@@ -9,7 +9,7 @@ from typing import Dict, List
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
-from ..source import AttrSource, DefaultsSource, GetItemSource
+from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import istensor, make_cell
 from .base import typestr, VariableTracker
 
@@ -321,7 +321,7 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
     return tx.output.register_attr_or_module(
         res,
         name,
-        source=None,  # constant!
+        source=ConstantSource(name),
         **options,
     )
 

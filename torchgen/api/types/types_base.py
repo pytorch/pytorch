@@ -14,7 +14,7 @@ Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 """
 from abc import ABC
 from dataclasses import dataclass
-from enum import Enum
+from enum import auto, Enum
 from typing import List, Optional, Union
 
 from torchgen.model import Argument, SelfArgument, TensorOptionsArguments
@@ -24,7 +24,11 @@ from torchgen.model import Argument, SelfArgument, TensorOptionsArguments
 # context.  The Enum SpecialArgName covers all of these cases;
 # grep for their construction sites to see when they can occr.
 
-SpecialArgName = Enum("SpecialArgName", ("possibly_redundant_memory_format",))
+
+class SpecialArgName(Enum):
+    possibly_redundant_memory_format = auto()
+
+
 ArgName = Union[str, SpecialArgName]
 
 
