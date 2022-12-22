@@ -2307,13 +2307,17 @@ class ConcatKernel(NopKernel):
                     )
             offsets_end.append(new_size[dim])
 
+        with V.graph.fake_mode:
+            x_fake = [ir_node_to_tensor(x, guard_shape=True) for x in inputs]
+            output = torch.ops.aten.cat(x_fake, dim)
+
         kernel = ConcatKernel(
             name=None,
             layout=FixedLayout(
                 device=device,
                 dtype=dtype,
                 size=new_size,
-                stride=FlexibleLayout.contiguous_strides(new_size),
+                stride=output.stride(),
             ),
             inputs=[],
         )
@@ -4019,6 +4023,8 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):
+            self.name = "CaptureIndexing"
+
             def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, "reads", name)
                 return self._inner.load(name, index)
@@ -4101,6 +4107,7 @@ class LoopBodyBlock:
                 self.garbage_collect_values = False
                 self.env = {}
                 self.fetch_attr = submodules.__getitem__
+                self.name = V.get_ops_handler().name
 
         return InterpreterShim().run(V.get_ops_handler())
 
