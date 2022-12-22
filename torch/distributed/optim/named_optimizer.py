@@ -5,8 +5,10 @@ from copy import deepcopy
 from typing import Any, Collection, Dict, List, Mapping, Union
 
 import torch
+import torch.nn as nn
 from torch import optim
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
 __all__: List[str] = []
@@ -60,6 +62,7 @@ class _NamedOptimizer(optim.Optimizer):
         named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
         optimizer_class: optim.Optimizer,
         param_groups: Collection[Mapping[str, Any]] = None,
+        module: nn.Module = None,
         *args,
         **kwargs,
     ) -> None:
@@ -75,6 +78,7 @@ class _NamedOptimizer(optim.Optimizer):
             *args,
             **kwargs,
         )
+        self.module = module
         if param_groups is None:
             self.ordered_param_keys = list(self.named_parameters.keys())
         else:
@@ -136,7 +140,7 @@ class _NamedOptimizer(optim.Optimizer):
                     ret_group[k] = deepcopy(v)
             ret_groups.append(ret_group)
 
-        return {"state": ret_state, "param_groups": ret_groups}
+        return self._post_state_dict({"state": ret_state, "param_groups": ret_groups})
 
     def step(self):
         """
@@ -176,6 +180,7 @@ class _NamedOptimizer(optim.Optimizer):
             By doing this, we can validate the optim ``state_dict`` to be loaded.
         """
         new_state_dict = self._optimizer.state_dict()
+        state_dict = self._pre_load_state_dict(state_dict)
         state = state_dict["state"]
         new_state = new_state_dict["state"]
         if len(new_state) == 0:
@@ -267,6 +272,16 @@ class _NamedOptimizer(optim.Optimizer):
         raise NotImplementedError(
             "add_param_group not supported yet and might be implemented soon."
         )
+
+    def _pre_load_state_dict(self, state_dict) -> None:
+        if isinstance(self.module, FSDP):
+            return FSDP._load_optim_state_dict_pre_hook(self.module, self._optimizer, state_dict)
+        return state_dict
+    
+    def _post_state_dict(self, state_dict) -> None:
+        if isinstance(self.module, FSDP):
+            FSDP._optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
+        return state_dict
 
 
 def _gen_param_group_key(param_keys: List[str]) -> str:
