@@ -1,4 +1,3 @@
-// (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 // clang-format off
 // Generated code for registering custom operators into the dispatcher.
 

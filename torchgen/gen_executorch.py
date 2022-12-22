@@ -333,7 +333,7 @@ def gen_custom_ops(
             "nativeFunctions_declarations": get_native_function_declarations(
                 grouped_native_functions=native_functions,
                 backend_indices=backend_indices,
-                native_function_decl_gen=dest.compute_native_function_declaration
+                native_function_decl_gen=dest.compute_native_function_declaration,
             ),
         },
     )
