@@ -1,3 +1,6 @@
+# TODO: rename executorch to qnnpack_executorch since executorch is a general runtime
+# not a specific backend
+
 import operator
 from typing import List
 import torch
@@ -55,6 +58,13 @@ executorch_default_dynamic_float16_dtype_config = DTypeConfig(
     bias_dtype=torch.float,
     is_dynamic=True,
 )
+
+executorch_weight_only_quint8_dtype_config = DTypeConfig(
+    input_dtype=torch.float,
+    output_dtype=torch.float,
+    weight_dtype=torch.quint8,
+)
+
 
 # =============================
 # |  BACKEND PATTERN CONFIGS  |
@@ -233,6 +243,33 @@ def _get_cat_configs() -> List[BackendPatternConfig]:
         .set_dtype_configs(dtype_configs))
     return cat_configs
 
+def _get_embedding_op_configs() -> List[BackendPatternConfig]:
+    dtype_configs = [
+        executorch_weight_only_quint8_dtype_config,
+    ]
+    embedding_op_configs = []
+    for embedding_op, qat_embedding_op, ref_embedding_op in [
+            (nn.Embedding, nnqat.Embedding, nnqr.Embedding),
+            (nn.EmbeddingBag, nnqat.EmbeddingBag, nnqr.EmbeddingBag),
+    ]:
+        embedding_op_configs.append(
+            BackendPatternConfig(embedding_op)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                .set_qat_module(qat_embedding_op)
+                .set_root_module(embedding_op)
+                .set_reference_quantized_module(ref_embedding_op)
+                ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+        # config for qat op
+        embedding_op_configs.append(
+            BackendPatternConfig(qat_embedding_op)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                .set_root_module(embedding_op)
+                .set_reference_quantized_module(ref_embedding_op)
+                ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+    return embedding_op_configs
+
 # =====================
 # |  BACKEND CONFIGS  |
 # =====================
@@ -247,4 +284,5 @@ def get_executorch_backend_config() -> BackendConfig:
         .set_backend_pattern_configs(_get_binary_ops_configs()) \
         .set_backend_pattern_configs(_get_share_qparams_ops_configs()) \
         .set_backend_pattern_configs(_get_bn_configs()) \
-        .set_backend_pattern_configs(_get_cat_configs())
+        .set_backend_pattern_configs(_get_cat_configs()) \
+        .set_backend_pattern_configs(_get_embedding_op_configs())
