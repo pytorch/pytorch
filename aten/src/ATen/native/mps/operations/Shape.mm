@@ -229,28 +229,6 @@ TORCH_IMPL_FUNC(cat_out_mps)
 
   const Tensor* notSkippedTensor = NULL; // non-owning reference
 
-  // Check for type promotion
-  TORCH_CHECK(
-      canCast(result_type(inputs), out.scalar_type()),
-      "torch.cat(): input types ",
-      " can't be cast to the desired output type ",
-      out.scalar_type());
-
-  // Inputs cannot alias the output tensor
-  idx = 0;
-  for(const Tensor& t : materialized_inputs) {
-    auto lap = at::get_overlap_status(out, t);
-    TORCH_CHECK(
-        lap != at::MemOverlapStatus::Partial &&
-            lap != at::MemOverlapStatus::Full,
-        "torch.cat(): unsupported operation: the input tensors cannot refer to any "
-        "of the output memory locations. Found overlap in input "
-        "tensor ",
-        idx);
-    idx++;
-  }
-  at::assert_no_internal_overlap(out);
-
   // Indices of tensors to be skipped because they're empty
   std::vector<int64_t> skipped_tensor_indices;
   // Tensors to be read
@@ -316,10 +294,9 @@ TORCH_IMPL_FUNC(cat_out_mps)
   // skip resizing if size of result is same as expected
   if (out.sizes() != size || !out.is_contiguous(memory_format)) {
     out.resize_(size, memory_format);
-  }
-
-  if (out.numel() == 0) {
-    return;
+    if (out.numel() == 0) {
+      return;
+    }
   }
 
   if (out.is_contiguous()){
