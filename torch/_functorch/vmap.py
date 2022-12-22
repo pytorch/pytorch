@@ -529,7 +529,7 @@ def chunk_vmap(
     chunks at a time. For more details about vectorizing map, see :func:`vmap`.
 
     .. note::
-        Please use :func:vmap with ``chunk_size`` argument instead of this API.
+        Please use :func:`vmap` with ``chunk_size`` argument instead of this API.
 
     Args:
         func (function): A Python function that takes one or more arguments.
