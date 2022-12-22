@@ -7,6 +7,7 @@ import importlib
 import itertools
 import os
 import random
+import shutil
 import sys
 import typing
 import unittest
@@ -5889,6 +5890,22 @@ if HAS_CUDA:
             assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
+        counter = itertools.count(0)
+
+        class DebugDirManager(object):
+            def __init__(self):
+                self.id = next(TritonCodeGenTests.counter)
+                self.prev_debug_name = None
+
+            def __enter__(self):
+                self.prev_debug_name = torch._dynamo.config.debug_dir_root
+                self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
+                torch._dynamo.config.debug_dir_root = self.new_name
+
+            def __exit__(self, *args):
+                shutil.rmtree(self.new_name)
+                torch._dynamo.config.debug_dir_root = self.prev_debug_name
+
         from torch._inductor.triton_ops.autotune import CachingAutotuner
 
         class NoOpCompilerBackend:
@@ -5980,7 +5997,7 @@ if HAS_CUDA:
 
             context = DebugContext()
 
-            with patch.object(
+            with TritonCodeGenTests.DebugDirManager(), patch.object(
                 config.trace, "enabled", True
             ), context, V.set_debug_handler(context):
 
