@@ -11,6 +11,8 @@ from typing import Any, Callable, Optional, Tuple, Union, List
 from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec
 from .pytree_hacks import tree_map_
 from functools import partial
+import os
+import sys
 
 from torch._C._functorch import (
     _add_batch_dim,
@@ -18,6 +20,7 @@ from torch._C._functorch import (
     _vmap_decrement_nesting,
     _vmap_increment_nesting,
 )
+from torch._functorch.utils import exposed_in
 
 in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
@@ -25,7 +28,7 @@ out_dims_t = Union[int, Tuple[int, ...]]
 
 def doesnt_support_saved_tensors_hooks(f):
     message = (
-        "functorch transforms don't yet support saved tensor hooks. "
+        "torch.func transforms don't yet support saved tensor hooks. "
         "Please open an issue with your use case."
     )
 
@@ -194,6 +197,40 @@ def _get_name(func: Callable):
     # examples, don't have a __name__.
     return repr(func)
 
+
+DECOMPOSITIONS_LOADED = False
+VMAP_DECOMPOSITIONS_LIB = None
+
+# torch.package, Python 3.11, and torch.jit-less environments are unhappy with
+# decompositions. Only load them when needed if possible.
+def lazy_load_decompositions():
+    global DECOMPOSITIONS_LOADED
+    if DECOMPOSITIONS_LOADED:
+        return
+    DECOMPOSITIONS_LOADED = True
+
+    if not (os.environ.get("PYTORCH_JIT", "1" if sys.version_info < (3, 11) else "0") == "1" and
+            __debug__):
+        return
+    # use an alternate way to register an operator into the decomposition table
+    # _register_jit_decomposition doesn't work for some operators, e.g. addr,
+    #  because the Tensor types generated cannot be unioned by torchscript
+    # decomp should be type OpOverload
+    global VMAP_DECOMPOSITIONS_LIB
+    VMAP_DECOMPOSITIONS_LIB = torch.library.Library("aten", "IMPL", "FuncTorchBatched")
+
+    from torch._decomp import decomposition_table
+
+    def _register_python_decomposition_vmap(decomp):
+        if decomp in decomposition_table:
+            VMAP_DECOMPOSITIONS_LIB.impl(decomp, decomposition_table[decomp])
+        else:
+            raise RuntimeError(f"could not find decomposition for {decomp}")
+
+
+    _register_python_decomposition_vmap(torch.ops.aten.mse_loss_backward.default)
+    _register_python_decomposition_vmap(torch.ops.aten.addr.default)
+
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
 # on BatchedTensors perform the batched operations that the user is asking for.
@@ -201,7 +238,7 @@ def _get_name(func: Callable):
 # vmap's randomness behavior differs from JAX's, which would require a PRNG key
 # to be passed everywhere.
 
-
+@exposed_in('torch.func')
 def vmap(
         func: Callable,
         in_dims: in_dims_t = 0,
@@ -209,12 +246,12 @@ def vmap(
         randomness: str = 'error') -> Callable:
     """
     vmap is the vectorizing map; ``vmap(func)`` returns a new function that
-    maps :attr:`func` over some dimension of the inputs. Semantically, vmap
-    pushes the map into PyTorch operations called by :attr:`func`, effectively
+    maps ``func`` over some dimension of the inputs. Semantically, vmap
+    pushes the map into PyTorch operations called by ``func``, effectively
     vectorizing those operations.
 
     vmap is useful for handling batch dimensions: one can write a function
-    :attr:`func` that runs on examples and then lift it to a function that can
+    ``func`` that runs on examples and then lift it to a function that can
     take batches of examples with ``vmap(func)``. vmap can also be used to
     compute batched gradients when composed with autograd.
 
@@ -222,12 +259,12 @@ def vmap(
         func (function): A Python function that takes one or more arguments.
             Must return one or more Tensors.
         in_dims (int or nested structure): Specifies which dimension of the
-            inputs should be mapped over. :attr:`in_dims` should have a
-            structure like the inputs. If the :attr:`in_dim` for a particular
+            inputs should be mapped over. ``in_dims`` should have a
+            structure like the inputs. If the ``in_dim`` for a particular
             input is None, then that indicates there is no map dimension.
             Default: 0.
         out_dims (int or Tuple[int]): Specifies where the mapped dimension
-            should appear in the outputs. If :attr:`out_dims` is a Tuple, then
+            should appear in the outputs. If ``out_dims`` is a Tuple, then
             it should have one element per output. Default: 0.
         randomness (str): Specifies whether the randomness in this
             vmap should be the same or different across batches. If 'different',
@@ -239,24 +276,24 @@ def vmap(
 
     Returns:
         Returns a new "batched" function. It takes the same inputs as
-        :attr:`func`, except each input has an extra dimension at the index
-        specified by :attr:`in_dims`. It takes returns the same outputs as
-        :attr:`func`, except each output has an extra dimension at the index
-        specified by :attr:`out_dims`.
+        ``func``, except each input has an extra dimension at the index
+        specified by ``in_dims``. It takes returns the same outputs as
+        ``func``, except each output has an extra dimension at the index
+        specified by ``out_dims``.
 
     .. warning:
         :func:`vmap` works best with functional-style code. Please do not
-        perform any side-effects in :attr:`func`, with the exception of
+        perform any side-effects in ``func``, with the exception of
         in-place PyTorch operations. Examples of side-effects include mutating
         Python data structures and assigning values to variables not captured
-        in :attr:`func`.
+        in ``func``.
 
     One example of using :func:`vmap` is to compute batched dot products. PyTorch
     doesn't provide a batched ``torch.dot`` API; instead of unsuccessfully
     rummaging through docs, use :func:`vmap` to construct a new function.
 
         >>> torch.dot                            # [D], [D] -> []
-        >>> batched_dot = functorch.vmap(torch.dot)  # [N, D], [N, D] -> [N]
+        >>> batched_dot = torch.func.vmap(torch.dot)  # [N, D], [N, D] -> [N]
         >>> x, y = torch.randn(2, 5), torch.randn(2, 5)
         >>> batched_dot(x, y)
 
@@ -271,7 +308,7 @@ def vmap(
         >>>     return feature_vec.dot(weights).relu()
         >>>
         >>> examples = torch.randn(batch_size, feature_size)
-        >>> result = functorch.vmap(model)(examples)
+        >>> result = torch.func.vmap(model)(examples)
 
     :func:`vmap` can also help vectorize computations that were previously difficult
     or impossible to batch. One example is higher-order gradient computation.
@@ -296,46 +333,46 @@ def vmap(
         >>> # vectorized gradient computation
         >>> def get_vjp(v):
         >>>     return torch.autograd.grad(y, x, v)
-        >>> jacobian = functorch.vmap(get_vjp)(I_N)
+        >>> jacobian = torch.func.vmap(get_vjp)(I_N)
 
     :func:`vmap` can also be nested, producing an output with multiple batched dimensions
 
         >>> torch.dot                            # [D], [D] -> []
-        >>> batched_dot = functorch.vmap(functorch.vmap(torch.dot))  # [N1, N0, D], [N1, N0, D] -> [N1, N0]
+        >>> batched_dot = torch.func.vmap(torch.func.vmap(torch.dot))  # [N1, N0, D], [N1, N0, D] -> [N1, N0]
         >>> x, y = torch.randn(2, 3, 5), torch.randn(2, 3, 5)
         >>> batched_dot(x, y) # tensor of size [2, 3]
 
-    If the inputs are not batched along the first dimension, :attr:`in_dims` specifies
+    If the inputs are not batched along the first dimension, ``in_dims`` specifies
     the dimension that each inputs are batched along as
 
         >>> torch.dot                            # [N], [N] -> []
-        >>> batched_dot = functorch.vmap(torch.dot, in_dims=1)  # [N, D], [N, D] -> [D]
+        >>> batched_dot = torch.func.vmap(torch.dot, in_dims=1)  # [N, D], [N, D] -> [D]
         >>> x, y = torch.randn(2, 5), torch.randn(2, 5)
         >>> batched_dot(x, y)   # output is [5] instead of [2] if batched along the 0th dimension
 
     If there are multiple inputs each of which is batched along different dimensions,
-    :attr:`in_dims` must be a tuple with the batch dimension for each input as
+    ``in_dims`` must be a tuple with the batch dimension for each input as
 
         >>> torch.dot                            # [D], [D] -> []
-        >>> batched_dot = functorch.vmap(torch.dot, in_dims=(0, None))  # [N, D], [D] -> [N]
+        >>> batched_dot = torch.func.vmap(torch.dot, in_dims=(0, None))  # [N, D], [D] -> [N]
         >>> x, y = torch.randn(2, 5), torch.randn(5)
         >>> batched_dot(x, y) # second arg doesn't have a batch dim because in_dim[1] was None
 
-    If the input is a Python struct, :attr:`in_dims` must be a tuple containing a struct
+    If the input is a Python struct, ``in_dims`` must be a tuple containing a struct
     matching the shape of the input:
 
         >>> f = lambda dict: torch.dot(dict['x'], dict['y'])
         >>> x, y = torch.randn(2, 5), torch.randn(5)
         >>> input = {'x': x, 'y': y}
-        >>> batched_dot = functorch.vmap(f, in_dims=({'x': 0, 'y': None},))
+        >>> batched_dot = torch.func.vmap(f, in_dims=({'x': 0, 'y': None},))
         >>> batched_dot(input)
 
     By default, the output is batched along the first dimension. However, it can be batched
-    along any dimension by using :attr:`out_dims`
+    along any dimension by using ``out_dims``
 
         >>> f = lambda x: x ** 2
         >>> x = torch.randn(2, 5)
-        >>> batched_pow = functorch.vmap(f, out_dims=1)
+        >>> batched_pow = torch.func.vmap(f, out_dims=1)
         >>> batched_pow(x) # [5, 2]
 
     For any function that uses kwargs, the returned function will not batch the kwargs but will
@@ -345,7 +382,7 @@ def vmap(
         >>> def f(x, scale=4.):
         >>>   return x * scale
         >>>
-        >>> batched_pow = functorch.vmap(f)
+        >>> batched_pow = torch.func.vmap(f)
         >>> assert torch.allclose(batched_pow(x), x * 4)
         >>> batched_pow(x, scale=x) # scale is not batched, output has shape [2, 2, 5]
 
@@ -357,6 +394,7 @@ def vmap(
 
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
+        lazy_load_decompositions()
         _check_out_dims_is_int_or_int_pytree(out_dims, func)
         batch_size, flat_in_dims, flat_args, args_spec = _process_batched_inputs(in_dims, args, func)
         return _flat_vmap(
@@ -381,12 +419,12 @@ def chunk_vmap(
         func (function): A Python function that takes one or more arguments.
             Must return one or more Tensors.
         in_dims (int or nested structure): Specifies which dimension of the
-            inputs should be mapped over. :attr:`in_dims` should have a
-            structure like the inputs. If the :attr:`in_dim` for a particular
+            inputs should be mapped over. ``in_dims`` should have a
+            structure like the inputs. If the ``in_dim`` for a particular
             input is None, then that indicates there is no map dimension.
             Default: 0.
         out_dims (int or Tuple[int]): Specifies where the mapped dimension
-            should appear in the outputs. If :attr:`out_dims` is a Tuple, then
+            should appear in the outputs. If ``out_dims`` is a Tuple, then
             it should have one element per output. Default: 0.
         randomness (str): Specifies whether the randomness in this
             vmap should be the same or different across batches. If 'different',
@@ -400,10 +438,10 @@ def chunk_vmap(
 
     Returns:
         Returns a new "batched" function. It takes the same inputs as
-        :attr:`func`, except each input has an extra dimension at the index
-        specified by :attr:`in_dims`. It takes returns the same outputs as
-        :attr:`func`, except each output has an extra dimension at the index
-        specified by :attr:`out_dims`.
+        ``func``, except each input has an extra dimension at the index
+        specified by ``in_dims``. It takes returns the same outputs as
+        ``func``, except each output has an extra dimension at the index
+        specified by ``out_dims``.
     """
     _check_randomness_arg(randomness)
 
@@ -490,3 +528,54 @@ def _flat_vmap(func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, r
         return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func)
     finally:
         _vmap_decrement_nesting()
+
+
+# `restore_vmap` is a private helper function. It is vmap but has the following
+# differences:
+# - instead of returning outputs, it returns an (outputs, out_dims) tuple.
+#   out_dims is a pytree of same shape as outputs and contains Optional[int]
+#   specifying where the vmapped dimension, if it exists, is in the corresponding output.
+# - does no validation on in_dims or inputs (vmap expects at least one Tensor to be vmapped).
+#   restore_vmap allows for no inputs to have the vmap dimension
+# - does no validation on outputs (vmap expects only Tensor outputs)
+#   restore_vmap allows for return of arbitrary outputs (not just Tensors)
+#
+# The TL;DR is that restore_vmap is more general than vmap and has a slightly
+# different API. The relaxations are so that we can "pause" vmap in the middle
+# of its execution and then "restore" it later (this is what we do in
+# the generate_vmap_rule=True implementation of autograd.Function).
+#
+# restore_vmap can be technically used in the implementation of vmap, but doing
+# that refactor is a bit technically challenging because:
+# - vmap couples the tensor-wrapping code with error checking
+# - vmap's tensor unwrapping code is in C++; we would need to rewrite part of it
+#   in python because it overlaps with unwrap_batched
+@doesnt_support_saved_tensors_hooks
+def restore_vmap(func, in_dims, batch_size, randomness):
+    def inner(*args, **kwargs):
+        vmap_level = _vmap_increment_nesting(batch_size, randomness)
+        try:
+            batched_inputs = wrap_batched(args, in_dims, vmap_level)
+            batched_outputs = func(*batched_inputs, **kwargs)
+            return unwrap_batched(batched_outputs, vmap_level)
+        finally:
+            _vmap_decrement_nesting()
+    return inner
+
+
+def wrap_batched(args, bdims, level):
+    flat_args, spec = tree_flatten(args)
+    flat_bdims = _broadcast_to_and_flatten(bdims, spec)
+    assert flat_bdims is not None
+    result = _create_batched_inputs(flat_bdims, flat_args, level, spec)
+    return result
+
+
+def unwrap_batched(args, level):
+    flat_args, spec = tree_flatten(args)
+    if len(flat_args) == 0:
+        return args, ()
+    result = [torch._C._functorch._unwrap_batched(arg, level) if isinstance(arg, torch.Tensor)
+              else (arg, None) for arg in flat_args]
+    output, bdims = zip(*result)
+    return tree_unflatten(output, spec), tree_unflatten(bdims, spec)

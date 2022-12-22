@@ -44,9 +44,81 @@ class NamedOptimizerTest(unittest.TestCase):
                     fn = self.assertEqual if assert_equal else self.assertNotEqual
                     fn(val, named_group[key], err_msg)
 
+    def _compare_param_groups(self, param_groups_1, param_groups_2):
+        self.assertTrue(isinstance(param_groups_1, list))
+        self.assertTrue(isinstance(param_groups_2, list))
+        for groups in zip(param_groups_1, param_groups_2):
+            self._compare_param_group(groups[0], groups[1])
+
+    def _compare_param_group(self, group_1, group_2):
+        self.assertTrue(isinstance(group_1, dict))
+        self.assertTrue(isinstance(group_2, dict))
+        for key, val in group_1.items():
+            self.assertTrue(key in group_2)
+            if key != "params":
+                self.assertEqual(val, group_2[key])
+            else:
+                for tensors in zip(val, group_2[key]):
+                    self.assertTrue(torch.allclose(tensors[0], tensors[1]))
+
     def test_state_dict(self):
         """Check that NamedOptimizer exposes the expected state dict
         interface."""
+        m = TestDummyModel()
+        m_dup = TestDummyModel()
+        optim = torch.optim.SGD(
+            m.parameters(),
+            lr=1e-2,
+            momentum=0.9,
+        )
+
+        named_optim = _NamedOptimizer(
+            m_dup.named_parameters(),
+            torch.optim.SGD,
+            lr=1e-2,
+            momentum=0.9,
+        )
+        self._compare_param_groups(optim.param_groups, named_optim.param_groups)
+
+        for _ in range(2):
+            x = torch.rand(5, 8)
+            y = m(x)
+            y.sum().backward()
+            optim.step()
+
+            y = m_dup(x)
+            y.sum().backward()
+            named_optim.step()
+
+        self._compare_param_groups(optim.param_groups, named_optim.param_groups)
+        sd = optim.state_dict()
+        named_sd = named_optim.state_dict()
+
+        # Compare "state" in optim state dict
+        self._compare_state_dict_group(
+            sd["state"][0],
+            named_sd["state"]["net1.0.weight"],
+            assert_equal=True,
+        )
+        self._compare_state_dict_group(
+            sd["state"][3],
+            named_sd["state"]["net2.0.bias"],
+            assert_equal=True,
+        )
+        self._compare_state_dict_group(
+            sd["state"][4],
+            named_sd["state"]["net3.weight"],
+            assert_equal=True,
+        )
+        self._compare_state_dict_group(
+            sd["state"][7],
+            named_sd["state"]["net4.1.bias"],
+            assert_equal=True,
+        )
+
+    def test_state_dict_multi_param_group(self):
+        """Check that NamedOptimizer exposes the expected state dict
+        interface when multiple param groups are specified."""
         m = TestDummyModel()
         m_dup = TestDummyModel()
         optim_1 = torch.optim.SGD(
@@ -84,7 +156,10 @@ class NamedOptimizerTest(unittest.TestCase):
                 {"params": m_dup.net4.parameters(), "lr": 1e-5},
             ],
         )
-        for i in range(2):
+        self._compare_param_groups(optim_1.param_groups, named_optim_1.param_groups)
+        self._compare_param_groups(optim_2.param_groups, named_optim_2.param_groups)
+
+        for _ in range(2):
             x = torch.rand(5, 8)
             y = m(x)
             y.sum().backward()
@@ -96,12 +171,15 @@ class NamedOptimizerTest(unittest.TestCase):
             named_optim_1.step()
             named_optim_2.step()
 
+        self._compare_param_groups(optim_1.param_groups, named_optim_1.param_groups)
+        self._compare_param_groups(optim_2.param_groups, named_optim_2.param_groups)
         sd_1 = optim_1.state_dict()
         sd_2 = optim_2.state_dict()
         named_sd_1 = named_optim_1.state_dict()
         named_sd_2 = named_optim_2.state_dict()
 
         # Compare "state" in optim state dict
+        print(list(named_sd_1["state"].keys()))
         self._compare_state_dict_group(
             sd_1["state"][0],
             named_sd_1["state"]["net1.0.weight"],

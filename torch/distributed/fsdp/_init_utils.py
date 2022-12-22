@@ -18,18 +18,20 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._exec_order_utils as exec_order_utils
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
+    _get_module_fsdp_state,
     _get_param_to_fqns,
     _is_fsdp_flattened,
     clean_tensor_name,
     TrainingState,
 )
-from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_states
 from torch.distributed.fsdp.api import (
@@ -303,7 +305,7 @@ def _init_core_state(
     state._stream_to_name = _stream_to_name
     state._free_event_queue = _FreeEventQueue()
     state._debug_level = dist.get_debug_level()
-    state._exec_order_data = _ExecOrderData(
+    state._exec_order_data = exec_order_utils._ExecOrderData(
         state._debug_level,
         backward_prefetch_limit,
         forward_prefetch_limit,
@@ -438,8 +440,13 @@ def _init_param_handles_from_module(
     )
     _check_single_device_module(root_module, state._ignored_params)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
-    # Initialize and shard `FlatParamHandle`s one by one following bottom-up
-    # order (hence the `reversed`) to avoid increasing peak GPU memory usage
+    # Initialize and shard `FlatParamHandle`s one by one following reverse
+    # depth-first order (i.e. reverse `.modules()` order), which represents a
+    # reverse topological sort order. This avoids increasing peak GPU memory
+    # usage when the unsharded model exists on CPU or meta device.
+    # NOTE: This order differs from that followed by the wrapper path when
+    # using auto wrapping, which also represents a valid reverse toplogical
+    # sort order, but the difference does not matter.
     materialized_module = False
     for fully_sharded_module, (params, buffers, param_names, buffer_names) in reversed(
         fully_sharded_module_to_states.items()
@@ -475,7 +482,9 @@ def _init_param_handles_from_module(
         # Pass `root_module` to have internal FQN metadata prefix starting from
         # it instead of `submodule`
         _init_param_handle_from_params(state, params, fully_sharded_module)
-    # Reverse to preserve top-down order like `_fsdp_handles()`
+    # Reverse `_handles` to preserve depth-first `.modules()` order for
+    # consistency with the wrapper path (namely, so that `_get_fsdp_handles()`
+    # returns the same ordering for both paths).
     state._handles.reverse()
     return state
 
@@ -527,19 +536,31 @@ def _get_ignored_modules(
     any FSDP instances, and returns the modules contained in their module
     subtrees as a :class:`set`. Nested FSDP instances are excluded, but their
     already-computed ignored modules are included.
+
+    ``_ignored_modules`` represents the argument passed by the user to FSDP.
     """
-    if _ignored_modules is None:
-        return set()
     msg_prefix = "`ignored_modules` should be an iterable of `torch.nn.Module`s "
     try:
-        ignored_root_modules = set(_ignored_modules)
+        ignored_root_modules = (
+            set(_ignored_modules) if _ignored_modules is not None else set()
+        )
     except TypeError as e:
         raise TypeError(msg_prefix + f"but got {type(_ignored_modules)}") from e
     for module in ignored_root_modules:
         if not isinstance(module, torch.nn.Module):
             raise TypeError(msg_prefix + f"but got an iterable with {type(module)}")
         if isinstance(module, fsdp_file.FullyShardedDataParallel):
+            # TODO: We may relax this by taking the FSDP instance's wrapped
+            # module to provide more flexibility to the user.
             raise ValueError("`ignored_modules` should not include FSDP modules")
+    # Treat modules that cannot compose with `fully_shard` as ignored modules,
+    # meaning that their subtrees are ignored
+    for module in root_module.modules():
+        if not traversal_utils._composable(module):
+            ignored_root_modules.add(module)
+    # NOTE: Even if `ignored_root_modules` is empty, do not return early so
+    # that this FSDP instance can get any ignored modules from its children.
+
     # Include child modules and exclude nested FSDP modules themselves
     ignored_modules = set(
         child
@@ -555,9 +576,10 @@ def _get_ignored_modules(
         )
     # Include nested FSDP modules' ignored modules
     for submodule in root_module.modules():
-        if isinstance(submodule, fsdp_file.FullyShardedDataParallel):
-            assert hasattr(submodule, "_ignored_modules")
-            ignored_modules.update(submodule._ignored_modules)
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_modules")
+            ignored_modules.update(optional_fsdp_state._ignored_modules)
     return ignored_modules
 
 
