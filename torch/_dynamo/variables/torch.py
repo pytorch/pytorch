@@ -13,6 +13,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._guards import GuardsCheckpointState
+from torch import sym_sqrt
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -442,8 +443,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             fn_ = self.value
             if any([isinstance(x, DynamicShapeVariable) for x in args]):
                 if self.value == math.sqrt:
-                    from torch.fx.experimental.symbolic_shapes import sym_sqrt
-
                     fn_ = sym_sqrt
 
             tensor_variable = wrap_fx_proxy(
