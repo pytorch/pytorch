@@ -1402,7 +1402,6 @@ class TestSparse(TestSparseBase):
     @onlyCPU
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/2010")
     def test_sspaddmm(self, device, dtype, coalesced):
 
         def test_shape(di, dj, dk, nnz):

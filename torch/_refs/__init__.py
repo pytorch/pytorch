@@ -3361,6 +3361,8 @@ def softmax(
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
+    if a.numel() == 0:
+        return torch.zeros_like(a, dtype=result_dtype)
     computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
     a_max = amax(a_, dim, keepdim=True)

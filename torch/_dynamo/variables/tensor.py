@@ -153,19 +153,8 @@ class TensorVariable(VariableTracker):
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
         elif name == "T":
-            if self.ndim == 0:
-                result = self
-            else:
-                args = [
-                    variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)
-                ]
-                result = self.call_method(tx, "permute", args, {})
-        elif name == "mT" and self.ndim != 1:
-            if self.ndim == 0:
-                result = self
-            else:
-                args = [variables.ConstantVariable(i) for i in [-2, -1]]
-                result = self.call_method(tx, "transpose", args, {})
+            args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
+            result = self.call_method(tx, "permute", args, {})
 
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)

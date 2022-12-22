@@ -1000,6 +1000,8 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
+    if x.numel() == 0:
+        return torch.zeros_like(x, dtype=result_dtype)
     x = x.to(computation_dtype)
     x_max = torch.amax(x, dim, keepdim=True)
     unnormalized = torch.exp(x - x_max)
