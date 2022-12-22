@@ -2888,7 +2888,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         # Incorrect `chunk_size`
         for chunk_size in (-1, 0):
-            with self.assertRaisesRegex(ValueError, "vmap: `chunk_size` should be greater than 0."):
+            with self.assertRaisesRegex(ValueError, "vmap: chunk_size should be None or greater than 0."):
                 vmap(
                     f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
                 )(x)
