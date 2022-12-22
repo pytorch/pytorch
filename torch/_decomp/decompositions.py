@@ -2076,7 +2076,7 @@ def upsample_nearest2d(
 
     # following "heuristic: only use channels_last path when it's faster than the contiguous path"
     _, n_channels, _, _ = input.shape
-    if input.device.type == "cuda" and n_channels < 16:
+    if input.device.type == "cuda" and n_channels < 4:
         memory_format = torch.contiguous_format
 
     result = result.contiguous(memory_format=memory_format)
@@ -2098,16 +2098,6 @@ def upsample_nearest3d(
         input, output_size
     )
     result = input[:, :, d_indices, h_indices, w_indices]
-
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
-
-    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
-    _, n_channels, _, _, _ = input.shape
-    if input.device.type == "cuda" and n_channels < 16:
-        memory_format = torch.contiguous_format
-
-    result = result.contiguous(memory_format=memory_format)
 
     return result
 
