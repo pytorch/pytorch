@@ -12,8 +12,8 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._guards import GuardsCheckpointState
 from torch import sym_sqrt
+from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
