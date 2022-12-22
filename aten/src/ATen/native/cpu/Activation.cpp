@@ -1205,7 +1205,7 @@ void mish_backward_kernel(TensorIterator& iter) {
 }
 
 void prelu_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "prelu_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "prelu_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
     cpu_kernel_vec(
       iter,
