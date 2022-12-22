@@ -180,7 +180,6 @@ DECLARE_PYOBJ_ATTR(frame_obj)
 
 static THPPyInterpreterFrame* THPPyInterpreterFrame_previous(THPPyInterpreterFrame* self, PyObject* _noargs) {
   THPPyInterpreterFrame* res = THPPyInterpreterFrame_New(self->frame->previous);
-  Py_XINCREF(res);
   return res;
 }
 
