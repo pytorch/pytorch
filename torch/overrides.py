@@ -238,6 +238,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.vitals_enabled,
         torch.set_vital,
         torch.read_vitals,
+        torch.vmap,
         torch.frombuffer,
         torch.asarray,
         Tensor.__delitem__,

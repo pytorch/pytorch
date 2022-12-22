@@ -2287,9 +2287,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
 
 
 aot_autograd_module_failures = set({
-    torch.nn.RNN,  # See https://github.com/pytorch/pytorch/issues/90500
-    torch.nn.LSTM,  # See https://github.com/pytorch/pytorch/issues/90500
-    torch.nn.GRU,  # See https://github.com/pytorch/pytorch/issues/90500
     torch.nn.GaussianNLLLoss,  # RuntimeError: It appears that you're trying to get value out
                                # of a tracing tensor with aten._local_scalar_dense.default -
                                # erroring out! It's likely that this is caused by data-dependent
@@ -2301,14 +2298,9 @@ aot_autograd_module_failures = set({
 })
 
 symbolic_aot_autograd_module_failures = {
+    torch.nn.GRU,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.TransformerEncoderLayer,  # RuntimeError: tried to get Double out of SymFloat
     torch.nn.TransformerDecoderLayer,  # RuntimeError: tried to get Double out of SymFloat
-    torch.nn.RNN,  # Exception: Invoking operators with non-Fake Tensor inputs in FakeTensorMode
-                   # is not yet supported. Please convert all Tensors to FakeTensors first.
-    torch.nn.LSTM,  # Exception: Invoking operators with non-Fake Tensor inputs in FakeTensorMode
-                    # is not yet supported. Please convert all Tensors to FakeTensors first.
-    torch.nn.GRU,  # Exception: Invoking operators with non-Fake Tensor inputs in FakeTensorMode
-                   # is not yet supported. Please convert all Tensors to FakeTensors first.
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.CrossEntropyLoss,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
