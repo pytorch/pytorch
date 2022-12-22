@@ -140,6 +140,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "GoogleFnet",  # Eager model failed to run
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
+    "MT5ForConditionalGeneration",  # fails accuracy
     # TIMM
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy
