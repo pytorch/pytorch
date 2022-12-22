@@ -870,6 +870,7 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   dotzerokey = PyUnicode_InternFromString(".0");
   PyObject* module = PyModule_Create(&_module);
 
+#if IS_PYTHON_3_11_PLUS
   if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
     return NULL;
   }
@@ -877,6 +878,7 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   if (PyModule_AddObject(module, "_PyInterpreterFrame", (PyObject*)&THPPyInterpreterFrameType) != 0) {
     return NULL;
   }
+#endif
 
   return module;
 }

@@ -5409,6 +5409,33 @@ class TestNNMPS(NNTestCase):
         r2_cpu = r2.to("cpu")
         self.assertEqual(r1, r2_cpu)
 
+    def test_group_norm_backward(self, device='mps'):
+        # See https://github.com/pytorch/pytorch/issues/88331 for more detail
+        shape = [1, 4, 16, 16]
+        x = torch.full(shape, 7.0, device=device)
+
+        target = torch.ones((1, 3, 128, 128), device=device)
+
+        conv_in = nn.Conv2d(4, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), device=device)
+        conv_out = nn.Conv2d(128, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), device=device)
+        norm = nn.GroupNorm(32, 128, eps=1e-6, affine=True, device=device)
+
+        with torch.enable_grad():
+            x = x.detach().requires_grad_()
+            out = 5.5 * x
+            out = conv_in(out)
+            out = out + norm(out)
+            out = out + norm(out)
+            out = out + norm(out)
+            out = F.interpolate(out, scale_factor=8.0, mode="nearest")
+            out = norm(out)
+            out = conv_out(out)
+
+            loss = (out - target).norm(dim=-1).sum()
+            grad = -torch.autograd.grad(loss, x)[0]
+            self.assertFalse(grad.detach().isnan().any().item(), 'NaN gradients returned by autograd')
+
+
     # def test_conv2d_same_padding(self, device='mps'):
         # x = torch.rand(1, 1, 10, 11, device=device)
         # y = torch.rand(1, 1, 4, 5, device=device)
@@ -7463,7 +7490,7 @@ class TestConsistency(TestCase):
         'gradient': ['f16', 'f32', 'i16'],
         'half': ['f16'],
         'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'index_select': ['f16', 'f32', 'i16', 'i32', 'i64'],
+        'index_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'index_add': ['f16', 'f32', 'i16', 'i32'],
         'int': ['i32'],
         'isclose': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
