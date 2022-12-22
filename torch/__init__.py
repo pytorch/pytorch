@@ -765,6 +765,10 @@ def enable_check_sparse_tensor_invariants(enable: builtins.bool = True):
 
       The flag can be locally overridden by the ``check_invariants``
       optional argument of the sparse tensor constructor functions.
+
+    Args:
+        enable (:class:`bool`): If True, enable invariants checks,
+                                otherwise, disable the checks.
     """
     torch._C._set_check_sparse_tensor_invariants(enable)
 

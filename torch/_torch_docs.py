@@ -107,7 +107,7 @@ factory_common_args = merge_dicts(
     memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.contiguous_format``.
     check_invariants (bool, optional): If sparse tensor invariants are checked.
-        Default: as returned by :func:`torch.is_check_sparse_tensor_invariants_enabled()`.
+        Default: as returned by :func:`torch.is_check_sparse_tensor_invariants_enabled`, initially False.
 """
     ),
     {

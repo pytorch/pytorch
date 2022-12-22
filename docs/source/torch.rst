@@ -47,6 +47,10 @@ Creation Ops
 
     tensor
     sparse_coo_tensor
+    sparse_csr_tensor
+    sparse_csc_tensor
+    sparse_bsr_tensor
+    sparse_bsc_tensor
     asarray
     as_tensor
     as_strided
@@ -611,6 +615,8 @@ Utilities
     set_warn_always
     is_warn_always_enabled
     vmap
+    enable_check_sparse_tensor_invariants
+    is_check_sparse_tensor_invariants_enabled
     _assert
 
 Optimizations
