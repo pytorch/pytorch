@@ -44,6 +44,7 @@ decompositions = get_decompositions(
         aten.grid_sampler_2d,
         aten.hardsigmoid,
         aten.hardsigmoid_backward,
+        aten.upsample_bilinear2d,
         aten.hardswish,
         aten.hardswish_backward,
         aten.hardtanh,
