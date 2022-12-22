@@ -275,6 +275,7 @@ def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
         g = torch._C._AutoDispatchBelowAutograd()
         try:
+            old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
             return prim(*args, **kwargs)
         finally:
             del g

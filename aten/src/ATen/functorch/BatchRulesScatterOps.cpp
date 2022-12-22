@@ -5,13 +5,14 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <iostream>
 #include <ATen/Operators.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
+#include <iostream>
+#include <torch/library.h>
 
 
 namespace at { namespace functorch {
@@ -1074,6 +1075,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(scatter_add, scatter_add_batch_rule);
   VMAP_SUPPORT2(scatter, reduce, scatter_reduce_batch_rule);
   VMAP_SUPPORT2(scatter, value_reduce, scatter_value_reduce_batch_rule);
+  // as_strided_scatter does not work with the for-loop fallback today,
+  // because as_strided_scatter will return an output that matches
+  // the strides/storage_offset of its input.
+  // With the for loop fallback, each input tensor is a slice into
+  // the larger batched tensor.
+  m.impl("as_strided_scatter", torch::CppFunction::makeFromBoxedFunction<&vmapErrorFallback>());
 }
 
 }}

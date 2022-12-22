@@ -460,6 +460,7 @@ class TestOperators(TestCase):
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
+        xfail('as_strided_scatter'),
         decorate('linalg.det', 'singular',
                  decorator=expectedFailureIf(IS_MACOS and IS_X86)),
     }))
@@ -965,6 +966,8 @@ class TestOperators(TestCase):
         xfail('tensor_split'),  # data_ptr composite compliance
         xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip('as_strided'),  # Test runner cannot handle this
+        # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
+        xfail('as_strided_scatter'),
         xfail('nn.functional.gaussian_nll_loss'),  # .item or data-dependent control flow
         xfail('scatter'),  # forward-mode AD does not support at::scatter
         xfail('nanquantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)

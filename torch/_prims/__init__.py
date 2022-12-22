@@ -1828,7 +1828,7 @@ def _as_strided_scatter_meta(
         lambda: f"expected src to have a size equal to the slice of self. src size = {src.shape}, slice size = {size}",
     )
 
-    return _clone_meta(input)
+    return utils.clone_preserve_strides(input)
 
 
 _as_strided_scatter_doc = """
