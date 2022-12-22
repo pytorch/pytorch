@@ -12,7 +12,7 @@ import yaml
 from collections import OrderedDict
 from torchgen.code_template import CodeTemplate
 from dataclasses import dataclass
-from typing import List
+from typing import Any, Dict, List
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
@@ -68,8 +68,8 @@ class VulkanShaderGenerator(object):
 
 """
 
-    def __init__(self):  # type: ignore[no-untyped-def]
-        self.ops_template_params = {}
+    def __init__(self: "VulkanShaderGenerator") -> None:
+        self.ops_template_params: Dict[Any, Any] = {}
 
     def add_params_yaml(self, parameters_yaml_file):  # type: ignore[no-untyped-def]
         all_template_params = OrderedDict()
@@ -118,6 +118,7 @@ class VulkanShaderGenerator(object):
             with open(output_file, "w") as f:
                 f.write(content)
 
+
 @dataclass
 class ShaderInfo:
     tile_size: List[int]
@@ -125,38 +126,44 @@ class ShaderInfo:
     weight_storage_type: str = ""
     bias_storage_type: str = ""
 
-def getName(filePath):
+def getName(filePath: str) -> str:
     return os.path.basename(filePath).replace("/", "_").replace(".", "_")
 
-def isDescriptorLine(lineStr):
+def isDescriptorLine(lineStr: str) -> bool:
     descriptorLineId = r"^layout\(set"
-    return re.search(descriptorLineId, lineStr)
+    return re.search(descriptorLineId, lineStr) is not None
 
-def isTileSizeLine(lineStr):
+def isTileSizeLine(lineStr: str) -> bool:
     tile_size_id = r"^ \* TILE_SIZE = \("
-    return re.search(tile_size_id, lineStr)
+    return re.search(tile_size_id, lineStr) is not None
 
-def findTileSizes(lineStr):
+def findTileSizes(lineStr: str) -> List[int]:
     tile_size_id = r"^ \* TILE_SIZE = \(([0-9]+), ([0-9]+), ([0-9]+)\)"
     matches = re.search(tile_size_id, lineStr)
+    if matches is None:
+        raise AssertionError("matches is None in findTileSizes")
     return [int(matches.group(1)), int(matches.group(2)), int(matches.group(3))]
 
-def isWeightStorageTypeLine(lineStr):
+def isWeightStorageTypeLine(lineStr: str) -> bool:
     weight_storage_id = r"^ \* WEIGHT_STORAGE = "
-    return re.search(weight_storage_id, lineStr)
+    return re.search(weight_storage_id, lineStr) is not None
 
-def getWeightStorageType(lineStr):
+def getWeightStorageType(lineStr: str) -> str:
     weight_storage_id = r"^ \* WEIGHT_STORAGE = ([a-zA-Z]+_\dD)"
     matches = re.search(weight_storage_id, lineStr)
+    if matches is None:
+        raise AssertionError("matches is None in getWeightStorageType")
     return matches.group(1)
 
-def isBiasStorageTypeLine(lineStr):
+def isBiasStorageTypeLine(lineStr: str) -> bool:
     weight_storage_id = r"^ \* BIAS_STORAGE = "
-    return re.search(weight_storage_id, lineStr)
+    return re.search(weight_storage_id, lineStr) is not None
 
-def getBiasStorageType(lineStr):
+def getBiasStorageType(lineStr: str) -> str:
     weight_storage_id = r"^ \* BIAS_STORAGE = ([a-zA-Z]+_\dD)"
     matches = re.search(weight_storage_id, lineStr)
+    if matches is None:
+        raise AssertionError("matches is None in getBiasStorageType")
     return matches.group(1)
 
 typeIdMapping = {
@@ -173,12 +180,13 @@ storageTypeToEnum = {
     "": "api::StorageType::UNKNOWN",
 }
 
-def determineDescriptorType(lineStr):
+def determineDescriptorType(lineStr: str) -> str:
     for identifier, typeNum in typeIdMapping.items():
         if re.search(identifier, lineStr):
             return typeNum
+    raise AssertionError("No matching descriptor type for " + lineStr + " in determineDescriptorType")
 
-def getShaderInfo(srcFilePath):
+def getShaderInfo(srcFilePath: str) -> ShaderInfo:
     shader_info = ShaderInfo([], [], "")
     with open(srcFilePath, 'r') as srcFile:
         for line in srcFile:
@@ -193,7 +201,7 @@ def getShaderInfo(srcFilePath):
 
     return shader_info
 
-def genGLSLFromGLSLT(src_dir_path, tmp_dir_path):
+def genGLSLFromGLSLT(src_dir_path: str, tmp_dir_path: str) -> None:
     template_dir_path = os.path.join(src_dir_path, "templates")
     vexs = glob.glob(os.path.join(template_dir_path, '**', '*.yaml'), recursive=True)
     parameter_yaml_files = []
@@ -213,9 +221,20 @@ def genGLSLFromGLSLT(src_dir_path, tmp_dir_path):
     for glslt in templateSrcPaths:
         generator.generate(glslt, tmp_dir_path)  # type: ignore[no-untyped-call]
 
-def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
-    print("hFilePath:{} cppFilePath:{} srcDirPath:{} glslcPath:{} tmpDirPath:{}".format(
-        hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath))
+
+def genCppH(
+    hFilePath: str,
+    cppFilePath: str,
+    srcDirPath: str,
+    glslcPath: str,
+    tmpDirPath: str,
+    env: Dict[Any, Any],
+) -> None:
+    print(
+        "hFilePath:{} cppFilePath:{} srcDirPath:{} glslcPath:{} tmpDirPath:{}".format(
+            hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath
+        )
+    )
 
     vexs = glob.glob(os.path.join(srcDirPath, '**', '*.glsl'), recursive=True)
     templateSrcPaths = []
@@ -242,8 +261,8 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
         codeTemplate = CodeTemplate.from_file(templateSrcPath)
         srcPath = tmpDirPath + "/" + name + ".glsl"
         content = codeTemplate.substitute(env)
-        with open(srcPath, 'w') as f:
-            f.write(content)
+        with open(srcPath, 'w') as fw:
+            fw.write(content)
 
         spvPath = tmpDirPath + "/" + name + ".spv"
         print("spvPath {}".format(spvPath))
@@ -288,8 +307,8 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
         name = getName(spvPath)
 
         print("spvPath:{}".format(spvPath))
-        with open(spvPath, 'rb') as f:
-            next_bin = array.array('I', f.read())
+        with open(spvPath, 'rb') as fr:
+            next_bin = array.array('I', fr.read())
             sizeBytes = 4 * len(next_bin)
             shader_info_bin_code.append(
                 "const uint32_t {}_bin[] = {{\n  {}\n}};".format(
@@ -333,13 +352,13 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
     cpp += nsend
     h += nsend
 
-    with open(hFilePath, "w") as f:
-        f.write(h)
-    with open(cppFilePath, "w") as f:
-        f.write(cpp)
+    with open(hFilePath, "w") as fw:
+        fw.write(h)
+    with open(cppFilePath, "w") as fw:
+        fw.write(cpp)
 
 
-def parse_arg_env(items):
+def parse_arg_env(items: Dict[Any, Any]) -> Dict[Any, Any]:
     d = {}
     if items:
         for item in items:
@@ -350,7 +369,7 @@ def parse_arg_env(items):
     return d
 
 
-def main(argv):
+def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(description='')
     parser.add_argument(
         '-i',
@@ -395,6 +414,8 @@ def main(argv):
         glslcPath=options.glslc_path,
         tmpDirPath=options.tmp_dir_path,
         env=env)
+
+    return 0
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv))
