@@ -11,7 +11,7 @@ def handle_bad_status(response: requests.Response) -> None:
         exception_message = (
             "Is github alright?",
             f"Recieved status code '{response.status_code}' when attempting to retrieve runs:\n",
-            f"{response.content}"
+            f"{response.content.decode()}"
         )
         raise RuntimeError(exception_message)
 
