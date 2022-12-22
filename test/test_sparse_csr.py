@@ -2081,7 +2081,7 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(torch.mul, 100, [100, 1])
         _test_spadd_shape(torch.mul, 100, [1, 100])
 
-    #TODO: enable hybrid once to_dense supports it
+    # TODO: enable hybrid once to_dense supports it
     @parametrize('enable_hybrid', [False])
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
