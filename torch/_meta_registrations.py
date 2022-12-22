@@ -1654,12 +1654,12 @@ def meta_select(self, dim, index):
 
 @register_meta(aten.select_scatter.default)
 def meta_select_scatter(self, src, dim, index):
-    return torch.empty_like(self)
+    return utils.clone_preserve_strides(self)
 
 
 @register_meta(aten.slice_scatter.default)
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
-    return torch.empty_like(self)
+    return utils.clone_preserve_strides(self)
 
 
 # TODO: Deduplicate this with canonicalize_dim
