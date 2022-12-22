@@ -6,8 +6,7 @@ import requests
 import os
 import argparse
 
-
-def handle_bad_status(response) -> None:
+def handle_bad_status(response: requests.Response) -> None:
     if response.status_code != 200:
         exception_message = (
             "Is github alright?",
