@@ -3423,9 +3423,16 @@ class TestSparse(TestSparseBase):
 
         def check_is_coalesced(s):
             self.assertTrue(s.is_coalesced())
-            sc = s.to_dense().to_sparse()
-            self.assertEqual(s.indices(), sc.indices())
-            self.assertEqual(s.values(), sc.values())
+
+            indices = s.indices()
+            hash_coeffs = torch.tensor(s.shape[:s.sparse_dim()], device=s.device).cumprod(-1).flip(-1)
+            if s.sparse_dim() > 1:
+                hash_coeffs.unsqueeze_(-1)
+                hash_values = (indices * hash_coeffs).sum(0)
+            else:
+                hash_values = indices * hash_coeffs
+
+            self.assertEqual(hash_values, hash_values.sort()[0])
 
         def ref_sparse_mm(a, b):
             return a.to_dense() @ b.to_dense()
