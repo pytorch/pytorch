@@ -2,8 +2,8 @@
 
 namespace custom {
 namespace native {
-Tensor& add_3_out(const Tensor& a, const Tensor& b, const Tensor& c, Tensor& out) {
-    out = a + b + c;
+at::Tensor& add_3_out(const at::Tensor& a, const at::Tensor& b, const at::Tensor& c, at::Tensor& out) {
+    out = a.add(b).add(c);
     return out;
 }
 }
