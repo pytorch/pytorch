@@ -27,7 +27,6 @@
 #undef Py_BUILD_CORE
 #endif
 
-
 // C++ API functions for objects to
 // * construct the object, returning a ref-counted handle
 // * The actual API, with methods that take/return C-typed values
@@ -1495,22 +1494,14 @@ struct PyInstDecoder {
         switch(opcode()) {
             case STORE_NAME:
             case STORE_GLOBAL:
-            names = py::object::borrow(code_object_->co_names);
-            break;
+                names = py::object::borrow(code_object_->co_names);
+                break;
             case STORE_FAST:
-    #if PY_VERSION_HEX < 0x030b0000
-            names = py::object::borrow(code->co_varnames);
-    #else
-            names = py::object::steal(PyCode_GetVarnames(code_object_));
-    #endif
-            break;
+                names = py::object::steal(PyCode_GetVarnames(code_object_));
+                break;
             case STORE_DEREF:
-    #if PY_VERSION_HEX < 0x030b0000
-            names = py::object::borrow(code->co_cellvars);
-    #else
-            names = py::object::steal(PyCode_GetCellvars(code_object_));
-    #endif
-            break;
+                names = py::object::steal(PyCode_GetCellvars(code_object_));
+                break;
             default:
                 return py::object();
         }
