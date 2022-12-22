@@ -1775,6 +1775,7 @@ def run(runner, args, original_dir=None):
                 assert runner.suite_name == "timm_models"
                 args.batch_size = 8
 
+        # Remove sources of randomness
         args.use_eval_mode = True
         inductor_config.fallback_random = True
 
