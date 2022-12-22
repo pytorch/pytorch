@@ -15,6 +15,7 @@ import torch
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..ir import ReductionHint
+from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     get_fused_kernel_name,
     instance_descriptor,
@@ -23,6 +24,7 @@ from ..utils import (
     sympy_symbol,
 )
 from ..virtualized import ops, V
+
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -1337,7 +1339,12 @@ class TritonScheduling:
                 elif node is EnableReduction:
                     stack.close()
                 else:
-                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+                    # TODO - mostly works but needs a couple fixes
+                    if not config.dynamic_shapes:
+                        # TODO - use split ranges ?
+                        indexing_dtype_strength_reduction(node._body)
+                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                    node.codegen(index_vars)
 
         wrapper = V.graph.wrapper_code
         src_code = kernel.codegen_kernel()
