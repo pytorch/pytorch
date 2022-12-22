@@ -2868,12 +2868,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 )(*args)
                 self.assertEqual(output, expected_vmap)
 
-            for chunk_size in (-1, 0):
-                with self.assertRaisesRegex(ValueError, "vmap: `chunk_size` should be greater than 0."):
-                    vmap(
-                        fn, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
-                    )(*args)
-
     @parametrize('in_dim', [0, 1])
     @parametrize('out_dim', [0, 1])
     @parametrize('randomness', ['error', 'same'])
