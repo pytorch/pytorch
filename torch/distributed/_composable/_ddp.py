@@ -570,7 +570,7 @@ class DistributedDataParallel(Module):
                 self.num_iterations += 1
                 self.reducer.prepare_for_forward()
 
-            # Calling _rebuild_buckets before forward compuation,
+            # Calling _rebuild_buckets before forward computation,
             # It may allocate new buckets before deallocating old buckets
             # inside _rebuild_buckets. To save peak memory usage,
             # call _rebuild_buckets before the peak memory usage increases
@@ -689,7 +689,7 @@ class DistributedDataParallel(Module):
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks
-    # of whether backwards pass synchronization will run this iteraton or not.
+    # of whether backwards pass synchronization will run this iteration or not.
     def _check_global_requires_backward_grad_sync(self, is_joined_rank):
         if not is_joined_rank and self.require_backward_grad_sync:
             requires_sync_tensor = torch.ones(1, device=self.device)
@@ -772,17 +772,13 @@ class DistributedDataParallel(Module):
         Args:
             state (Any): Optional state that is passed to the hook.
             hook (Callable): Callable with the following signature:
-                            ``hook(state: object, buffers: Dict[str, torch.Tensor])
-                            -> Optional[List[torch.futures.Future[torch.Tensor]]]``
+                         ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]``:
             comm_hook_location (_BufferCommHookLocation): Enum value indicating
                             where to run the hook.
                             _BufferCommHookLocation.PRE_FORWARD means that the
                             hook will run _before_ the forward pass, and
                             _BufferCommHookLocation.POST_FORWARD means that the
                             hook will run _after_ the forward pass.
-
-            hook (Callable): Callable with the following signature:
-                         ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]``:
 
             NOTE: To maximize performance, users can return a
                 List[torch.futures.Future] from their hook, and DDP will
@@ -1161,9 +1157,9 @@ class DistributedDataParallel(Module):
         r"""
         This interface can be called after DistributedDataParallel() is
         constructed. It returns a dictionary of logging data. It could help
-        for debugging and analysis. The loggind data includes DistributedDataParallel
+        for debugging and analysis. The logging data includes DistributedDataParallel
         constructor input parameters, some internal states of DistributedDataParallel
-        and performance metrics. Simply print the dictorinary and see what
+        and performance metrics. Simply print the dictionary and see what
         these metrics are.
         This is a prototype interface and subject to change in the future.
         """
@@ -1175,7 +1171,7 @@ class DistributedDataParallel(Module):
         r"""
         This interface allows users to set sample_rate of collecting
         runtime stats. The runtime stats will be recorded for the
-        first 10 iterations, after 10 iteratons runtime stats will be
+        first 10 iterations, after 10 iterations runtime stats will be
         recorded once every "sample_rate" training iterations. In
         default, runtime stats are recorded for the first 10 iterations,
         after 10 iterations runtime stats are recorded once every
