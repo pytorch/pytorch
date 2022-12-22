@@ -10,7 +10,7 @@ from trymerge import gh_post_pr_comment as gh_post_comment, GitHubPR
 
 SAME_SHA_ERROR = (
     "\n```\nAborting rebase because rebasing the branch resulted in the same sha as the target branch.\n" +
-    "This usually happens because the PR was already been merged.  Please rebase locally and push.\n```"
+    "This usually happens because the PR has already been merged.  Please rebase locally and push.\n```"
 )
 
 def parse_args() -> Any:
