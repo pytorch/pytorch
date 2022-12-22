@@ -59,9 +59,11 @@ TORCH_API std::vector<int64_t> MakeTransposePermutation(
 //   shape1       = [9, 7, 6, 1, 2]
 //   shape2       =       [6, 5, 2]
 //   result_shape = [9, 7, 6, 5, 2]
-TORCH_API std::vector<int64_t> GetPromotedShape(
+TORCH_API std::tuple<std::vector<int64_t>, std::vector<bool>> GetPromotedShape(
     c10::ArrayRef<int64_t> shape1_dims,
-    c10::ArrayRef<int64_t> shape2_dims);
+    std::vector<bool> shape1_dynamic_dims,
+    c10::ArrayRef<int64_t> shape2_dims,
+    std::vector<bool> shape2_dynamic_dims);
 
 TORCH_API Shape
 GetPromotedBinaryOpShape(const Shape& shape1, const Shape& shape2);

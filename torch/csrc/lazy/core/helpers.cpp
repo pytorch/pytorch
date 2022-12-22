@@ -5,6 +5,8 @@
 #include <torch/csrc/lazy/core/tensor_util.h>
 
 #include <limits>
+#include <iostream>
+#include <tuple>
 
 namespace torch {
 namespace lazy {
@@ -77,10 +79,14 @@ std::vector<int64_t> MakeTransposePermutation(
   return permute_dims;
 }
 
-std::vector<int64_t> GetPromotedShape(
+
+std::tuple<std::vector<int64_t>, std::vector<bool>> GetPromotedShape (
     c10::ArrayRef<int64_t> shape1_dims,
-    c10::ArrayRef<int64_t> shape2_dims) {
+    std::vector<bool> shape1_dynamic_dims,
+    c10::ArrayRef<int64_t> shape2_dims,
+    std::vector<bool> shape2_dynamic_dims) {
   std::vector<int64_t> dimensions;
+  std::vector<bool> dynamic_dims;
   // If the rank of a shape is bigger than then other, fill up the first
   // dimensions with the ones of the bigger.
   // Example:
@@ -92,37 +98,52 @@ std::vector<int64_t> GetPromotedShape(
         dimensions.end(),
         shape1_dims.begin(),
         shape1_dims.begin() + (shape1_dims.size() - shape2_dims.size()));
+    dynamic_dims.insert(
+        dynamic_dims.end(),
+        shape1_dynamic_dims.begin(),
+        shape1_dynamic_dims.begin() + (shape1_dynamic_dims.size() - shape2_dynamic_dims.size()));
   } else if (shape2_dims.size() > shape1_dims.size()) {
     dimensions.insert(
         dimensions.end(),
         shape2_dims.begin(),
         shape2_dims.begin() + (shape2_dims.size() - shape1_dims.size()));
+    dynamic_dims.insert(
+        dynamic_dims.end(),
+        shape2_dynamic_dims.begin(),
+        shape2_dynamic_dims.begin() + (shape2_dynamic_dims.size() - shape1_dynamic_dims.size()));
   }
   // For the common dimensions, they must match, or one of them be 1.
   size_t min_size = std::min(shape1_dims.size(), shape2_dims.size());
   for (const auto i : c10::irange(min_size)) {
     int64_t dim1 = shape1_dims[shape1_dims.size() - min_size + i];
     int64_t dim2 = shape2_dims[shape2_dims.size() - min_size + i];
-    TORCH_CHECK(
+    bool is_dynamic1 = shape1_dynamic_dims[shape1_dims.size() - min_size + i];
+    bool is_dynamic2 = shape2_dynamic_dims[shape2_dims.size() - min_size + i];
+    bool is_dynamic = is_dynamic1 || is_dynamic2;
+    dynamic_dims.push_back(is_dynamic);
+    if (!is_dynamic) {
+      TORCH_CHECK(
         dim1 == dim2 || dim1 == 1 || dim2 == 1,
         "(",
         c10::Join(", ", shape1_dims),
         ") and (",
         c10::Join(", ", shape1_dims),
         ")");
+    }
     if (dim1 == 0 || dim2 == 0) {
       dimensions.push_back(0);
     } else {
       dimensions.push_back(std::max<int64_t>(dim1, dim2));
     }
   }
-  return dimensions;
+  return std::make_tuple(dimensions, dynamic_dims);
 }
 
 Shape GetPromotedBinaryOpShape(const Shape& shape1, const Shape& shape2) {
+  std::vector<int64_t> promotedShape = std::get<0>(GetPromotedShape(shape1.sizes(), shape1.is_symbolic().value(), shape2.sizes(), shape2.is_symbolic().value()));
   return Shape(
       promoteTypes(shape1.scalar_type(), shape2.scalar_type()),
-      GetPromotedShape(shape1.sizes(), shape2.sizes()));
+      promotedShape);
 }
 
 std::vector<std::string> StrSplit(c10::string_view text, char delim) {
