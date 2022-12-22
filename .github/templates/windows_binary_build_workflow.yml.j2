@@ -50,6 +50,9 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
+{%- if cross_compile_arm64 %}
+  CROSS_COMPILE_ARM64: 1
+{% endif %}
 !{{ common.concurrency(build_environment) }}
 
 jobs:

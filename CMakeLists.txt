@@ -346,7 +346,7 @@ cmake_dependent_option(
     "NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
     BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
-
+option(USE_HOST_PROTOC "Use host protoc executable during cross-compilation" OFF)
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -690,6 +690,11 @@ if(NOT IOS AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES M
   endif()
   set(PROTOBUF_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
   set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
+endif()
+
+if(USE_HOST_PROTOC)
+  set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE $ENV{PROTOC})
+  set(PROTOBUF_PROTOC_EXECUTABLE $ENV{PROTOC})
 endif()
 
 # ---[ Misc checks to cope with various compiler modes
