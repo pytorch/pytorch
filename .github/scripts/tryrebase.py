@@ -49,11 +49,20 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
 
-    # steal the identity of the committer of the commit on the orig branch
-    email = repo._run_git("log", orig_ref, "--pretty=format:%ae", "-1")
-    name = repo._run_git("log", orig_ref, "--pretty=format:%an", "-1")
-    repo._run_git("config", "--global", "user.name", name)
-    repo._run_git("config", "--global", "user.email", email)
+    # Check the configured name and email, and only set them if they are not set. When
+    # tryrebase is used as part of trymerge, the name and email have already been set
+    # by the merge workflow, so trying to set them again here will wrongly make the
+    # committer to be the author of the original branch instead of PyTorch merge bot
+    email = repo._run_git("config", "user.email")
+    name = repo._run_git("config", "user.name")
+
+    if not email or not name:
+        # Steal the identity of the committer of the commit on the orig branch
+        email = repo._run_git("log", orig_ref, "--pretty=format:%ae", "-1")
+        name = repo._run_git("log", orig_ref, "--pretty=format:%an", "-1")
+
+        repo._run_git("config", "--global", "user.email", email)
+        repo._run_git("config", "--global", "user.name", name)
 
     os.environ["OAUTH_TOKEN"] = os.environ["GITHUB_TOKEN"]
     with open('.ghstackrc', 'w+') as f:
