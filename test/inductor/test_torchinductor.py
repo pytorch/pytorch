@@ -2831,7 +2831,7 @@ class CommonTemplate:
             ):
                 super(M, self).__init__()
                 self.conv = torch.nn.Conv2d(
-                    3,
+                    64,
                     5,
                     1,
                     **kwargs,
@@ -2847,8 +2847,8 @@ class CommonTemplate:
         opt_mod = torch._dynamo.optimize("inductor")(mod)
         memory_format = torch.channels_last
         inputs = (
-            torch.randn([1, 3, 16, 16]).to(memory_format=memory_format),
-            torch.randn([1, 3, 32, 32]).to(memory_format=memory_format),
+            torch.randn([1, 64, 16, 16]).to(memory_format=memory_format),
+            torch.randn([1, 64, 32, 32]).to(memory_format=memory_format),
         )
         y = mod(*inputs)
         opt_y = opt_mod(*inputs)
