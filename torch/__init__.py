@@ -48,7 +48,8 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'compile', 'vmap',
+    'compile', 'vmap', 'enable_check_sparse_tensor_invariants',
+    'is_check_sparse_tensor_invariants_enabled'
 ]
 
 ################################################################################
@@ -746,7 +747,7 @@ def is_warn_always_enabled():
     """
     return _C._get_warnAlways()
 
-def enable_check_sparse_tensor_invariants(enable: bool = True):
+def enable_check_sparse_tensor_invariants(enable: builtins.bool = True):
     r"""Enable or disable sparse tensor invariants check in
     sparse tensor constructors.
 
@@ -767,7 +768,7 @@ def enable_check_sparse_tensor_invariants(enable: bool = True):
     """
     torch._C._set_check_sparse_tensor_invariants(enable)
 
-def is_check_sparse_tensor_invariants_enabled() -> bool:
+def is_check_sparse_tensor_invariants_enabled() -> builtins.bool:
     r"""Returns True if the sparse tensor invariants check is enabled.
     """
     return torch._C._check_sparse_tensor_invariants()
