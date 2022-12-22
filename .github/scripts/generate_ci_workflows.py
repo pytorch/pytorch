@@ -58,7 +58,7 @@ class BinaryBuildWorkflow:
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     is_scheduled: str = ""
     branches: str = "nightly"
-    # Mainly for macos
+    # Mainly for MacOS and Windows
     cross_compile_arm64: bool = False
     xcode_version: str = ""
 
@@ -92,6 +92,7 @@ class BinaryBuildWorkflow:
 class OperatingSystem:
     LINUX = "linux"
     WINDOWS = "windows"
+    WINDOWS_ARM64 = "windows-arm64"
     MACOS = "macos"
     MACOS_ARM64 = "macos-arm64"
     LINUX_AARCH64 = "linux-aarch64"
@@ -226,6 +227,34 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
             OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG
         ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS_ARM64,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.RELEASE,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.WINDOWS_ARM64,
+            generate_binary_build_matrix.RELEASE
+        ),
+        cross_compile_arm64=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS_ARM64,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.DEBUG,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.WINDOWS_ARM64,
+            generate_binary_build_matrix.DEBUG
+        ),
+        cross_compile_arm64=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
