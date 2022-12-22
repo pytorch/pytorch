@@ -14,11 +14,14 @@ set(GEN_COMMAND
         --aten_yaml_path=${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml
         --use_aten_lib
         --op_selection_yaml_path=${TEST_ROOT}/selected_operators.yaml
+        --custom_ops_yaml_path=${TEST_ROOT}/custom_ops.yaml
         )
 set(GEN_COMMAND_sources
         ${OUTPUT_DIRECTORY}/RegisterCodegenUnboxedKernelsEverything.cpp
+        ${OUTPUT_DIRECTORY}/RegisterCPUCustomOps.cpp
         ${OUTPUT_DIRECTORY}/Functions.h
         ${OUTPUT_DIRECTORY}/NativeFunctions.h
+        ${OUTPUT_DIRECTORY}/CustomOpsNativeFunctions.h
         )
 message(STATUS "Generating sources for unboxing kernels ${GEN_COMMAND}")
 add_custom_command(
@@ -32,6 +35,7 @@ add_custom_command(
         ${TEST_ROOT}/templates/Functions.h
         ${TEST_ROOT}/templates/NativeFunctions.h
         ${TEST_ROOT}/templates/RegisterCodegenUnboxedKernels.cpp
+        ${TEST_ROOT}/templates/RegisterDispatchKeyCustomOps.cpp
         WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_custom_target(unbox_target DEPENDS ${GEN_COMMAND_sources})
@@ -39,6 +43,7 @@ add_custom_target(unbox_target DEPENDS ${GEN_COMMAND_sources})
 add_library(unbox_lib STATIC
         ${GEN_COMMAND_sources}
         ${TEST_ROOT}/operator_registry.cpp
+        ${TEST_ROOT}/custom_ops.cpp
         )
 target_include_directories(unbox_lib PUBLIC ${TEST_ROOT} ${ATen_CPU_INCLUDE})
 target_link_libraries(unbox_lib PUBLIC torch_cpu)

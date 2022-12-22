@@ -23,7 +23,7 @@ class ComputeNativeFunctionStub:
             return None
 
         sig = DispatcherSignature.from_schema(
-            f.func, prefix=f"wrapper_{f.func.name.overload_name}_", symint=False
+            f.func, prefix=f"wrapper_CPU_{f.func.name.overload_name}_", symint=False
         )
         assert sig is not None
         if len(f.func.returns) == 0:

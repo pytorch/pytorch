@@ -327,10 +327,21 @@ def gen_custom_ops(
         rocm=rocm,
     )
     cpu_fm.write_with_template(
+        "CustomOpsNativeFunctions.h",
+        "NativeFunctions.h",
+        lambda: {
+            "nativeFunctions_declarations": get_native_function_declarations(
+                grouped_native_functions=native_functions,
+                backend_indices=backend_indices,
+                native_function_decl_gen=dest.compute_native_function_declaration
+            ),
+        },
+    )
+    cpu_fm.write_with_template(
         f"Register{dispatch_key}CustomOps.cpp",
         "RegisterDispatchKeyCustomOps.cpp",
         lambda: {
-            "ops_headers": '#include "NativeFunctions.h"',
+            "ops_headers": '#include "CustomOpsNativeFunctions.h"',
             "DispatchKey": dispatch_key,
             "dispatch_namespace": dispatch_key.lower(),
             "dispatch_namespaced_definitions": "",
