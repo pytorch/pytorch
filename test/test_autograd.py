@@ -3474,7 +3474,7 @@ Done""")
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
             z = x + y
-            s = z.sum()
+            s = z.sum(dim=None)
             s.backward()
         print(p.key_averages().table(
             sort_by="self_cpu_time_total", row_limit=-1))
@@ -3501,11 +3501,11 @@ Done""")
                 self.assertEqual(e.sequence_nr, -1)
                 found_empty = True
 
-        for (fwd_name, bwd_name), ops in autograd_ops.items():
+        for idx, ((fwd_name, bwd_name), ops) in enumerate(autograd_ops.items()):
             self.assertEqual(len(ops), 3)
             self.assertEqual(ops[0].name, fwd_name)
-            self.assertEqual(ops[1].name, f"autograd::engine::evaluate_function: {bwd_name}Backward0")
-            self.assertEqual(ops[2].name, f"{bwd_name}Backward0")
+            self.assertEqual(ops[1].name, f"autograd::engine::evaluate_function: {bwd_name}Backward{idx}")
+            self.assertEqual(ops[2].name, f"{bwd_name}Backward{idx}")
             self.assertGreaterEqual(ops[0].sequence_nr, 0)
             self.assertEqual(ops[1].sequence_nr, ops[0].sequence_nr)
             self.assertEqual(ops[2].sequence_nr, ops[0].sequence_nr)
