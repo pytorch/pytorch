@@ -76,6 +76,7 @@ from .lists import (
 )
 from .misc import (
     AutogradFunctionVariable,
+    BlackHoleVariable,
     ComptimeVariable,
     GetAttrVariable,
     InspectSignatureVariable,
@@ -479,6 +480,9 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, torch.autograd.function.FunctionCtx):
+            # The autograd.function context for forward extraction
+            return BlackHoleVariable()
         elif (
             isinstance(value, types.MethodType)
             and type(getattr(value, "__self__", None))
