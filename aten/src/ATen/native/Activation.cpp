@@ -681,6 +681,9 @@ TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, 
 
 Tensor prelu(const Tensor& self, const Tensor& weight_) {
   TORCH_INTERNAL_ASSERT(weight_.defined());
+  TORCH_CHECK(self.scalar_type() == weight_.scalar_type(),
+              "prelu: Type promoting not supported. Got ",
+              self.scalar_type(), " and ", weight_.scalar_type());
   if (weight_.sym_numel() != 1) {
     TORCH_CHECK(self.dim() > 0, "Not allow zero-dim input tensor.");
 
@@ -707,10 +710,13 @@ Tensor prelu(const Tensor& self, const Tensor& weight_) {
 
 
 Tensor _prelu_kernel(const Tensor& self, const Tensor& weight) {
-  auto options = self.options().dtype(promoteTypes(self.scalar_type(), weight.scalar_type()));
-  Tensor result = at::empty({0}, options);
-  TensorIterator iter;
-  iter.build_borrowing_binary_op(result, self, weight);
+  // Weight broadcasts over self and they have the same dtype
+  auto result = at::empty_like(self);
+  auto iter = TensorIteratorConfig()
+    .add_output(result)
+    .add_input(self)
+    .add_input(weight)
+    .build();
   prelu_stub(iter.device_type(), iter);
   return result;
 }
@@ -718,13 +724,7 @@ Tensor _prelu_kernel(const Tensor& self, const Tensor& weight) {
 std::tuple<Tensor, Tensor> _prelu_kernel_backward(const Tensor& self, const Tensor& weight, const Tensor& grad_out) {
   Tensor grad_self = at::empty({0}, self.options());
   Tensor grad_weight = at::empty({0}, weight.options());
-  // Checks from build_borrowing_binary_op
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
     .add_output(grad_self)
     .add_output(grad_weight)
     .add_input(self)
