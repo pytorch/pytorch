@@ -15,7 +15,6 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.testing import requires_static_shapes
-from torch._dynamo.utils import same
 from torch.nn import functional as F
 
 tensor_for_import_testing = torch.ones(10, 10)
@@ -376,25 +375,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
 
-    def test_T_shapes(self):
-        def fn(x):
-            return torch.ones_like(x.T)
-
-        for shape in [(), (3, 4)]:
-            x = torch.rand(shape)
-            ref = fn(x)
-            res = torch._dynamo.optimize_assert("eager")(fn)(x)
-            self.assertTrue(same(res, ref))
-
-    def test_mT_shapes(self):
-        def fn(x):
-            return x.sum() + x.mT
-
-        for shape in [(), (3, 4), (3, 4, 5)]:
-            x = torch.rand(shape)
-            ref = fn(x)
-            res = torch._dynamo.optimize_assert("eager")(fn)(x)
-            self.assertTrue(same(res, ref))
+    @make_test
+    def test_T(x):
+        return torch.ones_like(x.T)
 
     @make_test
     def test_is_sparse(x):
