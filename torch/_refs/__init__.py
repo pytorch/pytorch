@@ -4479,7 +4479,7 @@ def movedim(
     utils.check(
         len(source) == len(destination),  # type: ignore[arg-type]
         lambda: (
-            "movedim: Invalid source or destination dims: source "
+            "movedim: Invalid source or destination dims: source "  # type: ignore[arg-type]
             f"({list(source)} dims) should contain the same number "  # type: ignore[arg-type]
             f"of dims as destination ({list(destination)} dims)"  # type: ignore[arg-type]
         ),
