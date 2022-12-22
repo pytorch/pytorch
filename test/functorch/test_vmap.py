@@ -4757,23 +4757,23 @@ class TestRandomness(TestCase):
                 return torch.rrelu(x)
             vmap(f, randomness='same')(z)
 
-    # @parametrize('in_dim', [0, 1, 2])
-    # @parametrize('out_dim', [0, 1, 2])
-    # def test_chunk_vmap(self, in_dim, out_dim):
+    @parametrize('in_dim', [0, 1, 2])
+    @parametrize('out_dim', [0, 1, 2])
+    def test_chunk_vmap(self, in_dim, out_dim):
 
-    #     randomness = "different"
+        randomness = "different"
 
-    #     x = torch.randn(4, 5, 6)
+        x = torch.randn(4, 5, 6)
 
-    #     def f(x):
-    #         y = x.sin() + torch.rand_like(x)
-    #         return y
+        def f(x):
+            y = x.sin() + torch.rand_like(x)
+            return y
 
-    #     for chunks in [1, 2, 3, 4, 7, 10, 16]:
-    #         output = chunk_vmap(
-    #             f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunks=chunks
-    #         )(x)
-    #         self._assert_all_slices_unique(output)
+        for chunks in [1, 2, 3, 4, 7, 10, 16]:
+            output = chunk_vmap(
+                f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunks=chunks
+            )(x)
+            self._assert_all_slices_unique(output)
 
     @parametrize('in_dim', [0, 1, 2])
     @parametrize('out_dim', [0, 1, 2])
