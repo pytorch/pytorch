@@ -67,7 +67,7 @@ operations in ``func``. ``vmap(func)`` returns a new function that maps ``func``
 over some dimension (default: 0) of each Tensor in inputs.
 
 vmap is useful for hiding batch dimensions: one can write a function func that
-runs on examples and then lift it to a function that can take batches of 
+runs on examples and then lift it to a function that can take batches of
 examples with ``vmap(func)``, leading to a simpler modeling experience:
 
 .. code-block:: python
