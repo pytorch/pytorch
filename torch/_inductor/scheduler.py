@@ -318,7 +318,9 @@ class SchedulerNode(BaseSchedulerNode):
             from .codegen.triton_template import should_use_template
             from .codegen.wrapper import buffer_reuse_key
 
-            for read in self.read_writes.reads:
+            ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+
+            for read in ordered_reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
                 )
@@ -363,7 +365,7 @@ class SchedulerNode(BaseSchedulerNode):
     def mark_run(self):
         self.allocate()
 
-    def codegen(self, index_vars):
+    def ranges_from_index_vars(self, index_vars):
         sizes = self._sizes
         assert sum(map(len, sizes)) == sum(map(len, index_vars))
         var_ranges = dict(
@@ -372,6 +374,10 @@ class SchedulerNode(BaseSchedulerNode):
                 itertools.chain.from_iterable(sizes),
             )
         )
+        return var_ranges
+
+    def codegen(self, index_vars):
+        var_ranges = self.ranges_from_index_vars(index_vars)
         try:
             with V.set_ops_handler(
                 SimplifyIndexing(V.get_ops_handler(), var_ranges)
@@ -1117,6 +1123,16 @@ class Scheduler:
                     or node.is_template()
                 ):
                     self.flush()
+                if device != self.current_device:
+                    if device.type == "cuda":
+                        if self.current_device and self.current_device.type == "cuda":
+                            V.graph.wrapper_code.codegen_cuda_device_guard_exit()
+                        assert device.index is not None, "device should have an index"
+                        V.graph.wrapper_code.codegen_cuda_device_guard_enter(
+                            device.index
+                        )
+                    elif self.current_device and self.current_device.type == "cuda":
+                        V.graph.wrapper_code.codegen_cuda_device_guard_exit()
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
@@ -1130,6 +1146,9 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
+
+            if config.triton.debug_sync_kernel:
+                self.get_backend(device).codegen_sync()
 
             self.available_buffer_names.update(node.get_names())
 

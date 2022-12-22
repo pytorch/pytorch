@@ -8,6 +8,7 @@ import types
 from collections import defaultdict, OrderedDict
 from dataclasses import dataclass
 from enum import Enum
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import (
     Any,
@@ -422,17 +423,20 @@ class PackageExporter:
             return False
 
     def _get_source_of_module(self, module: types.ModuleType) -> Optional[str]:
-        filename = getattr(module, "__file__", None)
-        result = (
-            None
-            if filename is None or not filename.endswith(".py")
-            else linecache.getlines(filename, module.__dict__)
-        )
-
-        if result is None:
-            return None
-
-        return "".join(result)
+        filename = None
+        spec = getattr(module, "__spec__", None)
+        if spec is not None:
+            loader = getattr(spec, "loader", None)
+            if loader is not None and isinstance(loader, SourceFileLoader):
+                try:
+                    filename = loader.get_filename(module.__name__)
+                except ImportError:
+                    pass
+        if filename is None:
+            filename = getattr(module, "__file__", None)
+        if isinstance(filename, str) and filename.endswith(".py"):
+            return "".join(linecache.getlines(filename, module.__dict__))
+        return None
 
     def add_dependency(self, module_name: str, dependencies=True):
         """Given a module, add it to the dependency graph according to patterns
