@@ -213,9 +213,9 @@ class NNModuleVariable(VariableTracker):
                 # TODO mlazos: we don't fully support all of the hooks that exist,
                 # so restrict using __call__ only to lazy modules for now
                 if is_lazy:
-                    fn = mod.__class__.__call__
+                    fn = mod.__call__.__func__
                 else:
-                    fn = mod.__class__.forward
+                    fn = mod.forward.__func__
 
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
