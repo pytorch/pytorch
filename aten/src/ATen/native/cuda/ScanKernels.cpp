@@ -89,11 +89,19 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
 }
 
 void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
-  if (self.is_floating_point() || self.is_complex()) {
-    // See Note [Writing Nondeterministic Operations]
-    // Issue reporting nondeterministic behavior: https://github.com/pytorch/pytorch/issues/75240
-    globalContext().alertNotDeterministic("cumsum_cuda_kernel");
-  }
+  // Cruise: this check was added in PyTorch 1.13.0. Previously it was silently non-deterministic.
+  // We have a lot of cumsum usage in the codebase at the moment and we still want to be able to run it
+  // with the deterministic mode. This could be solved in the upstream
+  // see https://github.com/pytorch/pytorch/issues/89492 for tracking.
+  // Given that fact, we don't want to put any elaborate workarounds or re-work the codebase
+  // Hence we are skipping the non-determinism alert here.
+  // TODO [MLP-20850]: consider removing this patch if all customers switch to the warn_only=True mode
+  //
+  // if (self.is_floating_point() || self.is_complex()) {
+  //   // See Note [Writing Nondeterministic Operations]
+  //   // Issue reporting nondeterministic behavior: https://github.com/pytorch/pytorch/issues/75240
+  //   globalContext().alertNotDeterministic("cumsum_cuda_kernel");
+  // }
   auto result_ = contiguous_out_arg(result);
   launch_cumsum_cuda_kernel(*result_, self, dim);
   if (!result.is_same(*result_)) {
