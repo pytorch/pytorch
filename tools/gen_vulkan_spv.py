@@ -184,7 +184,9 @@ def determineDescriptorType(lineStr: str) -> str:
     for identifier, typeNum in typeIdMapping.items():
         if re.search(identifier, lineStr):
             return typeNum
-    raise AssertionError("No matching descriptor type for " + lineStr + " in determineDescriptorType")
+    raise AssertionError(
+        "No matching descriptor type for " + lineStr + " in determineDescriptorType"
+    )
 
 def getShaderInfo(srcFilePath: str) -> ShaderInfo:
     shader_info = ShaderInfo([], [], "")
@@ -335,7 +337,6 @@ def genCppH(
             storageTypeToEnum[shader_info.bias_storage_type],
         ]
 
-
         shader_info_h_code.append("extern const api::ShaderInfo {};".format(name))
         shader_info_cpp_code.append(
             "const api::ShaderInfo {}(\n  {}\n);".format(
@@ -347,7 +348,6 @@ def genCppH(
     cpp += "namespace {{\n{}\n}} // namespace\n".format("\n".join(shader_info_bin_code))
     cpp += "{}\n".format("\n".join(shader_info_cpp_code))
     h += "{}\n".format("\n".join(shader_info_h_code))
-
 
     cpp += nsend
     h += nsend
