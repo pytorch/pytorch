@@ -1645,7 +1645,7 @@ def get_aten_op(fn: Callable, name: str):
         module = module[1:]
         module = module.replace(".", "_")
         module = module + "_"
-    return getattr(torch.ops.aten, f"{module}{name}")
+    return getattr(torch._ops.ops.aten, f"{module}{name}")
 
 
 def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
