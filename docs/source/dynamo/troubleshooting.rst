@@ -217,7 +217,7 @@ torchdynamo. It is important to note that errors can occur during this
 tracing and also while TorchInductor lowers the forward and backward
 graphs to GPU code or C++. A model can often consist of hundreds or
 thousands of FX nodes, so narrowing the exact nodes where this problem
-occurred can be very difficult. Fortunately, there are tools availabe to
+occurred can be very difficult. Fortunately, there are tools available to
 automatically minify these input graphs to the nodes which are causing
 the issue. The first step is to determine whether the error occurs
 during tracing of the backward graph with AOTAutograd or during
@@ -378,7 +378,7 @@ through an example.
    test_backend_error()
 
 In order to run the code after TorchDynamo has traced the forward graph,
-you can use the ``TORCHDYNAMO_REPRO_AFTER`` enviornment variable. Running
+you can use the ``TORCHDYNAMO_REPRO_AFTER`` environment variable. Running
 this program with ``TORCHDYNAMO_REPRO_AFTER=“dynamo”`` (or
 ``torch._dynamo.config.repro_after="dynamo"``) should produce `this
 output <https://gist.github.com/mlazos/244e3d5b53667e44078e194762c0c92b>`__\ and

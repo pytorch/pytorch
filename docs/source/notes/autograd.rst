@@ -339,7 +339,7 @@ Non-determinism
 ^^^^^^^^^^^^^^^
 
 If you are calling ``backward()`` from multiple threads concurrently and have
-shared inputs (i.e. Hogwild CPU training), then non-determinsim should be expected.
+shared inputs (i.e. Hogwild CPU training), then non-determinism should be expected.
 This can occur because parameters are automatically shared across threads,
 as such, multiple threads may access and try to accumulate the same ``.grad``
 attribute during gradient accumulation. This is technically not safe, and
