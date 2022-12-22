@@ -209,7 +209,7 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
                         self.assertEqual(n_p1[1], n_p2[1])
 
         def opt_at(opt, idx):
-            return list(iter(opt.state.values()))[idx]
+            return list(opt.state.values())[idx]
 
         # Adam lazily creates its state
         self.assertEqual(
