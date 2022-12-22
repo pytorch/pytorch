@@ -154,10 +154,6 @@ CI_SKIP_OPTIMIZER = {
     "convmixer_768_32",  # accuracy
     "sebotnet33ts_256",  # accuracy
     "hrnet_w18",  # Stack issue in fx
-    # "tf_mixnet_l",  # This model is non-deterministic with same input + weights,
-    # but without optimizing over multiple iterations, this still passes
-    # "mixnet_l",  # same as above
-    # "ghostnet_100",  # same as above
     # TorchBench
     "dlrm",  # symbolic shapes error
     # HF
@@ -909,7 +905,6 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
-        self.use_amp = False
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
         self.optimizer = None
@@ -942,9 +937,7 @@ class BenchmarkRunner:
             self.autocast = torch.cuda.amp.autocast
 
     def init_optimizer(self, name, device, params):
-        print(name)
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            print("INIT OPTIMIZER")
             self.optimizer = torch.optim.SGD(params, lr=0.01)
         else:
             self.optimizer = None
@@ -1201,7 +1194,7 @@ class BenchmarkRunner:
                     if (
                         isinstance(e, RuntimeError)
                         and "Internal Triton PTX codegen error" in str(e)
-                    ) or (isinstance(e, KeyError) and str(e) == "'cubin'"):
+                    ) or (isinstance(e, KeyError) and "cubin" in str(e)):
                         if i < retries:
                             time.sleep((i + 1) * 30)
                             print("Retrying...")
@@ -1782,10 +1775,7 @@ def run(runner, args, original_dir=None):
                 assert runner.suite_name == "timm_models"
                 args.batch_size = 8
 
-        # Remove sources of randomness
-        if runner.suite_name != "timm_models":
-            # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
-            args.use_eval_mode = True
+        args.use_eval_mode = True
         inductor_config.fallback_random = True
 
         # Remove randomeness when torch manual seed is called
