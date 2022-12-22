@@ -356,6 +356,8 @@ if(WIN32)
   set(USE_MIMALLOC ON)
 endif()
 
+option(USE_HOST_PROTOC "Use host protoc executable during cross-compilation" OFF)
+
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
   if(CCACHE_PROGRAM)
@@ -711,6 +713,11 @@ if(NOT IOS AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES M
   endif()
   set(PROTOBUF_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
   set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
+endif()
+
+if(USE_HOST_PROTOC)
+  set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE $ENV{PROTOC})
+  set(PROTOBUF_PROTOC_EXECUTABLE $ENV{PROTOC})
 endif()
 
 # ---[ Misc checks to cope with various compiler modes
