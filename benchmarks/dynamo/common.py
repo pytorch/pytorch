@@ -1776,8 +1776,11 @@ def run(runner, args, original_dir=None):
                 args.batch_size = 8
 
         # Remove sources of randomness
-        args.use_eval_mode = True
+        if runner.suite_name != "timm_models":
+            # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
+            args.use_eval_mode = True
         inductor_config.fallback_random = True
+        torch.backends.cudnn.deterministic = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
