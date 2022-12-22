@@ -71,43 +71,95 @@ SymInt = Union[
 
 Scalar = Union[int, float, bool]
 
+# This is a Tensor Arugment used in the args of an node
+# We intentionally don't store the tensor's storage, nor the tensor's meta data here,
+# as the same tensor argument can be used in multiple nodes, and we want to avoid storing the same data multiple times.
+# In another word, this field is an reference to the tensor, not the tensor itself.
+@dataclass
+class TensorArgument:
+    name: str   # identifier of the tensor, which must exist in graph's ivalues map
 
-# ArgumentType = Union[
 
-#     Tensor
+@dataclass
+class Argument:
+
+    # Permissible types for operator's arguments
+    class ArgumentType(Enum):
+        TENSOR = auto()
+        # TENSORS = auto()    # !!! This is an important decision to decide how to handle list of tensors. More discussion to come.
+
+        SCALAR = auto()     # !!! Scalar is already an union type: Union[int, float, bool], check if serialization library can handle this
+        # SCALARS = auto()    # !!! for Scalar[], used in native_function.yaml, but not used in canonical aten ops yet... Consider if we need this
+
+        BOOL = auto()
+        BOOLS = auto()      # for bool[]
+                            # !!! There are use of bool[3] in canonical aten ops, consider if we can simplify this
+
+        INT = auto()
+        INTS = auto()       # for int[]
+
+        FLOAT = auto()
+        FLOATS = auto()     # for float[]
+
+        STRING = auto()
+        # STRINGS = auto()    # !!! There is no str[] in native_function.yaml. Consider if this is needed for expressiveness
+
+        # SYMINT = auto()    # !!! Can Symint be an arguement?, there are symint in native_function.yaml
+        # SYMINT = auto()    # !!! Can Symint[] be an arguement? there are symint[] in native_function.yaml
+
+        # GRAPH = auto()      # !!! Consider how to handle condition op, which need to pass in a graph for the branch
+        # GRAPHS = auto()      # !!! What about list of graphs? Do we need this?
+
+        # !!! Following types doesn't have a list version in native_function.yaml
+        SCALAR_TYPE = auto()
+        MEMORY_FORMAT = auto()
+        LAYOUT = auto()
+        DEVICE = auto()
+
+    # Declaration of which type the value field is storing
+    type: ArgumentType
+
+    val: Union[
+        TensorArgument,
+        # List[TensorArgument],
+        Scalar,
+        # List[Scalar],
+        bool,
+        List[bool],
+        int,
+        List[int],
+        float,
+        List[float],
+        str,
+        # List[str],
+        # SymInt,
+        # List[SymInt],
+        # Graph,
+        # List[Graph],
+        ScalarType,
+        MemoryFormat,
+        Layout,
+        Device,
+    ]
+
+@dataclass
+class KeywordArgument:
+    key: str
+    vale: Argument
+
+# !!! How to model optional fields? Is it an operator schema annotation, or an argument type?
 #     Tensor?
-#     Tensor[]
-
-#     Scalar
 #     Scalar?
-
-#     ScalarType
 #     ScalarType?
-
-#     bool
-#     bool[3]
 #     bool?
-
-#     int
 #     int?
-#     int[]
 #     int[]?
-
-#     float
 #     float[]?
-
-#     SymInt
-#     SymInt[]
 #     SymInt[]?
-
 #     MemoryFormat?
-
-#     Layout
 #     Layout?
-
-#     Device
 #     Device?
-# ]
+
 
 ################################################################################
 # Following section is the defining the schema of serializing a concrete tensor
@@ -124,7 +176,7 @@ Scalar = Union[int, float, bool]
 #       These are faithful capture of tensor's detail in pytorch's executions during tracing
 #       However, it's up to downstream system on how to utilized these fields
 #       In another word, these feilds are suggestive, rather than mandatory.
-@dataclass
+
 class TensorMeta:
     dtype: ScalarType
     sizes: List[SymInt]
@@ -216,13 +268,13 @@ class Node:
     target: str      # fully qualified name to the target, e.g. aten.add.Tensnor
                      # !!! Consider using a structured operator name instead of string
 
-    inputs: List[str]    # A list of IValue names consumed by this node
+    args: List[Argument]              # args for this node
+    kwargs: List[KeywordArgument]     # kwargs for this node
+                                      # !!! Not all types in Argument are used as kwargs, e.g. TensorArgument should not be used as kwargs
+                                      # Do we want to enforce this in the schema? i.e. only allow certain types to be used as kwargs?
 
-    # !!! what about other non-tensor inputs in args?
-    # !!! what about kwargs?
-
-    outputs: List[str]  # A list of IValue names that are produced by this node
-                        # Notice: this assumes that a node can only return Tensor(s), and not other int/float/bool types...
+    outputs: List[TensorArgument]   # A list of Tensor Argument returned by this node
+                                    # !!! Notice: this assumes that a node can only return Tensor(s), and not other int/float/bool types...
 
     metadata: List[StringStringPair]
 
