@@ -3266,7 +3266,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.alpha_dropout', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         xfail('as_strided'),  # Our test runner can't handle this; manual test exists
-        xfail('as_strided_scatter'), # no batching rule implemented, default doesnt work
+        xfail('as_strided_scatter'),  # no batching rule implemented, default doesnt work
         skip('new_empty_strided'),  # empty tensor data is garbage so it's hard to make comparisons with it
         xfail('nn.functional.fractional_max_pool3d'),  # randomness
         xfail('nn.functional.fractional_max_pool2d'),  # randomness
