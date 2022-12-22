@@ -345,7 +345,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     Computes the Jacobian of ``func`` with respect to the arg(s) at index
     ``argnum`` using reverse mode autodiff
 
-    ..note:
+    .. note::
         Using :attr:`chunk_size=1` is equivalent to computing the jacobian
         row-by-row with a for-loop i.e. the constraints of :func:`vmap` are
         not applicable.
