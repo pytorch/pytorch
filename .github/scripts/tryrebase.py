@@ -8,6 +8,10 @@ from typing import Any
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import gh_post_pr_comment as gh_post_comment, GitHubPR
 
+SAME_SHA_ERROR = (
+    "\n```\nAborting rebase because rebasing the branch resulted in the same sha as the target branch.\n" +
+    "This usually happens because the PR was already been merged.  Please rebase locally and push.\n```"
+)
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
@@ -26,6 +30,10 @@ def rebase_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = F
 
     repo.fetch(branch, branch)
     repo._run_git("rebase", onto_branch, branch)
+
+    if repo.rev_parse(branch) == repo.rev_parse(onto_branch):
+        raise Exception(SAME_SHA_ERROR)
+
     if dry_run:
         push_result = repo._run_git("push", "--dry-run", "-f", remote_url, refspec)
     else:
@@ -49,7 +57,10 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
 
-    # Steal the identity of the committer of the commit on the orig branch
+    if repo.rev_parse(orig_ref) == repo.rev_parse(onto_branch):
+        raise Exception(SAME_SHA_ERROR)
+
+    # steal the identity of the committer of the commit on the orig branch
     email = repo._run_git("log", orig_ref, "--pretty=format:%ae", "-1")
     name = repo._run_git("log", orig_ref, "--pretty=format:%an", "-1")
     repo._run_git("config", "--global", "user.email", email)
