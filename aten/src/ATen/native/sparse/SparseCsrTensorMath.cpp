@@ -238,8 +238,8 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
 }
 
 template <typename op_t>
-Tensor binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
-  // NOTE: binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
+Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
+  // NOTE: intersection_binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
   const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::result_type(sparse, scalar));
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
   Tensor compressed_indices, plain_indices;
@@ -255,8 +255,8 @@ Tensor binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar,
 }
 
 template <typename op_t>
-Tensor& binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const string& op_name, const op_t& op) {
-  // NOTE: binary_op_with_wrapped_scalar_ assumes scalar.numel() == 1.
+Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const string& op_name, const op_t& op) {
+  // NOTE: intersection_binary_op_with_wrapped_scalar_ assumes scalar.numel() == 1.
   const auto broadcasted_shape = infer_size(sparse.sizes(), scalar.sizes());
   if (sparse.sizes() != broadcasted_shape) {
     TORCH_CHECK(false, op_name, "(): output with shape ", sparse.sizes(), " does not match ",
@@ -271,12 +271,12 @@ Tensor& binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, con
 Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
   // Check if either of the arguments is a wrapped Scalar
   if (self.layout() == kStrided && self.dim() == 0) {
-    return binary_op_with_wrapped_scalar(other, self, [](const Tensor& a, const Tensor& b) -> Tensor {
+    return intersection_binary_op_with_wrapped_scalar(other, self, [](const Tensor& a, const Tensor& b) -> Tensor {
         return a.mul(b);
     });
   }
   if (other.layout() == kStrided && other.dim() == 0) {
-    return binary_op_with_wrapped_scalar(self, other, [](const Tensor& a, const Tensor& b) -> Tensor {
+    return intersection_binary_op_with_wrapped_scalar(self, other, [](const Tensor& a, const Tensor& b) -> Tensor {
         return a.mul(b);
     });
   }
@@ -297,7 +297,7 @@ Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
 
 Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
   if (other.layout() == kStrided && other.dim() == 0) {
-    return binary_op_with_wrapped_scalar_(self, other, "mul_", [](Tensor& a, const Tensor& b) -> Tensor& {
+    return intersection_binary_op_with_wrapped_scalar_(self, other, "mul_", [](Tensor& a, const Tensor& b) -> Tensor& {
         return a.mul_(b);
     });
   }
