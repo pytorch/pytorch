@@ -37,23 +37,6 @@ runs:
       run: |
         Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
 
-    - name: Install Visual Studio 2019 toolchain
-      shell: powershell
-      env:
-        VS_VERSION: "16.8.6"
-        INSTALL_WINDOWS_SDK: "1"
-      run: |
-        .\.circleci\scripts\vs_install.ps1
-
-    - name: Install CUDA and CUDNN
-      shell: bash
-      if: inputs.cuda-version != 'cpu'
-      env:
-        CUDA_VERSION: ${{ inputs.cuda-version }}
-      run: |
-        .circleci/scripts/windows_cuda_install.sh
-        .circleci/scripts/windows_cudnn_install.sh
-
     - name: Setup Python3
       uses: actions/setup-python@v4
       with:
