@@ -1129,9 +1129,9 @@ Tensor min_max_mps(const Tensor& input_t,
           MPSGraphTensor* outputTensor = nil;
           MPSGraphTensor* castInputTensor = nil;
 
-          if(input_t.scalar_type() != ScalarType::Float &&
-             input_t.scalar_type() != ScalarType::Int   &&
-             input_t.scalar_type() != ScalarType::Half) {
+          if (input_t.scalar_type() != ScalarType::Float &&
+              input_t.scalar_type() != ScalarType::Int   &&
+              input_t.scalar_type() != ScalarType::Half) {
             castInputTensor =  [mpsGraph castTensor:inputTensor
                                              toType:MPSDataTypeInt32
                                                name:@"castInputTensor"];
