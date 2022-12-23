@@ -5,7 +5,7 @@ import io
 import subprocess
 import json
 from functools import lru_cache
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any, Dict
 
 cache = lru_cache(None)
 
@@ -416,11 +416,13 @@ def trace_plot(data, device=None, plot_segments=False):
         alloc = 'alloc'
         free = 'free_completed'
 
-    addr_versions = {}
+    addr_versions: Dict[int, int] = {}
 
     def add_element(addr, size, frames, extra=()):
         next_version = addr_versions[addr] = addr_versions.get(addr, 0) + 1
-        frames = [f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation", *extra, *(_frame_fmt(f, full_filename=True) for f in frames)]
+        frames = [f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation",
+                  *extra,
+                  *(_frame_fmt(f, full_filename=True) for f in frames)]
         return w.add_element(size, frames)
 
     for i, e in enumerate(trace):
@@ -816,7 +818,7 @@ plot.set_delegate(delegate)
 </html>
 """
 
-def segment_plot(data, device=None):
+def segment_plot(data: Any, device=None):
     device = _choose_device(data, device)
     trace = data['device_traces'][device]
 
@@ -842,15 +844,15 @@ def segment_plot(data, device=None):
     def format_frames(frames):
         return intern_stack([_frame_fmt(f, full_filename=True) for f in frames])
 
-    result = {
+    result: Any = {
         'string_table': string_table,
         'suffix_table': suffix_table,
         'events': {
-            'action': [], # reference to string table
-            'addr': [], # for OOM, this will hold device_free value
+            'action': [],  # reference to string table
+            'addr': [],  # for OOM, this will hold device_free value
             'size': [],
             'stream': [],
-            'frames': [] # reference to suffix_table
+            'frames': []  # reference to suffix_table
         },
         'segments': {
             'addr': [],
@@ -861,7 +863,7 @@ def segment_plot(data, device=None):
             'addr': [],
             'size': [],
             'real_size': [],
-            'frames': [], # reference to string table
+            'frames': [],  # reference to string table
             'pending_free': [],
         }
     }
@@ -873,7 +875,7 @@ def segment_plot(data, device=None):
             t = ts[i]
             if i + 1 < len(ts):
                 tnext = ts[i + 1]
-                if  t['action'] == 'free_requested' and tnext['action'] == 'free_completed' and t['addr'] == tnext['addr']:
+                if t['action'] == 'free_requested' and tnext['action'] == 'free_completed' and t['addr'] == tnext['addr']:
                     yield {**t, 'action': 'free'}
                     i += 2
                     continue
@@ -883,12 +885,12 @@ def segment_plot(data, device=None):
                 yield t
             i += 1
 
-    preproc = {
+    preproc: Any = {
         'action': intern_str,
         'frames': format_frames,
     }
 
-    events = result['events']
+    events: Any = result['events']
     for event in fold_free(trace):
         for k in events.keys():
             events[k].append(preproc.get(k, lambda x: x)(event[k]))
@@ -1148,12 +1150,15 @@ function MemoryView(outer, stack_info, trace_data, events) {
 
     let segments_data = trace_data.segments
     for (let [i, addr] of trace_data.segments.addr.entries()) {
-        segments_map[addr] = Segment(addr, segments_data.size[i], segments_data.stream[i], null, trace_data.segment_version(addr, false))
+        segments_map[addr] = Segment(addr, segments_data.size[i], segments_data.stream[i],
+                                     null, trace_data.segment_version(addr, false))
     }
 
     let blocks_data = trace_data.blocks
     for (let [i, addr] of trace_data.blocks.addr.entries()) {
-        block_map[addr] = Block(addr, blocks_data.size[i], blocks_data.real_size[i], blocks_data.frames[i], blocks_data.pending_free[i], trace_data.block_version(addr, false))
+        block_map[addr] = Block(addr, blocks_data.size[i], blocks_data.real_size[i],
+                                blocks_data.frames[i], blocks_data.pending_free[i],
+                                trace_data.block_version(addr, false))
     }
 
     function simulate_memory(idx) {
@@ -1251,7 +1256,8 @@ function MemoryView(outer, stack_info, trace_data, events) {
                     if (t.internal_free > 0) {
                         internal = ` (${t.internal_free/free*100}% internal)`
                     }
-                    return `s${t.addr.toString(16)}_${t.version}: segment ${formatSize(t.size)} allocated, ${formatSize(free)} free${internal} (stream ${t.stream})\n${t.frames}`
+                    return `s${t.addr.toString(16)}_${t.version}: segment ${formatSize(t.size)} allocated, ` +
+                           `${formatSize(free)} free${internal} (stream ${t.stream})\n${t.frames}`
                 },
                 (d) => {
                     d.attr('stroke', 'black')
@@ -1297,7 +1303,8 @@ function MemoryView(outer, stack_info, trace_data, events) {
                 if (t.free_requested) {
                     requested = " (block freed but waiting due to record_stream)"
                 }
-                return `b${t.addr.toString(16)}_${t.version} ${formatSize(t.real_size)} allocation${requested} (stream ${t.segment.stream})\n` + t.frames
+                return `b${t.addr.toString(16)}_${t.version} ` +
+                       `${formatSize(t.real_size)} allocation${requested} (stream ${t.segment.stream})\n` + t.frames
             }, removeStroke)
 
             let free_selection = block_r.selectAll('rect').data(blocks).enter()
@@ -1311,7 +1318,8 @@ function MemoryView(outer, stack_info, trace_data, events) {
             stack_info.register(free_selection, (d) => {
                 addStroke(d)
                 let t = d.datum()
-                return `Free space lost due to rounding ${formatSize(t.size - t.real_size)} (stream ${t.segment.stream})\n` + t.frames
+                return `Free space lost due to rounding ${formatSize(t.size - t.real_size)}` +
+                       ` (stream ${t.segment.stream})\n` + t.frames
             }, removeStroke)
 
             let reserved = segments.reduce((x, y) => x + y.size, 0)
