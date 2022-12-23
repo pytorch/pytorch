@@ -13,7 +13,7 @@ import sympy
 
 import torch
 
-from . import config, dependencies, ir
+from . import config, dependencies, ir, metrics
 from .dependencies import MemoryDep, StarDep
 from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, dynamo_utils, has_triton
@@ -318,7 +318,9 @@ class SchedulerNode(BaseSchedulerNode):
             from .codegen.triton_template import should_use_template
             from .codegen.wrapper import buffer_reuse_key
 
-            for read in self.read_writes.reads:
+            ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+
+            for read in ordered_reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
                 )
@@ -347,6 +349,12 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
+                        # mutations not tracked in cpp kernels
+                        if isinstance(
+                            V.kernel, torch._inductor.codegen.triton.TritonKernel
+                        ):
+                            V.kernel.mutations.add(input_node.get_name())
+                            V.kernel.mutations.add(self.get_name())
                         return
         super().allocate()
 
@@ -357,7 +365,7 @@ class SchedulerNode(BaseSchedulerNode):
     def mark_run(self):
         self.allocate()
 
-    def codegen(self, index_vars):
+    def ranges_from_index_vars(self, index_vars):
         sizes = self._sizes
         assert sum(map(len, sizes)) == sum(map(len, index_vars))
         var_ranges = dict(
@@ -366,6 +374,10 @@ class SchedulerNode(BaseSchedulerNode):
                 itertools.chain.from_iterable(sizes),
             )
         )
+        return var_ranges
+
+    def codegen(self, index_vars):
+        var_ranges = self.ranges_from_index_vars(index_vars)
         try:
             with V.set_ops_handler(
                 SimplifyIndexing(V.get_ops_handler(), var_ranges)
@@ -593,6 +605,7 @@ class Scheduler:
         self.compute_predecessors()
         self.dead_node_elimination()
 
+        metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
@@ -977,7 +990,7 @@ class Scheduler:
         common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
             node2.read_writes.reads | node2.read_writes.writes
         )
-        return sum(dep.numel_hint() for dep in common_memory_deps)
+        return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
     def score_fusion_key(self, nodes):
         """
@@ -1080,9 +1093,9 @@ class Scheduler:
         else:
             if not has_triton():
                 device_props = torch.cuda.get_device_properties(device)
-                if device_props.major < 6:
+                if device_props.major < 7:
                     raise RuntimeError(
-                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 6.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
+                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
                     )
                 else:
                     raise RuntimeError(
@@ -1110,6 +1123,16 @@ class Scheduler:
                     or node.is_template()
                 ):
                     self.flush()
+                if device != self.current_device:
+                    if device.type == "cuda":
+                        if self.current_device and self.current_device.type == "cuda":
+                            V.graph.wrapper_code.codegen_cuda_device_guard_exit()
+                        assert device.index is not None, "device should have an index"
+                        V.graph.wrapper_code.codegen_cuda_device_guard_enter(
+                            device.index
+                        )
+                    elif self.current_device and self.current_device.type == "cuda":
+                        V.graph.wrapper_code.codegen_cuda_device_guard_exit()
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
@@ -1123,6 +1146,9 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
+
+            if config.triton.debug_sync_kernel:
+                self.get_backend(device).codegen_sync()
 
             self.available_buffer_names.update(node.get_names())
 

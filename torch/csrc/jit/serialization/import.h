@@ -110,19 +110,27 @@ TORCH_API Module jitModuleFromSourceAndConstants(
     const std::vector<IValue>& constants,
     int32_t version);
 
-extern Module (*_load_jit_module_from_flatbuffer_bytes)(
-    // comp unit
-    std::shared_ptr<char>,
-    size_t,
-    ExtraFilesMap&,
-    c10::optional<at::Device>);
+TORCH_API Module parse_and_initialize_jit_module(
+    std::shared_ptr<char> data,
+    size_t size,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device = c10::nullopt);
 
-extern Module (*_load_jit_module_from_flatbuffer_bytes)(
-    // comp unit
-    std::shared_ptr<char>,
-    size_t,
-    ExtraFilesMap&,
-    c10::optional<at::Device>);
+TORCH_API Module load_jit_module_from_file(
+    const std::string& filename,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device = c10::nullopt);
+
+TORCH_API Module load_jit_module_from_stream(
+    std::istream& in,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device = c10::nullopt);
+
+TORCH_API Module parse_and_initialize_jit_module(
+    std::shared_ptr<char> data,
+    size_t size,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device);
 
 } // namespace jit
 } // namespace torch

@@ -51,7 +51,7 @@ template <>
 struct type_caster<at::Storage> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::Storage, _("torch.storage._StorageBase"));
+  PYBIND11_TYPE_CASTER(at::Storage, _("torch.StorageBase"));
 
   bool load(handle src, bool) {
     PyObject* obj = src.ptr();
@@ -97,7 +97,7 @@ template <>
 struct TORCH_PYTHON_API type_caster<at::IntArrayRef> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::IntArrayRef, _("typing.Tuple[int, ...]"));
+  PYBIND11_TYPE_CASTER(at::IntArrayRef, _("Tuple[int, ...]"));
 
   bool load(handle src, bool);
   static handle cast(
@@ -113,7 +113,7 @@ template <>
 struct TORCH_PYTHON_API type_caster<at::SymIntArrayRef> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::SymIntArrayRef, _("at::SymIntArrayRef"));
+  PYBIND11_TYPE_CASTER(at::SymIntArrayRef, _("List[int]"));
 
   bool load(handle src, bool);
   static handle cast(
@@ -126,7 +126,7 @@ struct TORCH_PYTHON_API type_caster<at::SymIntArrayRef> {
 };
 
 template <>
-struct TORCH_PYTHON_API type_caster<at::MemoryFormat> {
+struct type_caster<at::MemoryFormat> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::MemoryFormat, _("torch.memory_format"));
@@ -204,9 +204,23 @@ struct type_caster<c10::DispatchKey>
 };
 
 template <>
-struct type_caster<c10::SymInt> {
+struct TORCH_PYTHON_API type_caster<c10::Scalar> {
  public:
-  PYBIND11_TYPE_CASTER(c10::SymInt, _("torch._prims_common.IntLike"));
+  PYBIND11_TYPE_CASTER(
+      c10::Scalar,
+      _("Union[Number, torch.SymInt, torch.SymFloat]"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      const c10::Scalar& si,
+      return_value_policy /* policy */,
+      handle /* parent */);
+};
+
+template <>
+struct TORCH_PYTHON_API type_caster<c10::SymInt> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymInt, _("Union[int, torch.SymInt]"));
   bool load(py::handle src, bool);
 
   static py::handle cast(
@@ -216,15 +230,44 @@ struct type_caster<c10::SymInt> {
 };
 
 template <>
-struct type_caster<c10::SymFloat> {
+struct TORCH_PYTHON_API type_caster<c10::SymFloat> {
  public:
-  PYBIND11_TYPE_CASTER(c10::SymFloat, _("torch._prims_common.FloatLike"));
+  PYBIND11_TYPE_CASTER(c10::SymFloat, _("float"));
   bool load(py::handle src, bool);
 
   static py::handle cast(
       c10::SymFloat si,
       return_value_policy /* policy */,
       handle /* parent */);
+};
+
+template <typename T>
+struct type_caster<c10::complex<T>> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(c10::complex<T>, _("complex"));
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+
+    // Refered from `THPUtils_unpackComplexDouble`
+    Py_complex py_complex = PyComplex_AsCComplex(obj);
+    if (py_complex.real == -1.0 && PyErr_Occurred()) {
+      return false;
+    }
+
+    // Python's Complex is always double precision.
+    value = c10::complex<double>(py_complex.real, py_complex.imag);
+    return true;
+  }
+
+  static handle cast(
+      const c10::complex<T>& complex,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    // Python only knows double precision complex.
+    return handle(PyComplex_FromDoubles(complex.real(), complex.imag()));
+  }
 };
 
 // Pybind11 bindings for our optional and variant types.

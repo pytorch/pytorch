@@ -39,7 +39,7 @@ import subprocess
 import sys
 import tempfile
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from os.path import abspath, exists
 from random import randint
 
@@ -90,8 +90,6 @@ DEFAULTS = {
     "training": [
         "eager",
         "aot_eager",
-        "aot_cudagraphs",
-        "nvprims_nvfuser",
         "inductor",
         "inductor_no_cudagraphs",
     ],
@@ -223,10 +221,28 @@ def parse_args():
         help="Updates to dashboard",
     )
     parser.add_argument(
+        "--no-graphs",
+        action="store_true",
+        default=False,
+        help="Do not genenerate and upload metric graphs",
+    )
+    parser.add_argument(
+        "--no-update-archive",
+        action="store_true",
+        default=False,
+        help="Do not update lookup.csv or the log archive",
+    )
+    parser.add_argument(
+        "--no-gh-comment",
+        action="store_true",
+        default=False,
+        help="Do not write a comment to github",
+    )
+    parser.add_argument(
         "--update-dashboard-test",
         action="store_true",
         default=False,
-        help="Do not udpate lookup file or upload images/comments when --update-dashboard is specified",
+        help="does all of --no-graphs, --no-update-lookup, and --no-gh-comment",
     )
     parser.add_argument(
         "--dashboard-image-uploader",
@@ -336,7 +352,7 @@ def generate_dropdown_comment(title, body):
     return str_io.getvalue()
 
 
-def build_summary():
+def build_summary(args):
     import git
 
     out_io = io.StringIO()
@@ -345,38 +361,45 @@ def build_summary():
         if exists(path):
             repo = git.Repo(path, search_parent_directories=True)
             sha = repo.head.object.hexsha
+            date = repo.head.object.committed_datetime
             out_io.write(f"{name} commit: {sha}\n")
+            out_io.write(f"{name} commit date: {date}\n")
         else:
             out_io.write(f"{name} Absent\n")
 
     def env_var(name):
         out_io.write(f"{name} = {os.environ[name]}\n")
 
-    out_io.write("## Commit hashes ##\n")
-    print_commit_hash(".", "torch._dynamo")
+    out_io.write("\n")
+    out_io.write("### Run name ###\n")
+    out_io.write(get_archive_name(args, args.dtypes[0]))
+    out_io.write("\n")
+
+    out_io.write("\n")
+    out_io.write("### Commit hashes ###\n")
     print_commit_hash("../pytorch", "pytorch")
     print_commit_hash("../functorch", "functorch")
     print_commit_hash("../torchbenchmark", "torchbench")
 
     out_io.write("\n")
-    out_io.write("## TorchDynamo config flags ##\n")
+    out_io.write("### TorchDynamo config flags ###\n")
     for key in dir(torch._dynamo.config):
         val = getattr(torch._dynamo.config, key)
         if not key.startswith("__") and isinstance(val, bool):
             out_io.write(f"torch._dynamo.config.{key} = {val}\n")
 
     out_io.write("\n")
-    out_io.write("## Torch version ##\n")
+    out_io.write("### Torch version ###\n")
     out_io.write(f"torch: {torch.__version__}\n")
 
     out_io.write("\n")
-    out_io.write("## Environment variables ##\n")
+    out_io.write("### Environment variables ###\n")
     env_var("TORCH_CUDA_ARCH_LIST")
     env_var("CUDA_HOME")
     env_var("USE_LLVM")
 
     out_io.write("\n")
-    out_io.write("## GPU details ##\n")
+    out_io.write("### GPU details ###\n")
     out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
     out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
     out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
@@ -404,8 +427,9 @@ def archive_data(archive_name):
         else:
             day = "000"
     else:
-        day = datetime.today().strftime("%j")
-        prefix = datetime.today().strftime(f"day_{day}_%d_%m_%y")
+        now = datetime.now(tz=timezone(timedelta(hours=-8)))
+        day = now.strftime("%j")
+        prefix = now.strftime(f"day_{day}_%d_%m_%y")
     return day, prefix
 
 
@@ -413,6 +437,12 @@ def archive_data(archive_name):
 def default_archive_name(dtype):
     _, prefix = archive_data(None)
     return f"{prefix}_performance_{dtype}_{randint(100, 999)}"
+
+
+def get_archive_name(args, dtype):
+    return (
+        default_archive_name(dtype) if args.archive_name is None else args.archive_name
+    )
 
 
 def archive(src_dir, dest_dir_prefix, archive_name, dtype):
@@ -810,7 +840,7 @@ class ParsePerformanceLogs(Parser):
 
 def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir):
     mode = get_mode(args)
-    build_summary()
+    build_summary(args)
 
     parser_class = ParsePerformanceLogs
     parser = parser_class(
@@ -864,6 +894,8 @@ class SummaryStatDiffer:
         for _, row in df_merge.iterrows():
             if row["Compiler"] in self.args.flag_compilers:
                 for suite in self.args.suites:
+                    if suite + "_prev" not in row or suite + "_cur" not in row:
+                        continue
                     data["compiler"].append(row["Compiler"])
                     data["suite"].append(suite)
                     data["prev_value"].append(row[suite + "_prev"])
@@ -963,13 +995,13 @@ class RegressionDetector:
                             f"suite: {suite}): {path}\n\n"
                         )
 
+            regressions_present = False
             for metric in [
                 "accuracy",
                 "speedup",
                 "compilation_latency",
                 "compression_ratio",
             ]:
-                regressions_present = False
                 dfs = []
                 for compiler in self.args.flag_compilers:
                     if last2[compiler] is None:
@@ -1060,7 +1092,7 @@ class RegressionTracker:
     def generate_comment(self):
         title = "## Metrics over time ##\n"
         str_io = io.StringIO()
-        if not self.args.update_dashboard_test:
+        if not self.args.update_dashboard_test and not self.args.no_graphs:
             for name in glob.glob(self.args.output_dir + "/*over_time.png"):
                 output = (
                     subprocess.check_output([self.args.dashboard_image_uploader, name])
@@ -1076,7 +1108,7 @@ class RegressionTracker:
     def diff(self):
         log_infos = self.find_last_k()
 
-        for metric in ["geomean", "passrate"]:
+        for metric in ["geomean", "passrate", "comp_time", "memory"]:
             fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
             for idx, suite in enumerate(self.suites):
                 dfs = []
@@ -1091,7 +1123,7 @@ class RegressionTracker:
                     df = pd.read_csv(gmean_filename)
                     if suite not in df:
                         continue
-                    if metric == "geomean":
+                    if metric == "geomean" or metric == "memory":
                         df[suite] = df[suite].str.replace("x", "").astype(float)
                     elif metric == "passrate":
                         df[suite] = df[suite].str.split("%").str[0].astype(float)
@@ -1138,7 +1170,7 @@ class DashboardUpdater:
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
         assert os.path.exists(self.lookup_file)
         try:
-            if not self.args.update_dashboard_test:
+            if not self.args.update_dashboard_test and not self.args.no_update_archive:
                 self.update_lookup_file()
         except subprocess.CalledProcessError:
             sys.stderr.write("failed to update lookup file\n")
@@ -1146,11 +1178,7 @@ class DashboardUpdater:
     def update_lookup_file(self):
         dtype = self.args.dtypes[0]
         day, _ = archive_data(self.args.archive_name)
-        target_dir = (
-            default_archive_name(dtype)
-            if self.args.archive_name is None
-            else self.args.archive_name
-        )
+        target_dir = get_archive_name(self.args, dtype)
         # Update lookup csv the folder to arhived logs
         subprocess.check_call(
             f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
@@ -1170,7 +1198,7 @@ class DashboardUpdater:
     def upload_graphs(self):
         title = "## Performance graphs ##\n"
         str_io = io.StringIO()
-        if not self.args.update_dashboard_test:
+        if not self.args.update_dashboard_test and not self.args.no_graphs:
             for name in glob.glob(self.output_dir + "/*png"):
                 if "over_time" not in name:
                     output = (
@@ -1192,10 +1220,11 @@ class DashboardUpdater:
             "gh_executive_summary.txt",
             "gh_summary_diff.txt",
             "gh_warnings.txt",
-            # "gh_regression.txt",
+            "gh_regression.txt",
             "gh_metric_regression.txt",
             "gh_training.txt",
             "gh_graphs.txt",
+            "gh_build_summary.txt",
         ]
         all_lines = []
         for f in files:
@@ -1244,8 +1273,10 @@ class DashboardUpdater:
         print(comment)
 
         if not self.args.update_dashboard_test:
-            self.comment_on_gh(comment)
-            self.archive()
+            if not self.args.no_gh_comment:
+                self.comment_on_gh(comment)
+            if not self.args.no_update_archive:
+                self.archive()
 
 
 if __name__ == "__main__":
@@ -1278,6 +1309,7 @@ if __name__ == "__main__":
     args.compilers = compilers
     args.devices = devices
     args.dtypes = dtypes
+    flag_compilers = list(set(flag_compilers) & set(compilers))
     args.flag_compilers = flag_compilers
     args.suites = suites
 
@@ -1287,6 +1319,9 @@ if __name__ == "__main__":
         parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir)
     elif args.run:
         generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        # generate memoized archive name now so that the date is reflective
+        # of when the run started
+        get_archive_name(args, dtypes[0])
         # TODO - Do we need to worry about segfaults
         try:
             os.system("bash run.sh")
@@ -1296,12 +1331,23 @@ if __name__ == "__main__":
             )
             raise e
         if not args.log_operator_inputs:
-            archive(
-                output_dir, args.dashboard_archive_path, args.archive_name, dtypes[0]
-            )
+            if not args.no_update_archive:
+                archive(
+                    output_dir,
+                    args.dashboard_archive_path,
+                    args.archive_name,
+                    dtypes[0],
+                )
             parse_logs(
                 args, dtypes, suites, devices, compilers, flag_compilers, output_dir
             )
+            if not args.no_update_archive:
+                archive(
+                    output_dir,
+                    args.dashboard_archive_path,
+                    args.archive_name,
+                    dtypes[0],
+                )
 
     if args.update_dashboard:
         DashboardUpdater(args).update()
