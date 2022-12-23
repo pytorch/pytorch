@@ -124,8 +124,10 @@ def calc_active(seg):
 
 def _report_free(free_external, free_internal):
     total = free_external + free_internal
-    pct = (free_internal / total) * 100
-    suffix = f' ({pct:.1f}% internal)'
+    suffix = ''
+    if total != 0:
+        pct = (free_internal / total) * 100
+        suffix = f' ({pct:.1f}% internal)'
     return f'{Bytes(total)}{suffix}'
 
 PAGE_SIZE = 1024 * 1024 * 20
@@ -397,14 +399,15 @@ def _choose_device(data, device):
                 if device is not None:
                     raise ValueError(f'Both device {device} and {i} have traces, use --device to specify which trace.')
                 device = i
-        if device is None:
-            raise ValueError('No trace information was recorded.')
     return device
 
 def trace_plot(data, device=None, plot_segments=False):
     w = PlotWriter()
     addr_to_alloc = {}
     device = _choose_device(data, device)
+    if device is None:
+        raise ValueError('No trace information was recorded.')
+
     trace = data['device_traces'][device]
 
     if plot_segments:
@@ -820,7 +823,10 @@ plot.set_delegate(delegate)
 
 def segment_plot(data: Any, device=None):
     device = _choose_device(data, device)
-    trace = data['device_traces'][device]
+    if device is None:
+        trace = []
+    else:
+        trace = data['device_traces'][device]
 
     string_table: List[str] = []
     suffix_table: List[Tuple[int, Optional[int]]] = []
@@ -893,6 +899,12 @@ def segment_plot(data: Any, device=None):
     events: Any = result['events']
     for event in fold_free(trace):
         for k in events.keys():
+            # stack frames not recorded on event
+            # happens for snapshot even when
+            # frames are recorded for other things.
+            if k == 'frames' and k not in event:
+                events[k].append(None)
+                continue
             events[k].append(preproc.get(k, lambda x: x)(event[k]))
 
     segments = result['segments']
@@ -1059,6 +1071,8 @@ function EventSelector(body, outer, events, stack_info, memory_view) {
                 let enter = () => eventStack(div.datum(), allocated, reserved)
                 stack_info.highlight(enter)
                 div.node().scrollIntoViewIfNeeded(false)
+            } else {
+                memory_view.draw(0)
             }
             selected_event_idx = idx
         }
@@ -1099,6 +1113,8 @@ function formatEvent(event) {
     switch (event.action) {
         case 'oom':
             return `OOM (requested ${formatSize(event.size)}, CUDA has ${formatSize(event.device_free)} memory free)${stream}`
+        case 'snapshot':
+            return "snapshot"
         default:
             return `${event.action.padEnd(14)} ${formatAddr(event).padEnd(18)} ${formatSize(event.size)}${stream}`
     }
@@ -1164,7 +1180,7 @@ function MemoryView(outer, stack_info, trace_data, events) {
     function simulate_memory(idx) {
         let l_segment_map = {...segments_map}
         let l_block_map = {...block_map}
-        for (let i = events.length - 1; i != idx; i--) {
+        for (let i = events.length - 1; i > idx; i--) {
             let event = events[i]
             switch (event.action) {
                 case 'free':
@@ -1374,7 +1390,7 @@ function main() {
     let event_selector = EventSelector(body, outer, events, stack_info, memory_view)
 
     window.addEventListener('load', function() {
-        event_selector.select(events.length - 1)
+        event_selector.select(events.length > 0 ? events.length - 1 : null)
     });
 }
 main()
