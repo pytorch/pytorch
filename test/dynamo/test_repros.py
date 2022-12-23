@@ -3,6 +3,7 @@ import collections
 import copy
 import inspect
 import itertools
+import operator
 import random
 import unittest
 from abc import ABC
@@ -2225,6 +2226,67 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing(self):
+        def f(x):
+            return x[: x.shape[0] - 2, x.shape[1] - 1 :: 2]
+
+        gm_aten_mode, _ = torch._dynamo.export(
+            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        inp = torch.randn(6, 7)
+        self.assertEqual(gm_aten_mode(inp).shape, f(inp).shape)
+
+        count = 0
+        for node in gm_aten_mode.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.slice.Tensor
+            ):
+                count += 1
+
+        self.assertEqual(count, 2)
+
+        gm_dynamo_mode, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=False)
+
+        # at this point, the graph should contain 3 getitem methods
+        # one for x.shape[0]-2 and one for x.shape[1]-1 and one for slice
+        count = 0
+        for node in gm_dynamo_mode.graph.nodes:
+            if node.op == "call_function" and node.target == operator.getitem:
+                count += 1
+
+        self.assertEqual(count, 3)
+        self.assertEqual(gm_dynamo_mode(inp).shape, f(inp).shape)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing_invalid(self):
+        def f(x):
+            return x[x.shape[0] : x.shape[0] : x.shape[0]]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Step size needs to be static"
+        ):
+            torch._dynamo.export(
+                f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+            )
+
+        def g(x, y):
+            return x[y : x.shape[0]]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamic slicing on data-dependent value is not supported",
+        ):
+            torch._dynamo.export(
+                g,
+                torch.randn(4, 5),
+                torch.tensor(2),
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
 
 
 if __name__ == "__main__":
