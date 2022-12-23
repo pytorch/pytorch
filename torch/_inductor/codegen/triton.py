@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Dict, List
+from typing import Dict, List, Set
 
 import sympy
 
@@ -16,7 +16,6 @@ from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
-    free_symbol_startswith,
     get_fused_kernel_name,
     instance_descriptor,
     sympy_product,
@@ -28,6 +27,7 @@ from .common import (
     CSEVariable,
     DeferredLine,
     ExprPrinter,
+    free_symbol_startswith,
     IndentedBuffer,
     index_prevent_reordering,
     Kernel,
@@ -114,12 +114,19 @@ def triton_constant(value):
 class TritonCSEVariable(CSEVariable):
     def __init__(self, name):
         super().__init__(name)
-        self.is_scalar = False
+        # We'll use this to track which masks the variable needs when used for indirect indexing
+        self.mask_vars: Set[str] = set()
 
-    def update_on_args(self, args, kwargs):
-        self.is_scalar = all(
-            not (isinstance(arg, TritonCSEVariable)) or arg.is_scalar for arg in args
-        )
+    def update_on_args(self, name, args, kwargs):
+        # When making a variable that is going to be used in indirect indexing
+        # if a where clause is used it should mean that the result is always a
+        # valid index, so you shouldn't include any of the dependent variables
+        # in the resulting load mask
+        if name == "where":
+            return
+        for arg in args:
+            if isinstance(arg, TritonCSEVariable):
+                self.mask_vars.update(arg.mask_vars)
 
 
 class TritonOverrides(OpOverrides):
@@ -730,19 +737,27 @@ class TritonKernel(Kernel):
         index = self.simplify_indexing(index)
         index_vars = index.free_symbols
         index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
-        indirect_indexing = self.is_indirect_indexing(index)
+
+        mask_vars: Set[str] = set()
+        for var in index_vars:
+            if var.name.startswith("tmp"):
+                # indirect indexing
+                cse_var = self.cse.varname_map[var.name]
+                mask_vars.update(cse_var.mask_vars)
+            else:
+                # var is one of xN, yN or rN
+                assert var.name[0] in "xyr", var.name
+                mask_vars.add(f"{var.name[0]}mask")
 
         need_dense = (
             config.triton.dense_indexing
             or dense_indexing
-            or indirect_indexing
             or self._load_mask is not None
         ) and index != 0
 
         have_dense = True
         have_loop_vars = False
-        mask = []
-        dense_mask = []
+        dense_mask_vars = set()
 
         for tree in self.range_trees:
             if tree.prefix == "r" and not self.inside_reduction:
@@ -750,45 +765,28 @@ class TritonKernel(Kernel):
             if index_vars.intersection(tree.var_list):
                 have_loop_vars = True
                 have_dense = False
-                mask.append(f"{tree.prefix}mask")
-            dense_mask.append(f"{tree.prefix}mask")
+            dense_mask_vars.add(f"{tree.prefix}mask")
 
         if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
             if isinstance(index, sympy.Integer):
-                return index_str, "None"
+                return index_str, set(), "None"
             else:
-                mask = dense_mask
-
+                mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
-            mask = dense_mask
+            mask_vars = dense_mask_vars
             index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
-        elif indirect_indexing:
-            # Use dense mask for indirect_indexing
-            # See https://github.com/pytorch/torchdynamo/issues/1654
-            # TODO - An optimization could be to hoist this load outside of
-            # reduction loop, if it is independent of rmask. Such example can be found in
-            # https://github.com/pytorch/torchdynamo/issues/1654
-            index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-            mask = dense_mask
 
         if self._load_mask:
-            mask.append(self._load_mask)
-        elif not mask:
-            mask = ["None"]
+            mask_vars.add(self._load_mask)
 
-        if mask == ["xmask"] and index == 0 and self.range_trees[0].numel == 1:
+        if mask_vars == {"xmask"} and index == 0 and self.range_trees[0].numel == 1:
             # This causes a triton error:
             # https://github.com/openai/triton/issues/633
-            mask = ["None"]
+            mask_vars = set()
 
-        if (
-            index_str in self.cse.varname_map
-            and self.cse.varname_map[index_str].is_scalar
-        ):
-            mask = ["None"]
-
-        return index_str, " & ".join(map(str, mask))
+        mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
+        return index_str, mask_vars, mask_str
 
     def var_ranges(self):
         return dict(
@@ -820,7 +818,7 @@ class TritonKernel(Kernel):
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
-        index, mask = self.indexing(index)
+        index, mask_vars, mask = self.indexing(index)
 
         if "rmask" in mask:
             # This eviction policy heuristic is untested.
@@ -852,17 +850,20 @@ class TritonKernel(Kernel):
         ):
             # can lift a common load outside of reduction loop
             # One exception is when this is an indirect_load.
-            tmp = self.cse.generate(self.body, line)
+            result_var = self.cse.generate(self.body, line)
         else:
-            tmp = self.cse.generate(self.loads, line)
+            result_var = self.cse.generate(self.loads, line)
+
+        result_var.mask_vars = mask_vars
 
         if not self.inside_reduction or "rmask" not in mask:
-            self.outside_loop_vars.add(tmp)
-        return tmp
+            self.outside_loop_vars.add(result_var)
+
+        return result_var
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask = self.indexing(index, dense_indexing=True)
+        index, mask_vars, mask = self.indexing(index, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -890,6 +891,7 @@ class TritonKernel(Kernel):
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
+        result_var.mask_vars = set(var for var in masks if var[0] != "r")
         if (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
@@ -943,8 +945,9 @@ class TritonKernel(Kernel):
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
+            result_var.mask_vars = var_name.mask_vars
         self.inside_reduction = False
-        index, mask = self.indexing(index)
+        index, mask_vars, mask = self.indexing(index)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)

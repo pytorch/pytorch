@@ -376,7 +376,7 @@ class GuardBuilder(GuardBuilderBase):
         # TODO: arg_ref the used arg names
         code = output_graph.shape_env.codegen_guards(
             [a.fake for a in fs],
-            [a.source for a in fs],
+            [a.sname for a in fs],
         )
         if code != "True":
             self._produce_guard_code(guard, [code], shape_env=True)
