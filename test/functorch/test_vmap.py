@@ -3361,7 +3361,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                             vmap(op, in_dims)(*args, **kwargs)
 
             # Sample inputs check
-            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+            sample_inputs_itr = op.reference_inputs(device, dtype, requires_grad=False)
             aliases, inplace_aliases = discover_variants(op)
             check_shape_only = op.name in ('empty_like', 'new_empty')
             for sample_input in sample_inputs_itr:
