@@ -56,7 +56,7 @@ def profile_using_dynolog():
     To enable tracing via dynolog we register a global optimizer step post
     hook. Requires the 'USE_KINETO_DAEMON' environment variable to be set.
     """
-    if os.environ.get("KINETO_USE_DAEMON", None) is not None: 
+    if os.environ.get("KINETO_USE_DAEMON", None) is not None:
         handle = register_optimizer_step_post_hook(_optimizer_post_hook)
 
 

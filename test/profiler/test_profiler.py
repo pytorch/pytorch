@@ -1074,7 +1074,7 @@ class TestProfiler(TestCase):
             # Manually call the hook. TODO: Remove this once we add the
             # profiler step hooks in the Optimizer class that will get triggered above.
             # See https://github.com/pytorch/pytorch/issues/88446
-            optimizer_step()
+#            optimizer_step()
 
         for idx in range(niters):
             run_batch()

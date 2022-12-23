@@ -48,7 +48,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'compile', 'profile_using_dynolog',
+    'compile', 'vmap', 'profile_using_dynolog',
 ]
 
 ################################################################################
@@ -1245,6 +1245,8 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 import torch.fx.experimental.symbolic_shapes
 
 from torch import func as func
+
+from torch.func import vmap
 
 # Enable trace collection through dynolog
 from torch.profiler.profiler import profile_using_dynolog
