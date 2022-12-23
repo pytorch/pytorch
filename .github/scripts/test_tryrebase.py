@@ -13,7 +13,7 @@ class TestRebase(TestCase):
     @mock.patch('gitutils.GitRepo._run_git')
     @mock.patch('gitutils.GitRepo.rev_parse', side_effect=mocked_rev_parse)
     @mock.patch('tryrebase.gh_post_comment')
-    def test_rebase(self, mocked_post_comment: Any,  mocked_rp: Any, mocked_run_git: Any, mocked_gql: Any) -> None:
+    def test_rebase(self, mocked_post_comment: Any, mocked_rp: Any, mocked_run_git: Any, mocked_gql: Any) -> None:
         "Tests rebase successfully"
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
@@ -45,7 +45,7 @@ class TestRebase(TestCase):
     @mock.patch('gitutils.GitRepo._run_git', return_value="Everything up-to-date")
     @mock.patch('gitutils.GitRepo.rev_parse', side_effect=mocked_rev_parse)
     @mock.patch('tryrebase.gh_post_comment')
-    def test_no_need_to_rebase(self, mocked_post_comment: Any,  mocked_rp: Any, mocked_run_git: Any, mocked_gql: Any) -> None:
+    def test_no_need_to_rebase(self, mocked_post_comment: Any, mocked_rp: Any, mocked_run_git: Any, mocked_gql: Any) -> None:
         "Tests branch already up to date"
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
