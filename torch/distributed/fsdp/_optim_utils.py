@@ -1436,6 +1436,71 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
     )
 
 
+def _all_gather_optim_state(
+    fsdp_state: _FSDPState,
+    optim_state: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    All-gathering state from all the ranks. This API is slow as it uses
+    ``all_gather_object``. However, optim state_dict is not in the critical path.
+    We can fuse the communication across differnt state if the performance
+    becomes a problem.
+    """
+
+    # Pre-processed state to prepare for the all_gather_object call.
+    IS_ZERO_DIM_TENSOR_KEY = "__is_zero_dim_tensor"
+    processed_state: Dict[str, Any] = {}
+    for state_name, value in sorted_items(optim_state):
+        if torch.is_tensor(value):
+            if value.dim() == 0:
+                processed_state[state_name] = value.item()
+                processed_state[f"{state_name}{IS_ZERO_DIM_TENSOR_KEY}"] = value.dtype
+            else:
+                processed_state[state_name] = value.to(fsdp_state.compute_device)
+        else:
+            processed_state[state_name] = value
+
+    # Allgather the state
+    object_list: List[Dict[str, Any]] = [{} for _ in range(fsdp_state.world_size)]
+    dist.all_gather_object(object_list, processed_state)
+
+    # Convert the gathered, pre-proccessed state of each rank to the original  one.
+    gathered_state: Dict[str, Any] = {}
+    for object_state in object_list:
+        for name, object_value in object_state.items():
+            if IS_ZERO_DIM_TENSOR_KEY in name:
+                continue
+            curr_object_value = gathered_state.get(name, None)
+            dtype = object_state.get(f"{name}{IS_ZERO_DIM_TENSOR_KEY}", None)
+            if dtype is not None:
+                zero_dim_tensor = torch.tensor(object_value, dtype=dtype)
+                if curr_object_value is not None:
+                    assert torch.equal(
+                        zero_dim_tensor, curr_object_value
+                    ), f"Different ranks have different value for {name}."
+                else:
+                    gathered_state[name] = zero_dim_tensor
+            elif torch.is_tensor(object_value):
+                if curr_object_value is not None:
+                    curr_object_value.append(object_value.to(fsdp_state.compute_device))
+                else:
+                    gathered_state[name] = [object_value.to(fsdp_state.compute_device)]
+            else:
+                if curr_object_value is not None:
+                    assert (
+                        curr_object_value == object_value
+                    ), f"Different ranks have different value for {name}."
+                else:
+                    gathered_state[name] = object_value
+
+    for name, value in list(gathered_state.items()):
+        if not isinstance(value, list) or not torch.is_tensor(value[0]):
+            continue
+        gathered_state[name] = torch.cat(value)
+
+    return gathered_state
+
+
 def _gather_orig_param_state(
     fsdp_param_info: FSDPParamInfo,
     fqn: str,
@@ -1458,51 +1523,16 @@ def _gather_orig_param_state(
     ):
         return optim_state
 
-    # Gathering state from all ranks. This step may be slow. However,
-    # `state_dict()` is not in the critical path. We can fuse the communication
-    # if the performance becomes a problem.
-    state_objects = {
-        state_name: value for state_name, value in sorted_items(optim_state)
-    }
-    object_list: List[Dict[str, Any]] = [{} for _ in range(fsdp_state.world_size)]
-    dist.all_gather_object(object_list, state_objects)
-    orig_state: Dict[str, Any] = {}
-    for idx, state in enumerate(object_list):
-        for state_name, value in state.items():
-            curr_value = orig_state.get(state_name, [])
-            if torch.is_tensor(value):
-                if value.dim() > 0:
-                    curr_value.append(value.to(fsdp_state.compute_device))
-                    orig_state[state_name] = curr_value
-                else:  # zero dim tensor, e.g., step.
-                    if torch.is_tensor(curr_value):
-                        assert torch.equal(curr_value, value)
-                    else:
-                        orig_state[state_name] = value
-            else:
-                assert curr_value == [] or curr_value == value
-                orig_state[state_name] = value
+    gathered_state = _all_gather_optim_state(fsdp_state, optim_state)
 
     # Unflatten state values.
-    for state_name in orig_state.keys():
-        value = orig_state[state_name]
-        if not isinstance(value, list) or not torch.is_tensor(value[0]):
+    for state_name, value in list(gathered_state.items()):
+        if not torch.is_tensor(value) or value.dim() == 0:
             continue
-        try:
-            value = torch.concat(value)[: flat_param._numels[param_idx]].reshape(
-                flat_param._shapes[param_idx]
-            )
-        except Exception as e:
-            raise Exception(
-                (
-                    flat_param._numels[param_idx],
-                    flat_param._shapes[param_idx],
-                    len(value),
-                    value[0].shape,
-                    state_name,
-                    fqn,
-                )
-            )
+
+        value = value[: flat_param._numels[param_idx]].reshape(
+            flat_param._shapes[param_idx]
+        )
         if shard_state:
             assert fsdp_state.process_group is not None
             value = _ext_chunk_tensor(
@@ -1513,8 +1543,8 @@ def _gather_orig_param_state(
                 fsdp_state.process_group,
             )
         value = value.cpu()
-        orig_state[state_name] = value
-    return orig_state
+        gathered_state[state_name] = value
+    return gathered_state
 
 
 def _shard_orig_param_state(

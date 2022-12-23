@@ -743,7 +743,6 @@ class TestFSDPOptimStateDict(FSDPTest):
             for key, value in group1.items():
                 self.assertEqual(value, group2[key])
 
-    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
     def test_optim_state_dict_save_load(self):
         orig_model = CompositeParamModel(device=torch.device("cuda"))
@@ -755,7 +754,6 @@ class TestFSDPOptimStateDict(FSDPTest):
 
         self._test_optim_state_save_load(orig_model, orig_optim, composable_model, composable_optim)
 
-    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
     def test_optim_state_dict_submodule_fully_shard(self):
         orig_model = CompositeParamModel(device=torch.device("cuda"))
