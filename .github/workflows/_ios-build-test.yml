@@ -93,7 +93,7 @@ jobs:
       - name: Build PyTorch Mobile Runtime
         run: |
           # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          conda activate "${RUNNER_TEMP}/${CONDA_ENV}"
           export TCLLIBPATH="/usr/local/lib"
           python -VV
           export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
@@ -114,7 +114,7 @@ jobs:
         if: inputs.ios-platform == 'SIMULATOR'
         run: |
           # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          conda activate "${RUNNER_TEMP}/${CONDA_ENV}"
           # use the pytorch nightly build to generate models
           pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
           # generate models for differnet backends
