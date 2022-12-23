@@ -4147,7 +4147,7 @@ def new_ones(
 def new_full(
     a: TensorLikeType,
     size: ShapeType,
-    fill_value: Union[int, float, bool],
+    fill_value: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
