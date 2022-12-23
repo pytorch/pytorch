@@ -125,8 +125,8 @@ def main() -> None:
         email = name = ""
 
         if pr.is_ghstack_pr():
-            # Check the configured name and email, and only set them if they are not set. If
-            # they are available, store them so that we can put them back after rebasing here
+            # Check the configured name and email. If they are available, store them so that
+            # we can put them back after rebasing here
             email = repo._run_git("config", "user.email")
             name = repo._run_git("config", "user.name")
 
