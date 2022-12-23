@@ -1088,7 +1088,7 @@ std::tuple<Tensor,optional<int64_t>> index_fill__batch_rule(
         self_.select(0, i) : self_;
       const auto& index_slice = index_bdim.has_value() ?
         index_.select(0, i) : index_;
-      self_slice.index_fill_(self_bdim.has_value() || self.numel() == 1 ? dim : dim + 1, index_slice, value);
+      self_slice.index_fill_(self_bdim.has_value() || self.dim() == 0 ? dim : dim + 1, index_slice, value);
     }
     return std::make_tuple(self_, 0);
 }
