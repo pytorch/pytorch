@@ -133,14 +133,8 @@ inline Variable valueToTensor(
   }
 }
 
-static inline void checkUnpackSlice(
-    PyObject* index,
-    Py_ssize_t* start_ptr,
-    Py_ssize_t* stop_ptr,
-    Py_ssize_t* step_ptr) {
-  if (PySlice_Unpack(index, start_ptr, stop_ptr, step_ptr) != 0) {
-    throw python_error();
-  }
+static inline UnpackedSlice checkUnpackSlice(PyObject* index) {
+  return __PySlice_Unpack(index);
 }
 
 static inline void recordSliceTrace(PyObject* obj) {
@@ -214,14 +208,12 @@ static inline Variable applySlicing(
             }
             return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
           } else if (PySlice_Check(obj)) {
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            Py_ssize_t start, stop, step;
-            checkUnpackSlice(obj, &start, &stop, &step);
+            auto val = checkUnpackSlice(obj);
             if (is_tracing) {
               recordSliceTrace(obj);
             }
             return at::indexing::TensorIndex(
-                at::indexing::Slice(start, stop, step));
+                at::indexing::Slice(val.start, val.stop, val.step));
           } else if (obj == Py_Ellipsis) {
             return at::indexing::TensorIndex(at::indexing::Ellipsis);
           } else if (obj == Py_None) {
@@ -360,15 +352,14 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     return THPVariable_Wrap(at::indexing::get_item(
         self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}));
   } else if (PySlice_Check(index)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Py_ssize_t start, stop, step;
-    checkUnpackSlice(index, &start, &stop, &step);
+    auto val = checkUnpackSlice(index);
     if (is_tracing) {
       recordSliceTrace(index);
     }
     return THPVariable_Wrap(at::indexing::get_item(
         self_,
-        {at::indexing::TensorIndex(at::indexing::Slice(start, stop, step))}));
+        {at::indexing::TensorIndex(
+            at::indexing::Slice(val.start, val.stop, val.step))}));
   } else if (index == Py_False || index == Py_True) {
     return THPVariable_Wrap(([&]() {
       pybind11::gil_scoped_release no_gil;
@@ -490,8 +481,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Py_ssize_t start, stop, step;
-    checkUnpackSlice(index, &start, &stop, &step);
+    auto val = checkUnpackSlice(index);
     if (is_tracing) {
       recordSliceTrace(index);
     }
@@ -499,7 +489,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     // indexing functions from Python ]
     dispatch_set_item(
         self_,
-        {at::indexing::TensorIndex(at::indexing::Slice(start, stop, step))},
+        {at::indexing::TensorIndex(
+            at::indexing::Slice(val.start, val.stop, val.step))},
         value,
         /*disable_slice_optimization=*/is_tracing);
     return 0;
