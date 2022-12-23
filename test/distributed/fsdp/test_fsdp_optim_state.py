@@ -2,6 +2,7 @@
 
 import bisect
 import sys
+import unittest
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
@@ -782,9 +783,9 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @unittest.SkipTest("The test currently fails on CI.")
+    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
-    def _test_use_orig_params(self) -> None:
+    def test_use_orig_params(self) -> None:
         """Tests :meth:`optim_state_dict` for an FSDP-root nested model."""
         self._test_load_optim_state(
             _ModelClass.NESTED,
@@ -1441,7 +1442,7 @@ class TestFSDPOptimState(FSDPTest):
         loss.backward()
         optim.step()
 
-    @unittest.SkipTest("The test currently fails on CI.")
+    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
     def test_compatible_with_named_optimizer(self):
         class TestDummyModel(torch.nn.Module):
@@ -1477,7 +1478,12 @@ class TestFSDPOptimState(FSDPTest):
             loss = model(batch).sum()
             loss.backward()
             optim.step()
-            state_dicts.append(FSDP._optim_state_dict(model, optim))
+            if isinstance(optim, _NamedOptimizer):
+                state_dict = optim.state_dict()
+                state_dict = FSDP._optim_state_dict_post_hook(model, optim, state_dict)
+                state_dicts.append(state_dict)
+            else:
+                state_dicts.append(FSDP._optim_state_dict(model, optim))
 
         self._check_same_param_groups(
             state_dicts[0], state_dicts[1], check_same_param_keys=False

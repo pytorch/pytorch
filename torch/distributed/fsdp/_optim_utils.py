@@ -23,7 +23,7 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
     _FSDPState,
-    _get_module_fsdp_state,
+    _get_module_fsdp_state_if_comm_module,
     _get_param_to_fqns,
     _module_handles,
     clean_tensor_name,
@@ -1344,6 +1344,7 @@ def _optim_state_dict(
             "managedparameters may not exist in the local shard, so the lookup "
             "can return -1. Both assert conditions failed, some unexpected "
             "corner case happens."
+            f"{param_key}  {optim_state_key.is_fsdp_managed} {use_orig_params}"
         )
         if optim_state_key.is_fsdp_managed:
             # If there are multiple unflat_param_names (not use_orig_params),
@@ -1404,7 +1405,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
     """
 
     def module_fn(module, prefix, fqn_to_param_info):
-        fsdp_state = _get_module_fsdp_state(module)
+        fsdp_state = _get_module_fsdp_state_if_comm_module(module)
         if fsdp_state is None:
             return
         _lazy_init(fsdp_state, module)

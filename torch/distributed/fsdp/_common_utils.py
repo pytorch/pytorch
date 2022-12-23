@@ -16,15 +16,15 @@ from typing import (
 )
 
 import torch
+import torch.distributed as dist
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
-import torch.distributed as dist
 from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 
-from .api import FullStateDictConfig, StateDictConfig, StateDictType, ShardingStrategy
+from .api import FullStateDictConfig, ShardingStrategy, StateDictConfig, StateDictType
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -54,6 +54,17 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
     if state is None or not isinstance(state, _FSDPState):
         return None
     return state
+
+
+def _get_module_fsdp_state_if_comm_module(module: nn.Module) -> Optional[_FSDPState]:
+    state = _get_module_fsdp_state(module)
+    if state is None:
+        return None
+    if state == module:  # FullyShardedDataParallel module case.
+        return state
+    if module in state._fully_sharded_module_to_handles:  # fully_shard case.
+        return state
+    return None
 
 
 class TrainingState(Enum):
