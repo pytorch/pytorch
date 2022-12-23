@@ -1048,7 +1048,6 @@ class TestOperators(TestCase):
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
-        xfail('index_fill'),
         xfail('put'),
         xfail('take'),
         xfail('nn.functional.max_pool3d'),
