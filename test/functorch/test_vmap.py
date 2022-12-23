@@ -3523,7 +3523,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
         xfail('histogram'),
-        xfail('index_fill'),
         xfail('nansum'),
         xfail('nanmean'),
         xfail('scatter_reduce', 'sum'),

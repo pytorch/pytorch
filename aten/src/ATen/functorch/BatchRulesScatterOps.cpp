@@ -1056,6 +1056,78 @@ std::tuple<Tensor,optional<int64_t>> masked_fill_scalar_batch_rule(
   return std::make_tuple(result, 0);
 }
 
+std::tuple<Tensor,optional<int64_t>> index_fill__batch_rule(
+    Tensor & self, optional<int64_t> self_bdim,
+    int dim,
+    const Tensor & index, optional<int64_t> index_bdim,
+    const Scalar & value,
+    bool check_incompatible_inplace) {
+
+    if (check_incompatible_inplace && !self_bdim.has_value()) {
+      vmapIncompatibleInplaceError("index_fill_");
+    }
+
+    const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+    Tensor self_ = moveBatchDimToFront(self, self_bdim);
+    Tensor index_ = moveBatchDimToFront(index, index_bdim);
+    dim = maybe_wrap_dim(dim, self_logical_rank);
+
+    if (!index_bdim) {
+      self_.unsqueeze_(-1);
+      self_.index_fill_(dim + 1, index_, value);
+      self_.squeeze_(-1);
+      return std::make_tuple(self_, 0);
+    }
+
+    auto batch_size = get_bdim_size2(self, self_bdim, index, index_bdim);
+    self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+    index_ = ensure_has_bdim(index_, index_bdim.has_value(), batch_size);
+
+    for (const auto i : c10::irange(0, batch_size)) {
+      const auto& self_slice = self_bdim.has_value() ?
+        self_.select(0, i) : self_;
+      const auto& index_slice = index_bdim.has_value() ?
+        index_.select(0, i) : index_;
+      self_slice.index_fill_(self_bdim.has_value() || self.numel() == 1 ? dim : dim + 1, index_slice, value);
+    }
+    return std::make_tuple(self_, 0);
+}
+
+std::tuple<Tensor,optional<int64_t>> index_fill__int_scalar_batch_rule(
+    Tensor & self, optional<int64_t> self_bdim,
+    int dim,
+    const Tensor & index, optional<int64_t> index_bdim,
+    const Scalar & value) {
+    return index_fill__batch_rule(self, self_bdim, dim, index, index_bdim, value, true);
+}
+
+std::tuple<Tensor,optional<int64_t>> index_fill__int_tensor_batch_rule(
+    Tensor & self, optional<int64_t> self_bdim,
+    int dim,
+    const Tensor & index, optional<int64_t> index_bdim,
+    const Tensor & value, optional<int64_t> value_bdim) {
+    return index_fill__batch_rule(self, self_bdim, dim, index, index_bdim, value.item(), true);
+}
+
+std::tuple<Tensor,optional<int64_t>> index_fill_int_scalar_batch_rule(
+    const Tensor & self, optional<int64_t> self_bdim,
+    int dim,
+    const Tensor & index, optional<int64_t> index_bdim,
+    const Scalar & value) {
+    auto self_ = self.clone(at::MemoryFormat::Preserve);
+    return index_fill__batch_rule(self_, self_bdim, dim, index, index_bdim, value, false);
+}
+
+std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule(
+    const Tensor & self, optional<int64_t> self_bdim,
+    int dim,
+    const Tensor & index, optional<int64_t> index_bdim,
+    const Tensor & value, optional<int64_t> value_bdim) {
+    auto self_ = self.clone(at::MemoryFormat::Preserve);
+    return index_fill__batch_rule(self_, self_bdim, dim, index, index_bdim, value.item(), false);
+}
+
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index.Tensor", index_plumbing);
   m.impl("index_put_", index_put__plumbing);
@@ -1066,6 +1138,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);
   VMAP_SUPPORT2(masked_fill, Scalar, masked_fill_scalar_batch_rule);
+  VMAP_SUPPORT2(index_fill_, int_Tensor, index_fill__int_tensor_batch_rule);
+  VMAP_SUPPORT2(index_fill_, int_Scalar, index_fill__int_scalar_batch_rule);
+  VMAP_SUPPORT2(index_fill, int_Tensor, index_fill_int_tensor_batch_rule);
+  VMAP_SUPPORT2(index_fill, int_Scalar, index_fill_int_scalar_batch_rule);
   VMAP_SUPPORT(index_add, index_add_batch_rule);
   VMAP_SUPPORT(diagonal_scatter, diagonal_scatter_batch_rule);
   VMAP_SUPPORT(gather, gather_batch_rule);
