@@ -1619,9 +1619,41 @@ def tensor_constructor(fill_value):
     return inner
 
 
-empty = register_lowering([torch.empty, aten.empty])(tensor_constructor(0))
 zeros = register_lowering([torch.zeros, aten.zeros])(tensor_constructor(0))
 ones = register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
+
+
+@register_lowering([torch.empty, aten.empty])
+def empty(
+    *size,
+    names=None,
+    dtype=None,
+    layout=0,
+    device=None,
+    pin_memory=None,
+    memory_format=None,
+):
+    assert names is None
+    assert not pin_memory
+    assert layout in (0, torch.strided)
+    assert memory_format in (None, torch.contiguous_format)
+    device = decode_device(device)
+    dtype = dtype or torch.get_default_dtype()
+    if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
+        size = tuple(size[0])
+    size = [sympy.expand(s) for s in size]
+    pointwise = _full(0, device, dtype, size)
+    pointwise.realize()
+    buffer = pointwise.data.data
+    buffer.data.ranges = [0] * len(size)
+    assert isinstance(buffer, ir.ComputedBuffer)
+    buffer.layout = ir.FixedLayout(
+        device=device,
+        dtype=dtype,
+        size=[sympy.expand(s) for s in size],
+        stride=ir.FlexibleLayout.contiguous_strides(size),
+    )
+    return pointwise
 
 
 def create_tensor_like(creation_fn):
@@ -1675,9 +1707,30 @@ def new_constant(fill_value):
     return _new_constant
 
 
-register_lowering(aten.new_empty)(new_constant(0))
 register_lowering(aten.new_zeros)(new_constant(0))
 register_lowering(aten.new_ones)(new_constant(1))
+
+
+@register_lowering(aten.new_empty)
+def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None):
+    assert isinstance(size, (list, type))
+    assert not pin_memory
+    assert not layout or layout == torch.strided
+    dtype = decode_dtype(dtype) or x.get_dtype()
+    device = device or x.get_device()
+    size = [sympy.Integer(s) for s in size]
+    pointwise = _full(0, device, dtype, size)
+    pointwise.realize()
+    buffer = pointwise.data.data
+    buffer.data.ranges = [0] * len(size)
+    assert isinstance(buffer, ir.ComputedBuffer)
+    buffer.layout = ir.FixedLayout(
+        device=device,
+        dtype=dtype,
+        size=[sympy.expand(s) for s in size],
+        stride=ir.FlexibleLayout.contiguous_strides(size),
+    )
+    return pointwise
 
 
 @register_lowering(aten.empty_strided)
@@ -1691,11 +1744,9 @@ def empty_strided(
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
-    if tuple(ir.FlexibleLayout.contiguous_strides(size)) == tuple(stride):
-        # fast path, no need to realize it
-        return pointwise
     pointwise.realize()
     buffer = pointwise.data.data
+    buffer.data.ranges = [0] * len(size)
     assert isinstance(buffer, ir.ComputedBuffer)
     buffer.layout = ir.FixedLayout(
         device=device,

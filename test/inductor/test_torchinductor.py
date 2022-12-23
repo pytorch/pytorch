@@ -4110,11 +4110,35 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(102400), torch.randn(3)])
 
+    def test_empty1(self):
+        def fn():
+            return torch.empty((1, 128, 128))
+
+        self.common(fn, [], assert_equal=False)
+
+    def test_empty2(self):
+        def fn():
+            return aten.empty((1, 128, 128))
+
+        self.common(fn, [], assert_equal=False)
+
+    def test_new_empty(self):
+        def fn(a):
+            return aten.new_empty(a, [1, 128, 128])
+
+        self.common(fn, [torch.randn(55)], assert_equal=False)
+
+    def test_empty_strided(self):
+        def fn():
+            return aten.empty_strided([1, 128, 128], [16384, 128, 1])
+
+        self.common(fn, [], assert_equal=False)
+
     def test_new_empty_strided(self):
         def fn(a):
-            return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
+            return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1])
 
-        self.common(fn, [torch.randn(55)])
+        self.common(fn, [torch.randn(55)], assert_equal=False)
 
     @patch.object(torch._inductor.config.triton, "cudagraphs", True)
     def test_dropout(self):
