@@ -124,7 +124,7 @@ def calc_active(seg):
 
 def _report_free(free_external, free_internal):
     total = free_external + free_internal
-    pct = (free_internal / total) * 100
+    pct = (free_internal / total) * 100 if total != 0 else 0
     suffix = f' ({pct:.1f}% internal)'
     return f'{Bytes(total)}{suffix}'
 
