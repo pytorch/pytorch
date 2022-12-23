@@ -378,7 +378,7 @@ through an example.
    test_backend_error()
 
 In order to run the code after TorchDynamo has traced the forward graph,
-you can use the ``TORCHDYNAMO_REPRO_AFTER`` enviornment variable. Running
+you can use the ``TORCHDYNAMO_REPRO_AFTER`` environment variable. Running
 this program with ``TORCHDYNAMO_REPRO_AFTER=“dynamo”`` (or
 ``torch._dynamo.config.repro_after="dynamo"``) should produce `this
 output <https://gist.github.com/mlazos/244e3d5b53667e44078e194762c0c92b>`__\ and
