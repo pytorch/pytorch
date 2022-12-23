@@ -588,6 +588,9 @@ struct ReduceOp {
       for (index_t i = 0; i < vt0; i++) {
         const auto offset = calc(idx + i * stride) / output_vec_size;
         values[i] = memory::load_vector<output_vec_size>(data_, offset);
+      }
+      #pragma unroll
+      for (index_t i = 0; i < vt0; i++) {
         #pragma unroll
         for (index_t j = 0; j < output_vec_size; j++) {
           value_list[i][j] = ops.reduce(value_list[i][j], values[i].val[j], idx + i * stride);
