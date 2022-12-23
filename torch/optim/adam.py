@@ -121,7 +121,7 @@ class Adam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=0, amsgrad=False, *, foreach: Optional[bool] = None,
                  maximize: bool = False, capturable: bool = False,
-                 differentiable: bool = False, fused: Optional[bool] = None):
+                 differentiable: bool = False, fused: Optional[bool] = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -152,7 +152,7 @@ class Adam(Optimizer):
                 for pg in self.param_groups for p in pg['params']
             ):
                 raise RuntimeError("FusedAdam requires all the params to be CUDA, floating point")
-            
+
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
@@ -307,16 +307,18 @@ def adam(params: List[Tensor],
     See :class:`~torch.optim.Adam` for details.
     """
 
-    # We try to use the fused implementation whenever we can since it is fastest. 
+    # We try to use the fused implementation whenever we can since it is fastest.
     # It's only available when the tensors are floats on the same CUDA device
-    # and when differentiable=False. 
+    # and when differentiable=False.
     # We still respect when the user inputs False for fused.
     if fused is None:
         if not differentiable and all(
-                p.is_cuda and torch.is_floating_point(p)
-                for p in params + grads + exp_avgs + exp_avg_sqs + max_exp_avg_sqs + state_steps
-            ):
+            p.is_cuda and torch.is_floating_point(p)
+            for p in params + grads + exp_avgs + exp_avg_sqs + max_exp_avg_sqs + state_steps
+        ):
             fused = True
+        else:
+            fused = False
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
