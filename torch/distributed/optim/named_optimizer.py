@@ -188,11 +188,6 @@ class _NamedOptimizer(optim.Optimizer):
                 "Expects the optim to be initialized before load but found not initialized."
             )
 
-        # Load state of state_dict
-        if len(new_state) != len(state):
-            raise ValueError(
-                f"Expects equal length as {len(new_state)} in `state_dict` state length but found {len(state)}."
-            )
         for idx, param_key in enumerate(self.ordered_param_keys):
             # When the conditional training is performed, not all parameters are updated in the optim.
             if param_key not in state.keys():
@@ -231,10 +226,6 @@ class _NamedOptimizer(optim.Optimizer):
         src_param_groups = state_dict["param_groups"]
         new_param_groups = new_state_dict["param_groups"]
 
-        if len(new_param_groups) != len(src_param_groups):
-            raise ValueError(
-                f"Expects equal param_groups count as {len(new_param_groups)} in `state_dict` but found {len(src_param_groups)}."
-            )
         src_group_map = {}
         for group in src_param_groups:
             param_keys = []
@@ -248,10 +239,9 @@ class _NamedOptimizer(optim.Optimizer):
                 param_keys.append(self.ordered_param_keys[param_key])  # type: ignore[call-overload]
             new_group_map[_gen_param_group_key(param_keys)] = new_group
         for group_key, new_group in new_group_map.items():
+            # When the conditional training is performed, not all parameters need to be in the param_group.
             if group_key not in src_group_map:
-                raise ValueError(
-                    f"Expects group {group_key} to be in `state_dict` but is missing"
-                )
+                continue
             src_group = src_group_map[group_key]
             if len(src_group) != len(new_group):
                 raise ValueError(
@@ -278,7 +268,7 @@ class _NamedOptimizer(optim.Optimizer):
             return FSDP._load_optim_state_dict_pre_hook(self.module, self._optimizer, state_dict)
         return state_dict
     
-    def _post_state_dict(self, state_dict) -> None:
+    def _post_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
             FSDP._optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
         return state_dict
