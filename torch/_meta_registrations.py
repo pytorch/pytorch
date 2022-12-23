@@ -2105,7 +2105,10 @@ def _cudnn_rnn(
     output = input.new_empty(out_shape)
 
     cell_shape = [num_layers * num_directions, mini_batch, hidden_size]
-    cy = cx.new_empty(0 if cx is None else cell_shape)
+    if cx is None:
+        cy = torch.empty(0, device=input.device)
+    else:
+        cy = cx.new_empty(cell_shape)
 
     hy = hx.new_empty([num_layers * num_directions, mini_batch, out_size])
 
