@@ -417,6 +417,10 @@ class CppOverrides(OpOverrides):
         return f"std::expm1({x})"
 
     @staticmethod
+    def tanh(x):
+        return f"std::tanh({x})"
+
+    @staticmethod
     def signbit(x):
         return f"std::signbit({x})"
 
