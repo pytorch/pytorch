@@ -1949,14 +1949,15 @@ class TestJac(TestCase):
             # as it returns an output with dynamic shape.
             return torch.take(x, idx)
 
-        for fn in (partial(f, idx=idx_1), partial(f, idx=idx_2)):
-            actual = jacrev(fn, chunk_size=chunk_size, _preallocate_and_copy=_preallocate_and_copy)(x,)
-            expected = torch.autograd.functional.jacobian(fn, x, vectorize=False)
-            torch.testing.assert_close(actual, expected)
+        for fn, idx in ((f, idx_1), (f, idx_2)):
+            jacfn = jacrev(fn, chunk_size=chunk_size, _preallocate_and_copy=_preallocate_and_copy)
+            actual = jacfn(x, idx)
+            expected = torch.autograd.functional.jacobian(partial(fn, idx=idx), x, vectorize=False)
+            self.assertEqual(actual, expected)
 
             msg = r"vmap: .* is not possible because there exists a Tensor"
             with self.assertRaisesRegex(RuntimeError, msg):
-                jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x,)
+                jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
 
 
 class TestHessian(TestCase):
