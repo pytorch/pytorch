@@ -28,17 +28,17 @@ TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
 
 namespace {
-bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
+bool is_autocast_eligible(const Tensor& tensor, c10::DeviceType device_type) {
   switch (device_type) {
-    case DeviceType::CUDA:
+    case c10::DeviceType::CUDA:
       return (tensor.is_cuda() || tensor.is_xla()) &&
           tensor.is_floating_point();
-    case DeviceType::CPU:
+    case c10::DeviceType::CPU:
       return (tensor.is_cpu() || tensor.is_mkldnn()) &&
           tensor.is_floating_point();
-    case DeviceType::XPU:
+    case c10::DeviceType::XPU:
       return tensor.is_xpu() && tensor.is_floating_point();
-    case DeviceType::HPU:
+    case c10::DeviceType::HPU:
       return tensor.is_hpu() && tensor.is_floating_point();
     default:
       return false;
@@ -47,15 +47,15 @@ bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
 } // namespace
 
 inline DispatchKey get_autocast_dispatch_key_from_device_type(
-    DeviceType device_type) {
+    c10::DeviceType device_type) {
   switch (device_type) {
-    case DeviceType::CUDA:
+    case c10::DeviceType::CUDA:
       return DispatchKey::Autocast;
-    case DeviceType::CPU:
+    case c10::DeviceType::CPU:
       return DispatchKey::AutocastCPU;
-    case DeviceType::XPU:
+    case c10::DeviceType::XPU:
       return DispatchKey::AutocastXPU;
-    case DeviceType::HPU:
+    case c10::DeviceType::HPU:
       return DispatchKey::AutocastHPU;
     default:
       throw std::runtime_error(
@@ -64,15 +64,15 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
 }
 
 inline at::ScalarType get_lower_precision_fp_from_device_type(
-    DeviceType device_type) {
+    c10::DeviceType device_type) {
   switch (device_type) {
-    case DeviceType::CUDA:
+    case c10::DeviceType::CUDA:
       return get_autocast_gpu_dtype();
-    case DeviceType::CPU:
+    case c10::DeviceType::CPU:
       return get_autocast_cpu_dtype();
-    case DeviceType::XPU:
+    case c10::DeviceType::XPU:
       return get_autocast_xpu_dtype();
-    case DeviceType::HPU:
+    case c10::DeviceType::HPU:
       return get_autocast_hpu_dtype();
     default:
       throw std::runtime_error(
@@ -90,7 +90,7 @@ Logic to extract the promote type from any Tensor or TensorList args.
 inline at::ScalarType prioritize(
     at::ScalarType current,
     const Tensor& nextArg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   if (current == at::kDouble) {
     AT_ERROR("promote type is double in at::autocast::prioritize");
     return current;
@@ -119,7 +119,7 @@ inline at::ScalarType prioritize(
 inline at::ScalarType prioritize(
     at::ScalarType current,
     const TensorList& list,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   for (const auto& tensor : list) {
     current = prioritize(current, tensor, device_type);
   }
@@ -129,7 +129,7 @@ inline at::ScalarType prioritize(
 inline at::ScalarType prioritize(
     at::ScalarType current,
     const ITensorListRef& list,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   for (const auto& tensor : list) {
     current = prioritize(current, tensor, device_type);
   }
@@ -141,14 +141,14 @@ template <typename T>
 inline at::ScalarType prioritize(
     at::ScalarType current,
     T nextArg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   return current;
 }
 
 // Overload for the tail case.
 inline at::ScalarType promote_type(
     at::ScalarType current,
-    DeviceType device_type) {
+    c10::DeviceType device_type) {
   return current;
 }
 
@@ -157,7 +157,7 @@ inline at::ScalarType promote_type(
 template <typename Arg0, typename... Args>
 inline at::ScalarType promote_type(
     at::ScalarType current,
-    DeviceType device_type,
+    c10::DeviceType device_type,
     Arg0 arg0,
     Args... args) {
   auto new_current = prioritize(current, arg0, device_type);
@@ -169,7 +169,7 @@ Logic to apply cached casting to any Tensor argument.
 ****************************************************/
 inline bool is_eligible(
     const Tensor& arg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   return (
       arg.defined() && is_autocast_eligible(arg, device_type) &&
       (arg.scalar_type() != at::kDouble));
@@ -179,13 +179,13 @@ inline bool is_eligible(
 TORCH_API Tensor cached_cast(
     at::ScalarType to_type,
     const Tensor& arg,
-    DeviceType device_type = DeviceType::CUDA);
+    c10::DeviceType device_type = c10::DeviceType::CUDA);
 
 // Overload to process optional<Tensor>
 inline c10::optional<Tensor> cached_cast(
     at::ScalarType to_type,
     const c10::optional<Tensor>& arg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   if (arg.has_value()) {
     return cached_cast(to_type, *arg, device_type);
   } else {
@@ -197,7 +197,7 @@ inline c10::optional<Tensor> cached_cast(
 inline std::vector<Tensor> cached_cast(
     at::ScalarType to_type,
     const TensorList& arg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   std::vector<Tensor> vec;
   vec.reserve(arg.size());
   for (const auto& t : arg) {
@@ -209,7 +209,7 @@ inline std::vector<Tensor> cached_cast(
 inline std::vector<Tensor> cached_cast(
     at::ScalarType to_type,
     const ITensorListRef& arg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   std::vector<Tensor> vec;
   vec.reserve(arg.size());
   for (const auto& t : arg) {
@@ -223,7 +223,7 @@ template <typename T>
 inline T cached_cast(
     at::ScalarType to_type,
     T arg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   return arg;
 }
 

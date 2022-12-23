@@ -68,14 +68,14 @@ typedef enum {
    * \brief CUDA managed/unified memory allocated by cudaMallocManaged
    */
   kDLCUDAManaged = 13,
-} DLDeviceType;
+} DLc10::DeviceType;
 
 /*!
  * \brief A Device for Tensor and operator.
  */
 typedef struct {
   /*! \brief The device type used in the device. */
-  DLDeviceType device_type;
+  DLc10::DeviceType device_type;
   /*!
    * \brief The device index.
    * For vanilla CPU memory, pinned memory, or managed memory, this is set to 0.

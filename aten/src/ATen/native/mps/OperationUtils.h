@@ -28,7 +28,7 @@ struct TORCH_CUDA_CPP_API MPSGeneratorImpl : public c10::GeneratorImpl {
   uint64_t seed() override;
   void set_state(const c10::TensorImpl& new_state) override;
   c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
-  static DeviceType device_type();
+  static c10::DeviceType device_type();
 
 private:
   MPSGeneratorImpl* clone_impl() const override;

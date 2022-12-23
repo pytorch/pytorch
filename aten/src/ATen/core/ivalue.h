@@ -1212,7 +1212,7 @@ public:
       // representation with Tensor.
       c10::intrusive_ptr_target* as_intrusive_ptr;
       struct {
-        DeviceType type;
+        c10::DeviceType type;
         DeviceIndex index;
       } as_device;
     } u;
