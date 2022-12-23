@@ -71,14 +71,14 @@ jobs:
         if: inputs.ios-platform != 'SIMULATOR'
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: 3.10
+          python-version: "3.10"
           environment-file: .github/requirements/conda-env-iOS
 
       - name: Setup miniconda for iOS simulator
         if: inputs.ios-platform == 'SIMULATOR'
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: 3.10
+          python-version: "3.10"
           environment-file: .github/requirements/conda-env-iOS
           pip-requirements-file: .github/requirements/pip-requirements-iOS-sim.txt
 
