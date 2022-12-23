@@ -110,8 +110,8 @@ def generate_single_level_function(interpreter, autograd_function):
             operands,
             wrap_fn)
 
-    def setup_context(ctx, outputs, *operands):
-        return autograd_function.setup_context(ctx, outputs, *operands)
+    def setup_context(ctx, inputs, output):
+        return autograd_function.setup_context(ctx, inputs, output)
 
     # backward is only used if the transform is TransformType.Grad
     def backward(ctx, *grads):
@@ -188,8 +188,8 @@ def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, wr
 #         return x.exp()
 #
 #     @staticmethod
-#     def setup_context(ctx, outputs, x):
-#         y = outputs
+#     def setup_context(ctx, inputs, output):
+#         y = output
 #         ctx.save_for_backward(y)
 #
 #     @staticmethod

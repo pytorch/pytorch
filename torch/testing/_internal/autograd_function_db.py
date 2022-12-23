@@ -16,7 +16,7 @@ import numpy as np
 #
 # Axes:
 # - saves {output, input, intermediate, non-tensor}
-# - {inputs, outputs} x {single tensor, tensors, arbitrary objects}
+# - {inputs, output} x {single tensor, tensors, arbitrary objects}
 # - Uses {mark_dirty, mark_non_differentiable, once_differentiable}
 
 
@@ -32,9 +32,9 @@ class NumpyCube(torch.autograd.Function):
         return torch.tensor(input_np ** 3, device=input.device), dinput
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
-        ctx.save_for_backward(inputs[0], outputs[1])
-        ctx.save_for_forward(inputs[0], outputs[1])
+    def setup_context(ctx, inputs, output):
+        ctx.save_for_backward(inputs[0], output[1])
+        ctx.save_for_forward(inputs[0], output[1])
 
     @staticmethod
     def backward(ctx, grad_output, grad_saved):
@@ -63,8 +63,8 @@ class NumpyCubeNotComposable(torch.autograd.Function):
         return torch.tensor(input_np ** 3, device=input.device), input_np
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
-        _, input_np = outputs
+    def setup_context(ctx, inputs, output):
+        _, input_np = output
         ctx.input_np = input_np
         ctx.device = inputs[0].device
 
@@ -81,7 +81,7 @@ class NumpyMul(torch.autograd.Function):
         return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
+    def setup_context(ctx, inputs, output):
         ctx.save_for_backward(*inputs)
         ctx.save_for_forward(*inputs)
 
@@ -162,9 +162,9 @@ class NumpySort(torch.autograd.Function):
         )
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
+    def setup_context(ctx, inputs, output):
         x, dim = inputs
-        _, ind, ind_inv = outputs
+        _, ind, ind_inv = output
         ctx.mark_non_differentiable(ind, ind_inv)
         ctx.save_for_backward(ind, ind_inv)
         ctx.save_for_forward(ind, ind_inv)
@@ -202,7 +202,7 @@ class NumpyTake(torch.autograd.Function):
         return torch.tensor(np.take_along_axis(x, ind, dim), device=device)
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
+    def setup_context(ctx, inputs, output):
         x, ind, ind_inv, dim = inputs
         ctx.save_for_backward(ind, ind_inv)
         ctx.save_for_forward(ind, ind_inv)
@@ -246,7 +246,7 @@ class Select(torch.autograd.Function):
         return x[idx]
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
+    def setup_context(ctx, inputs, output):
         x, idx = inputs
         ctx.x_shape = x.shape
         ctx.idx = idx

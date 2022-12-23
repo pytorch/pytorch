@@ -989,7 +989,7 @@ class TestAutogradFunction(TestCase):
                 return x, y
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
+            def setup_context(ctx, inputs, output):
                 ctx.set_materialize_grads(False)
 
             @staticmethod
@@ -1016,7 +1016,7 @@ class TestAutogradFunction(TestCase):
                 return x * y
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
+            def setup_context(ctx, inputs, output):
                 return
 
             @staticmethod
@@ -1039,8 +1039,8 @@ class TestAutogradFunction(TestCase):
                 return torch.tensor(input_np ** 3, device=input.device), input_np
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
-                ctx.input_np = outputs[1]
+            def setup_context(ctx, inputs, output):
+                ctx.input_np = output[1]
                 ctx.device = inputs[0].device
 
             @staticmethod
@@ -1097,7 +1097,7 @@ class TestAutogradFunction(TestCase):
                 return x.clone()
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
+            def setup_context(ctx, inputs, output):
                 return
 
             @staticmethod
@@ -1125,8 +1125,8 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 return torch.tensor(input_np ** 3, device=input.device), dinput
 
             @staticmethod
-            def setup_context(ctx, outputs, input):
-                ctx.save_for_backward(input, outputs[1])
+            def setup_context(ctx, inputs, output):
+                ctx.save_for_backward(inputs, output[1])
 
             @staticmethod
             def backward(ctx, grad_output, grad_saved):
@@ -1146,7 +1146,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 pass
 
             @staticmethod
-            def setup_context(ctx, outputs, input):
+            def setup_context(ctx, inputs, output):
                 pass
 
             @staticmethod
@@ -1172,7 +1172,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 pass
 
             @staticmethod
-            def setup_context(ctx, outputs, input):
+            def setup_context(ctx, inputs, output):
                 pass
 
             @staticmethod
@@ -1197,7 +1197,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 pass
 
             @staticmethod
-            def setup_context(ctx, outputs, x, y):
+            def setup_context(ctx, inputs, output):
                 pass
 
             @staticmethod
@@ -1222,7 +1222,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 return input
 
             @staticmethod
-            def setup_context(ctx, outputs, input):
+            def setup_context(ctx, inputs, output):
                 pass
 
             @staticmethod

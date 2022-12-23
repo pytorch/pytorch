@@ -449,7 +449,7 @@ class TestOperators(TestCase):
         xfail('nn.functional._scaled_dot_product_attention', device_type='cuda'),
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: calling in-place operation that would mutate a captured Tensor
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: https://github.com/pytorch/pytorch/issues/91280
 
         # --- Non-Contiguous Failures! ---
         # This is expected to fail as the operator
