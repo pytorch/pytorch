@@ -497,6 +497,10 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                                                                  flat_output_numels,
                                                                  chunk_size=chunk_size):
                 if chunk_size == 1:
+                    # sanity check.
+                    for t in flat_basis_chunk:
+                        assert t.size(0) == 1
+
                     flat_basis_chunk = tree_map(lambda t: torch.squeeze(t, 0), flat_basis_chunk)
 
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
@@ -543,6 +547,10 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                                                                                 flat_output_numels,
                                                                                 chunk_size=chunk_size)):
                 if chunk_size == 1:
+                    # sanity check.
+                    for t in flat_basis_chunk:
+                        assert t.size(0) == 1
+
                     flat_basis_chunk = list(map(lambda t: torch.squeeze(t, 0), flat_basis_chunk))
 
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
