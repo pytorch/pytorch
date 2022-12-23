@@ -12,7 +12,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
-from .vmap import vmap, doesnt_support_saved_tensors_hooks
+from .vmap import vmap, doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 from torch._C._functorch import (
     _wrap_for_grad,
@@ -638,10 +638,7 @@ def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
     assert chunk_size is None or chunk_size > 0
     total_numel = sum(tensor_numels)
     if chunk_size and chunk_size < total_numel:
-        n_chunks = total_numel // chunk_size
-        chunk_numels = [chunk_size] * n_chunks
-        # remainder chunk
-        chunk_numels.append(total_numel % chunk_size)
+        chunk_numels = get_chunk_sizes(total_numel, chunk_size)
     else:  # chunk_size is None or chunk_size >= total_numel
         chunk_size = total_numel
         chunk_numels = [total_numel]
@@ -1259,8 +1256,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     When composed with ``vmap``, ``grad`` can be used to compute per-sample-gradients:
 
-        >>> from torch.func import grad
-        >>> from torch.func import vmap
+        >>> from torch.func import grad, vmap
         >>> batch_size, feature_size = 3, 5
         >>>
         >>> def model(weights, feature_vec):
@@ -1345,6 +1341,8 @@ def _maybe_unwrap_functional_tensor(maybe_tensor, *, reapply_views: bool):
         # This can happen if we functionalize a fn that returns a global,
         # which was never wrapped properly.
         return maybe_tensor
+    # Sync any pending updates on the output tensor
+    torch._sync(maybe_tensor)
     return _unwrap_functional_tensor(maybe_tensor, reapply_views)
 
 

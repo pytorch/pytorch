@@ -2039,7 +2039,29 @@ class TestNLLLoss(TestCase):
         strided_mps_out = strided_mps1 - strided_mps2
         self.assertEqual(strided_cpu_out, strided_mps_out)
 
+    def test_unfold(self):
+        x = torch.arange(1., 8)
+        x_mps = torch.arange(1., 8, device="mps")
 
+        y = x.unfold(0, 2, 1)
+        y_mps = x_mps.unfold(0, 2, 1)
+
+        self.assertEqual(y, y_mps)
+
+    def test_unfold_all_devices_and_dtypes(self):
+        supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
+        for dt in supported_dtypes:
+            x = torch.empty((0, 1, 3, 0), dtype=dt, device="mps")
+            self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
+
+    def test_unfold_scalars(self):
+        x = torch.tensor(0.5, device="mps")
+        # unfold on a 0-dimensional tensor should always return a 1-d dimensional
+        # tensor of shape [size] (i.e., the second parameter to unfold)
+
+        self.assertEqual(torch.empty(0, device="mps"), x.unfold(0, 0, 1))
+        self.assertEqual(torch.empty(0, device="mps"), x.unfold(0, 0, 2))
+        self.assertEqual(torch.tensor([0.5], device="mps"), x.unfold(0, 1, 1))
 
     def test_sum_backward(self):
         def helper(n, c):
@@ -3401,13 +3423,19 @@ class TestNLLLoss(TestCase):
                 # clamp to avoid division by 0
                 mps_y = cpu_y.detach().clone().to('mps')
 
-                result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
-                result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
-                self.assertEqual(result_div_mps, result_div_cpu)
+                if (rounding_mode == "floor_divide"):
+                    result_div_cpu = torch.floor_divide(cpu_x, cpu_y)
+                    result_div_mps = torch.floor_divide(mps_x, mps_y)
+                    self.assertEqual(result_div_mps, result_div_cpu)
+                else:
+                    result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
+                    result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
+                    self.assertEqual(result_div_mps, result_div_cpu)
 
         helper((2, 8, 4, 5), None)
         helper((2, 8, 4, 5), "floor")
         helper((2, 8, 4, 5), "trunc")
+        helper((2, 8, 4, 5), "floor_divide")
 
     def test_rounding(self):
         def helper(shape):
@@ -4399,14 +4427,14 @@ class TestNLLLoss(TestCase):
 
     # Test index add
     def test_index_add(self):
-        def helper(shape, dim, index, source_shape, alpha, idx_dtype=torch.int32):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+        def helper(shape, dim, index, source_shape, alpha, x_dtype=torch.float32, idx_dtype=torch.int32):
+            cpu_x = torch.randn(shape, device='cpu', dtype=x_dtype, requires_grad=False)
             x = cpu_x.detach().clone().to('mps')
 
             cpu_idx = torch.tensor(index, device='cpu', dtype=idx_dtype)
             idx = cpu_idx.detach().clone().to('mps')
 
-            cpu_source = torch.randn(source_shape, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_source = torch.randn(source_shape, device='cpu', dtype=x_dtype, requires_grad=False)
             source = cpu_source.detach().clone().to('mps')
 
             idx_result = torch.index_add(x, dim=dim, index=idx, source=source, alpha=alpha)
@@ -4422,6 +4450,8 @@ class TestNLLLoss(TestCase):
         # test result dim=1
         helper((2,), 0, [1], (1,), 6.0)
         helper(2, 0, 1, 1, 6)
+        # test float16
+        helper((2,), 0, [1], (1,), 6.0, x_dtype=torch.float16)
 
     # Test flip
     def test_flip(self):
@@ -5401,6 +5431,33 @@ class TestNNMPS(NNTestCase):
         r2_cpu = r2.to("cpu")
         self.assertEqual(r1, r2_cpu)
 
+    def test_group_norm_backward(self, device='mps'):
+        # See https://github.com/pytorch/pytorch/issues/88331 for more detail
+        shape = [1, 4, 16, 16]
+        x = torch.full(shape, 7.0, device=device)
+
+        target = torch.ones((1, 3, 128, 128), device=device)
+
+        conv_in = nn.Conv2d(4, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), device=device)
+        conv_out = nn.Conv2d(128, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), device=device)
+        norm = nn.GroupNorm(32, 128, eps=1e-6, affine=True, device=device)
+
+        with torch.enable_grad():
+            x = x.detach().requires_grad_()
+            out = 5.5 * x
+            out = conv_in(out)
+            out = out + norm(out)
+            out = out + norm(out)
+            out = out + norm(out)
+            out = F.interpolate(out, scale_factor=8.0, mode="nearest")
+            out = norm(out)
+            out = conv_out(out)
+
+            loss = (out - target).norm(dim=-1).sum()
+            grad = -torch.autograd.grad(loss, x)[0]
+            self.assertFalse(grad.detach().isnan().any().item(), 'NaN gradients returned by autograd')
+
+
     # def test_conv2d_same_padding(self, device='mps'):
         # x = torch.rand(1, 1, 10, 11, device=device)
         # y = torch.rand(1, 1, 4, 5, device=device)
@@ -5691,14 +5748,13 @@ class TestViewOpsMPS(TestCase):
             v[0, 1] = 0
             self.assertEqual(t[1, 0], v[0, 1])
 
-    # requires aten::unfold
-    # def test_unfold_view(self, device="mps"):
-    #     t = torch.ones(10, device=device)
-    #     v = t.unfold(0, 3, 2)
-    #     self.assertTrue(self.is_view_of(t, v))
+    def test_unfold_view(self, device="mps"):
+        t = torch.ones(10, device=device)
+        v = t.unfold(0, 3, 2)
+        self.assertTrue(self.is_view_of(t, v))
 
-    #     v[1, 0] = 0
-    #     self.assertEqual(t[2], v[1, 0])
+        v[1, 0] = 0
+        self.assertEqual(t[2], v[1, 0])
 
     def test_squeeze_view(self, device="mps"):
         t = torch.ones(5, 1, 5, device=device)
@@ -7376,9 +7432,9 @@ class TestConsistency(TestCase):
         'masked.softmin': ['f32'],
         'masked.std': ['f32'],
         'masked.var': ['f32'],
-        'abs': ['f16', 'f32', 'i16', 'i32', 'u8'],
-        'acos': ['f32', 'i16', 'i32', 'u8'],
-        'acosh': ['f32', 'i16', 'i32', 'u8'],
+        'abs': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
+        'acos': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'acosh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'addbmm': ['f32'],
         'addcdiv': ['f32'],
@@ -7397,11 +7453,11 @@ class TestConsistency(TestCase):
         'logsumexp': ['f32'],
         'mean': ['f32'],
         'sum': ['f32'],
-        'asin': ['f32', 'i16', 'i32', 'u8'],
-        'asinh': ['f32', 'i16', 'i32', 'u8'],
-        'atan': ['f32', 'i16', 'i32', 'u8'],
+        'asin': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'asinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'atan': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'atan2': ['f32'],
-        'atanh': ['f32', 'i16', 'i32', 'u8'],
+        'atanh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'atleast_1d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'atleast_2d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'atleast_3d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7425,8 +7481,8 @@ class TestConsistency(TestCase):
         'conj_physical': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'contiguous': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'corrcoef': ['f32'],
-        'cos': ['f32', 'i16', 'i32', 'u8', 'i64'],
-        'cosh': ['f32', 'i16', 'i32', 'u8', 'i64'],
+        'cos': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
+        'cosh': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
         'cov': ['f32'],
         'cumsum': ['f16', 'f32', 'int16', 'int32'],
         'deg2rad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7439,9 +7495,9 @@ class TestConsistency(TestCase):
         'dot': ['f32', 'i16', 'i32', 'i64', 'u8'],
         'einsum': ['f32'],
         'equal': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'erf': ['f32', 'i16', 'i32', 'u8'],
-        'exp': ['f32', 'i16', 'i32', 'u8'],
-        'exp2': ['f16', 'f32', 'i16', 'i32', 'u8'],
+        'erf': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'exp': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'exp2': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'eye': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'fill': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'flatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7450,11 +7506,13 @@ class TestConsistency(TestCase):
         'flipud': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'float': ['f32'],
         'floor': ['f32', 'f16', 'i16', 'i32', 'i64'],
+        'floor_divide': ['f32', 'f16'],
         'frac': ['f16', 'f32'],
         'gradient': ['f16', 'f32', 'i16'],
         'half': ['f16'],
         'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'index_select': ['f32', 'i16', 'i32', 'i64'],
+        'index_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'index_add': ['f16', 'f32', 'i16', 'i32'],
         'int': ['i32'],
         'isclose': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'isfinite': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7466,9 +7524,10 @@ class TestConsistency(TestCase):
         'linalg.svd': ['f32'],
         'linalg.vector_norm': ['f16', 'f32'],
         'linspace': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'log': ['f32', 'i16', 'i32', 'u8'],
-        'log10': ['f32', 'i16', 'i32', 'u8'],
-        'log2': ['f32', 'i16', 'i32', 'u8'],
+        'log': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'log10': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'log1p': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'log2': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'log_softmax': ['f32'],
         'logaddexp': ['f32'],
         'logaddexp2': ['f32'],
@@ -7479,7 +7538,7 @@ class TestConsistency(TestCase):
         'matmul': ['f32'],
         'mm': ['f32'],
         'mv': ['f32'],
-        'neg': ['f16', 'f32', 'i16', 'i32', 'i64'],
+        'neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.adaptive_max_pool1d': ['f32'],
         'nn.functional.adaptive_max_pool2d': ['f32'],
         'nn.functional.binary_cross_entropy': ['f32'],
@@ -7545,7 +7604,7 @@ class TestConsistency(TestCase):
         'pow': ['f16'],
         'rad2deg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'real': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'reciprocal': ['f16', 'f32', 'i16', 'i32', 'u8'],
+        'reciprocal': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'repeat': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'repeat_interleave': ['b8',
                               'f16',
@@ -7560,28 +7619,29 @@ class TestConsistency(TestCase):
         'resolve_neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'rot90': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'round': ['f32', 'f16', 'i16', 'i32', 'i64'],
-        'rsqrt': ['f32', 'i16', 'i32', 'u8'],
+        'rsqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'select_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'sgn': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'short': ['i16'],
-        'sigmoid': ['f32'],
+        'sigmoid': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'sign': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8', 'i64'],
-        'sin': ['f32', 'i16', 'i32', 'u8'],
-        'sinh': ['f32', 'i16', 'i32', 'u8'],
+        'sin': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'sinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'slice_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'softmax': ['f32'],
         'special.ndtr': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'split': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sqrt': ['f32', 'i16', 'i32', 'u8'],
+        'sqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'square': ['f16', 'f32'],
         'squeeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'std': ['f32'],
         'sub': ['f32', 'i16', 'i32', 'i64'],
         'sum_to_size': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'svd': ['f32'],
         't': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'tan': ['i16', 'i32', 'u8'],
-        'tanh': ['f32', 'i16', 'i32', 'u8'],
+        'tan': ['b8', 'i16', 'i32', 'u8'],
+        'tanh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'tensordot': ['f32'],
         'tile': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'topk': ['f32'],
@@ -7595,6 +7655,7 @@ class TestConsistency(TestCase):
         'unbind': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unflatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unsqueeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'var': ['f32'],
         'view': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'view_as': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'vsplit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7606,7 +7667,8 @@ class TestConsistency(TestCase):
         'logical_and': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_or': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8']}
+        'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8']
+    }
 
 
     ALLOWLIST_OP_GRAD = {
@@ -7679,7 +7741,8 @@ class TestConsistency(TestCase):
         'gradient': ['f32'],
         'half': ['f16'],
         'hstack': ['f16', 'f32'],
-        'index_select': ['f32'],
+        'index_select': ['f16', 'f32'],
+        'index_add': ['f16', 'f32'],
         'isclose': ['f16', 'f32'],
         'isfinite': ['f16', 'f32'],
         'isinf': ['f16', 'f32'],
@@ -7691,6 +7754,7 @@ class TestConsistency(TestCase):
         'linspace': ['f16', 'f32'],
         'log': ['f32'],
         'log10': ['f32'],
+        'log1p': ['f32'],
         'log2': ['f32'],
         'log_softmax': ['f32'],
         'logaddexp': ['f32'],
@@ -7721,7 +7785,7 @@ class TestConsistency(TestCase):
         'nn.functional.local_response_norm': ['f32'],
         'nn.functional.margin_ranking_loss': ['f32'],
         'nn.functional.mse_loss': ['f32'],
-        'nn.functional.pad': ['f16', 'f32'],
+        'nn.functional.pad': ['f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.pairwise_distance': ['f16', 'f32'],
         'nn.functional.poisson_nll_loss': ['f32'],
         'nn.functional.relu': ['f32'],
@@ -7776,7 +7840,8 @@ class TestConsistency(TestCase):
         'view_as': ['f16', 'f32'],
         'vsplit': ['f16', 'f32'],
         'vstack': ['f16', 'f32'],
-        'zero_': ['f16', 'f32']}
+        'zero_': ['f16', 'f32']
+    }
 
     # These ops that are problematic. So never run them even when
     # generating the new allowlist.
@@ -7797,7 +7862,6 @@ class TestConsistency(TestCase):
         'std': [torch.float16],
         'stft': [torch.float32], 'var': [torch.float16],
         # + forward when requires_grad=True or running backward
-        'index_select': [torch.float16],
         'nn.functional.embedding': [torch.float32, torch.float16],
         '__rpow__': [torch.int64],
         'masked.std': [torch.int32],
@@ -7811,8 +7875,7 @@ class TestConsistency(TestCase):
         'diag_embed': [torch.uint8],
         'diagonal_scatter': [torch.uint8],
         'index_add': None,
-        'linalg.inv': ['f32'],
-        'log1p': None,
+        'linalg.inv': [torch.float32],
         'long': None,
         'nn.functional.avg_pool1d': [torch.int64],
         'nn.functional.avg_pool2d': [torch.int64],
@@ -7838,6 +7901,7 @@ class TestConsistency(TestCase):
         'tile': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
         '__radd__': ['torch.bool', 'torch.uint8'],
         '__rmul__': ['torch.uint8'],
+        'neg': ['torch.uint8'],
         'add': ['torch.bool', 'torch.uint8'],
         'addr': ['torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
         'diag': ['torch.int64'],

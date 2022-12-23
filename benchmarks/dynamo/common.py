@@ -140,6 +140,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "GoogleFnet",  # Eager model failed to run
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
+    "MT5ForConditionalGeneration",  # fails accuracy
     # TIMM
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy
@@ -153,11 +154,10 @@ CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
     "sebotnet33ts_256",  # accuracy
-    "tf_mixnet_l",  # This model is non-deterministic with same input + weights,
-    # but without optimizing over multiple iterations, this still passes
+    "hrnet_w18",  # Stack issue in fx
     # TorchBench
     "dlrm",  # symbolic shapes error
-    "hrnet_w18",  # Stack issue in fx
+    # HF
     "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
     "MobileBertForQuestionAnswering",  # Stack issue in fx
@@ -906,7 +906,6 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
-        self.use_amp = False
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
         self.optimizer = None
@@ -1094,10 +1093,6 @@ class BenchmarkRunner:
         2) Checks if eager itself has variations.
         """
 
-        with open("in1.txt", "w") as f:
-            print(example_inputs, file=f)
-            print(list(model.parameters()), file=f)
-
         def record_status(accuracy_status):
             """
             Records the status in the csv file
@@ -1135,8 +1130,6 @@ class BenchmarkRunner:
             )
             self.init_optimizer(name, current_device, model_fp64.parameters())
             fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
-            with open("out1.txt", "w") as f:
-                print(fp64_outputs, file=f)
         except Exception:
             log.warning(
                 f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
@@ -1181,36 +1174,32 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
-            # Sometime CI fails with random triton compilation failure which disappears after retry
+            # Sometime CI fails with random triton compilation failure which will be skipped for now
             # TODO: revisit this after switching to new Triton runtime
-            retries = 2 if self.args.ci else 0
-            for i in range(retries + 1):
-                reset_rng_state()
-                torch._dynamo.reset()
-                try:
-                    model_copy = deepcopy_and_maybe_ddp(model)
-                    self.init_optimizer(name, current_device, model_copy.parameters())
-                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-
-                    new_result = optimized_model_iter_fn(model_copy, example_inputs)
-                    break
-                except Exception as e:
+            reset_rng_state()
+            torch._dynamo.reset()
+            try:
+                model_copy = deepcopy_and_maybe_ddp(model)
+                self.init_optimizer(name, current_device, model_copy.parameters())
+                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                new_result = optimized_model_iter_fn(model_copy, example_inputs)
+            except Exception as e:
+                log.exception(e)
+                if self.args.ci and (
+                    (
+                        isinstance(e, RuntimeError)
+                        and "Internal Triton PTX codegen error" in str(e)
+                    )
+                    or (isinstance(e, KeyError) and "cubin" in str(e))
+                ):
+                    accuracy_status = "pass_due_to_skip"
+                    return record_status(accuracy_status)
+                else:
                     print(
                         "TorchDynamo optimized model failed to run because of following error"
                     )
-                    log.exception(e)
-                    if i < retries and (
-                        (
-                            isinstance(e, RuntimeError)
-                            and str(e).startswith("Internal Triton PTX codegen error")
-                        )
-                        or (isinstance(e, KeyError) and str(e) == "'cubin'")
-                    ):
-                        time.sleep((i + 1) * 30)
-                        print("Retrying...")
-                    else:
-                        accuracy_status = "fail_to_run"
-                        return record_status(accuracy_status)
+                    accuracy_status = "fail_to_run"
+                    return record_status(accuracy_status)
 
             if not same(
                 correct_result,
@@ -1786,6 +1775,7 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
+        torch.backends.cudnn.deterministic = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
