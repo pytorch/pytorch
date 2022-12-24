@@ -1292,6 +1292,44 @@ class TestTransformers(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
+    @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
+    def test_flash_fail_fp32t(self):
+        device = 'cuda'
+        dtype = torch.float
+        size = (16, 16, 32, 32)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
+
+    @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
+    def test_flash_autocast_fp32_float16(self):
+        device = 'cuda'
+        dtype = torch.float
+        size = (16, 16, 32, 32)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        with torch.autocast(device_type='cuda', dtype=torch.float16):
+            with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
+                _ = torch.nn.functional._scaled_dot_product_attention(
+                    q, k, v, None, 0.0, False, False)
+
+    @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
+    def test_flash_autocast_fp32_bfloat16(self):
+        device = 'cuda'
+        dtype = torch.float
+        size = (16, 16, 32, 32)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
+                _ = torch.nn.functional._scaled_dot_product_attention(
+                    q, k, v, None, 0.0, False, False)
+
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
 instantiate_parametrized_tests(TestTransformers)
