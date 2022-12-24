@@ -1456,17 +1456,17 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
             return view_copy_1
 
 
-        >>> A function that mutates its input tensor
+        >>> # A function that mutates its input tensor
         >>> def f(a):
         ...     b = a.view(-1)
         ...     b.add_(1)
         ...     return a
         ...
         >>> f_no_mutations_and_views_traced = make_fx(functionalize(f, remove='mutations_and_views'))(inpt)
-        >>>
-        >>> All mutations and views have been removed,
-        >>> but there is an extra copy_ in the graph to correctly apply the mutation to the input
-        >>> after the function has completed.
+        >>> #
+        >>> # All mutations and views have been removed,
+        >>> # but there is an extra copy_ in the graph to correctly apply the mutation to the input
+        >>> # after the function has completed.
         >>> print(f_no_mutations_and_views_traced.code)
 
 
