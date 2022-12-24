@@ -85,6 +85,8 @@ class Argument:
 
     # Permissible types for operator's arguments
     class ArgumentType(Enum):
+        NONE = auto()       # !!! This is used for nullable arguments, is this the right way to handle None?
+
         TENSOR = auto()
         # TENSORS = auto()    # !!! This is an important decision to decide how to handle list of tensors. More discussion to come.
 
@@ -119,7 +121,7 @@ class Argument:
     # Declaration of which type the value field is storing
     type: ArgumentType
 
-    val: Union[
+    value: Union[
         TensorArgument,
         # List[TensorArgument],
         Scalar,
@@ -145,7 +147,7 @@ class Argument:
 @dataclass
 class KeywordArgument:
     key: str
-    vale: Argument
+    value: Argument
 
 # !!! How to model optional fields? Is it an operator schema annotation, or an argument type?
 #     Tensor?
@@ -177,6 +179,7 @@ class KeywordArgument:
 #       However, it's up to downstream system on how to utilized these fields
 #       In another word, these feilds are suggestive, rather than mandatory.
 
+@dataclass
 class TensorMeta:
     dtype: ScalarType
     sizes: List[SymInt]
@@ -189,7 +192,9 @@ class TensorMeta:
     strides: List[SymInt]
     storage_offset: int
     layout: Layout
-    memory_format: MemoryFormat
+
+    # !!! memory_format is not tensor property, but it can only used as operator argument
+    # memory_format: MemoryFormat
 
 
 @dataclass
@@ -238,7 +243,7 @@ class Tensor:
 
 # !!! consider adding an optional named field to Tensor directly to avoid defining a new class
 @dataclass
-class NamedTesnsor:
+class NamedTensor:
     name: str
     tensor: Tensor
 
@@ -280,14 +285,14 @@ class Node:
 
 
 # Maps to fx.Graph
-@dataclass
+@dataclass(init=False)
 class Graph:
 
     inputs: List[Node]    # Maps to fx.graph's placeholder nodes.
                           # Placeholder nodes are stored separately, to clearly distinguish them from other nodes.
                           # !!! Consider making inputs a List[IValue] instead of List[Node], need to think about where to store the metadata for placeholder nodes
 
-    outputs: Node   # Maps to fx.graph's output node.
+    output: Node    # Maps to fx.graph's output node.
                     # Output node are stored separately, to clearly distinguish them from other nodes.
                     # A graph can only have a single output node.
                     # !!! Consider making outputs a List[IValue] instead of a Node, need to thinking about where to store the metadata for output node
@@ -302,7 +307,7 @@ class Graph:
 
 # Maps to fx.GraphModule
 # This the top level construct for the model
-@dataclass
+@dataclass(init=False)
 class GraphModule:
     name: str       # A readable name for the model, potentially maps to GraphModule's self.__class__.__name__
                     # This is not an identified for GraphModule
@@ -316,8 +321,8 @@ class GraphModule:
     # The name of the tensor will be used to bind to the IValues of Graph Inputs
     # !!! Consider storing them in the GraphModule, or in the Graph.
     # !!! Do we needs to store parameters and buffers separately? (Sherlock: Ideally no.)
-    parameters: List[NamedTesnsor]
-    buffers: List[NamedTesnsor]
+    parameters: List[NamedTensor]
+    buffers: List[NamedTensor]
 
     # !!! model constants: constant, etc.
 
