@@ -19,6 +19,7 @@ def replicate(
 
     Example::
         >>> # xdoctest: +REQUIRES(module:torch._C)
+        >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
         >>> module = nn.Linear(3, 3)
         >>> replicate(module)
     """

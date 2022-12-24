@@ -37,6 +37,7 @@ class ShardingPlan(object):
       want to convert the output of the second linear layer back to DDP, we can do it as follows:
 
         >>> # xdoctest: +REQUIRES(module:torch._C)
+        >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
         >>> class MyModule(nn.Module):
         >>>     def __init__(self):
         >>>        super().__init__()

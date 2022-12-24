@@ -202,6 +202,7 @@ def load_sharded_optimizer_state_dict(
     """
     Loads a state_dict to be used in conjuntion with FSDP sharded optimizer state.
     This is the current recommended way to checkpoint is FSDP
+    >>> # xdoctest: +SKIP
     >>> import torch.distributed.checkpoint as dist_cp
     >>> import spmd.checkpoint as sp_cp
     >>> # Save
