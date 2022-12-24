@@ -423,7 +423,7 @@ def trace_plot(data, device=None, plot_segments=False):
 
     def add_element(addr, size, frames, extra=()):
         next_version = addr_versions[addr] = addr_versions.get(addr, 0) + 1
-        frames = [f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation",
+        frames = [f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation ({size} bytes)",
                   *extra,
                   *(_frame_fmt(f, full_filename=True) for f in frames)]
         return w.add_element(size, frames)
@@ -478,7 +478,7 @@ def profile_plot(profile, device=None):
             category = Category.TEMPORARY
         stack = allocation_stacks.get(tensor_key, ())
         return w.add_element(size,
-                             [f"{_format_size(size)} allocation ({category.name.lower()})", *(p.name for p in stack)],
+                             [f"{_format_size(size)} ({size} bytes) allocation ({category.name.lower()})", *(p.name for p in stack)],
                              category.value - 1)
 
     kv_to_elem = {}
@@ -1092,11 +1092,12 @@ function EventSelector(body, outer, events, stack_info, memory_view) {
 }
 
 function formatSize(num) {
+    let orig = num
     // https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
     const units = ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"];
     for (const unit of units) {
         if (Math.abs(num) < 1024.0) {
-        return `${num.toFixed(1)}${unit}B`;
+        return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
         }
         num /= 1024.0;
     }
