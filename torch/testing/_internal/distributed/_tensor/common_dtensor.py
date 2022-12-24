@@ -54,6 +54,7 @@ def skip_unless_torch_gpu(method: T) -> T:
     """
     Test decorator which skips the test unless there's a GPU available to torch.
 
+    >>> # xdoctest: +REQUIRES(module:torch._C)
     >>> @skip_unless_torch_gpu
     >>> def test_some_method(self) -> None:
     >>>   ...
