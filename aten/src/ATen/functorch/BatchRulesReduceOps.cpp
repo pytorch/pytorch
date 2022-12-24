@@ -25,11 +25,6 @@ Tensor mean_decomp(
   return at::mean(self, range(0, self.dim()), false, dtype);
 }
 
-Tensor nansum_decomp(
-    const Tensor& self, optional<ScalarType> dtype) {
-  return at::nansum(self, range(0, self.dim()), false, dtype);
-}
-
 Tensor prod_decomp(
     const Tensor& self, optional<ScalarType> dtype) {
   return at::prod(self.flatten(), 0, false, dtype);
@@ -401,9 +396,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_BOXED(mode);
   m.impl("nanmedian", nanmedian_decomp);
   REDUCTION_BOXED(nanmedian.dim);
-  // TODO: re-enable these
-  // m.impl("nansum", nansum_decomp);
-  // REDUCTION_BOXED(nansum.dim_IntList);
+  REDUCTION_BOXED(nansum);
+  REDUCTION_BOXED(nanmean);
   m.impl("norm.Scalar", norm_scalar_decomp);
   REDUCTION_BOXED_ARGS(norm.ScalarOpt_dim, 2);
   m.impl("prod", prod_decomp);

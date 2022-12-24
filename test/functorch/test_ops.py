@@ -1050,8 +1050,6 @@ class TestOperators(TestCase):
         xfail('take'),
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
-        xfail('nanmean'),
-        xfail('nansum'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.dropout2d', ''),
@@ -1120,8 +1118,6 @@ class TestOperators(TestCase):
         xfail('cummin'),
         xfail('cumprod'),
         xfail('fill'),
-        xfail('nansum'),
-        xfail('nanmean'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
         xfail('index_copy'),
