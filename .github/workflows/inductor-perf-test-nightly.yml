@@ -3,9 +3,6 @@ name: inductor-A100-perf
 on:
   schedule:
     - cron: 45 1,9,17 * * *
-  push:
-    tags:
-      - ciflow/nightly/*
   pull_request:
     paths:
       - .github/workflows/inductor-perf-test-nightly.yml
