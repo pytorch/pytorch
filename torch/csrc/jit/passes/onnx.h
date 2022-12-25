@@ -1,8 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/passes/onnx/constant_map.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <unordered_map>
 

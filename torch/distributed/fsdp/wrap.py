@@ -88,10 +88,14 @@ class ModuleWrapPolicy(_FSDPPolicy):
             _module_wrap_policy,
             module_classes=module_classes,
         )
+        self._module_classes_str = str(module_classes)
 
     @property
     def policy(self):
         return self._policy
+
+    def __repr__(self) -> str:
+        return super().__repr__() + f"({self._module_classes_str})"
 
 
 def lambda_auto_wrap_policy(

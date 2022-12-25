@@ -65,7 +65,7 @@ vec4 dequantize(vec4 tex, float scale, int zero_point) {
  * Quantizes a float texel based on a scale and zero point.
  */
 uvec4 quantize(vec4 tex, float scale, int zero_point) {
-  return uvec4(tex / scale + zero_point);
+  return uvec4(roundEven(tex / scale) + zero_point);
 }
 
 void main() {
