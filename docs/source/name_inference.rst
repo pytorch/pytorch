@@ -208,6 +208,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    ":meth:`Tensor.asinh`, :func:`torch.asinh`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.asinh_`,None
    :meth:`Tensor.size`,None
+   ":meth:`Tensor.softmax`, :func:`torch.softmax`",:ref:`keeps_input_names-doc`
    ":meth:`Tensor.split`, :func:`torch.split`",:ref:`keeps_input_names-doc`
    ":meth:`Tensor.sqrt`, :func:`torch.sqrt`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.sqrt_`,None
