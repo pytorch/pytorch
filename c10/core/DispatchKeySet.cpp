@@ -101,6 +101,8 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor &&
           non_functional_backend_dispatch_keyset.has(k);
+    case DispatchKey::FuncTorchBatchedDecomposition:
+      return functorch_batched_ks.has(k);
     default:
       return t == k;
   }

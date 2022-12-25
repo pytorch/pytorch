@@ -3282,6 +3282,7 @@ class TestScript(JitTestCase):
                 # there should still be a Bailout after disable_grad call
                 FileCheck().check("disable_grad").check("BailOut[").check("BailoutTemplate").run(g)
 
+    @skipIfTorchDynamo("Torchdynamo cannot correctly handle profiler.profile calls")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_profiling_merge(self):
         @torch.jit.script
@@ -3950,6 +3951,14 @@ def foo(x):
                 # type: (Int, Int) -> Int
                 return a + 2
             torch.jit.script(invalid4)
+
+    def test_calls_in_type_annotations(self):
+        with self.assertRaisesRegex(RuntimeError, "Type annotation should not contain calls"):
+            def spooky(a):
+                # type: print("Hello") -> Tensor # noqa: F723
+                return a + 2
+            print(torch.__file__)
+            torch.jit.annotations.get_signature(spooky, None, 1, True)
 
     def test_is_optional(self):
         ann = Union[List[int], List[float]]
@@ -5752,6 +5761,7 @@ a")
         real_outs = cu.test_view_shape_prop(*inputs)
         self.assertEqual(real_outs, outputs)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_view_listconstruct_shape_prop(self):
         def fn(x):
             B = x.size(0)
@@ -6776,6 +6786,7 @@ a")
         self.checkScript(plus_123, (2,))
         self.checkScript(plus_123, (3,))
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -9301,6 +9312,7 @@ dedent """
         self.run_pass("inline", fee.graph)
         FileCheck().check_not("prim::If").run(fee.graph)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_pack_unpack_nested(self):
         class SubSubMod(torch.jit.ScriptModule):
             def __init__(self):
@@ -10100,6 +10112,7 @@ dedent """
         # testing that tensor type of lists is unified
         self.getExportImportCopy(m)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @_inline_everything
     def test_import_constants_not_specialized(self):
         class Mod(torch.nn.Module):
@@ -10707,6 +10720,7 @@ dedent """
             graph = script.graph_for()
             FileCheck().check("aten::manual_seed").run(graph)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_index_select_shape_prop(self):
 
         @torch.jit.script
@@ -11146,6 +11160,7 @@ dedent """
                 self.assertEqual(x.grad, x_ref.grad)
                 self.assertEqual(w.grad, w_ref.grad)
 
+    @skipIfTorchDynamo("TorchDynamo doesn't support profile")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the profiling version of test_rand")
     def test_rand_profiling(self):
         def test_rand():

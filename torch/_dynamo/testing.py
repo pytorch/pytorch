@@ -37,6 +37,11 @@ def named_parameters_for_optimized_module(mod):
     return mod._orig_mod.named_parameters
 
 
+def named_buffers_for_optimized_module(mod):
+    assert isinstance(mod, eval_frame.OptimizedModule)
+    return mod._orig_mod.named_buffers
+
+
 def remove_optimized_module_prefix(name):
     prefix = "_orig_mod."
     assert name.startswith(prefix)
@@ -67,6 +72,12 @@ def collect_results(model, prediction, loss, example_inputs):
         params[name] = param_copy
     results.append(grads)
     results.append(params)
+    buffers = dict()
+    for name, buffer in model.named_buffers():
+        if isinstance(model, eval_frame.OptimizedModule):
+            name = remove_optimized_module_prefix(name)
+        buffers[name] = buffer
+    results.append(buffers)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
             for inp in example:
@@ -124,7 +135,7 @@ def debug_dump(name, code: types.CodeType, extra=""):
         )
 
 
-def debug_insert_nops(frame, cache_size):
+def debug_insert_nops(frame, cache_size, hooks):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -236,7 +247,7 @@ def rand_strided(size, stride, dtype=torch.float32, device="cpu"):
     if dtype.is_floating_point:
         buffer = torch.randn(needed_size, dtype=dtype, device=device)
     else:
-        buffer = torch.ones(size=[needed_size], dtype=dtype, device=device)
+        buffer = torch.zeros(size=[needed_size], dtype=dtype, device=device)
     return torch.as_strided(buffer, size, stride)
 
 

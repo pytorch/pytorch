@@ -7,7 +7,7 @@ from typing import Callable, List, Tuple
 import numpy
 
 import torch
-from torch.testing._internal.common_dtype import floating_types_and
+from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_utils import TEST_SCIPY
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
@@ -112,6 +112,44 @@ def reference_inputs_kaiser_window(op_info, device, dtype, requires_grad, **kwar
         yield SampleInput(size, sym=True, **kw)
 
 
+def reference_inputs_general_cosine_window(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    yield from sample_inputs_window(op_info, device, dtype, requires_grad, **kwargs)
+
+    cases = (
+        (8, {"a": [0.5, 0.5]}),
+        (16, {"a": [0.46, 0.54]}),
+        (32, {"a": [0.46, 0.23, 0.31]}),
+        (64, {"a": [0.5]}),
+        (128, {"a": [0.1, 0.8, 0.05, 0.05]}),
+        (256, {"a": [0.2, 0.2, 0.2, 0.2, 0.2]}),
+    )
+
+    for size, kw in cases:
+        yield SampleInput(size, sym=False, **kw)
+        yield SampleInput(size, sym=True, **kw)
+
+
+def reference_inputs_general_hamming_window(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    yield from sample_inputs_window(op_info, device, dtype, requires_grad, **kwargs)
+
+    cases = (
+        (8, {"alpha": 0.54}),
+        (16, {"alpha": 0.5}),
+        (32, {"alpha": 0.23}),
+        (64, {"alpha": 0.8}),
+        (128, {"alpha": 0.9}),
+        (256, {"alpha": 0.05}),
+    )
+
+    for size, kw in cases:
+        yield SampleInput(size, sym=False, **kw)
+        yield SampleInput(size, sym=True, **kw)
+
+
 def error_inputs_window(op_info, device, *args, **kwargs):
     # Tests for windows that have a negative size
     yield ErrorInput(
@@ -138,7 +176,21 @@ def error_inputs_window(op_info, device, *args, **kwargs):
     yield ErrorInput(
         SampleInput(3, *args, dtype=torch.long, device=device, **kwargs),
         error_type=ValueError,
-        error_regex="expects floating point dtypes, got: torch.int64",
+        error_regex="expects float32 or float64 dtypes, got: torch.int64",
+    )
+
+    # Tests for window tensors that are bfloat16
+    yield ErrorInput(
+        SampleInput(3, *args, dtype=torch.bfloat16, device=device, **kwargs),
+        error_type=ValueError,
+        error_regex="expects float32 or float64 dtypes, got: torch.bfloat16",
+    )
+
+    # Tests for window tensors that are float16
+    yield ErrorInput(
+        SampleInput(3, *args, dtype=torch.float16, device=device, **kwargs),
+        error_type=ValueError,
+        error_regex="expects float32 or float64 dtypes, got: torch.float16",
     )
 
 
@@ -185,6 +237,24 @@ def error_inputs_kaiser_window(op_info, device, **kwargs):
     )
 
 
+def error_inputs_general_cosine_window(op_info, device, **kwargs):
+    # Yield common error inputs
+    yield from error_inputs_window(op_info, device, a=[0.54, 0.46], **kwargs)
+
+    # Tests for negative beta
+    yield ErrorInput(
+        SampleInput(3, a=None, dtype=torch.float32, device=device, **kwargs),
+        error_type=TypeError,
+        error_regex="Coefficients must be a list/tuple",
+    )
+
+    yield ErrorInput(
+        SampleInput(3, a=[], dtype=torch.float32, device=device, **kwargs),
+        error_type=ValueError,
+        error_regex="Coefficients cannot be empty",
+    )
+
+
 def reference_signal_window(fn: Callable):
     r"""Wrapper for scipy signal window references.
 
@@ -213,14 +283,14 @@ def make_signal_windows_opinfo(
     reference_inputs_func: Callable,
     error_inputs_func: Callable,
     *,
-    skips: Tuple[DecorateInfo] = (),
+    skips: Tuple[DecorateInfo, ...] = (),
 ):
     r"""Helper function to create OpInfo objects related to different windows."""
     return OpInfo(
         name=name,
         ref=ref if TEST_SCIPY else None,
-        dtypes=floating_types_and(torch.bfloat16, torch.float16),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types(),
         sample_inputs_func=sample_inputs_func,
         reference_inputs_func=reference_inputs_func,
         error_inputs_func=error_inputs_func,
@@ -265,46 +335,9 @@ def make_signal_windows_opinfo(
                 "test_op_has_batch_rule",
             ),
             DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
             ),
             *skips,
         ),
@@ -313,6 +346,40 @@ def make_signal_windows_opinfo(
 
 op_db: List[OpInfo] = [
     make_signal_windows_opinfo(
+        name="signal.windows.hamming",
+        ref=reference_signal_window(scipy.signal.windows.hamming)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.hann",
+        ref=reference_signal_window(scipy.signal.windows.hann) if TEST_SCIPY else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.bartlett",
+        ref=reference_signal_window(scipy.signal.windows.bartlett)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.blackman",
+        ref=reference_signal_window(scipy.signal.windows.blackman)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
+    ),
+    make_signal_windows_opinfo(
         name="signal.windows.cosine",
         ref=reference_signal_window(scipy.signal.windows.cosine)
         if TEST_SCIPY
@@ -320,13 +387,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
-        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
@@ -336,13 +396,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, tau=2.78),
         reference_inputs_func=partial(reference_inputs_exponential_window, tau=2.78),
         error_inputs_func=error_inputs_exponential_window,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
-        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.gaussian",
@@ -368,12 +421,36 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, beta=12.0),
         reference_inputs_func=partial(reference_inputs_kaiser_window, beta=12.0),
         error_inputs_func=error_inputs_kaiser_window,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Unsupported on MPS for now pending aten::i0 support"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.general_cosine",
+        ref=reference_signal_window(scipy.signal.windows.general_cosine)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=partial(sample_inputs_window, a=[0.54, 0.46]),
+        reference_inputs_func=partial(
+            reference_inputs_general_cosine_window, a=[0.54, 0.46]
         ),
+        error_inputs_func=error_inputs_general_cosine_window,
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.general_hamming",
+        ref=reference_signal_window(scipy.signal.windows.general_hamming)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=partial(sample_inputs_window, alpha=0.54),
+        reference_inputs_func=partial(
+            reference_inputs_general_hamming_window, alpha=0.54
+        ),
+        error_inputs_func=error_inputs_window,
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.nuttall",
+        ref=reference_signal_window(scipy.signal.windows.nuttall)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
     ),
 ]
