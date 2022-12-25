@@ -2841,6 +2841,9 @@ class TestReductions(TestCase):
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
 
+        linear = torch.linspace(0, 0.99 - 5.0e-7, 101).to(device)
+        test_against_np(linear, bins=20, min=0, max=0.99)
+
     @onlyCPU
     def test_histc_bfloat16(self, device):
         actual = torch.histc(

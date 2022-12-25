@@ -78,7 +78,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 5, runner: "linux.2xlarge" },
           { config: "default", shard: 3, num_shards: 5, runner: "linux.2xlarge" },
           { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
@@ -299,14 +299,14 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
       build-generates-artifacts: false
 
-  linux-focal-rocm5_2-py3_8-build:
+  linux-focal-rocm5_3-py3_8-build:
     # don't run build twice on master
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm5.2-py3.8
+    name: linux-focal-rocm5.3-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.2-py3.8
-      docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
+      build-environment: linux-focal-rocm5.3-py3.8
+      docker-image-name: pytorch-linux-focal-rocm5.3-py3.8
       sync-tag: rocm-build
       test-matrix: |
         { include: [

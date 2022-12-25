@@ -25,6 +25,7 @@ except ModuleNotFoundError:
     print("Installing Pytorch Image Models...")
     pip_install("git+https://github.com/rwightman/pytorch-image-models")
 finally:
+    from timm import __version__ as timmversion
     from timm.data import resolve_data_config
     from timm.models import create_model
 
@@ -67,11 +68,16 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set()
+REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256")
 
 SKIP = {
     # Unusual training setup
     "levit_128",
+}
+
+
+MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
+    "cait_m36_384": 4,
 }
 
 
@@ -181,7 +187,8 @@ class TimmRunnner(BenchmarkRunner):
 
         retries = 1
         success = False
-        while not success and retries < 4:
+        model = None
+        while not success and retries < 6:
             try:
                 model = create_model(
                     model_name,
@@ -204,6 +211,9 @@ class TimmRunnner(BenchmarkRunner):
                 time.sleep(wait)
                 retries += 1
 
+        if model is None:
+            raise RuntimeError(f"Failed to load model '{model_name}'")
+
         model.to(
             device=device,
             memory_format=torch.channels_last if channels_last else None,
@@ -212,7 +222,9 @@ class TimmRunnner(BenchmarkRunner):
         self.num_classes = model.num_classes
 
         data_config = resolve_data_config(
-            self._args, model=model, use_test_size=not is_training
+            vars(self._args) if timmversion >= "0.8.0" else self._args,
+            model=model,
+            use_test_size=not is_training,
         )
         input_size = data_config["input_size"]
         recorded_batch_size = TIMM_MODELS[model_name]
@@ -222,6 +234,10 @@ class TimmRunnner(BenchmarkRunner):
                 int(recorded_batch_size / BATCH_SIZE_DIVISORS[model_name]), 1
             )
         batch_size = batch_size or recorded_batch_size
+
+        # Control the memory footprint for few models
+        if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
+            batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
 
         # example_inputs = torch.randn(
         #     (batch_size,) + input_size, device=device, dtype=data_dtype
@@ -248,8 +264,6 @@ class TimmRunnner(BenchmarkRunner):
             model.train()
         else:
             model.eval()
-
-        self.init_optimizer(device, model.parameters())
 
         self.validate_model(model, example_inputs)
 
@@ -303,7 +317,7 @@ class TimmRunnner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(*cloned_inputs)
             if isinstance(pred, tuple):

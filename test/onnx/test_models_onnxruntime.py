@@ -394,6 +394,7 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @skipScriptTest()  # TODO: #75625
+    @skipIfUnsupportedMinOpsetVersion(20)
     def test_transformer_encoder(self):
         class MyModule(torch.nn.Module):
             def __init__(self, ninp, nhead, nhid, dropout, nlayers):

@@ -8,27 +8,48 @@
 
 namespace c10d {
 
+// Macro to generate the error message on a non-successful UCC return value.
+#define TORCH_UCC_GET_ERROR_MSG(_err, _error_msg, _result) \
+  do {                                                     \
+      _err = c10::str(                                     \
+          "[",                                             \
+          std::string(__FILE__),                           \
+          ":",                                             \
+          std::to_string(__LINE__),                        \
+          "] ",                                            \
+          logger->getLogPrefix(),                          \
+          _error_msg,                                      \
+          ", error code ",                                 \
+          _result,                                         \
+          ": ",                                            \
+          ucc_status_string(_result),                      \
+          ", system error code ",                          \
+          errno);                                          \
+  } while (0)
+
 // Macro to throw on a non-successful UCC return value.
-#define TORCH_UCC_CHECK(_cmd, _error_msg) \
-  do {                                    \
-    ucc_status_t result = _cmd;           \
-    if (result != UCC_OK) {               \
-      std::string err = c10::str(         \
-          "[",                            \
-          std::string(__FILE__),          \
-          ":",                            \
-          std::to_string(__LINE__),       \
-          "] ",                           \
-          logger->getLogPrefix(),         \
-          _error_msg,                     \
-          ", error code ",                \
-          result,                         \
-          ": ",                           \
-          ucc_status_string(result),      \
-          ", system error code ",         \
-          errno);                         \
-      TORCH_CHECK(false, err);            \
-    }                                     \
+#define TORCH_UCC_CHECK(_cmd, _error_msg)               \
+  do {                                                  \
+    ucc_status_t result = _cmd;                         \
+    if (result != UCC_OK) {                             \
+      std::string err;                                  \
+      TORCH_UCC_GET_ERROR_MSG(err, _error_msg, result); \
+      TORCH_CHECK(false, err);                          \
+    }                                                   \
+  } while (0)
+
+// Macro and throw on a non-successful UCC return value and free its request.
+#define TORCH_UCC_CHECK_REQUEST(_request, _cmd, _error_msg) \
+  do {                                                      \
+    ucc_status_t result = _cmd;                             \
+    if (result != UCC_OK) {                                 \
+      std::string err;                                      \
+      TORCH_UCC_GET_ERROR_MSG(err, _error_msg, result);     \
+      if (_request != nullptr) {                            \
+        ucc_collective_finalize(_request);                  \
+      }                                                     \
+      TORCH_CHECK(false, err);                              \
+    }                                                       \
   } while (0)
 
 // Macros to print logs with unified format
