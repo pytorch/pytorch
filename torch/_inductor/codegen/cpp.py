@@ -14,7 +14,7 @@ from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..utils import sympy_product, sympy_subs, sympy_symbol
+from ..utils import cache_on_self, sympy_product, sympy_subs, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
@@ -665,65 +665,59 @@ class CppKernel(Kernel):
     def size_hint(self):
         return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
 
-    def codegen_loops(self, code, worksharing):
+    def codegen_loops_impl(self, loop_nest, code, worksharing):
         threads = parallel_num_threads()
-
-        loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
-        loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
-            loops[self.reduction_depth :]
+        par_depth = self.decide_parallel_depth(
+            self.call_ranges[: loop_nest.max_parallel_depth()], threads
         )
-        reductions.mark_reduction(self.reduction_vars)
-
-        if codecache.pick_vec_isa():
-            # TODO(jansel): detect stride-1 dimension and vectorize that
-            if reductions:
-                reductions.loops[-1].simd = True
-            elif loops:
-                loops.loops[-1].simd = True
-
-        par_depth = 0
-        reduction_par_depth = 0
-        if loops:
-            par_depth = self.decide_parallel_depth(
-                self.call_ranges[: self.reduction_depth], threads
-            )
-        else:
-            reduction_par_depth = self.decide_parallel_depth(
-                self.call_ranges[self.reduction_depth :], threads
-            )
-
         with contextlib.ExitStack() as stack:
             if par_depth:
-                worksharing.parallel(threads)
-                loops.mark_parallel(par_depth)
-            elif reduction_par_depth:
-                # need to close the worksharing scope to define reduction vars outside it
-                worksharing.close()
-                reductions.mark_parallel(reduction_par_depth)
+                if loop_nest.is_reduction_only():
+                    # need to close the worksharing scope to define reduction vars outside it
+                    worksharing.close()
+                else:
+                    worksharing.parallel(threads)
+                    loop_nest.mark_parallel(par_depth)
             elif threads > 1:
                 if worksharing.single():
                     stack.enter_context(code.indent())
 
-            loops.codegen(code, stack)
+            def gen_loops(loop, in_reduction=False):
+                kernel = loop.get_kernel()
+                with contextlib.ExitStack() as stack_outer:
+                    if loop.is_reduction and not in_reduction:
+                        assert kernel
+                        if kernel.reduction_prefix:
+                            stack_outer.enter_context(code.indent())
+                        code.splice(kernel.reduction_prefix)
+                    if loop_nest.is_reduction_only():
+                        worksharing.parallel(threads)
+                    with contextlib.ExitStack() as stack:
+                        code.writelines(loop.lines())
+                        stack.enter_context(code.indent())
+                        # generate inner loops or loop body
+                        if loop.inner:
+                            for inner_loop in loop.inner:
+                                gen_loops(inner_loop, stack, loop.is_reduction)
+                        else:
+                            assert kernel
+                            with contextlib.ExitStack() as stack:
+                                code.splice(kernel.loads)
+                                code.splice(kernel.compute)
+                                code.splice(kernel.stores)
 
-            with contextlib.ExitStack() as stack_outer:
-                if self.reduction_prefix:
-                    stack_outer.enter_context(code.indent())
-                code.splice(self.reduction_prefix)
+                    if loop_nest.is_reduction_only():
+                        worksharing.close()
 
-                if reduction_par_depth:
-                    worksharing.parallel(threads)
+                    if loop.is_reduction and not in_reduction:
+                        code.splice(kernel.reduction_suffix)
+            
+            for loop in loop_nest.root:
+                gen_loops(loop)
 
-                with contextlib.ExitStack() as stack:
-                    reductions.codegen(code, stack)
-                    code.splice(self.loads)
-                    code.splice(self.compute)
-                    code.splice(self.stores)
-
-                if reduction_par_depth:
-                    worksharing.close()
-
-                code.splice(self.reduction_suffix)
+    def codegen_loops(self, code, worksharing):
+        loop_nest = LoopNest.build(self)
+        self.codegen_loops_impl(loop_nest, code, worksharing)
 
     def decide_parallel_depth(self, ranges, threads):
         seq = self.size_hint()
@@ -1039,54 +1033,13 @@ class CppKernelProxy(CppKernel):
         self.simd_omp_kernel: CppKernel = None
         self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
 
-    def vectorize_most_inner_loop(self, loop_nest, dtype=torch.float):
-        assert self.picked_vec_isa
-        nelements = self.picked_vec_isa.nelements(dtype)
-        loop_nest.split_most_inner_loop(nelements)
-        loop_with_tail = loop_nest.loops[-1]
-        assert isinstance(loop_with_tail, LoopLevelWithTail)
-
-        loop_with_tail.main_loop.simd_vec = True
-
-        loop_with_tail.tail_loop.simd_omp = True
-        # We chope the loop into two cubes by the nelements - main loop and tail loop.
-        # Regarding the main loop, it is straightforward that it could be vectorized with
-        # nelements. But for the tail loop, it still could be vectorized. For example,
-        # if the nelements is 8(256bits), then the tail loop still could be vectorized
-        # as 4(128bits).
-        loop_with_tail.tail_loop.simd_nelements = int(nelements / 2)
-        loop_with_tail.tail_loop.simd_vec = False
-
-        loop_with_tail.main_loop_body = self.simd_vec_kernel
-        loop_with_tail.tail_loop_body = self.simd_omp_kernel
-        return loop_nest
-
     def codegen_loops(self, code, worksharing):
-        threads = parallel_num_threads()
-
         if self.simd_vec_kernel is None or not self.picked_vec_isa:
             assert self.simd_omp_kernel
             return self.simd_omp_kernel.codegen_loops(code, worksharing)
 
-        assert self.simd_vec_kernel.itervars == self.simd_omp_kernel.itervars
-        assert self.simd_vec_kernel.ranges == self.simd_omp_kernel.ranges
-        assert (
-            self.simd_vec_kernel.reduction_vars == self.simd_omp_kernel.reduction_vars
-        )
-
-        itervars = self.simd_vec_kernel.itervars
-        rangs = self.simd_vec_kernel.ranges
-        loops = [LoopLevel(var, size) for var, size in zip(itervars, rangs)]
-        assert (
-            self.simd_vec_kernel.reduction_depth == self.simd_omp_kernel.reduction_depth
-        )
-        reduction_depth = self.simd_vec_kernel.reduction_depth
-        loops_nest_non_reduce, loops_nest_reduce = LoopNest(
-            loops[:reduction_depth]
-        ), LoopNest(loops[reduction_depth:])
-        loops_nest_reduce.mark_reduction(self.simd_vec_kernel.reduction_vars)
-
         assert self.picked_vec_isa
+        loop_nest = LoopNest.build(self.simd_omp_kernel)
         # Do not apply vectorization since the range of most inner is too small. Meanwhile,
         # If the range of the most inner is less then the codecache.pick_vec_isa().nelements(),
         # the generated code for some reduction will be as follows that leads to incrrect result.
@@ -1113,11 +1066,9 @@ class CppKernelProxy(CppKernel):
         # tmp1_vec(LINE02) will always be zero as it is initialized with tmp1 value and the range(LINE05)
         # is 0. Hence, the LINE10 will always reset tmp1 to 0. But tmp1(LINE01) is global value. So the result
         # will be incorrect. We skip thie case.
-        most_inner_loop = (
-            loops_nest_reduce.loops[-1]
-            if loops_nest_reduce
-            else loops_nest_non_reduce.loops[-1]
-        )
+        loops = loop_nest.get_loops_at(loop_nest.depth - 1)
+        assert len(loops) == 1
+        most_inner_loop = loops[0]
         main_loop_range = ir.IndexingDiv(
             most_inner_loop.size, self.picked_vec_isa.nelements()
         )
@@ -1127,23 +1078,8 @@ class CppKernelProxy(CppKernel):
             metrics.generated_cpp_vec_kernel_count -= 1
             return self.simd_omp_kernel.codegen_loops(code, worksharing)
 
-        # TODO(jansel): detect stride-1 dimension and vectorize that
-        if loops_nest_reduce:
-            loops_nest_reduce.loops[-1].simd = True
-        elif loops_nest_non_reduce:
-            loops_nest_non_reduce.loops[-1].simd = True
-
-        par_depth = 0
-        reduction_par_depth = 0
-        if loops_nest_non_reduce:
-            par_depth = self.simd_vec_kernel.decide_parallel_depth(
-                self.simd_vec_kernel.call_ranges[:reduction_depth], threads
-            )
-        else:
-            reduction_par_depth = self.simd_vec_kernel.decide_parallel_depth(
-                self.simd_vec_kernel.call_ranges[reduction_depth:], threads
-            )
-
+        # TODO: fix the following
+        '''
         # If the most inner loop of the reduction will be vectorized, the vectorization
         # will add a vec variable for reduction. Take the code snippet as an example:
         #     float tmp1 = 0;
@@ -1175,77 +1111,13 @@ class CppKernelProxy(CppKernel):
         ):
             metrics.generated_cpp_vec_kernel_count -= 1
             return self.simd_omp_kernel.codegen_loops(code, worksharing)
-
-        with contextlib.ExitStack() as stack:
-            if par_depth:
-                worksharing.parallel(threads)
-                loops_nest_non_reduce.mark_parallel(par_depth)
-            elif reduction_par_depth:
-                # need to close the worksharing scope to define reduction vars outside it
-                worksharing.close()
-                loops_nest_reduce.mark_parallel(reduction_par_depth)
-            elif threads > 1:
-                if worksharing.single():
-                    stack.enter_context(code.indent())
-
-            non_reduce_loops = loops_nest_non_reduce.loops
-            reduce_loops = loops_nest_reduce.loops
-            loop_with_tail: LoopLevelWithTail = None
-
-            if loops_nest_reduce:
-                self.vectorize_most_inner_loop(loops_nest_reduce)
-                loop_with_tail = loops_nest_reduce.loops[-1]
-                # The most inner loop will be vectorized
-                reduce_loops = reduce_loops[0:-1]
-            else:
-                self.vectorize_most_inner_loop(loops_nest_non_reduce)
-                loop_with_tail = loops_nest_non_reduce.loops[-1]
-                # The most inner loop will be vectorized
-                non_reduce_loops = non_reduce_loops[0:-1]
-
-            # The reductions loops are always the loop body of non-reduction loops
-            for loop in non_reduce_loops:
-                code.writelines(loop.lines())
-                stack.enter_context(code.indent())
-
-            with contextlib.ExitStack() as stack_outer:
-                if self.simd_vec_kernel.reduction_prefix:
-                    stack_outer.enter_context(code.indent())
-                code.splice(self.simd_vec_kernel.reduction_prefix)
-
-                if reduction_par_depth:
-                    worksharing.parallel(threads)
-
-                with contextlib.ExitStack() as stack:
-                    for loop in reduce_loops:
-                        code.writelines(loop.lines())
-                        stack.enter_context(code.indent())
-
-                    def gen_vectorized_loop(loop, kernel, write_reduction_suffix=False):
-                        code.writelines(loop.lines())
-                        with contextlib.ExitStack() as stack:
-                            stack.enter_context(code.indent())
-                            code.splice(kernel.loads)
-                            code.splice(kernel.compute)
-                            code.splice(kernel.stores)
-                        if write_reduction_suffix:
-                            code.splice(kernel.reduction_suffix)
-
-                    # Regarding the vectorized reduction loop, we need to call reduce_all to to reduce
-                    # the vectorize as a single scalar. Hence, we set write_reduction_suffix to True to
-                    # gen the code.
-                    gen_vectorized_loop(
-                        loop_with_tail.main_loop, loop_with_tail.main_loop_body, True
-                    )
-
-                    gen_vectorized_loop(
-                        loop_with_tail.tail_loop, loop_with_tail.tail_loop_body, False
-                    )
-
-                if reduction_par_depth:
-                    worksharing.close()
-
-                code.splice(loop_with_tail.tail_loop_body.reduction_suffix)
+        '''
+        main_loop, tail_loop = loop_nest.split_with_tiling(
+            -1, self.simd_vec_kernel.tile_size
+        )
+        main_loop.set_kernel(self.simd_vec_kernel)
+        tail_loop.set_kernel(self.simd_omp_kernel)
+        self.codegen_loops_impl(loop_nest, code, worksharing)
 
 
 class CppScheduling:
@@ -1517,6 +1389,64 @@ class LoopLevel:
     simd_vec: bool = False
     collapsed: bool = False
     reduction_vars: Dict[str, str] = None
+    parent: 'LoopLevel' = None
+    # the next inner level of the loop, empty if it is inner-most
+    # contains >1 LoopLevel if the inner level of loop is split
+    inner: List['LoopLevel'] = []
+    # kernel assigned to this loop level, only valid
+    # when it is at the inner-most level
+    kernel: CppKernel = None
+
+    def get_kernel(self):
+        if self.kernel:
+            return self.kernel
+        assert len(self.inner) == 1
+        return self.inner[0].get_kernel()
+
+    def set_kernel(self, kernel):
+        if not self.inner:
+            self.kernel = kernel
+            return
+        assert len(self.inner) == 1
+        self.inner[0].set_kernel(kernel)
+
+    def get_loops_at(self, depth) -> List['LoopLevel']:
+        if depth == 0:
+            return [self]
+        else:
+            loops = []
+            for loop in self.inner:
+                loops += loop.get_loops_at(depth - 1)
+            return loops
+
+    def split_with_tiling(self, depth, factor):
+        def do_split_with_tiling():
+            sympy_factor = sympy.Integer(factor)
+
+            main_loop_range = ir.IndexingDiv(self.size, sympy_factor)
+            main_loop = LoopLevel(self.var, main_loop_range, parent=self.parent)
+            main_loop.parallel = self.parallel
+            main_loop.collapsed = False
+            main_loop.reduction_vars = self.reduction_vars
+
+            offset = main_loop_range * sympy_factor
+            tail_loop = LoopLevel(self.var, self.size, parent=self.parent)
+            tail_loop.offset = offset
+            tail_loop.parallel = self.parallel
+            tail_loop.collapsed = False
+            tail_loop.reduction_vars = self.reduction_vars
+
+            return main_loop, tail_loop
+
+        if depth == 0:
+            main_loop, tail_loop = do_split_with_tiling(factor)
+            parent = self.parent
+            if parent:
+                parent.inner = [main_loop, tail_loop]
+            return main_loop, tail_loop
+        else:
+            assert len(self.inner) == 1
+            return self.inner.split_with_tiling(depth - 1, factor)
 
     def lines(self):
         if self.reduction_vars:
@@ -1553,70 +1483,64 @@ class LoopLevel:
         return [line1, line2]
 
 
-class LoopLevelWithTail(LoopLevel):
-    def __init__(self, main_loop: LoopLevel, tail_loop: LoopLevel):
-        super().__init__()
-        self.main_loop = main_loop
-        self.tail_loop = tail_loop
-        self.main_loop_body = None
-        self.tail_loop_body = None
-
-    def lines(self):
-        raise AssertionError("Not Implemented")
-
-
 @dataclasses.dataclass
 class LoopNest:
-    loops: List[LoopLevel]
+    root: List[LoopLevel] = []
+    depth: int = 0
+
+    @staticmethod
+    def build(kernel: CppKernel):
+        itervars = kernel.itervars
+        ranges = kernel.ranges
+        reduction_depth = kernel.reduction_depth
+
+        root: List[LoopLevel] = []
+        levels: List[LoopLevel] = root
+        loop: LoopLevel = None
+        for depth, (var, size) in enumerate(zip(itervars, ranges)):
+            loop = LoopLevel(var, size, parent=loop)
+            if depth >= reduction_depth:
+                loop.is_reduction = True
+                loop.reduction_vars = itervars[reduction_depth:]
+            levels.append(loop)
+            levels = loop.inner
+        if loop:
+            loop.kernel = kernel
+        return LoopNest(root, len(itervars))
 
     def __bool__(self):
-        return bool(self.loops)
+        return bool(self.root)
 
-    def mark_reduction(self, reduction_vars):
-        for loop in self.loops:
-            loop.reduction_vars = reduction_vars
+    def get_loops_at(self, depth) -> List[LoopLevel]:
+        loops = []
+        for loop in self.root:
+            loops += loop.get_loops_at(depth)
+        return loops
+
+    @cache_on_self
+    def max_parallel_depth(self):
+        max_depth = 0
+        loops = self.root
+        while len(loops) == 1:
+            max_depth += 1
+            loops = loops[0].inner
+        return max_depth
+
+    def is_reduction_only(self):
+        return self.root and self.root[0].is_reduction
 
     def mark_parallel(self, par_depth):
-        loops = self.loops
+        assert par_depth <= self.max_parallel_depth(), "Parallel depth cannot exceed the maximal allowed parallel depth"
+        loops = self.root
         loops[0].parallel = par_depth
         for i in range(1, par_depth):
-            loops[i].collapsed = True
-
-    def split_most_inner_loop(self, factor):
-        sympy_factor = sympy.Integer(factor)
-
-        most_inner_loop = self.loops[-1]
-
-        # If the most inner loop needs to be collapsed, we need to
-        # exclude it since we need to split it into two loops. Meanwhile,
-        # we still mark it as parallized.
-        if most_inner_loop.collapsed:
-            assert self.loops[0].parallel == len(self.loops)
-            self.loops[0].parallel -= 1
-
-        main_loop_range = ir.IndexingDiv(most_inner_loop.size, sympy_factor)
-
-        main_loop = LoopLevel(most_inner_loop.var, main_loop_range)
-        main_loop.parallel = most_inner_loop.parallel
-        main_loop.collapsed = False
-        main_loop.reduction_vars = most_inner_loop.reduction_vars
-
-        offset = main_loop_range * sympy_factor
-        tail_loop = LoopLevel(most_inner_loop.var, most_inner_loop.size)
-        tail_loop.offset = offset
-        tail_loop.parallel = most_inner_loop.parallel
-        tail_loop.collapsed = False
-        tail_loop.reduction_vars = most_inner_loop.reduction_vars
-
-        loop_with_tail = LoopLevelWithTail(main_loop, tail_loop)
-        loop_with_tail.parallel = 0
-        loop_with_tail.collapsed = False
-
-        self.loops[-1] = loop_with_tail
-
-    def codegen(self, code, stack):
-        for loop in self.loops:
-            code.writelines(loop.lines())
-            stack.enter_context(code.indent())
-        else:
-            stack.enter_context(code.indent())
+            loops = loops[0].inner
+            loops[0].collapsed = True
+    
+    def split_with_tiling(self, depth, factor):
+        loops = self.get_loops_at(depth)
+        assert len(loops) == 1
+        split_loops = loops[0].split_with_tiling(0, factor)
+        if depth == 0:
+            self.root = split_loops
+        return split_loops
