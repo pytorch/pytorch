@@ -67,6 +67,11 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            All builds are done inside the container, to start an interactive session run:
+              docker exec -it $(docker container ps --format '{{.ID}}') bash
+            To start Python docs build type:
+              cd docs && make html && make coverage
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -170,3 +175,6 @@ jobs:
           if-no-files-found: error
           path: functorch_ghpages/nightly/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}/functorchdocs
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()

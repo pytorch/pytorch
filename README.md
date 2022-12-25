@@ -219,7 +219,7 @@ git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
 git submodule sync
-git submodule update --init --recursive --jobs 0
+git submodule update --init --recursive
 ```
 
 #### Install PyTorch
@@ -257,9 +257,6 @@ MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py develop
 **On Windows**
 
 Choose Correct Visual Studio Version.
-
-Sometimes there are regressions in new versions of Visual Studio, so
-it's best to use the same Visual Studio Version [16.8.5](https://github.com/pytorch/pytorch/blob/master/.circleci/scripts/vs_install.ps1) as Pytorch CI's.
 
 PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from

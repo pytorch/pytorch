@@ -517,10 +517,10 @@ at::Tensor sinc_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sparse_constructor_values_backward(
     const at::Tensor& sparse_grad_out,
     const at::Tensor& indices);
-at::Tensor embedding_dense_double_backward(
+at::Tensor embedding_dense_double_backward_symint(
     const at::Tensor& grad,
     const at::Tensor& indices,
-    int64_t padding_idx);
+    c10::SymInt padding_idx);
 at::Tensor index_backward(
     at::Tensor zeros_like_self,
     const torch::List<c10::optional<Tensor>>& indices,
@@ -1031,6 +1031,11 @@ Tensor take_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& indices);
+
+Tensor to_sparse_backward(
+    const Tensor& grad,
+    const c10::Layout self_layout,
+    const c10::OptionalArrayRef<c10::SymInt>& self_blocksize);
 
 } // namespace details
 } // namespace generated
