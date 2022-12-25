@@ -2,12 +2,18 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+from torch.distributed._tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Replicate,
+    Shard,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.distributed._tensor import DeviceMesh, DTensor, Shard, Replicate, distribute_tensor
 
 
 class TPShardingOpsTest(DTensorTestBase):
@@ -22,9 +28,7 @@ class TPShardingOpsTest(DTensorTestBase):
         tensor = torch.rand(16, 35, 26)
         sharding = [Shard(0)]
         st = distribute_tensor(tensor, device_mesh, sharding).view(8, 4, 35, 13)
-        st_new = distribute_tensor(
-            tensor.view(8, 4, 35, 13), device_mesh, sharding
-        )
+        st_new = distribute_tensor(tensor.view(8, 4, 35, 13), device_mesh, sharding)
         self.assertEqual(st.to_local(), st_new.to_local())
         self.assertEqual(st.placements[0], st_new.placements[0])
 

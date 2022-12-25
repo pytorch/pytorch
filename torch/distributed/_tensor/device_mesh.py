@@ -1,22 +1,23 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
 from typing import List, Optional, Sequence, TypeVar, Union
+
 import torch
 from torch.distributed.distributed_c10d import (
+    _get_default_group,
     all_gather,
     all_reduce,
+    all_to_all,
     broadcast,
+    get_global_rank,
     get_rank,
     get_world_size,
-    get_global_rank,
-    ReduceOp,
     GroupMember,
-    scatter,
-    _get_default_group,
-    reduce_scatter,
     new_group,
     ProcessGroup,
-    all_to_all,
+    reduce_scatter,
+    ReduceOp,
+    scatter,
     Work,
 )
 
@@ -25,9 +26,7 @@ _global_device_mesh: Optional["DeviceMesh"] = None
 
 def get_global_device_mesh() -> "DeviceMesh":
     global _global_device_mesh
-    assert (
-        _global_device_mesh is not None
-    ), "Could not get a default device mesh!"
+    assert _global_device_mesh is not None, "Could not get a default device mesh!"
     return _global_device_mesh
 
 
@@ -116,14 +115,14 @@ class DeviceMesh(object):
         # check default pg backend, should support device_type
         if device_type == "cpu":
             assert (
-                self._backend == "gloo"
+                self._backend == "gloo" or self._backend == "local"
             ), f"ProcessGroup backend: {self._backend} not supporting CPU!"
         elif device_type == "cuda":
             if self._backend == "gloo":
                 warnings.warn(
                     "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
                 )
-            assert self._backend == "gloo" or self._backend == "nccl"
+            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "local"
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type, but got {device_type}"
@@ -271,11 +270,11 @@ class DeviceMesh(object):
         scatter a list of tensors to a device mesh dimension. We by default
         use the first rank of the mesh dimension as the source of truth, i.e
         for a 2d mesh [[0, 1], [2, 3]], if we scatter on mesh_dim = 1, we will
-        scatter the tensor list on rank 0 to rank 0/1, and tensor lista on rank
+        scatter the tensor list on rank 0 to rank 0/1, and tensor list on rank
         2 to rank 2/3.
 
         Args:
-            tensor (torch.Tensor): the tensor to receive the scattered list.
+            output (torch.Tensor): the tensor to receive the scattered list.
             scatter_list (List[torch.Tensor]): the tensor list to be scattered.
             mesh_dim (int, optional): indicate which mesh dimension we want
                 to scatter on, we by default choose the first rank on the
@@ -337,9 +336,7 @@ class DeviceMesh(object):
         if dim_group is not GroupMember.WORLD:
             src_for_dim = get_global_rank(dim_group, 0)
 
-        return broadcast(
-            tensor, src=src_for_dim, group=dim_group, async_op=async_op
-        )
+        return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
 
     def all_gather(
         self,
@@ -363,9 +360,7 @@ class DeviceMesh(object):
             A :class:`Work` object
         """
         dim_group = self._dim_groups[mesh_dim]
-        return all_gather(
-            tensor_list, tensor, group=dim_group, async_op=async_op
-        )
+        return all_gather(tensor_list, tensor, group=dim_group, async_op=async_op)
 
     def all_reduce(
         self,
@@ -453,9 +448,9 @@ class DeviceMesh(object):
             # scatter the tensor
             output_offset = offset_list[my_coordinate]
             output.copy_(
-                flat_tensor[
-                    output_offset : output_offset + output.numel()
-                ].view(output.shape)
+                flat_tensor[output_offset : output_offset + output.numel()].view(
+                    output.shape
+                )
             )
         else:
             raise RuntimeError(

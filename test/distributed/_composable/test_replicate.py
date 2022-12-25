@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
-from torch.distributed._composable.replicate import mark_root_module, replicate
+from torch.distributed._composable.replicate import replicate
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import run_tests
 
@@ -26,6 +26,50 @@ class Net(nn.Module):
         x = self.fc3(x)
         return F.softmax(x, dim=1)
 
+class ReplicateStateDictTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _check_state_dict_parity(self, sd_1, sd_2):
+        for k1, k2 in zip(sd_1.keys(), sd_2.keys()):
+            self.assertEqual(k1, k2)
+
+        for v1, v2 in zip(sd_1.values(), sd_2.values()):
+            self.assertEqual(v1, v2)
+
+    def test_replicate_single_module_save_load(self):
+        """
+        Tests that replicate() on a single module state_dict
+        matches local module state_dict.
+        """
+        model = Net()
+        replicate_model = replicate(deepcopy(model))
+        local_sd = model.state_dict()
+        ddp_sd = replicate_model.state_dict()
+        self._check_state_dict_parity(local_sd, ddp_sd)
+
+    def test_replicate_non_root_multiple_save_load(self):
+        """
+        Tests tha replicate() on multiple submodules matches
+        local module state_dict.
+        """
+        model = Net()
+        replicate_model = deepcopy(model)
+        replicate(replicate_model.fc1)
+        replicate(replicate_model.fc2)
+        replicate(replicate_model.fc3)
+
+        local_sd = model.state_dict()
+        ddp_sd = replicate_model.state_dict()
+        self._check_state_dict_parity(local_sd, ddp_sd)
 
 class ReplicateTest(MultiProcessTestCase):
     def setUp(self) -> None:
@@ -39,13 +83,7 @@ class ReplicateTest(MultiProcessTestCase):
         except OSError:
             pass
 
-    def _prepare_module(self, global_batch_size):
-        model = Net()
-        input = torch.randn(global_batch_size, 2)
-        target = torch.randn(global_batch_size, 4)
-        return model, input, target
-
-    def test_replicate(self):
+    def _compare_module(self, mod, replicate_mod):
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
@@ -55,8 +93,8 @@ class ReplicateTest(MultiProcessTestCase):
 
         local_batch_size = 1
         global_batch_size = self.world_size * local_batch_size
-        model, input, target = self._prepare_module(global_batch_size)
-        replicate_model = mark_root_module(replicate(deepcopy(model)))
+        input = torch.randn(global_batch_size, 2)
+        target = torch.randn(global_batch_size, 4)
 
         def step_model(model, input, target):
             model.train()
@@ -69,9 +107,9 @@ class ReplicateTest(MultiProcessTestCase):
                 param.grad = None
 
         for iteration in range(2):
-            step_model(model, input, target)
+            step_model(mod, input, target)
             step_model(
-                replicate_model,
+                replicate_mod,
                 input[
                     self.rank
                     * local_batch_size : (self.rank + 1)
@@ -85,15 +123,35 @@ class ReplicateTest(MultiProcessTestCase):
             )
 
             self.assertEqual(
-                len(list(model.parameters())),
-                len(list(replicate_model.parameters())),
+                len(list(mod.parameters())),
+                len(list(replicate_mod.parameters())),
             )
-            for i, j in zip(model.parameters(), replicate_model.parameters()):
+            for i, j in zip(mod.parameters(), replicate_mod.parameters()):
                 self.assertEqual(i, j, rtol=1.3e-06, atol=5e-5)
 
             # Shuffle the input so that DDP input is different
             torch.manual_seed(iteration)
             input = input[torch.randperm(global_batch_size)]
+
+    def test_replicate_single_module(self):
+        model = Net()
+        replicate_model = replicate(deepcopy(model))
+        self._compare_module(model, replicate_model)
+
+    def test_replicate_multi_module(self):
+        model = Net()
+        replicate_model = deepcopy(model)
+        replicate(replicate_model.fc1)
+        replicate(replicate_model.fc2)
+        replicate(replicate_model.fc3)
+        self._compare_module(model, replicate_model)
+
+    def test_replicate_with_kwargs(self):
+        model = Net()
+        replicate_model = replicate(
+            deepcopy(model), bucket_cap_mb=1, gradient_as_bucket_view=True
+        )
+        self._compare_module(model, replicate_model)
 
 
 if __name__ == "__main__":

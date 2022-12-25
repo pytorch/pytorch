@@ -11,6 +11,8 @@
 
 #include <torch/csrc/profiler/events.h>
 
+#include "test/cpp/lite_interpreter_runtime/resources.h"
+
 #ifdef EDGE_PROFILER_USE_KINETO
 namespace torch {
 namespace jit {
@@ -42,16 +44,15 @@ bool checkMetaData(
 } // namespace
 
 TEST(MobileProfiler, ModuleHierarchy) {
-  std::string filePath(__FILE__);
-  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("to_be_profiled_module.ptl");
+  auto testModelFile = torch::testing::getResourcePath(
+      "test/cpp/lite_interpreter_runtime/to_be_profiled_module.ptl");
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
   inputs.emplace_back(at::rand({64, 64}));
   std::string trace_file_name("/tmp/test_trace.trace");
 
-  mobile::Module bc = _load_for_mobile(testModelFile);
+  mobile::Module bc = _load_for_mobile(testModelFile.string());
   {
     KinetoEdgeCPUProfiler profiler(
         bc,
@@ -60,7 +61,9 @@ TEST(MobileProfiler, ModuleHierarchy) {
         false, // profile memory
         true, // record callstack
         false, // record flops
-        true); // record module hierarchy
+        true, // record module hierarchy
+        {}, // events
+        false); // adjust_vulkan_timestamps
     bc.forward(inputs);
   } // End of profiler
   std::ifstream trace_file(trace_file_name);
@@ -95,16 +98,15 @@ TEST(MobileProfiler, ModuleHierarchy) {
 }
 
 TEST(MobileProfiler, Backend) {
-  std::string filePath(__FILE__);
-  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("test_backend_for_profiling.ptl");
+  auto testModelFile = torch::testing::getResourcePath(
+      "test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
   inputs.emplace_back(at::rand({64, 64}));
   std::string trace_file_name("/tmp/test_trace_backend.trace");
 
-  mobile::Module bc = _load_for_mobile(testModelFile);
+  mobile::Module bc = _load_for_mobile(testModelFile.string());
   {
     KinetoEdgeCPUProfiler profiler(
         bc,
@@ -130,16 +132,15 @@ TEST(MobileProfiler, Backend) {
 }
 
 TEST(MobileProfiler, BackendMemoryEvents) {
-  std::string filePath(__FILE__);
-  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("test_backend_for_profiling.ptl");
+  auto testModelFile = torch::testing::getResourcePath(
+      "test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
   inputs.emplace_back(at::rand({64, 64}));
   std::string trace_file_name("/tmp/test_trace_backend_memory.trace");
 
-  mobile::Module bc = _load_for_mobile(testModelFile);
+  mobile::Module bc = _load_for_mobile(testModelFile.string());
   {
     mobile::KinetoEdgeCPUProfiler profiler(
         bc,
@@ -163,13 +164,8 @@ TEST(MobileProfiler, BackendMemoryEvents) {
 }
 
 TEST(MobileProfiler, ProfilerEvent) {
-  /*
-   * TODO: Using __FILE__ is unreliable e.g. it fails to resolve correctly when
-   * using buck2, works ok with buck1
-   */
-  std::string filePath(__FILE__);
-  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("test_backend_for_profiling.ptl");
+  auto testModelFile = torch::testing::getResourcePath(
+      "test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
@@ -180,7 +176,7 @@ TEST(MobileProfiler, ProfilerEvent) {
       torch::profiler::ProfilerPerfEvents.begin(),
       torch::profiler::ProfilerPerfEvents.end());
 
-  mobile::Module bc = _load_for_mobile(testModelFile);
+  mobile::Module bc = _load_for_mobile(testModelFile.string());
   {
     // Bail if something goes wrong here
     try {
