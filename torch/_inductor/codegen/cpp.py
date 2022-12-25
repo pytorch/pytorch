@@ -580,7 +580,7 @@ class CppKernel(Kernel):
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = DeferredIndentedBuffer()
-        self.reduction_vars = {}
+        self.reduction_var_map = {}
         self.num_threads = num_threads  # num_threads the kernel specialized for
 
     def load(self, name: str, index: sympy.Expr):
@@ -612,7 +612,7 @@ class CppKernel(Kernel):
             self.loads, f"reduction {name} {cexpr(index)}", write=False
         )
         index = self.rename_indexing(index)
-        self.reduction_vars[tmpvar] = reduction_type
+        self.reduction_var_map[tmpvar] = reduction_type
         if argmax_or_argmin:
             self.reduction_prefix.writelines(
                 argmax_argmin_prefix(reduction_type, src_dtype, tmpvar)
@@ -685,7 +685,7 @@ class CppKernel(Kernel):
             def gen_loops(loop, in_reduction=False):
                 kernel = loop.get_kernel()
                 with contextlib.ExitStack() as stack_outer:
-                    if loop.is_reduction and not in_reduction:
+                    if loop.is_reduction() and not in_reduction:
                         assert kernel
                         if kernel.reduction_prefix:
                             stack_outer.enter_context(code.indent())
@@ -698,7 +698,7 @@ class CppKernel(Kernel):
                         # generate inner loops or loop body
                         if loop.inner:
                             for inner_loop in loop.inner:
-                                gen_loops(inner_loop, stack, loop.is_reduction)
+                                gen_loops(inner_loop, loop.is_reduction())
                         else:
                             assert kernel
                             with contextlib.ExitStack() as stack:
@@ -709,7 +709,7 @@ class CppKernel(Kernel):
                     if loop_nest.is_reduction_only():
                         worksharing.close()
 
-                    if loop.is_reduction and not in_reduction:
+                    if loop.is_reduction() and not in_reduction:
                         code.splice(kernel.reduction_suffix)
             
             for loop in loop_nest.root:
@@ -854,7 +854,7 @@ class CppVecKernel(CppKernel):
         tmpvar_vec = f"{tmpvar}_vec"
 
         index = self.rename_indexing(index)
-        self.reduction_vars[tmpvar] = reduction_type
+        self.reduction_var_map[tmpvar] = reduction_type
         self.reduction_prefix.writeline(
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
@@ -1388,24 +1388,28 @@ class LoopLevel:
     simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
     simd_vec: bool = False
     collapsed: bool = False
-    reduction_vars: Dict[str, str] = None
+    reduction_var_map: Dict[str, str] = None
     parent: 'LoopLevel' = None
     # the next inner level of the loop, empty if it is inner-most
     # contains >1 LoopLevel if the inner level of loop is split
-    inner: List['LoopLevel'] = []
+    inner: List['LoopLevel'] = dataclasses.field(default_factory=list)
     # kernel assigned to this loop level, only valid
     # when it is at the inner-most level
     kernel: CppKernel = None
 
-    def get_kernel(self):
+    def get_kernel(self) -> CppKernel:
         if self.kernel:
             return self.kernel
         assert len(self.inner) == 1
         return self.inner[0].get_kernel()
 
-    def set_kernel(self, kernel):
+    def set_kernel(self, kernel: CppKernel):
         if not self.inner:
             self.kernel = kernel
+            loop = self
+            while loop is not None and loop.is_reduction():
+                loop.reduction_var_map = kernel.reduction_var_map
+                loop = loop.parent
             return
         assert len(self.inner) == 1
         self.inner[0].set_kernel(kernel)
@@ -1419,6 +1423,9 @@ class LoopLevel:
                 loops += loop.get_loops_at(depth - 1)
             return loops
 
+    def is_reduction(self):
+        return bool(self.reduction_var_map)
+
     def split_with_tiling(self, depth, factor):
         def do_split_with_tiling():
             sympy_factor = sympy.Integer(factor)
@@ -1427,14 +1434,14 @@ class LoopLevel:
             main_loop = LoopLevel(self.var, main_loop_range, parent=self.parent)
             main_loop.parallel = self.parallel
             main_loop.collapsed = False
-            main_loop.reduction_vars = self.reduction_vars
+            main_loop.reduction_var_map = self.reduction_var_map
 
             offset = main_loop_range * sympy_factor
             tail_loop = LoopLevel(self.var, self.size, parent=self.parent)
             tail_loop.offset = offset
             tail_loop.parallel = self.parallel
             tail_loop.collapsed = False
-            tail_loop.reduction_vars = self.reduction_vars
+            tail_loop.reduction_var_map = self.reduction_var_map
 
             return main_loop, tail_loop
 
@@ -1449,11 +1456,11 @@ class LoopLevel:
             return self.inner.split_with_tiling(depth - 1, factor)
 
     def lines(self):
-        if self.reduction_vars:
+        if self.reduction_var_map:
             suffix = "_vec" if self.simd_vec else ""
             reduction = " " + " ".join(
                 f"reduction({RTYPE_TO_CPP[rtype]}:{var}{suffix})"
-                for var, rtype in self.reduction_vars.items()
+                for var, rtype in self.reduction_var_map.items()
             )
         else:
             reduction = ""
@@ -1473,7 +1480,7 @@ class LoopLevel:
             line1 = ""
         elif self.simd_omp:
             line1 = f"#pragma omp {simd}{reduction}"
-        elif not self.reduction_vars and codecache.is_gcc():
+        elif not self.reduction_var_map and codecache.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
@@ -1485,7 +1492,7 @@ class LoopLevel:
 
 @dataclasses.dataclass
 class LoopNest:
-    root: List[LoopLevel] = []
+    root: List[LoopLevel] = None
     depth: int = 0
 
     @staticmethod
@@ -1500,8 +1507,7 @@ class LoopNest:
         for depth, (var, size) in enumerate(zip(itervars, ranges)):
             loop = LoopLevel(var, size, parent=loop)
             if depth >= reduction_depth:
-                loop.is_reduction = True
-                loop.reduction_vars = itervars[reduction_depth:]
+                loop.reduction_var_map = kernel.reduction_var_map
             levels.append(loop)
             levels = loop.inner
         if loop:
@@ -1527,7 +1533,7 @@ class LoopNest:
         return max_depth
 
     def is_reduction_only(self):
-        return self.root and self.root[0].is_reduction
+        return self.root and self.root[0].is_reduction()
 
     def mark_parallel(self, par_depth):
         assert par_depth <= self.max_parallel_depth(), "Parallel depth cannot exceed the maximal allowed parallel depth"
