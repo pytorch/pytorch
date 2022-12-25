@@ -825,7 +825,11 @@ class TritonKernel(Kernel):
         # Keep the variable in cache if we are going to reuse it
         # TODO(lezcano) We could potentially do better
         # https://github.com/pytorch/pytorch/pull/91316#issuecomment-1364680622
-        ep = ", eviction_policy='evict_last'" if name not in self.current_node.last_usage else ""
+        ep = (
+            ", eviction_policy='evict_last'"
+            if name not in self.current_node.last_usage
+            else ""
+        )
 
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
