@@ -1,9 +1,10 @@
 # Owner(s): ["module: functorch"]
 import torch
-
-from torch.testing._internal.common_utils import TestCase, run_tests
-from functorch.experimental.cond import cond
+from functorch.experimental import control_flow
+from functorch.experimental.control_flow import cond
 from torch.fx.experimental.proxy_tensor import make_fx
+
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestControlFlow(TestCase):
     def test_cond_no_trace(self):
@@ -344,6 +345,123 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaises(AssertionError):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
+
+    def check_map_graph(self, gm, key):
+        i = 0
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.map:
+                i += 1
+                self.assertEqual(
+                    node.meta[key].shape[0], node.args[1].meta[key].shape[0]
+                )
+        self.assertEqual(i, 1)
+
+    def test_map_real(self):
+        def f(x, y):
+            return x + y
+
+        def g(xs, y):
+            return control_flow.map(f, xs, y)
+
+        gm = make_fx(g, tracing_mode="real")(torch.ones(3, 2, 2), torch.ones(2))
+        x = torch.randn(3, 2, 2)
+        y = torch.randn(2)
+        res = gm(x, y)
+        self.assertEqual(res, g(x, y))
+        self.check_map_graph(gm, "tensor_meta")
+
+    def test_map_symbolic(self):
+        def f(x, y):
+            return x + y
+
+        def g(xs, y):
+            return control_flow.map(f, xs, y)
+
+        gm = make_fx(g, tracing_mode="symbolic")(torch.ones(3, 2, 4), torch.ones(4))
+        x = torch.randn(3, 2, 2)
+        y = torch.randn(2)
+        res = gm(x, y)
+        self.assertEqual(res, g(x, y))
+        self.check_map_graph(gm, "val")
+
+    def test_nested_map_cond_real(self):
+        def true_fn(x, y):
+            return x * y
+
+        def false_fn(x, y):
+            return x + y
+
+        def f(x, pred, y):
+            return cond(pred, true_fn, false_fn, [x, y])
+
+        def g(pred, xs, y):
+            return control_flow.map(f, xs, pred, y)
+
+        gm = make_fx(g, tracing_mode="real")(
+            torch.tensor(True), torch.ones(3, 2, 4), torch.ones(4)
+        )
+        pred = torch.tensor(False)
+        x = torch.randn(3, 2, 2)
+        y = torch.randn(2)
+        res = gm(pred, x, y)
+        self.assertEqual(res, g(pred, x, y))
+        self.check_map_graph(gm, "tensor_meta")
+
+    def test_nested_map_cond_symbolic(self):
+        def true_fn(x, y):
+            return x * y
+
+        def false_fn(x, y):
+            return x + y
+
+        def f(x, pred, y):
+            return cond(pred, true_fn, false_fn, [x, y])
+
+        def g(pred, xs, y):
+            return control_flow.map(f, xs, pred, y)
+
+        gm = make_fx(g, tracing_mode="symbolic")(
+            torch.tensor(True), torch.ones(3, 2, 4), torch.ones(4)
+        )
+        pred = torch.tensor(False)
+        x = torch.randn(3, 2, 2)
+        y = torch.randn(2)
+        res = gm(pred, x, y)
+        self.assertEqual(res, g(pred, x, y))
+        self.check_map_graph(gm, "val")
+
+    def test_nested_cond_map_cond_symbolic(self):
+
+        def true_fn(x, y):
+            return x * y
+
+        def false_fn(x, y):
+            return x + y
+
+        def f(x, pred, y):
+            return cond(pred, true_fn, false_fn, [x, y])
+
+        def g(pred, xs, y):
+            return control_flow.map(f, xs, pred, y)
+
+        def main_true_fn(pred, xs, y):
+            return g(pred, xs, y) * 2
+
+        def main_false_fn(pred, xs, y):
+            return g(pred, xs, y) + 1
+
+        def main(p, pred, xs, y):
+            return cond(p, main_true_fn, main_false_fn, [pred, xs, y])
+
+        gm = make_fx(main, tracing_mode="symbolic")(
+            torch.tensor(True), torch.tensor(True), torch.ones(3, 2, 4), torch.ones(4)
+        )
+        p = torch.tensor(False)
+        pred = torch.tensor(False)
+        xs = torch.randn(3, 2, 2)
+        y = torch.randn(2)
+        res = gm(p, pred, xs, y)
+        self.assertEqual(res, main(p, pred, xs, y))
 
 if __name__ == '__main__':
     run_tests()
