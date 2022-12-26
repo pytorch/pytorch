@@ -121,6 +121,7 @@ struct ReadyQueue {
   // DistEngine.execute_graph_task_until_ready_queue_empty)
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
+  void waitForWork();
   NodeTask pop();
   bool empty() const;
   size_t size() const;

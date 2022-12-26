@@ -238,6 +238,16 @@ size_t ReadyQueue::size() const {
   return heap_.size();
 }
 
+auto ReadyQueue::waitForWork() -> void {
+  {
+    // Lock mutex for accesses to heap_
+    std::unique_lock<std::mutex> lock(mutex_);
+    not_empty_.wait(lock, [this] { return !heap_.empty(); });
+  }
+  // For the next wait
+  not_empty_.notify_one();
+}
+
 auto ReadyQueue::pop() -> NodeTask {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
@@ -348,13 +358,10 @@ void Engine::thread_init(
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
 
-#if defined(USE_CUDA)
-  if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
-    set_device(device);
-  }
-#else
+  // Wait for the ready queue to be used before setting the device to ensure we
+  // don't initialize the context spuriously (especially on CUDA 12)
+  ready_queue->waitForWork();
   set_device(device);
-#endif
 
   // initialize each device thread's thread local ready queue with the ready
   // queue that is created before the thread initialization
