@@ -3432,7 +3432,11 @@ class TestSparse(TestSparseBase):
             else:
                 hash_values = indices * hash_coeffs
 
+            # check if indices are sorted
             self.assertEqual(hash_values, hash_values.sort()[0])
+
+            # check if there are no repeated indices
+            self.assertEqual(hash_values, hash_values.unique())
 
         def ref_sparse_mm(a, b):
             return a.to_dense() @ b.to_dense()
