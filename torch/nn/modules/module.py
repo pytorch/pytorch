@@ -2344,7 +2344,7 @@ class Module:
                 "The parameters are copied (in a differentiable manner) from the original module. "
                 "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
                 "If you need gradients in your forward method, consider using autograd.grad instead.")
-        tmp_group = defaultdict(list)
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         for p in self.parameters():
             if p.grad is not None:
                 if set_to_none:
@@ -2355,12 +2355,13 @@ class Module:
                     else:
                         p.grad.requires_grad_(False)
                     if p.grad.device.type == 'cuda':
-                        tmp_group[p.grad.dtype].append(p)
+                        per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p)
                     else:
                         p.grad.zero_()
-        if tmp_group:
-            for _, grads in tmp_group.items():
-                torch._foreach_zero_(grads)
+        if per_device_and_dtype_grads:
+            for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                for grads in per_dtype_grads.values():
+                    torch._foreach_zero_(grads)
 
     def share_memory(self: T) -> T:
         r"""See :meth:`torch.Tensor.share_memory_`"""
