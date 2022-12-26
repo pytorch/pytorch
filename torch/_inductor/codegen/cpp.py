@@ -689,14 +689,15 @@ class CppKernel(Kernel):
                 code.splice(kernel.stores)
             
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
-                kernels = None
                 with contextlib.ExitStack() as stack_outer:
                     if loops:
                         loop = loops[0]
                         if loop.is_reduction() and not in_reduction:
                             kernels = loop.get_kernels()
                             assert kernels
-                            # TODO(jgong5): should gen prefix for all kernels
+                            # TODO(jgong5): should gen prefix for all kernels.
+                            # currently, Vec kernel generates prefix for both
+                            # vector and scalar kernels.
                             if kernels[0].reduction_prefix:
                                 stack_outer.enter_context(code.indent())
                             code.splice(kernels[0].reduction_prefix)
@@ -716,7 +717,6 @@ class CppKernel(Kernel):
                                     code.splice(kernel.reduction_suffix)
 
             def gen_loop(loop: LoopLevel, in_reduction=False):
-                kernels = None
                 with contextlib.ExitStack() as stack:
                     code.writelines(loop.lines())
                     stack.enter_context(code.indent())
@@ -735,7 +735,7 @@ class CppKernel(Kernel):
                 gen_kernel(loop_nest.kernel)
 
     def codegen_loops(self, code, worksharing):
-        loop_nest = LoopNest.build(self)
+        loop_nest = LoopNestWithSplit.build(self)
         self.codegen_loops_impl(loop_nest, code, worksharing)
 
     def decide_parallel_depth(self, ranges, threads):
@@ -1054,6 +1054,7 @@ class CppKernelProxy(CppKernel):
         super(CppKernelProxy, self).__init__(args, num_threads)
         self.simd_vec_kernel = simd_vec_kernel
         self.simd_omp_kernel = simd_omp_kernel
+        assert simd_omp_kernel, "Expect cpp scalar kernel always exists"
         self.call_ranges = simd_omp_kernel.call_ranges
         self.ranges = simd_omp_kernel.ranges
         self.itervars = simd_omp_kernel.itervars
@@ -1066,7 +1067,7 @@ class CppKernelProxy(CppKernel):
             return self.simd_omp_kernel.codegen_loops(code, worksharing)
 
         assert self.picked_vec_isa
-        loop_nest = LoopNest.build(self.simd_omp_kernel)
+        loop_nest = LoopNestWithSplit.build(self.simd_omp_kernel)
         main_loop, tail_loop = loop_nest.split_with_tiling(
             len(self.simd_vec_kernel.itervars) - 1, self.simd_vec_kernel.simd_nelements
         )
@@ -1346,11 +1347,11 @@ class LoopLevel:
     # the next inner level of the loop, empty if it is inner-most
     # contains >1 LoopLevel if the inner level of loop is split
     inner: List['LoopLevel'] = dataclasses.field(default_factory=list)
-    # kernel assigned to this loop level, only valid
-    # when it is at the inner-most level
+    # kernel assigned to this loop level, only valid when it is a leaf
     kernel: CppKernel = None
 
     def get_kernels(self) -> List[CppKernel]:
+        """Get all kernel objects under this loop level"""
         if self.kernel:
             return [self.kernel]
         kernels = []
@@ -1359,6 +1360,10 @@ class LoopLevel:
         return kernels
 
     def set_kernel(self, kernel: CppKernel):
+        """
+        Set the kernel under this loop level. No split is allowed under
+        this loop level.
+        """
         if not self.inner:
             self.kernel = kernel
             loop = self
@@ -1448,13 +1453,24 @@ class LoopLevel:
 
 
 @dataclasses.dataclass
-class LoopNest:
+class LoopNestWithSplit:
+    """
+    A loop-nest like structure but with some loop level split along
+    the loop range into the main tiling loop and the tail. It is built
+    with the `build` method as a loop nest and then split with
+    `split_with_tiling` at some depth.
+    
+    A typical case is for vectorization where we typically split at the inner-most
+    loop level. A more complicated case is 2D tiling where we split at
+    both inner-most and outer levels.
+    """
     root: List[LoopLevel] = None
     depth: int = 0
     kernel: CppKernel = None
 
     @staticmethod
     def build(kernel: CppKernel):
+        """ Build a LoopNest with the given `kernel` as the leaf """
         itervars = kernel.itervars
         ranges = kernel.ranges
         reduction_depth = kernel.reduction_depth
@@ -1468,7 +1484,7 @@ class LoopNest:
                 loop.reduction_var_map = kernel.reduction_var_map.copy()
             levels.append(loop)
             levels = loop.inner
-        loop_nest = LoopNest(root, len(itervars))
+        loop_nest = LoopNestWithSplit(root, len(itervars))
         if loop:
             loop.kernel = kernel
         else:
@@ -1479,6 +1495,7 @@ class LoopNest:
         return bool(self.root)
 
     def get_loops_at(self, depth) -> List[LoopLevel]:
+        """ Get all the loop levels at the given `depth` (most outer loop has depth 0) """
         loops = []
         for loop in self.root:
             loops += loop.get_loops_at(depth)
@@ -1486,6 +1503,7 @@ class LoopNest:
 
     @cache_on_self
     def max_parallel_depth(self):
+        """ Maximal allowed depth for parallelism. That is to the levels without splitting. """
         max_depth = 0
         loops = self.root
         while len(loops) == 1:
@@ -1494,6 +1512,10 @@ class LoopNest:
         return max_depth
 
     def is_reduction_only(self):
+        """
+        Whether all the loops are for reduction. Reduction loops
+        are always the inner most ones.
+        """
         return self.root and self.root[0].is_reduction()
 
     def mark_parallel(self, par_depth):
@@ -1505,6 +1527,12 @@ class LoopNest:
             loops[0].collapsed = True
     
     def split_with_tiling(self, depth, factor):
+        """
+        Split the loop into main and tail loops at given `depth` so that the range
+        of the main loop has range `floor_div(range, factor) * factor` and
+        the tail loop handles the remainder. The main loop is tiled
+        according to the `factor`.
+        """
         loops = self.get_loops_at(depth)
         assert len(loops) == 1
         split_loops = loops[0].split_with_tiling(0, factor)
