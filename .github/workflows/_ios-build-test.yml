@@ -72,7 +72,7 @@ jobs:
         with:
           python-version: "3.9"
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          pip-requirements-file: .github/requirements/pip-requirements-iOS.txt
 
       - name: Setup Fastlane
         run: |
