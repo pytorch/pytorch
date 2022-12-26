@@ -687,41 +687,50 @@ class CppKernel(Kernel):
                 code.splice(kernel.loads)
                 code.splice(kernel.compute)
                 code.splice(kernel.stores)
-
-            def gen_loops(loop, in_reduction=False):
+            
+            def gen_loops(loops: List[LoopLevel], in_reduction=False):
+                kernels = None
                 with contextlib.ExitStack() as stack_outer:
-                    kernels = None
-                    if loop.is_reduction() and not in_reduction:
-                        kernels = loop.get_kernels()
-                        assert kernels
-                        if kernels[0].reduction_prefix:
-                            stack_outer.enter_context(code.indent())
-                        code.splice(kernels[0].reduction_prefix)
-                    if loop_nest.is_reduction_only():
-                        worksharing.parallel(threads)
-                    with contextlib.ExitStack() as stack:
-                        code.writelines(loop.lines())
-                        stack.enter_context(code.indent())
-                        # generate inner loops or loop body
-                        if loop.inner:
-                            for inner_loop in loop.inner:
-                                gen_loops(inner_loop, loop.is_reduction())
-                        else:
-                            if kernels is None:
+                    if loops:
+                        loop = loops[0]
+                        if loop.is_reduction() and not in_reduction:
+                            kernels = loop.get_kernels()
+                            assert kernels
+                            # TODO(jgong5): should gen prefix for all kernels
+                            if kernels[0].reduction_prefix:
+                                stack_outer.enter_context(code.indent())
+                            code.splice(kernels[0].reduction_prefix)
+                        if loop_nest.is_reduction_only() and loop.parallel:
+                            worksharing.parallel(threads)
+
+                    for loop in loops:
+                        gen_loop(loop, in_reduction)
+
+                    if loops:
+                        if loop_nest.is_reduction_only() and loop.parallel:
+                            worksharing.close()
+                        for loop in loops:
+                            if loop.is_reduction() and not in_reduction:
                                 kernels = loop.get_kernels()
-                            assert len(kernels) == 1
-                            gen_kernel(kernels[0])
+                                for kernel in kernels:
+                                    code.splice(kernel.reduction_suffix)
 
-                    if loop_nest.is_reduction_only():
-                        worksharing.close()
-
-                    if loop.is_reduction() and not in_reduction:
-                        code.splice(kernels[0].reduction_suffix)
+            def gen_loop(loop: LoopLevel, in_reduction=False):
+                kernels = None
+                with contextlib.ExitStack() as stack:
+                    code.writelines(loop.lines())
+                    stack.enter_context(code.indent())
+                    # generate inner loops or loop body
+                    if loop.inner:
+                        gen_loops(loop.inner, loop.is_reduction())
+                    else:
+                        kernels = loop.get_kernels()
+                        assert len(kernels) == 1
+                        gen_kernel(kernels[0])
             
             stack.enter_context(code.indent())
             if loop_nest.root:
-                for loop in loop_nest.root:
-                    gen_loops(loop)
+                gen_loops(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
 
@@ -864,7 +873,7 @@ class CppVecKernel(CppKernel):
         tmpvar_vec = f"{tmpvar}_vec"
 
         index = self.rename_indexing(index)
-        self.reduction_var_map[tmpvar] = reduction_type
+        self.reduction_var_map[tmpvar_vec] = reduction_type
         self.reduction_prefix.writeline(
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
@@ -882,9 +891,10 @@ class CppVecKernel(CppKernel):
             reduce_all_body += f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
         reduce_all_body += "}"
         vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+        next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
         self.reduction_suffix.writeline(
             name,
-            f"{tmpvar} = {vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec});",
+            f"{reduction_combine(reduction_type, tmpvar, next_value)};",
         )
         self.cse.store_cache[name] = tmpvar
 
@@ -1421,9 +1431,12 @@ class LoopLevel:
         if not self.inner:
             self.kernel = kernel
             loop = self
-            while loop is not None and loop.is_reduction():
-                loop.reduction_var_map = kernel.reduction_var_map
+            if loop.is_reduction():
+                loop.reduction_var_map = kernel.reduction_var_map.copy()
                 loop = loop.parent
+                while loop is not None and loop.is_reduction():
+                    loop.reduction_var_map.update(kernel.reduction_var_map)
+                    loop = loop.parent
             return
         assert len(self.inner) == 1
         self.inner[0].set_kernel(kernel)
@@ -1471,9 +1484,8 @@ class LoopLevel:
 
     def lines(self):
         if self.reduction_var_map:
-            suffix = "_vec" if self.simd_vec else ""
             reduction = " " + " ".join(
-                f"reduction({RTYPE_TO_CPP[rtype]}:{var}{suffix})"
+                f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
                 for var, rtype in self.reduction_var_map.items()
             )
         else:
@@ -1522,7 +1534,7 @@ class LoopNest:
         for depth, (var, size) in enumerate(zip(itervars, ranges)):
             loop = LoopLevel(var, size, parent=loop)
             if depth >= reduction_depth:
-                loop.reduction_var_map = kernel.reduction_var_map
+                loop.reduction_var_map = kernel.reduction_var_map.copy()
             levels.append(loop)
             levels = loop.inner
         loop_nest = LoopNest(root, len(itervars))
