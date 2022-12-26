@@ -677,10 +677,17 @@ class CppKernel(Kernel):
                     worksharing.close()
                 else:
                     worksharing.parallel(threads)
-                    loop_nest.mark_parallel(par_depth)
+                loop_nest.mark_parallel(par_depth)
             elif threads > 1:
                 if worksharing.single():
                     stack.enter_context(code.indent())
+
+            def gen_kernel(kernel):
+                assert kernel
+                with contextlib.ExitStack() as stack:
+                    code.splice(kernel.loads)
+                    code.splice(kernel.compute)
+                    code.splice(kernel.stores)
 
             def gen_loops(loop, in_reduction=False):
                 kernel = loop.get_kernel()
@@ -700,11 +707,7 @@ class CppKernel(Kernel):
                             for inner_loop in loop.inner:
                                 gen_loops(inner_loop, loop.is_reduction())
                         else:
-                            assert kernel
-                            with contextlib.ExitStack() as stack:
-                                code.splice(kernel.loads)
-                                code.splice(kernel.compute)
-                                code.splice(kernel.stores)
+                            gen_kernel(kernel)
 
                     if loop_nest.is_reduction_only():
                         worksharing.close()
@@ -712,8 +715,11 @@ class CppKernel(Kernel):
                     if loop.is_reduction() and not in_reduction:
                         code.splice(kernel.reduction_suffix)
             
-            for loop in loop_nest.root:
-                gen_loops(loop)
+            if loop_nest.root:
+                for loop in loop_nest.root:
+                    gen_loops(loop)
+            else:
+                gen_kernel(loop_nest.kernel)
 
     def codegen_loops(self, code, worksharing):
         loop_nest = LoopNest.build(self)
@@ -1497,6 +1503,7 @@ class LoopLevel:
 class LoopNest:
     root: List[LoopLevel] = None
     depth: int = 0
+    kernel: CppKernel = None
 
     @staticmethod
     def build(kernel: CppKernel):
@@ -1513,9 +1520,12 @@ class LoopNest:
                 loop.reduction_var_map = kernel.reduction_var_map
             levels.append(loop)
             levels = loop.inner
+        loop_nest = LoopNest(root, len(itervars))
         if loop:
             loop.kernel = kernel
-        return LoopNest(root, len(itervars))
+        else:
+            loop_nest.kernel = kernel
+        return loop_nest
 
     def __bool__(self):
         return bool(self.root)
