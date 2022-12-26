@@ -3,10 +3,16 @@
 #include <ATen/Config.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
-#include <ATen/NativeFunctions.h>
+
 #include <ATen/TensorUtils.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/mkldnn_convolution_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -30,9 +36,39 @@ const Tensor& input,
     bool bidirectional,
     bool batch_first,
     bool train) {
-  AT_ERROR("mkldnn_rnn_layer: ATen not compiled with MKLDNN support");
+      AT_ERROR("mkldnn_rnn_layer: ATen not compiled with MKLDNN support");
+  }
 
-}} // namespace at::native
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(
+    const Tensor& input,
+    const Tensor& weight0,
+    const Tensor& weight1,
+    const Tensor& weight2,
+    const Tensor& weight3,
+    const Tensor& hx_,
+    const Tensor& cx_tmp,
+    const Tensor& output,
+    const Tensor& hy_,
+    const Tensor& cy_,
+    const c10::optional<Tensor>& grad_output_r_opt,
+    const c10::optional<Tensor>& grad_hy_r_opt,
+    const c10::optional<Tensor>& grad_cy_r_opt,
+    bool reverse,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t num_layers,
+    bool has_biases,
+    bool train,
+    bool bidirectional,
+    at::IntArrayRef batch_sizes,
+    bool batch_first,
+    const at::Tensor& workspace) {
+      AT_ERROR("mkldnn_rnn_layer_backward: ATen not compiled with MKLDNN support");
+    }
+
+REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub);
+
+} // namespace at::native
 }
 #else // AT_MKLDNN_EBABLED
 
@@ -522,10 +558,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
 namespace {
 
 // Helpers for working with different hidden types.
-std::tuple<Tensor, Tensor> unpack_hidden(const Tensor& hidden) {
-  return std::make_tuple(hidden, at::Tensor{});
-}
-
 std::tuple<Tensor, Tensor> unpack_hidden(const std::tuple<Tensor, Tensor>& hidden) {
   return hidden;
 }
@@ -534,12 +566,6 @@ template<typename hidden_type>
 hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
   static_assert(std::is_same<hidden_type, void>::value, "pack_hidden not implemented for this type");
   AT_ERROR("NOT IMPLEMENTED");
-}
-
-template<>
-Tensor pack_hidden<Tensor>(const Tensor& hx, const Tensor& cx) {
-  AT_ASSERT(cx.numel() == 0);
-  return hx;
 }
 
 template<>
