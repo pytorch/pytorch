@@ -2571,6 +2571,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: floor_divide
+    MPS: floor_divide_mps
     SparseCPU, SparseCUDA: floor_divide_sparse
 
 - func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -2578,12 +2579,14 @@
   variants: method
   dispatch:
     CPU, CUDA: floor_divide_
+    MPS: floor_divide_mps_
     SparseCPU, SparseCUDA: floor_divide_sparse_
 
 - func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: floor_divide_out
+    MPS: floor_divide_out_mps
     SparseCPU, SparseCUDA: floor_divide_out_sparse_zerodim
 
 - func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
@@ -9436,7 +9439,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta: unfold
+    CPU, CUDA, Meta, MPS: unfold
     QuantizedCPU, QuantizedCUDA: unfold
 
 - func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor
@@ -12897,6 +12900,7 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_inv_ex_out
+    MPS: linalg_inv_ex_out_mps
 
 - func: linalg_inv(Tensor A) -> Tensor
   python_module: linalg
@@ -13221,12 +13225,6 @@
     CompositeExplicitAutogradNonFunctional: _test_autograd_multiple_dispatch_view_copy
   tags: view_copy
   autogen: _test_autograd_multiple_dispatch_view_copy.out
-
-# Note: this function is only for testing.
-- func: _test_inductor_realize(Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU, CUDA, Meta: _test_inductor_realize
 
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
@@ -13699,6 +13697,7 @@
   variants: function
   autogen: _scaled_dot_product_attention.out
 
+# This aten function is kept so that we can test the choice function from Python
 - func: _fused_sdp_choice(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> int
   dispatch:
     CPU, NestedTensorCPU, Meta: _fused_sdp_choice_cpp
@@ -13717,10 +13716,13 @@
     CUDA: _scaled_dot_product_efficient_attention_cuda
     NestedTensorCUDA: _scaled_dot_product_efficient_attention_nestedtensor_cuda
 
-- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False) -> (Tensor, Tensor, Tensor)
+- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False, bool chunk_grad_outputs=False) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
 
+- func: _chunk_grad_outputs_efficient_attention(Tensor query, Tensor key, Tensor value, bool is_causal=False) -> bool
+  dispatch:
+    CUDA: _chunk_grad_outputs_efficient_attention
 # Returns ouput, softmax_logsumexp, softmax
 - func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, bool return_softmax, float dropout_p, bool is_causal) -> (Tensor, Tensor, Tensor)
   variants: function
@@ -13733,7 +13735,7 @@
   dispatch:
     CUDA: _efficient_attention_forward
 
-- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False) -> (Tensor, Tensor, Tensor)
+- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False, bool chunk_grad_outputs=False) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: _efficient_attention_backward

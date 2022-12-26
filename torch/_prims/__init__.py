@@ -296,7 +296,7 @@ def _make_prim(
     prim_autograd_impl.impl(name, _autograd_impl)
     prim_meta_impl.impl(name, meta)
 
-    _prim_packet = getattr(torch.ops.prims, name)
+    _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
 
     from torch._subclasses.fake_tensor import contains_tensor_types
@@ -1828,7 +1828,7 @@ def _as_strided_scatter_meta(
         lambda: f"expected src to have a size equal to the slice of self. src size = {src.shape}, slice size = {size}",
     )
 
-    return _clone_meta(input)
+    return utils.clone_preserve_strides(input)
 
 
 _as_strided_scatter_doc = """
