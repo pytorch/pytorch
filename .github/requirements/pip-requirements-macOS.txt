@@ -20,3 +20,8 @@ scipy==1.9.0
 sympy==1.11.1
 unittest-xml-reporting<=3.2.0,>=2.0.0
 xdoctest==1.0.2
+
+# iOS simulator requirements
+coremltools==5.0b5
+protobuf==3.20.1
+six==1.16.0

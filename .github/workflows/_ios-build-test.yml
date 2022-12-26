@@ -71,8 +71,8 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: "3.9"
-          environment-file: .github/requirements/conda-env-iOS.txt
-          pip-requirements-file: .github/requirements/pip-requirements-iOS-sim.txt
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Setup Fastlane
         run: |
