@@ -43,7 +43,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   pushd /tmp
   wget -q "${BASE_URL}/${CONDA_FILE}"
   chmod +x "${CONDA_FILE}"
-  as_jenkins ./"${CONDA_FILE}" -b -f -p "/opt/conda"
+  as_jenkins bash ./"${CONDA_FILE}" -b -f -p "/opt/conda"
   popd
 
   # NB: Don't do this, rely on the rpath to get it right
