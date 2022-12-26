@@ -689,13 +689,14 @@ class CppKernel(Kernel):
                 code.splice(kernel.stores)
 
             def gen_loops(loop, in_reduction=False):
-                kernel = loop.get_kernel()
                 with contextlib.ExitStack() as stack_outer:
+                    kernels = None
                     if loop.is_reduction() and not in_reduction:
-                        assert kernel
-                        if kernel.reduction_prefix:
+                        kernels = loop.get_kernels()
+                        assert kernels
+                        if kernels[0].reduction_prefix:
                             stack_outer.enter_context(code.indent())
-                        code.splice(kernel.reduction_prefix)
+                        code.splice(kernels[0].reduction_prefix)
                     if loop_nest.is_reduction_only():
                         worksharing.parallel(threads)
                     with contextlib.ExitStack() as stack:
@@ -706,13 +707,16 @@ class CppKernel(Kernel):
                             for inner_loop in loop.inner:
                                 gen_loops(inner_loop, loop.is_reduction())
                         else:
-                            gen_kernel(kernel)
+                            if kernels is None:
+                                kernels = loop.get_kernels()
+                            assert len(kernels) == 1
+                            gen_kernel(kernels[0])
 
                     if loop_nest.is_reduction_only():
                         worksharing.close()
 
                     if loop.is_reduction() and not in_reduction:
-                        code.splice(kernel.reduction_suffix)
+                        code.splice(kernels[0].reduction_suffix)
             
             stack.enter_context(code.indent())
             if loop_nest.root:
@@ -1405,12 +1409,13 @@ class LoopLevel:
     # when it is at the inner-most level
     kernel: CppKernel = None
 
-    def get_kernel(self) -> CppKernel:
+    def get_kernels(self) -> List[CppKernel]:
         if self.kernel:
-            return self.kernel
-        if len(self.inner) != 1:
-            return None
-        return self.inner[0].get_kernel()
+            return [self.kernel]
+        kernels = []
+        for loop in self.inner:
+            kernels += loop.get_kernels()
+        return kernels
 
     def set_kernel(self, kernel: CppKernel):
         if not self.inner:
