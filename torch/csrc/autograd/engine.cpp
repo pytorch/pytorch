@@ -346,7 +346,14 @@ void Engine::thread_init(
   // We don't have any good reason to prefer one or the other, so we've
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
+
+#if defined(USE_CUDA)
+  if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
+    set_device(device);
+  }
+#else
   set_device(device);
+#endif
 
   // initialize each device thread's thread local ready queue with the ready
   // queue that is created before the thread initialization
@@ -742,13 +749,17 @@ void GraphTask::set_exception(
 }
 
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
-  // We order it this way because retains_grad hooks are registered as
-  // tensor_pre_hooks and we want that to observe the result of modifications by
-  // all pre_hooks
   for (const auto& hook : fn.pre_hooks()) {
     inputs = (*hook)(inputs);
   }
+  return inputs;
+}
+
+static variable_list call_tensor_pre_hooks(Node& fn, variable_list inputs) {
   for (const auto& hook : fn.tensor_pre_hooks()) {
+    inputs = (*hook)(inputs);
+  }
+  for (const auto& hook : fn.retains_grad_hooks()) {
     inputs = (*hook)(inputs);
   }
   return inputs;
@@ -882,8 +893,9 @@ static variable_list call_function(
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
-      call_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
-
+      call_tensor_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
+  inputs =
+      call_pre_hooks(*func, inputs);
   if (!graph_task->keep_graph_) {
     fn.will_release_variables();
   }
@@ -943,10 +955,11 @@ void Engine::evaluate_function(
   if (!exec_info_.empty()) {
     auto& fn_info = exec_info_.at(func);
     variable_list new_inputs = inputs.buffer;
-    if (!fn_info.needed_ && fn_info.captures_) {
-      // call the prehooks of the next node
+    if (!fn_info.needed_) {
+      TORCH_INTERNAL_ASSERT(fn_info.captures_.get() != nullptr,
+        "we should only only be traversing nodes that are needed in backward")
       new_inputs =
-          call_pre_hooks(*func, InputBuffer::variables(std::move(inputs)));
+          call_tensor_pre_hooks(*func, InputBuffer::variables(std::move(inputs)));
     }
     if (auto* capture_vec = fn_info.captures_.get()) {
       const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);

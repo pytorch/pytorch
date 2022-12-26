@@ -62,7 +62,7 @@ struct CollectiveFingerPrint {
       const CollectiveFingerPrint& collective_fingerprint);
 
   // Executes and verifies the collective fingerprint.
-  void verify(c10::intrusive_ptr<ProcessGroup> pg) {
+  void verify(c10::intrusive_ptr<Backend> backend) {
     at::Tensor serialized_tensor = serialize_fingerprint();
     std::vector<at::Tensor> inp{serialized_tensor};
     // First verify tensor shapes. This is needed because if e.g. tensor dim
@@ -72,9 +72,9 @@ struct CollectiveFingerPrint {
     // the shape will be a single int k_i and we need to make sure k_i is
     // consistent across the whole world.
     std::vector<at::Tensor> sp = c10d::getTensorShapes(inp);
-    verify_tensors(sp, pg);
+    verify_tensors(sp, backend);
     // Now verify consistency for the actual tensor.
-    verify_tensors(inp, pg);
+    verify_tensors(inp, backend);
   }
 
   // Takes a serialized fingerprint from
@@ -129,7 +129,7 @@ struct CollectiveFingerPrint {
  private:
   void verify_tensors(
       std::vector<at::Tensor>& tensors_to_verify,
-      c10::intrusive_ptr<ProcessGroup>& pg) {
+      c10::intrusive_ptr<Backend>& backend) {
     // Create output tensor data structure to pass into allgather.
     std::vector<std::vector<at::Tensor>> output_tensors;
     // output tensors: [<tensor 0 outputs>, <tensor 1 outputs>, ..., <tensor n
@@ -140,15 +140,15 @@ struct CollectiveFingerPrint {
       // <tensor 0 outputs>: [<rank 0 tensor>, <rank 1 tensor>, ..., <rank n
       // tensor>]
       std::vector<at::Tensor> outputs;
-      outputs.reserve(pg->getSize());
-      for (const auto i : c10::irange(pg->getSize())) {
+      outputs.reserve(backend->getSize());
+      for (const auto i : c10::irange(backend->getSize())) {
         std::ignore = i; // Suppress unused variable warning
         outputs.emplace_back(at::zeros_like(tensor_shape));
       }
       output_tensors.emplace_back(outputs);
     }
     // Allgather tensor shapes.
-    pg->allgather(output_tensors, tensors_to_verify)->wait();
+    backend->allgather(output_tensors, tensors_to_verify)->wait();
     // Verify equivalence
     for (const auto i : c10::irange(output_tensors.size())) {
       const std::vector<at::Tensor> gathered_tensors = output_tensors[i];
@@ -160,7 +160,7 @@ struct CollectiveFingerPrint {
               deserialize_fingerprint(rank_tensor);
           std::stringstream ss;
           ss << "Detected mismatch between collectives on ranks. Rank "
-             << pg->getRank() << " is running collective: " << *this
+             << backend->getRank() << " is running collective: " << *this
              << ", but Rank " << rank
              << " is running collective: " << rank_fingerprint << ".";
           TORCH_CHECK(false, ss.str());
@@ -220,10 +220,13 @@ std::ostream& operator<<(
     std::vector<std::string> dtype_strs;
     std::vector<std::string> device_type_strs;
     std::vector<std::string> size_strs;
+    dtype_strs.reserve(collective_fingerprint.tensor_dtypes_.size());
     for (const auto& tensor_dtype : collective_fingerprint.tensor_dtypes_) {
       dtype_strs.emplace_back(
           c10::toString(static_cast<at::ScalarType>(tensor_dtype)));
     }
+    device_type_strs.reserve(
+        collective_fingerprint.tensor_device_types_.size());
     for (const auto& tensor_device_type :
          collective_fingerprint.tensor_device_types_) {
       device_type_strs.emplace_back(
@@ -260,29 +263,31 @@ std::ostream& operator<<(
 } // namespace
 
 ProcessGroupWrapper::ProcessGroupWrapper(
-    c10::intrusive_ptr<ProcessGroup> pg,
-    c10::intrusive_ptr<ProcessGroupGloo> glooPg)
-    : ProcessGroup(pg->getRank(), pg->getSize()), pg_(pg), glooPg_(glooPg) {
+    c10::intrusive_ptr<Backend> backend,
+    c10::intrusive_ptr<Backend> glooBackend)
+    : Backend(backend->getRank(), backend->getSize()),
+      backend_(backend),
+      glooBackend_(glooBackend) {
   // Set the sequence number for the underlying process group.
-  pg_->setSequenceNumberForGroup();
+  backend_->setSequenceNumberForGroup();
 }
 
 const std::string ProcessGroupWrapper::getBackendName() const {
-  return pg_->getBackendName();
+  return backend_->getBackendName();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::broadcast(
     std::vector<at::Tensor>& data,
     const BroadcastOptions& opts) {
   runCollectiveChecks(OpType::BROADCAST, data);
-  return pg_->broadcast(data, opts);
+  return backend_->broadcast(data, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce(
     std::vector<at::Tensor>& data,
     const AllreduceOptions& opts) {
   runCollectiveChecks(OpType::ALLREDUCE, data);
-  return pg_->allreduce(data, opts);
+  return backend_->allreduce(data, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce_coalesced(
@@ -293,14 +298,14 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce_coalesced(
   // inconsistent shapes, see python implementation in distributed_c10d for
   // details.
   runCollectiveChecks(OpType::ALLREDUCE_COALESCED, {});
-  return pg_->allreduce_coalesced(tensors, opts);
+  return backend_->allreduce_coalesced(tensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   runCollectiveChecks(OpType::REDUCE, tensors);
-  return pg_->reduce(tensors, opts);
+  return backend_->reduce(tensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather(
@@ -308,7 +313,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather(
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
   runCollectiveChecks(OpType::ALLGATHER, inputTensors);
-  return pg_->allgather(outputTensors, inputTensors, opts);
+  return backend_->allgather(outputTensors, inputTensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::_allgather_base(
@@ -317,7 +322,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::_allgather_base(
     const AllgatherOptions& opts) {
   std::vector<at::Tensor> inputTensors({inputBuffer});
   runCollectiveChecks(OpType::_ALLGATHER_BASE, inputTensors);
-  return pg_->_allgather_base(outputBuffer, inputBuffer, opts);
+  return backend_->_allgather_base(outputBuffer, inputBuffer, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather_coalesced(
@@ -329,7 +334,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather_coalesced(
   // inconsistent shapes, see python implementation in distributed_c10d for
   // details.
   runCollectiveChecks(OpType::ALLGATHER_COALESCED, {});
-  return pg_->allgather_coalesced(outputTensorLists, inputTensors, opts);
+  return backend_->allgather_coalesced(outputTensorLists, inputTensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::gather(
@@ -337,7 +342,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::gather(
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
   runCollectiveChecks(OpType::GATHER, inputTensors);
-  return pg_->gather(outputTensors, inputTensors, opts);
+  return backend_->gather(outputTensors, inputTensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::scatter(
@@ -345,7 +350,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::scatter(
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
   runCollectiveChecks(OpType::SCATTER, outputTensors);
-  return pg_->scatter(outputTensors, inputTensors, opts);
+  return backend_->scatter(outputTensors, inputTensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter(
@@ -353,7 +358,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter(
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
   runCollectiveChecks(OpType::REDUCE_SCATTER, outputTensors);
-  return pg_->reduce_scatter(outputTensors, inputTensors, opts);
+  return backend_->reduce_scatter(outputTensors, inputTensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall_base(
@@ -364,7 +369,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall_base(
     const AllToAllOptions& opts) {
   // alltoall supports uneven split, so don't enforce shape checking.
   runCollectiveChecks(OpType::ALLTOALL_BASE, {});
-  return pg_->alltoall_base(
+  return backend_->alltoall_base(
       outputTensor, inputTensor, outputSplitSizes, inputSplitSizes, opts);
 }
 
@@ -374,51 +379,51 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall(
     const AllToAllOptions& opts) {
   // alltoall supports uneven split, so don't enforce shape checking.
   runCollectiveChecks(OpType::ALLTOALL, {});
-  return pg_->alltoall(outputTensors, inputTensors, opts);
+  return backend_->alltoall(outputTensors, inputTensors, opts);
 }
 
 void ProcessGroupWrapper::monitoredBarrier(
     const BarrierOptions& opts,
     bool waitAllRanks) {
-  return pg_->monitoredBarrier(opts, waitAllRanks);
+  return backend_->monitoredBarrier(opts, waitAllRanks);
 }
 
 void ProcessGroupWrapper::setSequenceNumberForGroup() {
   // Set underlying pg's sequence number if it is not set.
-  if (pg_->getSequenceNumberForGroup() == 0) {
+  if (backend_->getSequenceNumberForGroup() == 0) {
     // Set the sequence number for the underlying process group.
-    pg_->setSequenceNumberForGroup();
+    backend_->setSequenceNumberForGroup();
   }
 }
 
 uint64_t ProcessGroupWrapper::getSequenceNumberForGroup() {
-  return pg_->getSequenceNumberForGroup();
+  return backend_->getSequenceNumberForGroup();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
-  return pg_->send(tensors, dstRank, tag);
+  return backend_->send(tensors, dstRank, tag);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
-  return pg_->recv(tensors, srcRank, tag);
+  return backend_->recv(tensors, srcRank, tag);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int tag) {
-  return pg_->recvAnysource(tensors, tag);
+  return backend_->recvAnysource(tensors, tag);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::barrier(
     const BarrierOptions& opts) {
   runCollectiveChecks(OpType::BARRIER, {});
-  return pg_->barrier(opts);
+  return backend_->barrier(opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
@@ -427,11 +432,11 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
     const ReduceScatterOptions& opts) {
   runCollectiveChecks(
       OpType::_REDUCE_SCATTER_BASE, {inputBuffer, outputBuffer});
-  return pg_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
+  return backend_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup> ProcessGroupWrapper::getWrappedPg() const {
-  return pg_;
+c10::intrusive_ptr<Backend> ProcessGroupWrapper::getWrappedPg() const {
+  return backend_;
 }
 
 void ProcessGroupWrapper::runCollectiveChecks(
@@ -439,11 +444,11 @@ void ProcessGroupWrapper::runCollectiveChecks(
     const std::vector<at::Tensor>& tensors) const {
   // first perform a monitored barrier to ensure all ranks can synchronize.
   c10d::BarrierOptions options;
-  // TODO: we should use wrapped pg_'s timeout here, but C++ ProcessGroup API
-  // does not expose timeout.
+  // TODO: we should use wrapped backend_'s timeout here, but C++ ProcessGroup
+  // API does not expose timeout.
   auto finger_print = CollectiveFingerPrint(op_type, tensors);
   try {
-    glooPg_->monitoredBarrier(options, /* waitAllRanks */ true);
+    glooBackend_->monitoredBarrier(options, /* waitAllRanks */ true);
   } catch (const std::runtime_error& e) {
     // Attach collective info to the exception and re-raise.
     std::stringstream ss;
@@ -457,7 +462,7 @@ void ProcessGroupWrapper::runCollectiveChecks(
     TORCH_CHECK(false, err_msg);
   }
   // Will throw if an ill-formed collective is detected.
-  finger_print.verify(glooPg_);
+  finger_print.verify(glooBackend_);
 }
 
 } // namespace c10d

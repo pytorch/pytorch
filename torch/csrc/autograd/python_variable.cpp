@@ -681,7 +681,7 @@ PyObject* THPVariable_pynew(
 
 static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   const auto& var = THPVariable_Unpack(self);
-  THPVariable_Wrap(var);
+  Py_DECREF(THPVariable_Wrap(var));
   Py_RETURN_NONE;
 }
 
