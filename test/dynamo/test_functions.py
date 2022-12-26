@@ -348,6 +348,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
 
     @make_test
+    def test_get_default_dtype(x):
+        if x.dtype == torch.get_default_dtype():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_device(x):
         if not x.is_cuda:
             return x + 1
@@ -687,6 +694,23 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = [1, 2, 3, 4]
         m[1:] = [6] * (len(m) - 1)
         return x + 1
+
+    @make_test
+    def test_distributed_is_available(x):
+        if torch.distributed.is_available():
+            return x + 1
+        else:
+            return x - 1
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "requires distributed package"
+    )
+    @make_test
+    def test_distributed_is_initialized(x):
+        if torch.distributed.is_initialized():
+            return x + 1
+        else:
+            return x - 1
 
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.

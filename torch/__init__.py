@@ -48,7 +48,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'compile',
+    'compile', 'vmap',
 ]
 
 ################################################################################
@@ -1116,8 +1116,6 @@ del register_after_fork
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg as lobpcg
 
-from ._vmap_internals import vmap as vmap
-
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
 # class usage. We add these lines here to preserve backward compatibility.
@@ -1138,6 +1136,20 @@ from ._linalg_utils import (  # type: ignore[misc]
     solve,
     lstsq,
 )
+
+class _TorchCompileInductorWrapper:
+    def __init__(self, mode, passes):
+        from torch._dynamo.eval_frame import lookup_backend
+        from torch._inductor.config import InductorConfigContext
+
+        self.compile_fn = lookup_backend("inductor")
+        self.cm = InductorConfigContext(mode if mode is not None else passes)
+        self._torchdynamo_orig_callable = self.compile_fn
+
+    def __call__(self, model_, inputs_):
+        with self.cm:
+            return self.compile_fn(model_, inputs_)
+
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
@@ -1189,22 +1201,12 @@ def compile(model: Optional[Callable] = None, *,
         return fn
 
     import torch._dynamo
-    from torch._dynamo.eval_frame import lookup_backend
-    from torch._inductor.config import InductorConfigContext
     if mode is not None and passes is not None:
         raise RuntimeError("Either mode or passes can be specified, but both can't be specified at the same time.")
     if mode is None and passes is None:
         mode = "default"
     if backend == "inductor":
-        compile_fn = lookup_backend(backend)
-        cm = InductorConfigContext(mode if mode is not None else passes)
-
-        def _compile_fn(model_, inputs_):
-            with cm:
-                return compile_fn(model_, inputs_)
-
-        _compile_fn._torchdynamo_orig_callable = compile_fn  # type: ignore[attr-defined]
-        backend = _compile_fn
+        backend = _TorchCompileInductorWrapper(mode, passes)
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, **kwargs)(model)
 
 
@@ -1239,3 +1241,6 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.symbolic_shapes
+
+from torch import func as func
+from torch.func import vmap
