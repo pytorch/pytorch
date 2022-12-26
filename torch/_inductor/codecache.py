@@ -413,6 +413,15 @@ class CppCodeCache:
                 global _libgomp
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
                 return cdll.LoadLibrary(path)
+            if "failed to map segment from shared object" in str(e):
+                print(
+                    "The /tmp folder appears to be mounted with noexec while TorchInductor needs "
+                    "an executable directory as for jitted binaries. Pls either remount /tmp with"
+                    " exec option or set another executable directory with TORCHINDUCTOR_CACHE_DIR"
+                    " environment variable.",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
             raise
 
     @classmethod
