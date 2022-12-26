@@ -67,18 +67,10 @@ jobs:
           # Install dependencies
           brew install libtool
 
-      - name: Setup miniconda for iOS device
-        if: inputs.ios-platform != 'SIMULATOR'
+      - name: Setup miniconda for iOS
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: "3.10"
-          environment-file: .github/requirements/conda-env-iOS
-
-      - name: Setup miniconda for iOS simulator
-        if: inputs.ios-platform == 'SIMULATOR'
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
-        with:
-          python-version: "3.10"
+          python-version: "3.9"
           environment-file: .github/requirements/conda-env-iOS
           pip-requirements-file: .github/requirements/pip-requirements-iOS-sim.txt
 
@@ -93,10 +85,8 @@ jobs:
       - name: Build PyTorch Mobile Runtime
         run: |
           # shellcheck disable=SC1091
-          source "${MINICONDA_INSTALL_PATH}/bin/activate" "${RUNNER_TEMP}/${CONDA_ENV}"
           export TCLLIBPATH="/usr/local/lib"
           python -VV
-          export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
           ${CONDA_RUN} scripts/build_ios.sh
 
       - name: Build TestApp
@@ -114,17 +104,16 @@ jobs:
         if: inputs.ios-platform == 'SIMULATOR'
         run: |
           # shellcheck disable=SC1091
-          source "${MINICONDA_INSTALL_PATH}/bin/activate" "${RUNNER_TEMP}/${CONDA_ENV}"
           # use the pytorch nightly build to generate models
-          pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+          ${CONDA_RUN} pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
           # generate models for differnet backends
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           mkdir -p ../models
           if [ "${USE_COREML_DELEGATE}" == 1 ]; then
-            python coreml_backend.py
+            ${CONDA_RUN} python coreml_backend.py
           else
             cd "${GITHUB_WORKSPACE}"
-            python test/mobile/model_test/gen_test_model.py ios-test
+            ${CONDA_RUN} python test/mobile/model_test/gen_test_model.py ios-test
           fi
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then

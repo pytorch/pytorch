@@ -9,13 +9,10 @@
 
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 
-if [ -z "$PYTHON" ]; then
-  PYTHON=python
-  PYTHON_VERSION_MAJOR=$($PYTHON -c 'import sys; print(sys.version_info[0])')
-  if [ "${PYTHON_VERSION_MAJOR}" -le 2 ]; then
-    echo "Default python executable is Python-2, trying to use python3 alias"
-    PYTHON=python3
-  fi
+PYTHON_VERSION_MAJOR=$($PYTHON -c 'import sys; print(sys.version_info[0])')
+if [ "${PYTHON_VERSION_MAJOR}" -le 2 ]; then
+  echo "Default python executable is Python-2, trying to use python3 alias"
+  PYTHON=python3
 fi
 
 echo "Bash: $(/bin/bash --version | head -1)"
