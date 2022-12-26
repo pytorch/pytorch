@@ -1027,10 +1027,14 @@ class CppVecKernelChecker(CppVecKernel):
 
 
 class CppKernelProxy(CppKernel):
-    def __init__(self, args=None, num_threads=None):
+    def __init__(self, args, num_threads, simd_vec_kernel: CppVecKernel, simd_omp_kernel: CppKernel):
         super(CppKernelProxy, self).__init__(args, num_threads)
-        self.simd_vec_kernel: CppVecKernel = None
-        self.simd_omp_kernel: CppKernel = None
+        self.simd_vec_kernel = simd_vec_kernel
+        self.simd_omp_kernel = simd_omp_kernel
+        self.call_ranges = simd_omp_kernel.call_ranges
+        self.ranges = simd_omp_kernel.ranges
+        self.itervars = simd_omp_kernel.itervars
+        self.reduction_depth = simd_omp_kernel.reduction_depth
         self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
 
     def codegen_loops(self, code, worksharing):
@@ -1113,7 +1117,7 @@ class CppKernelProxy(CppKernel):
             return self.simd_omp_kernel.codegen_loops(code, worksharing)
         '''
         main_loop, tail_loop = loop_nest.split_with_tiling(
-            -1, self.simd_vec_kernel.tile_size
+            len(self.simd_vec_kernel.itervars) - 1, self.simd_vec_kernel.simd_nelements
         )
         main_loop.set_kernel(self.simd_vec_kernel)
         tail_loop.set_kernel(self.simd_omp_kernel)
@@ -1251,10 +1255,8 @@ class CppScheduling:
             metrics.generated_kernel_count -= 1
 
         cpp_kernel_proxy = CppKernelProxy(
-            kernel_group.args, kernel_group.ws.num_threads
+            kernel_group.args, kernel_group.ws.num_threads, simd_vec_kernel, simd_omp_kernel
         )
-        cpp_kernel_proxy.simd_vec_kernel = simd_vec_kernel
-        cpp_kernel_proxy.simd_omp_kernel = simd_omp_kernel
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, None)
 
@@ -1400,7 +1402,8 @@ class LoopLevel:
     def get_kernel(self) -> CppKernel:
         if self.kernel:
             return self.kernel
-        assert len(self.inner) == 1
+        if len(self.inner) != 1:
+            return None
         return self.inner[0].get_kernel()
 
     def set_kernel(self, kernel: CppKernel):
@@ -1446,7 +1449,7 @@ class LoopLevel:
             return main_loop, tail_loop
 
         if depth == 0:
-            main_loop, tail_loop = do_split_with_tiling(factor)
+            main_loop, tail_loop = do_split_with_tiling()
             parent = self.parent
             if parent:
                 parent.inner = [main_loop, tail_loop]
