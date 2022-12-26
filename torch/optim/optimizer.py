@@ -457,6 +457,7 @@ class Optimizer:
             per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:
+                tmp_group = defaultdict(list)
                 for p in group['params']:
                     if p.grad is not None:
                         if set_to_none:
@@ -467,9 +468,15 @@ class Optimizer:
                             else:
                                 p.grad.requires_grad_(False)
                             if (not foreach or p.grad.is_sparse):
-                                p.grad.zero_()
+                                if p.grad.device.type == 'cuda':
+                                    tmp_group[p.grad.dtype].append(p)
+                                else:
+                                    p.grad.zero_()
                             else:
                                 per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
+                if tmp_group:
+                    for _, grads in tmp_group.items():
+                        torch._foreach_zero_(grads)
             if foreach:
                 for _, per_dtype_grads in per_device_and_dtype_grads.items():
                     for grads in per_dtype_grads.values():

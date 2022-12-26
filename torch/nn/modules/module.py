@@ -1,4 +1,4 @@
-from collections import OrderedDict, namedtuple
+from collections import OrderedDict, namedtuple, defaultdict
 import itertools
 import warnings
 import functools
@@ -2344,7 +2344,7 @@ class Module:
                 "The parameters are copied (in a differentiable manner) from the original module. "
                 "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
                 "If you need gradients in your forward method, consider using autograd.grad instead.")
-
+        tmp_group = defaultdict(list)
         for p in self.parameters():
             if p.grad is not None:
                 if set_to_none:
@@ -2354,7 +2354,13 @@ class Module:
                         p.grad.detach_()
                     else:
                         p.grad.requires_grad_(False)
-                    p.grad.zero_()
+                    if p.grad.device.type == 'cuda':
+                        tmp_group[p.grad.dtype].append(p)
+                    else:
+                        p.grad.zero_()
+        if tmp_group:
+            for _, grads in tmp_group.items():
+                torch._foreach_zero_(grads)
 
     def share_memory(self: T) -> T:
         r"""See :meth:`torch.Tensor.share_memory_`"""
