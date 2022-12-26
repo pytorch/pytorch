@@ -25,6 +25,7 @@ try:
 except ImportError:
     from .test_minifier import requires_cuda
 
+from functorch.experimental.control_flow import cond
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
@@ -2225,6 +2226,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
+
+    def test_cond_with_aten_mode(self):
+        def pred(x):
+            return x.all()
+
+        def true_fn(x):
+            return x * x
+
+        def false_fn(x):
+            return x + x
+
+        def my_fn(x):
+            return cond(x.all(), true_fn, false_fn, [x])
+
+        inp = torch.randn(6, 5)
+
+        gm, _ = torch._dynamo.export(
+            my_fn, torch.ones(1, 2), aten_graph=True, tracing_mode="symbolic"
+        )
+        self.assertEqual(gm(torch.ones(1, 2)), my_fn(torch.ones(1, 2)))
+        self.assertEqual(gm(torch.zeros(1, 2)), my_fn(torch.zeros(1, 2)))
 
 
 if __name__ == "__main__":

@@ -41,8 +41,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             return e
         return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
 
-    assert isinstance(operands, list), "Cond operands must be a list of tensors"
-    assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
+    assert isinstance(operands, (list, tuple)), "Cond operands must be either tuple or list"
+    assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be all tensors"
 
     true_graph = get_isolated_graphmodule(true_fn, operands, {})
     false_graph = get_isolated_graphmodule(false_fn, operands, {})
