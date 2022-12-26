@@ -191,7 +191,7 @@ class C10_API SymInt {
   }
 
   // Return the min represetable integer as a SymInt
-  static int64_t min_representable_int() {
+  static constexpr int64_t min_representable_int() {
     return MAX_UNREPRESENTABLE_INT + 1;
   }
 

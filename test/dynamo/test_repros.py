@@ -2288,6 +2288,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 tracing_mode="symbolic",
             )
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing_simple(self):
+        def f(x):
+            return x[slice(None, None, None)]
+
+        gm, _ = torch._dynamo.export(
+            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        inp = torch.randn(6, 7)
+        self.assertEqual(gm(inp), f(inp))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -53,7 +53,6 @@ struct TORCH_API Slice final {
       start_ = c10::SymInt(step_ < 0 ? INDEX_MAX : 0);
     } else {
       start_ = start_index.value();
-
     }
 
     if (!stop_index.has_value()) {

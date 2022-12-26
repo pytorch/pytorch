@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Exceptions.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/Exception.h>
 #include <pybind11/detail/common.h>
@@ -31,7 +30,7 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
 
   c10::SymInt start_sym, stop_sym, step_sym;
 
-  auto clip_val = [] (Py_ssize_t val) {
+  auto clip_val = [](Py_ssize_t val) {
     if (val < c10::SymInt::min_representable_int()) {
       return c10::SymInt::min_representable_int();
     }
@@ -75,7 +74,8 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
   if (torch::is_symint(py::handle(r->stop))) {
     stop_sym = py::handle(r->stop).cast<c10::SymInt>();
   } else if (r->stop == Py_None) {
-    stop_sym = c10::SymInt(step_sym < 0 ? c10::SymInt::min_representable_int() : PY_SSIZE_T_MAX);
+    stop_sym = c10::SymInt(
+        step_sym < 0 ? c10::SymInt::min_representable_int() : PY_SSIZE_T_MAX);
   } else {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t stop;
