@@ -52,6 +52,7 @@ from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.autograd.function import _set_autograd_function_extension_enabled
+from torch._functorch.vmap import restore_vmap
 
 FALLBACK_REGEX = 'There is a performance drop'
 
@@ -1075,6 +1076,47 @@ class TestVmapAPI(TestCase):
     @skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_vmap_autocast_cuda(self):
         self._test_vmap_autocast("cuda")
+
+    def test_restore_vmap_pytree_input_output(self):
+        def f(x, y):
+            output0 = x[0] + x[1]
+            output1 = y
+            return {'a': output0, 'b': output1}
+
+        B = 2
+        x0 = torch.randn(B, 3)
+        x1 = torch.randn(B)
+        y = torch.randn(4, B)
+
+        out, out_dims = restore_vmap(f, ((0, 0), 1), B, 'error')((x0, x1), y)
+        expected = vmap(f, in_dims=((0, 0), 1), out_dims={'a': 0, 'b': 1})((x0, x1), y)
+        self.assertEqual(out, expected)
+        self.assertEqual(out_dims, {'a': 0, 'b': 1})
+
+    def test_restore_vmap_no_vmapped_inputs(self):
+        def f(x, y, z):
+            return x, y * z, z
+
+        B = 2
+        # Mix of tensor and non-tensor inputs
+        x = torch.randn(3)
+        y = torch.randn(4)
+        z = 5
+        out, out_dims = restore_vmap(f, (None, None, None), B, 'error')(x, y, z)
+        self.assertEqual(out, f(x, y, z))
+        self.assertEqual(out_dims, (None, None, None))
+
+    def test_restore_vmap_unexpanded_outputs(self):
+        def f(x, y):
+            # Mix of tensor and non-tensor outputs
+            return 3 * y, y.sum(), None
+
+        B = 2
+        x = torch.randn(B, 3)
+        y = torch.randn(4)
+        out, out_dims = restore_vmap(f, (0, None), B, 'error')(x, y)
+        self.assertEqual(out, f(None, y))
+        self.assertEqual(out_dims, (None, None, None))
 
 
 def slice_inputs(inputs, bdims, i):
@@ -2756,6 +2798,154 @@ class TestVmapOperators(Namespace.TestVmapBase):
             )(x)
             self.assertEqual(output, expected)
 
+    @parametrize('in_dim', [0, 1, 2])
+    @parametrize('out_dim', [0, 1, 2])
+    @parametrize('randomness', ['error', 'same'])
+    def test_vmap_chunksize(self, in_dim, out_dim, randomness):
+
+        x = torch.randn(4, 5, 6)
+        y = torch.randn_like(x)
+
+        # fn: Single Input/Single Output
+        def f(x):
+            y = x.sin()
+            if randomness != "error":
+                y = y + torch.rand_like(x)
+            return y
+        f_args = (x,)
+        f_kwargs = {'in_dims': in_dim, 'out_dims': out_dim, 'randomness': randomness}
+
+        # fn: Nested Input/Single Output
+        def f1(pair):
+            x, y = pair
+            z = x.sin() + y.cos()
+            if randomness != "error":
+                z = z + torch.rand_like(z)
+            return z
+        f1_args = ((x, y),)
+        f1_kwargs = {'in_dims': ((in_dim,) * 2,), 'out_dims': out_dim, 'randomness': randomness}
+
+        # fn: Single Input/Nested Output
+        def f2(x):
+            y = x.sin()
+            if randomness != "error":
+                y = y + torch.rand_like(x)
+            return {'out': y, 'out1': y + 2}
+        f2_args = (x,)
+        f2_kwargs = {'in_dims': in_dim, 'out_dims': out_dim, 'randomness': randomness}
+
+        # fn: Nested Input/Nested Output (first tensor is not vmapped).
+        def f3(inp_dict):
+            x = inp_dict['inp']
+            y = inp_dict['inp1']
+            z = x.sin() + y.cos()
+            if randomness != "error":
+                z = z + torch.rand_like(z)
+            return {'z': z, 'tuple': (z, z + 1)}
+        f3_args = ({'inp': x.index_select(in_dim, torch.tensor([0])).squeeze(in_dim), 'inp1': y},)
+        f3_kwargs = {'in_dims': ({'inp': None, 'inp1': in_dim},), 'out_dims': out_dim, 'randomness': randomness}
+
+        # fn: Nested Input/Nested Output (first argument is not a Tensor).
+        def f4(inp_dict):
+            x = inp_dict['inp']
+            y = inp_dict['inp1']
+            z = x + y.cos()
+            if randomness != "error":
+                z = z + torch.rand_like(z)
+            return {'z': z, 'tuple': (z, z + 1)}
+        f4_args = ({'inp': 2., 'inp1': y},)
+        f4_kwargs = {'in_dims': ({'inp': None, 'inp1': in_dim},), 'out_dims': out_dim, 'randomness': randomness}
+
+        fns_and_args = ((f, f_args, f_kwargs), (f1, f1_args, f1_kwargs), (f2, f2_args, f2_kwargs),
+                        (f3, f3_args, f3_kwargs), (f4, f4_args, f4_kwargs))
+        for fn, args, kwargs in fns_and_args:
+            rs = torch.get_rng_state()
+            expected_vmap = vmap(fn, **kwargs)(*args)
+            for chunk_size in (1, 2, 3, 4, 7, 10, 16, 100):
+                torch.set_rng_state(rs)
+                output = vmap(
+                    fn, chunk_size=chunk_size, **kwargs
+                )(*args)
+                self.assertEqual(output, expected_vmap)
+
+    @parametrize('in_dim', [0, 1])
+    @parametrize('out_dim', [0, 1])
+    @parametrize('randomness', ['error', 'same'])
+    def test_vmap_chunksize_error(self, in_dim, out_dim, randomness):
+        x = torch.randn(4, 5, 6)
+
+        def f(x):
+            y = x.sin()
+            if randomness != "error":
+                y = y + torch.rand_like(x)
+            return y
+
+        # Incorrect `chunk_size`
+        for chunk_size in (-1, 0):
+            with self.assertRaisesRegex(ValueError, "vmap: chunk_size should be None or greater than 0."):
+                vmap(
+                    f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
+                )(x)
+
+        # Incorrect `out_dims`
+        msg = "out_dims is not compatible with the structure of `outputs`"
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(
+                f, in_dims=in_dim, out_dims=(out_dim, out_dim), randomness=randomness, chunk_size=2
+            )(x)
+
+    @parametrize('in_dim', [0, 1])
+    @parametrize('out_dim', [0, 1])
+    @parametrize('randomness', ['error', 'same'])
+    def test_vmap_chunksize_composition(self, in_dim, out_dim, randomness):
+        x = torch.randn(4, 5, 6)
+        y = torch.randn_like(x)
+
+        # fn: Single Input/Single Output
+        def f(x):
+            y = x.sin()
+            if randomness != "error":
+                y = y + torch.rand_like(x)
+            return y
+        f_args = (x,)
+
+        # fn: Nested Input/Single Output
+        def f1(pair):
+            x, y = pair
+            z = x.sin() + y.cos()
+            if randomness != "error":
+                z = z + torch.rand_like(z)
+            return z
+        f1_args = ((x, y),)
+
+        # fn: Single Input/Nested Output
+        def f2(x):
+            y = x.sin()
+            if randomness != "error":
+                y = y + torch.rand_like(x)
+            return {'out': y, 'out1': y + 2}
+        f2_args = (x,)
+
+        # fn: Nested Input/Nested Output
+        def f3(inp_dict):
+            x = inp_dict['inp']
+            y = inp_dict['inp1']
+            z = x.sin() + y.cos()
+            if randomness != "error":
+                z = z + torch.rand_like(z)
+            return {'z': z, 'tuple': (z, z + 1)}
+        f3_args = ({'inp': x, 'inp1': y},)
+
+        for fn, args in ((f, f_args), (f1, f1_args), (f2, f2_args), (f3, f3_args)):
+            rs = torch.get_rng_state()
+            expected = vmap(vmap(fn, in_dims=in_dim, out_dims=out_dim, randomness=randomness),
+                            in_dims=in_dim, out_dims=out_dim, randomness=randomness)(*args)
+            for chunk_size in (1, 2, 3, 4, 7, 10, 16, 100):
+                torch.set_rng_state(rs)
+                actual = vmap(vmap(
+                    fn, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
+                ), in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size)(*args)
+                self.assertEqual(actual, expected)
 
 instantiate_parametrized_tests(TestVmapOperators)
 
@@ -3224,6 +3414,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.alpha_dropout', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         xfail('as_strided'),  # Our test runner can't handle this; manual test exists
+        xfail('as_strided_scatter'),  # no batching rule implemented, default doesnt work
         skip('new_empty_strided'),  # empty tensor data is garbage so it's hard to make comparisons with it
         xfail('nn.functional.fractional_max_pool3d'),  # randomness
         xfail('nn.functional.fractional_max_pool2d'),  # randomness
@@ -3326,6 +3517,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
+        xfail('fill'),
         # Batch norm got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
@@ -4575,6 +4767,24 @@ class TestRandomness(TestCase):
         for chunks in [1, 2, 3, 4, 7, 10, 16]:
             output = chunk_vmap(
                 f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunks=chunks
+            )(x)
+            self._assert_all_slices_unique(output)
+
+    @parametrize('in_dim', [0, 1, 2])
+    @parametrize('out_dim', [0, 1, 2])
+    def test_vmap_chunksize(self, in_dim, out_dim):
+
+        randomness = "different"
+
+        x = torch.randn(4, 5, 6)
+
+        def f(x):
+            y = x.sin() + torch.rand_like(x)
+            return y
+
+        for chunk_size in [1, 2, 3, 4, 7, 10, 16, 100]:
+            output = vmap(
+                f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunk_size=chunk_size
             )(x)
             self._assert_all_slices_unique(output)
 

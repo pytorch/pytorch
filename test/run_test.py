@@ -290,7 +290,9 @@ CI_SERIAL_LIST = [
     'test_tensor_creation_ops',
     'test_sparse_csr',
     'test_dispatch',
+    'test_spectral_ops',    # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/88916
     'nn/test_pooling',
+    'nn/test_convolution',  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     'distributions/test_distributions',
     'test_autograd',  # slow gradcheck runs a test that checks the cuda memory allocator
     'test_prims',  # slow gradcheck runs a test that checks the cuda memory allocator
@@ -1074,6 +1076,7 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None, exact_matc
 
 def must_serial(file: str) -> bool:
     return (
+        os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1" or
         "distributed" in os.getenv("TEST_CONFIG", "") or
         "dynamo" in os.getenv("TEST_CONFIG", "") or
         "distributed" in file or
