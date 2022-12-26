@@ -896,6 +896,9 @@ class CppVecKernel(CppKernel):
             name,
             f"{reduction_combine(reduction_type, tmpvar, next_value)};",
         )
+        # NOTE(jgong5): we do not generate the real stores here with the assumption that
+        # the scalar kernel that handles the loop tail would be generated and generates
+        # the stores there.
         self.cse.store_cache[name] = tmpvar
 
 
@@ -1064,78 +1067,6 @@ class CppKernelProxy(CppKernel):
 
         assert self.picked_vec_isa
         loop_nest = LoopNest.build(self.simd_omp_kernel)
-        # Do not apply vectorization since the range of most inner is too small. Meanwhile,
-        # If the range of the most inner is less then the codecache.pick_vec_isa().nelements(),
-        # the generated code for some reduction will be as follows that leads to incrrect result.
-        #
-        #    LINE01:  float tmp1 = 0;
-        #    LINE02:  auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
-        #    LINE03:  for(long i1=0; i1<2; i1+=1)
-        #    LINE04:  {
-        #    LINE05:      for(long i2=0; i2<0; i2+=1)
-        #    LINE06:      {
-        #    LINE07:          auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i0) + (16*i2) + (32*i1));
-        #    LINE08:          tmp1_vec += tmp0;
-        #    LINE09:      }
-        #    LINE10:      tmp1 = vec_reduce_all<float>([](Vectorized<float>& x, Vectorized<float>&y) {return x + y;}, tmp1_vec);
-        #    LINE11:      #pragma omp simd simdlen(8)  reduction(+:tmp1)
-        #    LINE12:      for(long i2=0; i2<8; i2+=1)
-        #    LINE13:      {
-        #    LINE14:          auto tmp0 = in_ptr0[i2 + (8*i0) + (32*i1)];
-        #    LINE15:          tmp1 += tmp0;
-        #    LINE16:      }
-        #    LINE17:  }
-        #    LINE18:  out_ptr3[i0] = tmp1;
-        #
-        # tmp1_vec(LINE02) will always be zero as it is initialized with tmp1 value and the range(LINE05)
-        # is 0. Hence, the LINE10 will always reset tmp1 to 0. But tmp1(LINE01) is global value. So the result
-        # will be incorrect. We skip thie case.
-        loops = loop_nest.get_loops_at(loop_nest.depth - 1)
-        assert len(loops) == 1
-        most_inner_loop = loops[0]
-        main_loop_range = ir.IndexingDiv(
-            most_inner_loop.size, self.picked_vec_isa.nelements()
-        )
-        loop_interval = sympy.simplify(main_loop_range)
-        # TODO(Eikan): To support dynamic shape.
-        if not loop_interval.is_integer or loop_interval <= 0:
-            metrics.generated_cpp_vec_kernel_count -= 1
-            return self.simd_omp_kernel.codegen_loops(code, worksharing)
-
-        # TODO: fix the following
-        '''
-        # If the most inner loop of the reduction will be vectorized, the vectorization
-        # will add a vec variable for reduction. Take the code snippet as an example:
-        #     float tmp1 = 0;
-        #     for(long i1=0; i1<8; i1+=1) {
-        #        auto tmp0 = in_ptr0[i1];
-        #        tmp1 += tmp0;
-        #     }
-        # The vectorization will add tmp1_vec for reduction and then the loop will be transformed
-        # as follows.
-        #     float tmp1 = 0;
-        #     auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
-        #     for(long i1=0; i1<1; i1+=1) {
-        #        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i1));
-        #        tmp1_vec += tmp0;
-        #     }
-        #     tmp1 = at::vec::vec_reduce_all<float>([]
-        #       (at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;},
-        #       tmp1_vec);
-        #     for(long i1=8; i1<8; i1+=1) {
-        #        auto tmp0 = in_ptr0[i1];
-        #        tmp1 += tmp0;
-        #     }
-        # It means that the vectorization introduce another reduction variable(tmp1_vec).
-        # If the most inner loop of the reduction is not a parallelized but its parent reduction
-        # loop is parallized, the new added reduction variable(tmp1_vec) could not be added
-        # to the parallelized loop reduction. So we skip this case and does not vectorize it.
-        if reduction_par_depth > 0 and reduction_par_depth != len(
-            loops_nest_reduce.loops
-        ):
-            metrics.generated_cpp_vec_kernel_count -= 1
-            return self.simd_omp_kernel.codegen_loops(code, worksharing)
-        '''
         main_loop, tail_loop = loop_nest.split_with_tiling(
             len(self.simd_vec_kernel.itervars) - 1, self.simd_vec_kernel.simd_nelements
         )
