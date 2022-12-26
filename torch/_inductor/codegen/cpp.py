@@ -684,10 +684,9 @@ class CppKernel(Kernel):
 
             def gen_kernel(kernel):
                 assert kernel
-                with contextlib.ExitStack() as stack:
-                    code.splice(kernel.loads)
-                    code.splice(kernel.compute)
-                    code.splice(kernel.stores)
+                code.splice(kernel.loads)
+                code.splice(kernel.compute)
+                code.splice(kernel.stores)
 
             def gen_loops(loop, in_reduction=False):
                 kernel = loop.get_kernel()
@@ -715,6 +714,7 @@ class CppKernel(Kernel):
                     if loop.is_reduction() and not in_reduction:
                         code.splice(kernel.reduction_suffix)
             
+            stack.enter_context(code.indent())
             if loop_nest.root:
                 for loop in loop_nest.root:
                     gen_loops(loop)
