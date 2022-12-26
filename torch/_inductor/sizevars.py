@@ -52,6 +52,7 @@ class SizeVarAllocator(object):
         self._simplify_loops = self.make_simplify_loops_cache()
         self.declare = ""
         self.ending = ""
+        self.as_strided = "as_strided"
 
     def seed(self):
         """
@@ -586,6 +587,7 @@ class CppSizeVarAllocator(SizeVarAllocator):
         super().__init__(shape_env)
         self.declare = "auto "
         self.ending = ";"
+        self.as_strided = "at::as_strided"
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
@@ -607,6 +609,7 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
 
     def __init__(self, inner, var_ranges: VarRanges):
         super().__init__(inner)
+        self.name = "SimplifyIndexing"
         self._simplify: Callable[
             [Expr], Expr
         ] = lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)

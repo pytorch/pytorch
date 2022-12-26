@@ -9,6 +9,7 @@ import functools
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional
+from torch._functorch.autograd_function import custom_function_call
 
 __all__ = ["FunctionCtx", "BackwardCFunction", "FunctionMeta", "Function", "once_differentiable", "traceable",
            "InplaceFunction", "NestedIOFunction"]
@@ -201,12 +202,12 @@ class FunctionCtx(object):
         self.non_differentiable = args
 
     def set_materialize_grads(self, value: bool):
-        r"""Sets whether to materialize output grad tensors. Default is ``True``.
+        r"""Sets whether to materialize grad tensors. Default is ``True``.
 
         **This should be called only from inside the** :func:`forward` **method**
 
-        If ``True``, undefined output grad tensors will be expanded to tensors full
-        of zeros prior to calling the :func:`backward` method.
+        If ``True``, undefined grad tensors will be expanded to tensors full of zeros
+        prior to calling the :func:`backward` and :func:`jvp` methods.
 
         Example::
             >>> class SimpleFunc(Function):
@@ -418,9 +419,6 @@ class Function(_SingleLevelFunction):
         if not torch._C._is_autograd_function_extension_enabled():
             return super().apply(*args, **kwargs)
 
-        # TODO: fix circular import
-        # https://github.com/pytorch/pytorch/issues/90224
-        from torch._functorch.autograd_function import custom_function_call
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
             args = _functorch.utils.unwrap_dead_wrappers(args)
@@ -433,6 +431,7 @@ class Function(_SingleLevelFunction):
                 'In order to use an autograd.Function with functorch transforms ',
                 '(vmap, grad, jvp, jacrev, ...), it must have a setup_context ',
                 'staticmethod.')
+
         return custom_function_call(cls, *args, **kwargs)
 
 def once_differentiable(fn):

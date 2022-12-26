@@ -55,6 +55,11 @@ class NodeGuard {
   std::shared_ptr<Node> last_evaluating_node_;
 };
 
+// Return the Node currently being evaluated (if any)
+// This is only set during the backward pass while a Node is being
+// executed.
+TORCH_API std::shared_ptr<Node> get_current_node();
+
 // Global (not thread-local) feature flag for the new autograd.Function
 // extension. The extension consists of:
 // - splitting autograd.Function.forward into forward() and setup_context().
@@ -496,6 +501,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     tensor_pre_hooks_.push_back(std::move(pre_hook));
   }
 
+  void add_retains_grad_hook(std::unique_ptr<FunctionPreHook>&& pre_hook) {
+    retains_grad_hooks_.push_back(std::move(pre_hook));
+  }
+
   const std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks()
       const noexcept {
     return pre_hooks_;
@@ -508,6 +517,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   virtual std::vector<std::unique_ptr<FunctionPreHook>>&
   tensor_pre_hooks() noexcept {
     return tensor_pre_hooks_;
+  }
+
+  std::vector<std::unique_ptr<FunctionPreHook>>& retains_grad_hooks() noexcept {
+    return retains_grad_hooks_;
   }
 
   // Customization Points for Subclasses
@@ -618,12 +631,23 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   PyObject* pyobj_ = nullptr; // weak reference
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
+
+  // NOTE [Hooks ordering]
+  // We have 3 separate fields for pre hooks registered to the autograd nodes
+  // because the conditions under which they execute are different, and we
+  // want more fine-grained control over the order in which different types
+  // of hooks are executed.
+  // - pre_hooks  are only executed when the node itself is executed
+  // - tensor_pre_hook is executed as long as the engine traverses over it
+  //   even if that node won't be executed.
+  // - retains_grad_hook are like tensor_pre_hooks except they are always
+  //   ordered after all other tensor pre hooks
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
-  // pre-hooks registered to tensor should be called before pre-hooks registered
-  // to the function
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPreHook>> tensor_pre_hooks_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::vector<std::unique_ptr<FunctionPreHook>> retains_grad_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
