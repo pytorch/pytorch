@@ -35,9 +35,6 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     TwoLayerLinearModel
 )
-from torch.testing._internal.common_quantized import (
-    override_quantized_engine,
-)
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_dynamic_quant_module_mappings,
