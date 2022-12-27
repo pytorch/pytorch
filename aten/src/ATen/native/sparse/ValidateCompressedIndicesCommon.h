@@ -276,10 +276,10 @@ void _validate_compressed_sparse_indices_kernel(
         at::arange(batch_count, cidx.options()).view(batch_dims).unsqueeze_(-1);
 
     const auto idx_ndims = idx.dim();
-    std::array<std::array<int64_t, MAX_DIMS>, 2> idx_sizes_and_strides;
+    std::array<int64_t, MAX_DIMS> idx_sizes, idx_strides;
     for (int i = 0; i < idx_ndims; i++) {
-      idx_sizes_and_strides[0][i] = idx.size(i);
-      idx_sizes_and_strides[1][i] = idx.stride(i);
+      idx_sizes[i] = idx.size(i);
+      idx_strides[i] = idx.stride(i);
     }
 
     auto iter = TensorIteratorConfig()
@@ -295,12 +295,12 @@ void _validate_compressed_sparse_indices_kernel(
     AT_DISPATCH_INDEX_TYPES(
         idx.scalar_type(),
         NAME,
-        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes_and_strides]() {
+        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes, &idx_strides]() {
           const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
           const auto zero = index_t{0};
           KernelLauncher::launch(
               iter,
-              [zero, dim, nnz, idx_ndims, idx_sizes_and_strides, ptr_idx] FUNCAPI(
+              [zero, dim, nnz, idx_ndims, idx_sizes, idx_strides, ptr_idx] FUNCAPI(
                   index_t cidx_first,
                   index_t cidx_last,
                   index_t cidx_curr,
@@ -318,12 +318,10 @@ void _validate_compressed_sparse_indices_kernel(
                 // NOTE: the implementation below is sync-less, but,
                 // unfortunately, work is not guaranteed to be well-balanced
                 // between different threads.
-                const auto& idx_sizes = idx_sizes_and_strides[0];
-                const auto& idx_strides = idx_sizes_and_strides[1];
                 int64_t idx_offset = 0;
                 // assuming idx contiguity per batch:
                 int64_t tmp = batch_idx * idx_sizes[idx_ndims - 1];
-                for (int i = idx_ndims; i >= 2; i--) {
+                for (int i = idx_ndims - 1; i >= 0; i--) {
                   idx_offset += (tmp % idx_sizes[i]) * idx_strides[i];
                   tmp /= idx_sizes[i];
                 }
