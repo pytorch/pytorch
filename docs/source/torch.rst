@@ -613,6 +613,8 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
+    sym_float
+    sym_int
 
 Optimizations
 -------------
