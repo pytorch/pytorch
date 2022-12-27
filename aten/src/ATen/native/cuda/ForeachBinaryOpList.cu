@@ -2,7 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
-#include <ATen/NumericUtils.h>
+#include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -88,7 +88,7 @@ void all_types_bool_half_bfloat16_(TensorList tensors1, TensorList tensors2, con
     });
 }
 
-#define FOREACH_BINARY_OP_LIST(FUNCTION, NAME, OP, DIVISION_OP)                                                       \
+#define FOREACH_BINARY_OP_LIST(FUNCTION, NAME, OP, DIVISION_OP)                                             \
 void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {                  \
     check_foreach_api_restrictions(tensors1, tensors2);                                                     \
     if (!can_use_fast_route(tensors1, tensors2, DIVISION_OP)) {                                             \
@@ -107,8 +107,8 @@ std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1
     return FUNCTION<OP>(tensors1, tensors2);                                                                \
 }
 
-#define FOREACH_BINARY_OP_LIST_ALPHA(FUNCTION, NAME, OP)                                                                          \
-void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2, const Scalar& alpha) {                \
+#define FOREACH_BINARY_OP_LIST_ALPHA(FUNCTION, NAME, OP)                                                                \
+void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2, const Scalar& alpha) {         \
     check_foreach_api_restrictions(tensors1, tensors2);                                                                 \
     if (!can_use_fast_route({tensors1, tensors2}, alpha)) {                                                             \
         return at::native::foreach_tensor_##NAME##_list_kernel_slow_(tensors1, tensors2, alpha);                        \
@@ -130,19 +130,7 @@ FOREACH_BINARY_OP_LIST_ALPHA(all_types_complex_bool_half_bfloat16, add, std::plu
 FOREACH_BINARY_OP_LIST_ALPHA(all_types_complex_bool_half_bfloat16, sub, std::minus);
 FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*division_op*/ false);
 FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*division_op*/ true);
-
-// std:: does not have clamp functors
-template <typename T>
-struct clamp_min {
-    __device__ T operator()(const T& a, const T& b) const { return _isnan(a) or a > b ? a : b; }
-};
-
-template <typename T>
-struct clamp_max {
-    __device__ T operator()(const T& a, const T& b) const { return _isnan(a) or a < b ? a : b; }
-};
-
-FOREACH_BINARY_OP_LIST(all_types_bool_half_bfloat16, clamp_min, clamp_min, /*division_op*/ false);
-FOREACH_BINARY_OP_LIST(all_types_bool_half_bfloat16, clamp_max, clamp_max, /*division_op*/ false);
+FOREACH_BINARY_OP_LIST(all_types_bool_half_bfloat16, clamp_max, minimum, /*division_op*/ false);
+FOREACH_BINARY_OP_LIST(all_types_bool_half_bfloat16, clamp_min, maximum, /*division_op*/ false);
 
 }} // namespace at::native

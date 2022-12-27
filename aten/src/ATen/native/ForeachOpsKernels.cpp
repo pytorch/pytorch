@@ -283,32 +283,6 @@ FOREACH_POINTWISE_OP_SCALARLIST(addcmul);
 FOREACH_POINTWISE_OP_TENSOR(addcdiv);
 FOREACH_POINTWISE_OP_TENSOR(addcmul);
 
-// NOTE(crcrpar): It didn't seem feasible to use `self[i]` as both the first and the last
-// arguments of `maximum_out` and `minimum_out` so I tentatively embarrassingly get and copy
-// the result to `self[i]`.
-#define FOREACH_MAXIMUM_MINIMUM_OP(NAME)                                                     \
-std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList tensors2) { \
-  check_foreach_api_restrictions(tensors1, tensors2);                                        \
-                                                                                             \
-  std::vector<Tensor> result;                                                                \
-  result.reserve(tensors1.size());                                                           \
-  for (const auto i : c10::irange(tensors1.size())) {                                        \
-    result.emplace_back(at::NAME(tensors1[i], tensors2[i]));                                 \
-  }                                                                                          \
-                                                                                             \
-  return result;                                                                             \
-}                                                                                            \
-void foreach_tensor_##NAME##_slow_(TensorList self, TensorList other) {                      \
-  check_foreach_api_restrictions(self, other);                                               \
-  for (const auto i : c10::irange(self.size())) {                                            \
-    const auto tmp = at::NAME(self[i], other[i]);                                            \
-    self[i].copy_(tmp, /* non_blocking */ true);                                             \
-  }                                                                                          \
-}
-
-FOREACH_MAXIMUM_MINIMUM_OP(maximum)
-FOREACH_MAXIMUM_MINIMUM_OP(minimum)
-
 void foreach_tensor_zero_slow_(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
 

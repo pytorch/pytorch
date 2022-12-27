@@ -3,7 +3,7 @@
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/BinaryOps.h>
-#include <ATen/NumericUtils.h>
+#include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -139,18 +139,7 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, co
     });
 }
 
-// std:: does not have clamp functors
-template <typename T>
-struct clamp_min {
-    __device__ T operator()(const T& a, const T& b) const { return _isnan(a) or a > b ? a : b; }
-};
-
-template <typename T>
-struct clamp_max {
-    __device__ T operator()(const T& a, const T& b) const { return _isnan(a) or a < b ? a : b; }
-};
-
-FOREACH_BINARY_OP_SCALAR(all_types_bool_half_bfloat16, clamp_min, clamp_min, false);
-FOREACH_BINARY_OP_SCALAR(all_types_bool_half_bfloat16, clamp_max, clamp_max, false);
+FOREACH_BINARY_OP_SCALAR(all_types_bool_half_bfloat16, clamp_max, minimum, false);
+FOREACH_BINARY_OP_SCALAR(all_types_bool_half_bfloat16, clamp_min, maximum, false);
 
 }} // namespace at::native

@@ -7854,6 +7854,18 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=False,
     ),
+    ForeachFuncInfo(
+        "minimum",
+        dtypes=all_types_and(torch.bool),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+    ),
+    ForeachFuncInfo(
+        "maximum",
+        dtypes=all_types_and(torch.bool),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+    ),
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
@@ -7866,19 +7878,6 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
         "addcdiv",
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
-    ),
-]
-
-foreach_minmax_op_db: List[ForeachFuncInfo] = [
-    ForeachFuncInfo(
-        "maximum",
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
-    ),
-    ForeachFuncInfo(
-        "minimum",
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
     ),
 ]
 

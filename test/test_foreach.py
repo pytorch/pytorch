@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta, ops)
 from torch.testing._internal.common_methods_invocations import (
-    foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_minmax_op_db,
+    foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
     foreach_reduce_op_db)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, integral_types, complex_types,
@@ -399,50 +399,6 @@ class TestForeach(TestCase):
     def test_unary_slowpath(self, device, dtype, op):
         for N in N_values:
             self._test_unary(device, dtype, op, N, is_fastpath=False)
-
-    # note(crcrpar): `torch.maximum` and `torch.minimum` support `out` arg but there seem to be no inplace versions.
-    # So, compare `inplace_op` results with `ref`'s outputs.
-    def _minmax_test(self, opinfo, inputs, is_fastpath, n_expected_cudaLaunchKernels):
-        op, ref, inplace_op, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
-        expected = ref(inputs)
-        self.assertEqual(expected, op(inputs, self.is_cuda, is_fastpath))
-
-        inplace_inputs = [[t.clone() for t in inputs[0]], inputs[1]]
-        inplace_op(inplace_inputs, self.is_cuda, is_fastpath)
-        self.assertEqual(expected, inplace_inputs[0])
-
-    @ops(foreach_minmax_op_db)
-    def test_minmax_fastpath(self, device, dtype, op):
-        for N in N_values:
-            inputs = tuple(op.sample_inputs(device, dtype, N) for _ in range(2))
-            self._minmax_test(op, inputs, True, N if dtype == torch.bool else 1)
-
-    @ops(foreach_minmax_op_db,
-         dtypes=all_types_and(torch.half, torch.bfloat16, torch.bool))
-    def test_minmax_slowpath(self, device, dtype, op):
-        for N in N_values:
-            inputs = tuple(op.sample_inputs(device, dtype, N, noncontiguous=True) for _ in range(2))
-            self._minmax_test(op, inputs, False, 1)
-
-    # note(mkozuki): ForeachFuncInfo's of both `_foreach_maximum` and `_foreach_minimum` include integer types.
-    # so, manually limit dtypes to fp types for inf&nan tests.
-    @ops(foreach_minmax_op_db, dtypes=floating_types_and(torch.half, torch.bfloat16))
-    def test_minmax_float_inf_nan(self, device, dtype, op):
-        inputs = (
-            [
-                torch.tensor([float('inf')], device=device, dtype=dtype),
-                torch.tensor([-float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('nan')], device=device, dtype=dtype),
-                torch.tensor([float('nan')], device=device, dtype=dtype)
-            ],
-            [
-                torch.tensor([-float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('nan')], device=device, dtype=dtype)
-            ],
-        )
-        self._minmax_test(op, inputs, True, 1)
 
     def _reduce_test(self, opinfo, inputs, ord, is_fastpath, n_expected_cudaLaunchKernels):
         op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
