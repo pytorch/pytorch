@@ -52,7 +52,7 @@ with the replaced parameters.
     :nosignatures:
 
     functional_call
-    stack_ensembled_state
+    stack_module_state
 
 If you're looking for information on fixing Batch Norm modules, please follow the
 guidance here
@@ -60,4 +60,4 @@ guidance here
 .. toctree::
    :maxdepth: 1
 
-   batch_norm
+   func.batch_norm
