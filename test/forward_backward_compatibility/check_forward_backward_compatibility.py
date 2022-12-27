@@ -80,7 +80,7 @@ ALLOW_LIST = [
     ("aten::linalg_det", datetime.date(2022, 8, 1)),
     ("aten::linalg_det.out", datetime.date(2022, 8, 1)),
     ("aten::_det_lu_based_helper", datetime.date(2022, 8, 1)),
-    ("aten::frobenius_norm", datetime.date(2022, 10, 1)),
+    ("aten::frobenius_norm", datetime.date(2023, 3, 1)),
     ("aten::slogdet", datetime.date(2022, 8, 1)),
     ("aten::slogdet.out", datetime.date(2022, 8, 1)),
     ("aten::linalg_slogdet", datetime.date(2022, 8, 1)),
