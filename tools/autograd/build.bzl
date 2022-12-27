@@ -1,5 +1,8 @@
+load("@//tools:cruise_rules.bzl", "cruise_py_library")
+load("@//tools/py_hermetic_rules:py_hermetic_rules.bzl", "pip3_dep")
+
 def define_targets(rules):
-    rules.py_library(
+    cruise_py_library(
         name = "autograd",
         srcs = rules.glob(["*.py"]),
         data = rules.glob([
@@ -8,7 +11,8 @@ def define_targets(rules):
         ]),
         visibility = ["//:__subpackages__"],
         deps = [
-            rules.requirement("PyYAML"),
+            pip3_dep("pyyaml"),
             "//torchgen:torchgen",
         ],
+        import_from_root = True,
     )
