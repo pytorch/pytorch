@@ -19,11 +19,5 @@ struct CppFunctionTensorPreHook : public FunctionPreHook {
   int value_idx_;
 };
 
-struct CombinedFunctionPreHook : public FunctionPreHook {
-  CombinedFunctionPreHook(std::vector<std::shared_ptr<FunctionPreHook>> hooks);
-  variable_list operator()(const variable_list& values) override;
-  std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
-};
-
 } // namespace autograd
 } // namespace torch

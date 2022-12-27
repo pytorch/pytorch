@@ -48,21 +48,5 @@ variable_list CppFunctionTensorPreHook::operator()(
   return results;
 }
 
-// NB: This is currently used in accumulate grad only, which cannot save
-//     FunctionPreHooks on the node itself because the acc grad node won't be
-//     kept alive until there's another node referencing it
-// NOLINTNEXTLINE(modernize-pass-by-value)
-CombinedFunctionPreHook::CombinedFunctionPreHook(
-    std::vector<std::shared_ptr<FunctionPreHook>> hooks)
-    : hooks_(hooks) {}
-
-variable_list CombinedFunctionPreHook::operator()(const variable_list& values) {
-  variable_list res = values;
-  for (const auto& hook : hooks_) {
-    res = (*hook)(res);
-  }
-  return res;
-}
-
 } // namespace autograd
 } // namespace torch

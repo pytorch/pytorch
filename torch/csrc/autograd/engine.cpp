@@ -956,8 +956,10 @@ void Engine::evaluate_function(
     auto& fn_info = exec_info_.at(func);
     variable_list new_inputs = inputs.buffer;
     if (!fn_info.needed_) {
-      TORCH_INTERNAL_ASSERT(fn_info.captures_.get() != nullptr,
-        "we should only only be traversing nodes that are needed in backward")
+      // We always want to call tensor pre-hooks, but want to avoid calling it
+      // twice. needed_ = True indicates that we will call tensor pre-hooks later.
+      //
+      // See NOTE [Hooks ordering] for more context.
       new_inputs =
           call_tensor_pre_hooks(*func, InputBuffer::variables(std::move(inputs)));
     }
@@ -978,7 +980,7 @@ void Engine::evaluate_function(
       }
     }
     if (!fn_info.needed_) {
-      // Skip execution if we don't need to execute the function
+      // Skip execution if we don't need to execute the function.
       return;
     }
   }
