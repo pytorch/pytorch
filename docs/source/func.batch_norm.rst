@@ -44,7 +44,7 @@ module in-place to not use running stats
 
 .. code-block:: python
 
-    from functorch.experimental import replace_all_batch_norm_modules_
+    from torch.func import replace_all_batch_norm_modules_
     replace_all_batch_norm_modules_(net)
 
 Option 3: eval mode
