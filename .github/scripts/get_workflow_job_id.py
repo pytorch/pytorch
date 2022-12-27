@@ -6,6 +6,16 @@ import requests
 import os
 import argparse
 
+def handle_bad_status(response: requests.Response) -> None:
+    if response.status_code != 200:
+        exception_message = (
+            "Is github alright?",
+            f"Recieved status code '{response.status_code}' when attempting to retrieve runs:\n",
+            f"{response.content.decode()}"
+        )
+        raise RuntimeError(exception_message)
+
+
 # Our strategy is to retrieve the parent workflow run, then filter its jobs on
 # RUNNER_NAME to figure out which job we're currently running.
 #
@@ -44,10 +54,12 @@ response = requests.get(
     f"{PYTORCH_GITHUB_API}/actions/runs/{args.workflow_run_id}/jobs?per_page=100",
     headers=REQUEST_HEADERS,
 )
+handle_bad_status(response)
 
 jobs = response.json()["jobs"]
 while "next" in response.links.keys():
     response = requests.get(response.links["next"]["url"], headers=REQUEST_HEADERS)
+    handle_bad_status(response)
     jobs.extend(response.json()["jobs"])
 
 # Sort the jobs list by start time, in descending order. We want to get the most
