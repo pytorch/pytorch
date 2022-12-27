@@ -339,8 +339,9 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
             return autograd_function.jvp(wrapped_ctx, *tangents)
 
+        tangent_in_dims = get_tangents_in_dims(in_dims, tangents)
         out_tangents, out_tangents_dims = restore_vmap(
-            jvp_no_context, (saved_tensors_bdims, in_dims), batch_size, randomness)(
+            jvp_no_context, (saved_tensors_bdims, tangent_in_dims), batch_size, randomness)(
                 ctx.saved_tensors, tangents)
 
         result = reductify(out_tangents, out_tangents_dims, out_dims,
@@ -381,6 +382,17 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         return out_dims
 
     return Generated, get_out_dims
+
+
+# tangents might be None, so we need to replace
+# the corresponding in_dims with None.
+def get_tangents_in_dims(input_dims, tangents):
+    flat_in_dims, spec = pytree.tree_flatten(input_dims)
+    flat_tangents, _ = pytree.tree_flatten(tangents)
+    result = [None if tangent is None else in_dim
+              for in_dim, tangent in zip(flat_in_dims, flat_tangents)]
+    return pytree.tree_unflatten(result, spec)
+
 
 # NOTE: [Why do we need to run setup_context under a vmap?]
 # Consider the following autograd.Function
