@@ -22,8 +22,8 @@ void MPSHeapAllocatorImpl::init_allocator()
   static const char *verbosity_str = getenv("PYTORCH_DEBUG_MPS_ALLOCATOR");
   m_debug_verbosity = verbosity_str ? strtol(verbosity_str, nullptr, 0) : DebugVerbosity::SILENT;
 
-  // on unified memory, we set the allowed upper bound to twice the size of recommendedMaxWorkingSetSize.
-  const double high_watermark_upper_bound =  m_device.hasUnifiedMemory ? 2.0 : 1.0;
+  // we set the allowed upper bound to twice the size of recommendedMaxWorkingSetSize.
+  const double high_watermark_upper_bound = 2.0;
 
   static const char *high_watermark_ratio_str = getenv("PYTORCH_MPS_HIGH_WATERMARK_RATIO");
   m_high_watermark_ratio = high_watermark_ratio_str ? strtod(high_watermark_ratio_str, nullptr) : default_high_watermark_ratio;
