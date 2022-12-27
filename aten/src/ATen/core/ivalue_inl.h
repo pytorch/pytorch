@@ -216,7 +216,7 @@ inline at::Generator IValue::toGenerator() const& {
   AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
   return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
 }
-inline c10::SymInt IValue::toSymInt() const {
+inline c10::SymInt IValue::toSymInt() const& {
   AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
   if (isSymInt()) {
     return c10::SymInt(toIntrusivePtr<c10::SymNodeImpl>());
@@ -225,10 +225,28 @@ inline c10::SymInt IValue::toSymInt() const {
   }
 }
 
-inline c10::SymFloat IValue::toSymFloat() const {
+inline c10::SymInt IValue::toSymInt() && {
+  AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
+  if (isSymInt()) {
+    return c10::SymInt(moveToIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymInt(payload.u.as_int);
+  }
+}
+
+inline c10::SymFloat IValue::toSymFloat() const& {
   AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
   if (isSymFloat()) {
     return c10::SymFloat(toIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymFloat(payload.u.as_double);
+  }
+}
+
+inline c10::SymFloat IValue::toSymFloat() && {
+  AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
+  if (isSymFloat()) {
+    return c10::SymFloat(moveToIntrusivePtr<c10::SymNodeImpl>());
   } else {
     return c10::SymFloat(payload.u.as_double);
   }

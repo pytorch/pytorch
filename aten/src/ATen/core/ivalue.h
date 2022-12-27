@@ -574,7 +574,8 @@ public:
     return Tag::SymInt == tag;
   }
 
-  c10::SymInt toSymInt() const;
+  c10::SymInt toSymInt() const&;
+  c10::SymInt toSymInt() &&;
 
   IValue(c10::SymFloat i) {
     if (i.is_symbolic()) {
@@ -590,7 +591,8 @@ public:
     return Tag::SymFloat == tag;
   }
 
-  c10::SymFloat toSymFloat() const;
+  c10::SymFloat toSymFloat() const&;
+  c10::SymFloat toSymFloat() &&;
 
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
