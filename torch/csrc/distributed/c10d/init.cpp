@@ -258,7 +258,7 @@ static PyMethodDef reduceopmeta_methods[] = {
      (PyCFunction)reduceopmeta___instancecheck__,
      METH_O,
      "Custom `__instancecheck__` for ReduceOp"},
-    {NULL, NULL}};
+    {nullptr, nullptr}};
 PyTypeObject* GetReduceOpMetaclass() {
   static auto* metaclass = [] {
     PyTypeObject* base_metaclass =

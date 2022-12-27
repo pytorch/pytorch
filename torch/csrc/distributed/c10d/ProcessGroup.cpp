@@ -147,7 +147,7 @@ ProcessGroup::ProcessGroup(
 ProcessGroup::ProcessGroup(int rank, int size)
     : rank_(rank), size_(size), backendType_(BackendType::UNDEFINED) {}
 
-ProcessGroup::~ProcessGroup() {}
+ProcessGroup::~ProcessGroup() = default;
 
 void ProcessGroup::init() {
   C10_LOG_API_USAGE_ONCE(

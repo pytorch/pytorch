@@ -6,7 +6,7 @@ constexpr std::chrono::milliseconds Store::kDefaultTimeout;
 constexpr std::chrono::milliseconds Store::kNoTimeout;
 
 // Define destructor symbol for abstract base class.
-Store::~Store() {}
+Store::~Store() = default;
 
 const std::chrono::milliseconds& Store::getTimeout() const noexcept {
   return timeout_;

@@ -18,7 +18,7 @@ ProcessGroupRoundRobin::ProcessGroupRoundRobin(
   iterator_ = processGroups_.begin();
 }
 
-ProcessGroupRoundRobin::~ProcessGroupRoundRobin() {}
+ProcessGroupRoundRobin::~ProcessGroupRoundRobin() = default;
 
 c10::intrusive_ptr<Work> ProcessGroupRoundRobin::broadcast(
     std::vector<at::Tensor>& tensors,
