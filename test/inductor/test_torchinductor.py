@@ -2,10 +2,12 @@
 import contextlib
 import dataclasses
 import functools
+import glob
 import importlib
 import itertools
 import os
 import random
+import shutil
 import sys
 import typing
 import unittest
@@ -5888,6 +5890,22 @@ if HAS_CUDA:
             assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
+        counter = itertools.count(0)
+
+        class DebugDirManager(object):
+            def __init__(self):
+                self.id = next(TritonCodeGenTests.counter)
+                self.prev_debug_name = None
+
+            def __enter__(self):
+                self.prev_debug_name = torch._dynamo.config.debug_dir_root
+                self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
+                torch._dynamo.config.debug_dir_root = self.new_name
+
+            def __exit__(self, *args):
+                shutil.rmtree(self.new_name)
+                torch._dynamo.config.debug_dir_root = self.prev_debug_name
+
         from torch._inductor.triton_ops.autotune import CachingAutotuner
 
         class NoOpCompilerBackend:
@@ -5969,6 +5987,98 @@ if HAS_CUDA:
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
+
+        @staticmethod
+        def run_and_get_triton_code(fn, args):
+            from torch._inductor.debug import DebugContext
+            from torch._inductor.virtualized import V
+
+            torch._dynamo.reset()
+
+            context = DebugContext()
+
+            with TritonCodeGenTests.DebugDirManager(), patch.object(
+                config.trace, "enabled", True
+            ), context, V.set_debug_handler(context):
+
+                dir_name = "/".join(context._path.split("/")[:-1]) + "/"
+                fil = dir_name + "*inference*"
+                existing_dirs = glob.glob(fil)
+
+                fn(*args)
+
+                assert context._path is not None
+
+                dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
+
+                assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
+
+                full_name = os.path.join(dir_dbg[0], "output_code.py")
+                with open(full_name, "r") as f:
+                    return f.read()
+
+        def test_optimize_indexing_dtype(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
+
+            fn_opt = torch._dynamo.optimize("inductor")(fn)
+            inps = [torch.randn(2, 4, 16, 16).cuda()]
+            code = self.run_and_get_triton_code(fn_opt, inps)
+            self.assertTrue("to(tl.int32)" in code)
+            self.assertFalse("to(tl.int64)" in code)
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_cant_optimize_compute(self):
+            def ones():
+                return torch.ones([4], device="cuda")
+
+            def suffix(inp):
+                return (inp.to(torch.int64) + 1).to(torch.float64)
+
+            ten = torch.rand([4], device="cuda")
+
+            for foo in (
+                lambda x: x + 2147483657,
+                lambda x: torch.where(x < 0, ones(), ones() - 2) * (-(2 ** (40))),
+                lambda x: x + ten,
+                lambda x: x + ten.sum(),
+            ):
+
+                def fn():
+                    return suffix(foo(ones()))
+
+                fn_opt = torch._dynamo.optimize("inductor")(fn)
+                code = self.run_and_get_triton_code(fn_opt, [])
+
+                # this cannot be optimized away, value too large
+                self.assertTrue("to(tl.int64)" in code)
+                self.assertEqual(fn_opt(), fn())
+
+        def test_optimize_compute(self):
+            def ones():
+                return torch.ones([4], device="cuda")
+
+            def suffix(inp):
+                return (inp.to(torch.int64) + 1).to(torch.float64)
+
+            for foo in (
+                lambda x: x + 500,
+                lambda x: torch.where(x < 0, ones(), ones() - 2) * (-(2 ** (20))),
+                lambda x: x / 30,
+            ):
+
+                def fn():
+                    return suffix(foo(ones()))
+
+                fn_opt = torch._dynamo.optimize("inductor")(fn)
+                code = self.run_and_get_triton_code(fn_opt, [])
+
+                # this can be optimized away, value too large
+                self.assertTrue("to(tl.int64)" not in code)
+                self.assertTrue("to(tl.int32)" in code)
+
+                self.assertEqual(fn_opt(), fn())
 
 
 class ExprPrinterTests(TestCase):
