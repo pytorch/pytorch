@@ -1126,8 +1126,6 @@ class TestOperators(TestCase):
         xfail('nanmean'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
-        xfail('index_copy'),
-        xfail('index_fill'),
         xfail('linalg.eig'),
         xfail('linalg.householder_product'),
         xfail('lu'),
