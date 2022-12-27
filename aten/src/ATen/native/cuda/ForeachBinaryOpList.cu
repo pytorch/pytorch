@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
+#include <ATen/NumericUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -133,12 +134,12 @@ FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, div, std::divides, 
 // std:: does not have clamp functors
 template <typename T>
 struct clamp_min {
-    __device__ T operator()(const T& a, const T& b) const { return a < b ? b: a; }
+    __device__ T operator()(const T& a, const T& b) const { return _isnan(a) or a > b ? a : b; }
 };
 
 template <typename T>
 struct clamp_max {
-    __device__ T operator()(const T& a, const T& b) const { return a > b ? b: a; }
+    __device__ T operator()(const T& a, const T& b) const { return _isnan(a) or a < b ? a : b; }
 };
 
 FOREACH_BINARY_OP_LIST(all_types_bool_half_bfloat16, clamp_min, clamp_min, /*division_op*/ false);
