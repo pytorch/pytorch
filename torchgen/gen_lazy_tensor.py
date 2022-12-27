@@ -196,7 +196,7 @@ std::vector<at::Tensor> to_meta(at::ITensorListRef t_list) {
 class default_args:
     node_base: str = "Node"
     node_base_hdr: Optional[str] = None
-    shape_inference_hdr: str = "torch/csrc/lazy/core/shape_inference.h"
+    shape_inference_hdr: str = "external/pytorch/torch/csrc/lazy/core/shape_inference.h"
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
     lazy_ir_generator: Type[GenLazyIR] = GenLazyIR
