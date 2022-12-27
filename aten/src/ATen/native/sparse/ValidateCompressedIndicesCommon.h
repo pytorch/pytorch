@@ -276,14 +276,10 @@ void _validate_compressed_sparse_indices_kernel(
         at::arange(batch_count, cidx.options()).view(batch_dims).unsqueeze_(-1);
 
     const auto idx_ndims = idx.dim();
-    const auto idx_sizes = idx.sizes();
-    const auto idx_strides = idx.strides();
-    const auto idx_contiguous_strides = c10::contiguous_strides(idx_sizes);
-    std::array<int64_t, 3 * MAX_DIMS> idx_sizes_and_strides;
+    std::array<std::array<int64_t, MAX_DIMS>, 2> idx_sizes_and_strides;
     for (int i = 0; i < idx_ndims; i++) {
-      idx_sizes_and_strides[i] = idx_sizes[i];
-      idx_sizes_and_strides[idx_ndims + i] = idx_strides[i];
-      idx_sizes_and_strides[2 * idx_ndims + i] = idx_contiguous_strides[i];
+      idx_sizes_and_strides[0][i] = idx.size(i);
+      idx_sizes_and_strides[1][i] = idx.stride(i);
     }
 
     auto iter = TensorIteratorConfig()
@@ -322,16 +318,14 @@ void _validate_compressed_sparse_indices_kernel(
                 // NOTE: the implementation below is sync-less, but,
                 // unfortunately, work is not guaranteed to be well-balanced
                 // between different threads.
-                const int64_t* sizes = idx_sizes_and_strides.data();
-                const int64_t* strides = sizes + idx_ndims;
-                const int64_t* contiguous_strides = sizes + 2 * idx_ndims;
+                const auto& idx_sizes = idx_sizes_and_strides[0];
+                const auto& idx_strides = idx_sizes_and_strides[1];
                 int64_t idx_offset = 0;
                 // assuming idx contiguity per batch:
-                const int64_t batch_idx_ = batch_idx * sizes[idx_ndims - 1];
-                for (int i = 0; i < idx_ndims - 1; i++) {
-                  idx_offset +=
-                      ((batch_idx_ / contiguous_strides[i]) % sizes[i]) *
-                      strides[i];
+                int64_t tmp = batch_idx * idx_sizes[idx_ndims - 1];
+                for (int i = idx_ndims; i >= 2; i--) {
+                  idx_offset += (tmp % idx_sizes[i]) * idx_strides[i];
+                  tmp /= idx_sizes[i];
                 }
                 const auto* RESTRICT ptr_idx_batch = ptr_idx + idx_offset;
                 _check_idx_sorted_distinct_vals_slices_with_cidx<
