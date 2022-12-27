@@ -4,7 +4,16 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Callable, Dict, Generator, List, no_type_check, Optional, Set
+from typing import (
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    no_type_check,
+    Optional,
+    Set,
+)
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
@@ -30,6 +39,8 @@ class _FSDPState(_State):
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._is_root: Optional[bool] = None
+        self._handles: List[flat_param_file.FlatParamHandle] = []
+        self._ignored_modules: Set[nn.Module] = set()
         self.rank: int = -1
 
 
@@ -68,33 +79,47 @@ def _is_composable(state: _FSDPState):
 
 
 @no_type_check
-def _all_handles(state: _FSDPState) -> List:
-    return (
-        state._handles
-        if _is_composable(state)
-        else state._fsdp_handles(state)  # `FullyShardedDataParallel`
-    )
-
-
-@no_type_check
 def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     """
-    Given a module and returns the flat handles that map to this module. If the
-    module is FullyShardedDataParallel, the module._handles will be returned.
+    Returns the ``FlatParamHandle`` s corresponding to ``module``. These are
+    the handles that contain some parameter in ``module``.
     """
     if _is_composable(state):
         assert (
-            module in state._comm_module_to_handles
+            module in state._fully_sharded_module_to_handles
         ), f"Expects a `comm_module` but got {module} on rank {state.rank}"
-        return state._comm_module_to_handles[module][:]
+        return state._fully_sharded_module_to_handles[module][:]
     else:
+        # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
         return module._handles[:]
 
 
 @no_type_check
 def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
-    """Given a module and returns if this module has parameters sharded by FSDP."""
+    """Returns if ``module`` has parameters managed by FSDP."""
     return len(_module_handles(state, module)) > 0
+
+
+def _get_sharding_strategy(handles: Iterable):
+    """
+    Returns the sharding strategy of the group of handles given by ``handles``
+    or ``None`` if ``handles`` is empty. The input should be the handles
+    corresponding to one module, so we enforce that they all share the same
+    sharding strategy.
+    """
+    sharding_strategy = None
+    for handle in handles:
+        if sharding_strategy is None:
+            sharding_strategy = handle._sharding_strategy
+        elif (
+            sharding_strategy is not None
+            and sharding_strategy != handle._sharding_strategy
+        ):
+            raise AssertionError(
+                "Expects each group of handles to have the same sharding "
+                f"strategy but got {sharding_strategy} and {handle._sharding_strategy}"
+            )
+    return sharding_strategy
 
 
 def clean_tensor_name(tensor_name: str) -> str:

@@ -661,7 +661,7 @@ void SourceImporterImpl::importEnum(
             << ". Only Integers, Floats and Strings are supported.";
     }
 
-    names_values.emplace_back(std::make_pair(name, ivalue));
+    names_values.emplace_back(name, ivalue);
   }
 
   if (!value_type) {
