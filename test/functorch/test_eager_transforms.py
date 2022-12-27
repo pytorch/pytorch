@@ -4238,6 +4238,12 @@ class TestPyOperatorInteraction(TestCase):
         z, = torch.autograd.grad(y.sum(), x)
         self.assertEqual(z, torch.full_like(x, 2))
 
+    def test_functional_call_multiple_dicts(self):
+        mod = nn.Linear(1, 1)
+        x = torch.randn((1, 1))
+        params = ({'weight': torch.zeros(1, 1)}, {'bias': torch.ones(1)})
+        functional_call(mod, params, x)
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(

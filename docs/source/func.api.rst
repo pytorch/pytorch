@@ -59,4 +59,4 @@ guidance here
 .. toctree::
    :maxdepth: 1
 
-   batch_norm
+   func.batch_norm
