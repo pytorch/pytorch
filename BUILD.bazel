@@ -1,17 +1,21 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
+load("@cruise_ws//tools/third_party:pytorch/pybind_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
-load("@pytorch//third_party:substitution.bzl", "header_template_rule")
+load("@pytorch//third_party:substitution.bzl", "header_template_rule", "template_rule")
 load("@pytorch//:tools/bazel.bzl", "rules")
 load("@pytorch//tools/rules:cu.bzl", "cu_library")
 load("@pytorch//tools/config:defs.bzl", "if_cuda")
 load("@pytorch//:aten.bzl", "intern_build_aten_ops", "generate_aten")
 load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON")
-load(":build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
+load(":build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources", "libtorch_python_cuda_sources", "libtorch_python_distributed_sources")
 load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
+load("@//tools:cruise_rules.bzl", "cruise_py_binary", "cruise_py_library")
+load("@//tools/py_hermetic_rules:py_hermetic_rules.bzl", "pip3_dep")
 
 define_targets(rules = rules)
+
+exports_files(["torch/csrc/lazy/ts_backend/ts_native_functions.cpp"])
 
 COMMON_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
@@ -19,19 +23,32 @@ COMMON_COPTS = [
     "-DHAVE_SHM_OPEN=1",
     "-DHAVE_SHM_UNLINK=1",
     "-D_FILE_OFFSET_BITS=64",
+    "-DHAVE_GCC_GET_CPUID",
+    "-DUSE_GCC_GET_CPUID",
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
-    "-DUSE_DISTRIBUTED",
-    "-DAT_PER_OPERATOR_HEADERS",
+    # "-DUSE_DISTRIBUTED",
+    # "-DAT_PER_OPERATOR_HEADERS",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
+    "-DUSE_NUMPY",
+    "-UFMT_ENFORCE_COMPILE_STRING",
 ] + if_cuda([
     "-DUSE_CUDA",
     "-DUSE_CUDNN",
     # TODO: This should be passed only when building for CUDA-11.5 or newer
     # use cub in a safe manner, see:
     # https://github.com/pytorch/pytorch/pull/55292
-    "-DCUB_WRAPPED_NAMESPACE=at_cuda_detail",
+    # "-DCUB_WRAPPED_NAMESPACE=at_cuda_detail",
+    "-DUSE_DIRECT_NVRTC",
+    "-DUSE_DISTRIBUTED",
+    "-DUSE_C10D",
+    "-DUSE_C10D_NCCL",
+    "-DUSE_C10D_GLOO",
+    "-DUSE_TENSORPIPE",
+    "-DUSE_CUDA_NOT_ROCM",
+    "-DTENSORPIPE_SUPPORTS_CUDA=1",
+    "-DUSE_KINETO",
 ])
 
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
@@ -116,6 +133,9 @@ generate_aten(
         ["aten/src/ATen/Declarations.yaml"]
     ),
     generator = "//torchgen:gen",
+    exec_properties = {
+        "uploadOutputDirectories": "true",
+    },
 )
 
 filegroup(
@@ -314,12 +334,18 @@ cc_library(
 )
 
 ATEN_COPTS = COMMON_COPTS + [
+    "-DUSE_AVX",
+    "-DUSE_AVX2",
     "-DCAFFE2_BUILD_MAIN_LIBS",
     "-DHAVE_AVX_CPU_DEFINITION",
     "-DHAVE_AVX2_CPU_DEFINITION",
     "-fvisibility-inlines-hidden",
     "-fno-math-errno",
     "-fno-trapping-math",
+    # hardcode cuda version for the internals of cub/thrust to at least 10
+    "-D__CUDACC_VER_MAJOR__=10",
+    # Cruise: we are stricter about the warnings then PyTorch upstream, relax it here
+    "-Wno-error"
 ]
 
 intern_build_aten_ops(
@@ -352,10 +378,6 @@ cc_library(
         ":aten_src_ATen_config",
     ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
     copts = ATEN_COPTS,
-    data = if_cuda(
-        [":libcaffe2_nvrtc.so"],
-        [],
-    ),
     visibility = ["//visibility:public"],
     deps = [
         ":ATen_CPU",
@@ -364,6 +386,7 @@ cc_library(
         ":torch_headers",
         "@fbgemm",
         "@ideep",
+        ":libcaffe2_nvrtc.so",
     ],
     alwayslink = True,
 )
@@ -374,7 +397,6 @@ cc_library(
         "aten/src/ATen/cuda/nvrtc_stub/*.cpp",
     ]),
     copts = ATEN_COPTS,
-    linkstatic = True,
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
@@ -389,6 +411,7 @@ cc_library(
 cc_binary(
     name = "libcaffe2_nvrtc.so",
     linkshared = True,
+    linkstatic = False,
     visibility = ["//visibility:public"],
     deps = [
         ":aten_nvrtc",
@@ -1302,7 +1325,7 @@ cc_library(
     ],
 )
 
-py_binary(
+cruise_py_binary(
     name = "gen_op",
     srcs = ["caffe2/contrib/aten/gen_op.py"],
     deps = ["//torchgen"],
@@ -1428,7 +1451,6 @@ cc_library(
         ":caffe2_utils_srcs",
     ],
     copts = CAFFE2_COPTS + ["-mf16c"],
-    linkstatic = 1,
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_headers",
@@ -1447,6 +1469,7 @@ cc_library(
         "@fmt",
     ] + if_cuda(
         [
+            "@nccl",
             ":caffe2_cuda_cpp",
             ":aten_cuda",
             "@tensorpipe//:tensorpipe_cuda",
@@ -1636,8 +1659,7 @@ torch_sources = ({
     torch_cpp_srcs +
     libtorch_extra_sources +
     jit_core_sources +
-    lazy_tensor_ts_sources +
-    GENERATED_AUTOGRAD_CPP)
+    lazy_tensor_ts_sources)
 }).keys()
 
 cc_library(
@@ -1645,11 +1667,9 @@ cc_library(
     srcs = if_cuda(glob(
         libtorch_cuda_sources,
         exclude = [
-            "torch/csrc/cuda/python_nccl.cpp",
-            "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
-    )) + torch_sources,
+    )) + torch_sources + [":cpp_generated_code"],
     copts = TORCH_COPTS,
     defines = [
         "CAFFE2_NIGHTLY_VERSION=20200115",
@@ -1658,18 +1678,28 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
-        "@kineto",
+        "@libkineto",
+        ":aten_nvrtc",
     ] + if_cuda([
-        ":torch_distributed_cuda",
+        # Cruise-patch: Figure out how to enable this without causing quantization::_FloatToBfloat16Quantized dispatch error.
+        # ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",
         "@cutlass",
+        "@nccl",
     ]),
     alwayslink = True,
 )
 
 cc_library(
     name = "shm",
-    srcs = glob(["torch/lib/libshm/*.cpp"]),
+    srcs = glob(
+        [
+            "torch/lib/libshm/*.cpp"
+        ],
+        exclude = [
+            "torch/lib/libshm/manager.cpp",
+        ],
+    ),
     deps = [
         ":torch",
     ],
@@ -1700,20 +1730,83 @@ cc_library(
 
 cc_library(
     name = "torch_python",
-    srcs = libtorch_python_core_sources + GENERATED_AUTOGRAD_PYTHON,
+    tags = ["cuda112"],
+    srcs = libtorch_python_core_sources
+        + if_cuda(libtorch_python_cuda_sources)
+        + if_cuda(libtorch_python_distributed_sources)
+        + GENERATED_AUTOGRAD_PYTHON,
+    hdrs = glob([
+        "torch/csrc/generic/*.cpp",
+    ]),
+    copts = COMMON_COPTS + if_cuda(["-DUSE_CUDA=1"]),
     deps = [
         ":torch",
         ":shm",
+        "@python3//:interpreter_lib",
         "@pybind11",
+        "@numpy_includes_py3",
     ],
 )
 
 pybind_extension(
-    name = "_C",
-    srcs = ["torch/csrc/stub.c"],
-    deps = [
-        ":torch_python"
+    name = "torch/_C",
+    srcs = [
+        "torch/csrc/stub.c",
     ],
+    deps = [
+        ":torch_python",
+        ":aten_nvrtc",
+    ],
+)
+
+cc_binary(
+    name = "torch/bin/torch_shm_manager",
+    srcs = [
+        "torch/lib/libshm/manager.cpp",
+    ],
+    deps = [
+        ":shm",
+        # Cruise: this should not be needed here in theory? There should be a better place to put this dep
+        ":aten_nvrtc",
+    ],
+    linkstatic = False,
+)
+
+template_rule(
+    name = "gen_version_py",
+    src = ":torch/version.py.tpl",
+    out = "torch/version.py",
+    substitutions = select({
+        # Set default to 11.2. Otherwise Torchvision complains about incompatibility.
+        "//conditions:default": {"{{CUDA_VERSION}}": "11.2"},
+        "@cuda//:cuda100": {"{{CUDA_VERSION}}": "10.0"},
+        "@cuda//:cuda102": {"{{CUDA_VERSION}}": "10.2"},
+        "@cuda//:cuda112": {"{{CUDA_VERSION}}": "11.2"},
+    }),
+)
+
+cruise_py_library(
+    name = "pytorch_py",
+    visibility = ["//visibility:public"],
+    # Cruise-Patch: When there is a torch/version.py file, it will cause builds to fail with a duplicate source.
+    # It's unclear why this file is here, but we're excluding it to unblock customers who are hitting this.
+    srcs = glob(["torch/**/*.py"], exclude = ["torch/version.py"]) + [":torch/version.py"],
+    deps = [
+        pip3_dep("future"),
+        pip3_dep("numpy"),
+        pip3_dep("pyyaml"),
+        pip3_dep("requests"),
+        pip3_dep("setuptools"),
+        pip3_dep("six"),
+        pip3_dep("typing_extensions"),
+        "//torchgen",
+    ],
+    data = [
+        ":torch/_C.so",
+        ":torch/bin/torch_shm_manager",
+    ],
+
+    create_ipython_rules = False,
 )
 
 # cpp api tests
