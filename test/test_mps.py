@@ -1533,47 +1533,6 @@ class TestMPS(TestCase):
         helper(torch.float16)
         helper(torch.float32)
 
-    # Test forward NaN Sum
-    def test_nansum(self):
-        args = itertools.product(
-            (torch.float16, torch.float32),                             # dtype
-            (True, False),                                              # noncontiguous
-            (0, 1, None),                                               # dim
-        )
-
-        def helper(dtype, noncontiguous, dim):
-            zero_cpu = torch.zeros((), dtype=dtype)
-
-            # Randomly scale the values
-            scale = random.randint(10, 100)
-            x_cpu: torch.Tensor = make_tensor(
-                (17, 17), dtype=dtype, device='cpu',
-                low=-scale, high=scale, noncontiguous=noncontiguous)
-
-            if dtype.is_floating_point:
-                nan_mask_cpu = x_cpu < (0.2 * scale)
-                x_nonan_cpu = torch.where(nan_mask_cpu, zero_cpu, x_cpu)
-                x_cpu[nan_mask_cpu] = np.nan
-            else:
-                x_nonan_cpu = x_cpu
-
-            x_mps = x_cpu.to('mps')
-            out_mps = torch.empty((), dtype=dtype).to('mps')
-            dim_kwargs = {} if dim is None else {"dim": dim}
-            expect = torch.sum(x_nonan_cpu, **dim_kwargs)
-
-            actual_cpu = torch.nansum(x_cpu, **dim_kwargs)
-            self.assertEqual(expect, actual_cpu)
-
-            actual_mps = torch.nansum(x_mps, **dim_kwargs)
-            self.assertEqual(expect, actual_mps)
-
-            torch.nansum(x_mps, out=out_mps, **dim_kwargs)
-            self.assertEqual(expect, out_mps)
-
-        for dtype, noncontiguous, dim in args:
-            helper(dtype, noncontiguous, dim)
-
     def _test_module_empty_input(self, module, inp, check_size=True):
         inp.requires_grad_(True)
         out = module(inp)
@@ -1977,6 +1936,55 @@ class TestSmoothL1Loss(TestCase):
 
     def test_smooth_l1_loss_reduction_mean_sum_backward(self):
         self._smooth_l1_loss_helper(reduction="sum", requires_grad=True)
+
+
+class TestNanSum(TestCase):
+
+    def helper(self, dtype, noncontiguous, dim):
+        zero_cpu = torch.zeros((), dtype=dtype)
+
+        # Randomly scale the values
+        scale = random.randint(10, 100)
+        x_cpu: torch.Tensor = make_tensor(
+            (5, 5), dtype=dtype, device='cpu',
+            low=-scale, high=scale, noncontiguous=noncontiguous)
+
+        if dtype.is_floating_point:
+            nan_mask_cpu = x_cpu < (0.2 * scale)
+            x_no_nan_cpu = torch.where(nan_mask_cpu, zero_cpu, x_cpu)
+            x_cpu[nan_mask_cpu] = np.nan
+        else:
+            x_no_nan_cpu = x_cpu
+
+        x_mps = x_cpu.to('mps')
+        out_mps = torch.empty((), dtype=dtype).to('mps')
+        dim_kwargs = {"dim": dim} if dim is not None else {}
+        expect = torch.sum(x_no_nan_cpu, **dim_kwargs)
+
+        actual_cpu = torch.nansum(x_cpu, **dim_kwargs)
+        # Sanity check on CPU
+        self.assertEqual(expect, actual_cpu)
+
+        # Test MPS
+        actual_mps = torch.nansum(x_mps, **dim_kwargs)
+        print(f"{actual_mps=}")
+        print(f'{expect=}')
+        self.assertEqual(expect, actual_mps)
+
+        # Test out= variant
+        torch.nansum(x_mps, out=out_mps, **dim_kwargs)
+        self.assertEqual(expect, out_mps)
+
+    def test_nansum(self):
+        args = itertools.product(
+            (torch.float16, torch.float32, torch.int32, torch.int64),   # dtype
+            (True, False),                                              # noncontiguous
+            (0, 1, None),                                               # dim
+        )
+
+        for dtype, noncontiguous, dim in args:
+            with self.subTest(dtype=dtype, noncontiguous=noncontiguous, dim=dim):
+                self.helper(dtype, noncontiguous, dim)
 
 
 class TestNLLLoss(TestCase):
