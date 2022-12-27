@@ -397,7 +397,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("nanmedian", nanmedian_decomp);
   REDUCTION_BOXED(nanmedian.dim);
   REDUCTION_BOXED(nansum);
-  REDUCTION_BOXED(nanmean);
   m.impl("norm.Scalar", norm_scalar_decomp);
   REDUCTION_BOXED_ARGS(norm.ScalarOpt_dim, 2);
   m.impl("prod", prod_decomp);
