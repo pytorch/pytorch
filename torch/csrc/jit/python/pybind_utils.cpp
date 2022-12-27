@@ -535,9 +535,9 @@ py::object toPyObject(IValue ivalue) {
       return py::cast(autograd::Variable(std::move(tensor)));
     }
   } else if (ivalue.isStorage()) {
-    return py::cast(ivalue.toStorage());
+    return py::cast(std::move(ivalue).toStorage());
   } else if (ivalue.isGenerator()) {
-    return py::cast(ivalue.toGenerator());
+    return py::cast(std::move(ivalue).toGenerator());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
