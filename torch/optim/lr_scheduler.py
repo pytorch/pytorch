@@ -1220,21 +1220,10 @@ class CyclicLR(LRScheduler):
         self.mode = mode
         self.gamma = gamma
 
-        if scale_fn is None:
-            self._scale_fn_custom = None
-            if self.mode == 'triangular':
-                self._scale_fn_ref = weakref.WeakMethod(self._triangular_scale_fn)
-                self.scale_mode = 'cycle'
-            elif self.mode == 'triangular2':
-                self._scale_fn_ref = weakref.WeakMethod(self._triangular2_scale_fn)
-                self.scale_mode = 'cycle'
-            elif self.mode == 'exp_range':
-                self._scale_fn_ref = weakref.WeakMethod(self._exp_range_scale_fn)
-                self.scale_mode = 'iterations'
-        else:
-            self._scale_fn_custom = scale_fn
-            self._scale_fn_ref = None
-            self.scale_mode = scale_mode
+        self._scale_fn_ref = None
+        self._scale_fn_custom = scale_fn
+        self.scale_mode = scale_mode
+        self._init_scale_fn()
 
         self.cycle_momentum = cycle_momentum
         if cycle_momentum:
@@ -1250,6 +1239,19 @@ class CyclicLR(LRScheduler):
 
         super(CyclicLR, self).__init__(optimizer, last_epoch, verbose)
         self.base_lrs = base_lrs
+
+    def _init_scale_fn(self):
+        if self._scale_fn_custom is not None:
+            return
+        if self.mode == 'triangular':
+            self._scale_fn_ref = weakref.WeakMethod(self._triangular_scale_fn)
+            self.scale_mode = 'cycle'
+        elif self.mode == 'triangular2':
+            self._scale_fn_ref = weakref.WeakMethod(self._triangular2_scale_fn)
+            self.scale_mode = 'cycle'
+        elif self.mode == 'exp_range':
+            self._scale_fn_ref = weakref.WeakMethod(self._exp_range_scale_fn)
+            self.scale_mode = 'iterations'
 
     def _format_param(self, name, optimizer, param):
         """Return correctly formatted lr/momentum for each param group."""
@@ -1318,6 +1320,14 @@ class CyclicLR(LRScheduler):
                 param_group['momentum'] = momentum
 
         return lrs
+
+    def state_dict(self):
+        return {key: value for key, value in self.__dict__.items() if key not in ("optimizer", "_scale_fn_ref")}
+
+    def load_state_dict(self, state_dict):
+        self.__dict__.update(state_dict)
+        self._init_scale_fn()
+
 
 
 class CosineAnnealingWarmRestarts(LRScheduler):
