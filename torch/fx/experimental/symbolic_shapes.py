@@ -15,9 +15,7 @@ import textwrap
 import logging
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import (  # noqa: F401
-    SymInt, SymFloat, sym_float, sym_int, sym_ceil, sym_floor, sym_sqrt
-)
+from torch import SymInt, SymFloat, sym_float, sym_int  # noqa: F401
 from torch._guards import ShapeGuard
 
 log = logging.getLogger(__name__)
@@ -105,6 +103,12 @@ def guard_int(a):
         return a.node.guard_int("", 0)  # NB: uses Python backtrace
     assert isinstance(a, int)
     return a
+
+# Drop in replacement for math.sqrt
+def sym_sqrt(a):
+    if hasattr(a, '__sym_sqrt__'):
+        return a.__sym_sqrt__()
+    return math.sqrt(a)
 
 def to_node(self, num):
     if isinstance(num, (SymInt, SymFloat)):

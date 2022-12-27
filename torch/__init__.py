@@ -49,7 +49,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'compile', 'vmap', 'sym_int', 'sym_float', 'sym_sqrt', 'sym_floor', 'sym_ceil',
+    'sym_int', 'sym_float', 'compile', 'vmap'
 ]
 
 ################################################################################
@@ -312,7 +312,10 @@ class SymFloat:
 
 def sym_float(a):
     r"""
-    SymInt-aware utility for casting to float.
+    SymInt-aware utility for float casting.
+
+    Args:
+        a (SymInt, SymFloat, or object): Object to cast
     """
     if isinstance(a, SymFloat):
         return a
@@ -320,33 +323,21 @@ def sym_float(a):
         return a.__sym_float__()
     return py_float(a)  # type: ignore[operator]
 
-# Drop in replacement for math.sqrt
-def sym_sqrt(a):
-    r"""
-    SymInt-aware drop-in replacement for math.sqrt().
-    """
-    if hasattr(a, '__sym_sqrt__'):
-        return a.__sym_sqrt__()
-    return math.sqrt(a)
-
 # Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
 # directly usable, but this has a more relaxed type signature for mypy
 # (mypy requires SupportFloat which is too strict)
 def sym_floor(x):
-    r"""
-    SymInt-aware drop-in replacement for math.floor().
-    """
     return math.floor(x)  # type: ignore[type]
 
 def sym_ceil(x):
-    r"""
-    SymInt-aware drop-in replacement for math.ceil().
-    """
     return math.ceil(x)  # type: ignore[type]
 
 def sym_int(a):
     r"""
-    SymInt-aware utility for casting to int.
+    SymInt-aware utility for int casting.
+
+    Args:
+        a (SymInt, SymFloat, or object): Object to cast
     """
     if isinstance(a, SymInt):
         return a
