@@ -26,12 +26,17 @@ from torch.testing._internal.common_quantization import (
     ConvModel,
     QuantizationTestCase,
     skipIfNoFBGEMM,
+    skipIfNoQNNPACK,
+    withQNNPACKBackend,
     SingleLayerLinearDynamicModel,
     SingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
     SparseNNModel,
     skip_if_no_torchvision,
     TwoLayerLinearModel
+)
+from torch.testing._internal.common_quantized import (
+    override_quantized_engine,
 )
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
@@ -2072,7 +2077,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             mt_shadows_mt_copy, OutputLogger, 'b')
         self.assertTrue(len(act_compare_dict) == 1)
 
-@skipIfNoFBGEMM
+@skipIfNoQNNPACK
 class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     """
     Tests the "n shadows" workflow.
@@ -2100,6 +2105,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         print_comparisons_n_shadows_model(results)
         return msq
 
+    @withQNNPACKBackend
     def test_linear_mod(self):
         class M(nn.Module):
             def __init__(self):
@@ -2117,6 +2123,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             QConfigMultiMapping().set_global([torch.quantization.default_qconfig])
         self._test_impl(m, example_input, qconfig_mappings)
 
+    @withQNNPACKBackend
     def test_linear_relu_mod(self):
         class M(nn.Module):
             def __init__(self):
@@ -2142,6 +2149,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         )
         self._test_impl(m, example_input, qconfig_mappings)
 
+    @withQNNPACKBackend
     def test_conv_bn_relu_mod(self):
         class M(nn.Module):
             def __init__(self):
@@ -2166,6 +2174,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             ])
         self._test_impl(m, example_input, qconfig_mappings)
 
+    @withQNNPACKBackend
     def test_functions(self):
         class M(nn.Module):
             def __init__(self):
@@ -2204,6 +2213,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             .set_global([torch.quantization.default_qconfig])
         self._test_impl(m, example_input, qconfig_mappings)
 
+    @withQNNPACKBackend
     def test_partial_qconfig_mapping(self):
         class M(nn.Module):
             def __init__(self):
@@ -2229,6 +2239,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             .set_object_type(F.relu, [qconfig])
         self._test_impl(m, example_input, qconfig_mappings)
 
+    @withQNNPACKBackend
     def test_logger_enabled_and_save_activations_flags(self):
         m = nn.Sequential(nn.Linear(1, 1)).eval()
         example_input = (torch.randn(1, 1),)
@@ -2277,6 +2288,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         _check_logger_count(msq, 0, 1)
 
     @skip_if_no_torchvision
+    @withQNNPACKBackend
     def test_mobilenet_v2(self):
         import torchvision
         m = torchvision.models.quantization.mobilenet_v2(
@@ -2288,6 +2300,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
 
         self._test_impl(m, example_input, qconfig_mappings)
 
+    @withQNNPACKBackend
     def test_qconfig_multi_mapping_deduplication(self):
         # check that insertion deduplicates qconfigs
         qconfig_multi_mapping = QConfigMultiMapping().set_global(
@@ -2295,6 +2308,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         )
         self.assertEqual(len(qconfig_multi_mapping.qconfig_mappings_list), 1)
 
+    @withQNNPACKBackend
     def test_qconfig_multi_mapping_insert_padding(self):
         # test that inserting a higher priority qconfig style with fewer elements than a lower priority qconfig will
         # result in adding None to the extra QConfigMappings at that same style+key
@@ -2337,6 +2351,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             None,
         )
 
+    @withQNNPACKBackend
     def test_qconfig_multi_mapping_retroactive_padding(self):
         # test that inserting a lower priority qconfig style with more elements thhan lower priority qconfig styles
         # will result in the new QConfigMapping having None at all previously existing styles+keys
@@ -2379,6 +2394,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             None,
         )
 
+    @withQNNPACKBackend
     def test_qconfig_multi_mapping_end_to_end(self):
         # test that the prepare/convert_n_shadows_model works as expected
         # with qconfig_multi_mapping and avoids unwanted matches
@@ -2407,6 +2423,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         self.checkQuantizedLinear(msq.shadow_wrapper_1_1.mod_0)
         self.assertRaisesRegex(AttributeError, ".*", lambda: msq.shadow_wrapper_1_2)
 
+    @withQNNPACKBackend
     def test_qconfig_multi_mapping_from_list(self):
         # test QConfigMultiMapping.from_list_qconfig_mapping works as expected
 
@@ -2435,6 +2452,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         self.checkQuantizedLinear(msq.shadow_wrapper_1_1.mod_0)
         self.assertRaisesRegex(AttributeError, ".*", lambda: msq.shadow_wrapper_1_2)
 
+    @withQNNPACKBackend
     def test_qconfig_multi_mapping_ordering(self):
         # test that the module ordering ignores None
 
@@ -2465,6 +2483,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         self.checkDynamicQuantizedLinear(msq.shadow_wrapper_1_1.mod_0, torch.qint8)
         self.checkQuantizedLinear(msq.shadow_wrapper_1_2.mod_0)
 
+    @withQNNPACKBackend
     def test_qconfig_multi_mapping_repr(self):
         qconfig_multi_mapping = (
             QConfigMultiMapping()
@@ -2485,6 +2504,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         )
         self.assertTrue(isinstance(qconfig_multi_mapping.__repr__(), str))
 
+    @withQNNPACKBackend
     def test_custom_functions_and_tracer(self):
         class M(nn.Module):
             def __init__(self):
