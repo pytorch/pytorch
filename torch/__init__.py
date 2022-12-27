@@ -311,8 +311,7 @@ class SymFloat:
         return self.node
 
 def sym_float(a):
-    r"""
-    SymInt-aware utility for float casting.
+    r""" SymInt-aware utility for float casting.
 
     Args:
         a (SymInt, SymFloat, or object): Object to cast
@@ -333,8 +332,7 @@ def _sym_ceil(x):
     return math.ceil(x)  # type: ignore[type]
 
 def sym_int(a):
-    r"""
-    SymInt-aware utility for int casting.
+    r""" SymInt-aware utility for int casting.
 
     Args:
         a (SymInt, SymFloat, or object): Object to cast
