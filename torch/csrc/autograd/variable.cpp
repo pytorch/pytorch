@@ -180,8 +180,8 @@ void update_cpp_hooks_on_new_gradfn(
     new_list->push_back(std::move((*meta->retains_grad_hooks_list_)[0]));
     (*meta->retains_grad_hooks_list_)[0] = nullptr;
     meta->retains_grad_hooks_list_ = new_list;
-    std::unique_ptr<FunctionPreHook> hook_ptr(
-        new CppFunctionTensorPreHook(meta->retains_grad_hooks_list_, self.output_nr()));
+    std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionTensorPreHook(
+        meta->retains_grad_hooks_list_, self.output_nr()));
     new_fn->add_retains_grad_hook(std::move(hook_ptr));
   }
 }
@@ -220,18 +220,23 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
 void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
   const auto& fn = self.grad_fn();
   if (is_retains_grad_hook) {
-    std::shared_ptr<hooks_list>& list = materialize_autograd_meta(self)->retains_grad_hooks_list_;
+    std::shared_ptr<hooks_list>& list =
+        materialize_autograd_meta(self)->retains_grad_hooks_list_;
     // NOLINTNEXTLINE(modernize-make-shared)
     list.reset(new hooks_list());
-    std::unique_ptr<FunctionPreHook> hook_ptr{new CppFunctionTensorPreHook(list, self.output_nr())};
+    std::unique_ptr<FunctionPreHook> hook_ptr{
+        new CppFunctionTensorPreHook(list, self.output_nr())};
     TORCH_INTERNAL_ASSERT(fn, "Expect grad_fn to be defined for retains_grad");
     fn->add_retains_grad_hook(std::move(hook_ptr));
   } else {
-    std::shared_ptr<hooks_list>& list = materialize_autograd_meta(self)->cpp_hooks_list_;
+    std::shared_ptr<hooks_list>& list =
+        materialize_autograd_meta(self)->cpp_hooks_list_;
     // NOLINTNEXTLINE(modernize-make-shared)
     list.reset(new hooks_list());
-    std::unique_ptr<FunctionPreHook> hook_ptr{new CppFunctionTensorPreHook(list, self.output_nr())};
-    // NB: we could potentially only update hooks_ if !fn, but it shouldn't matter
+    std::unique_ptr<FunctionPreHook> hook_ptr{
+        new CppFunctionTensorPreHook(list, self.output_nr())};
+    // NB: we could potentially only update hooks_ if !fn, but it shouldn't
+    // matter
     //     and this was the way before, so we keep it like this for now.
     clear_hooks(self);
     add_hook(self, std::make_unique<CppFunctionTensorPreHook>(list, 0));
@@ -354,8 +359,7 @@ void add_hook(
   meta->hooks_.push_back(std::move(hook));
 }
 
-std::vector<std::unique_ptr<FunctionPreHook>>& hooks(
-    const Variable& self) {
+std::vector<std::unique_ptr<FunctionPreHook>>& hooks(const Variable& self) {
   TORCH_INTERNAL_ASSERT(get_autograd_meta(self));
   return get_autograd_meta(self)->hooks_;
 }
@@ -526,7 +530,8 @@ unsigned register_retains_grad_hook(
       "cannot register a hook on a variable that "
       "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
-  auto& list = torch::autograd::impl::get_autograd_meta(self)->retains_grad_hooks_list_;
+  auto& list =
+      torch::autograd::impl::get_autograd_meta(self)->retains_grad_hooks_list_;
   if (!list) {
     torch::autograd::impl::create_cpp_hook(self, /*is_retains_grad_hook=*/true);
   }
@@ -755,7 +760,8 @@ unsigned VariableHooks::_register_hook(
   // NB: materialize_autograd_meta unnecessary due to requires grad check
   auto& list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list_;
   if (!list) {
-    torch::autograd::impl::create_cpp_hook(self, /*is_retains_grad_hook=*/false);
+    torch::autograd::impl::create_cpp_hook(
+        self, /*is_retains_grad_hook=*/false);
   }
   unsigned idx = list->size();
   list->push_back(hook);

@@ -182,11 +182,12 @@ TORCH_API void set_name(const Variable&, const std::string& name);
 TORCH_API void add_hook(
     const at::TensorBase&,
     std::unique_ptr<FunctionPreHook> hook);
-TORCH_API std::vector<std::unique_ptr<FunctionPreHook>>& hooks(
-    const Variable&);
+TORCH_API std::vector<std::unique_ptr<FunctionPreHook>>& hooks(const Variable&);
 TORCH_API void clear_hooks(const at::TensorBase&);
 
-TORCH_API void create_cpp_hook(const at::TensorBase&, bool is_retains_grad_hooks=false);
+TORCH_API void create_cpp_hook(
+    const at::TensorBase&,
+    bool is_retains_grad_hooks = false);
 } // namespace impl
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
