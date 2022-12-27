@@ -118,8 +118,6 @@ cc_library(
     ],
     deps = [
         "@mkl",
-    ] + select({
-        "@pytorch//tools/config:thread_sanitizer": [],
-        "//conditions:default": ["@tbb"],
-    }),
+        "@tbb",
+    ],
 )
