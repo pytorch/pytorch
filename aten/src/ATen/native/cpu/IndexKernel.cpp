@@ -528,6 +528,164 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
   iter.cast_outputs();
 }
 
+
+#ifdef CPU_CAPABILITY_AVX2
+template<typename scalar_t=uint8_t>
+void print_m256i(__m256i value, std::string tag="") {
+
+    constexpr int64_t size = 256 / (sizeof(scalar_t) * 8);
+    __attribute__ ((aligned (32))) scalar_t aligned_output[size];
+
+    _mm256_storeu_si256((__m256i *)aligned_output, value);
+
+    std::cout << "print_m256i " << tag << ": ";
+    for (int i=0; i < size; i++) {
+        std::cout << (int64_t) aligned_output[i] << " ";
+    }
+    std::cout << std::endl;
+}
+#endif
+
+template<typename scalar_t=uint8_t>
+void print_data(scalar_t * data, int size, std::string tag="") {
+    std::cout << "\nprint_data " << tag << ": ";
+    for (int i=0; i < size; i++) {
+        std::cout << (int64_t) data[i] << " ";
+    }
+    std::cout << std::endl;
+}
+
+
+void cpu_hflip_channels_last_uint8_ch3(at::TensorIterator& iter) {
+
+  // int loop_counter = 0;
+
+  auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
+
+    // Here ntensors is defined for output and 1 input. But tensor iterator has defined output, input
+    // and restrided_input (see aten/src/ATen/native/TensorTransformations.cpp#L64-L66) but we use only
+    // output and input.
+    static constexpr int ntensors = 2;
+    const int64_t *outer_strides = &strides[3];
+    const int64_t stride = strides[0];
+
+    // std::cout << "\n-- size0, size1: " << size0 << " " << size1 << std::endl;
+    // std::cout << "stride: " << stride << std::endl;
+    // loop_counter++;
+    // std::cout << "loop_counter: " << loop_counter << std::endl;
+    // std::cout << "outer_strides: \n";
+    // for (const auto arg : c10::irange(ntensors)) {
+    //   std::cout << outer_strides[arg] << " ";
+    // }
+    // std::cout << "\n";
+
+    TORCH_INTERNAL_ASSERT(strides[0] == strides[1]);
+    // TODO: if OMP_NUM_THREADS>1 then size0 can be != 3 as data can be split by grain_size
+    // Need to write a fallback for cases like size0, size1: 2 1
+    TORCH_INTERNAL_ASSERT(size0 == 3);
+    TORCH_INTERNAL_ASSERT(stride == 1);
+    TORCH_INTERNAL_ASSERT(outer_strides[0] == -3);
+    TORCH_INTERNAL_ASSERT(outer_strides[1] == 3);
+
+    char* C10_RESTRICT data[ntensors] = {base[0], base[1]};
+    const int64_t size = size0 * size1;
+
+    int64_t i = 0;
+
+// #define CPU_CAPABILITY_AVX2
+#ifdef CPU_CAPABILITY_AVX2
+
+    const int64_t proc_vec_size = 256 / (8 * sizeof(uint8_t)) / size0;
+    __m256i data_vec, reversed_vec;
+
+    // Data: (1 2 3) (4 5 6) (7 8 9) (10 11 12) (13 14 15) (16 17 18) (19 20 21) (22 23 24) (25 26 27) (28 29 30) (31 32 33)
+    // load by 2 parts
+    // R = [ (1 2 3) (4 5 6) (7 8 9) (10 11 12) (13 14 15) (16 | (16 17 18) (19 20 21) (22 23 24) (25 26 27) (28 29 30) (31 ]
+    // flip(R) ->
+    // R = [ 31 (28 29 30) (25 26 27) (22 23 24) (19 20 21) (16 17 18) | 16 (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3) ]
+    // Write in 2 parts
+
+    // Output pointer:                                                                                                       v
+    //                (X X X)  (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X) (X X X) (X X X)
+
+    // Output part 1: (X X X)  (X X X)    (X X X)    (X X X)    (X X X)    (X X 16)   (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3)
+    // Output part 2: (X X 31) (28 29 30) (25 26 27) (22 23 24) (19 20 21) (16 17 18) (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3)
+
+    // Shuffle mask for 3 channels
+    __m256i mask =_mm256_set_epi8(
+        2, 1, 0, 5, 4, 3, 8, 7, 6, 11, 10, 9, 14, 13, 12, 15, // first 128-bit lane
+        2, 1, 0, 5, 4, 3, 8, 7, 6, 11, 10, 9, 14, 13, 12, 15  // second 128-bit lane
+    );
+
+    // shift output pointer by size0 - 1
+    if (size > proc_vec_size * size0) {
+      data[0] += (size0 - 1) * sizeof(uint8_t);
+    }
+
+    for (; i < size - proc_vec_size * size0; i += proc_vec_size * size0) {
+
+      // std::cout << "\n-- i=" << i << std::endl;
+      // load 256-bits by two 128-bits parts
+      auto a0 = _mm_loadu_si128((__m128i *) data[1]);
+      auto b0 = _mm256_castsi128_si256(a0);
+      auto a1 = _mm_loadu_si128((__m128i *) (data[1] + proc_vec_size / 2 * size0 * sizeof(uint8_t)));
+      data_vec = _mm256_inserti128_si256(b0, a1, 1);
+
+      data[1] += proc_vec_size * size0 * sizeof(uint8_t);
+
+      // print_m256i(data_vec, "data_vec");
+
+      reversed_vec = _mm256_shuffle_epi8(data_vec, mask);
+      reversed_vec = _mm256_permute2x128_si256(reversed_vec, reversed_vec, 1);
+
+      // print_m256i(reversed_vec, "reversed_vec");
+
+      // write output in two parts
+      data[0] -= (proc_vec_size / 2) * size0 * sizeof(uint8_t);
+      auto rev_vec_h = _mm256_extracti128_si256(reversed_vec, 1);
+      _mm_storeu_si128((__m128i *)data[0], rev_vec_h);
+
+      data[0] -= (proc_vec_size / 2) * size0 * sizeof(uint8_t);
+      auto rev_vec_l = _mm256_extracti128_si256(reversed_vec, 0);
+      _mm_storeu_si128((__m128i *)data[0], rev_vec_l);
+
+      // print_data<uint8_t>((uint8_t *)(base[0] - (size - 1) * sizeof(uint8_t)), size, "- output");
+    }
+
+    // print_data<uint8_t>((uint8_t *)data[0], 4, "- data[0]");
+    // print_data<uint8_t>((uint8_t *)(base[0] - (size - 1) * sizeof(uint8_t)), size, "1 output");
+
+    // As we write with an overlapping: vec_size (=32) vs proc_vec_size * size0 (=30), we need to
+    // advance data[0] by 2
+    if (i > 0) {
+      data[0] -= (256 / (8 * sizeof(uint8_t)) - proc_vec_size * size0) * sizeof(uint8_t);
+    }
+
+#endif
+
+    for (; i < size; i += size0) {
+
+      // std::cout << "\n-- i=" << i << " | " << size << std::endl;
+      // print_data<uint8_t>((uint8_t *)data[1], 9, "- data[1]");
+      memcpy(data[0], data[1], size0 * stride);
+      // print_data<uint8_t>((uint8_t *)data[0], 9, "- data[0]");
+
+      // advance:
+      for (const auto arg : c10::irange(ntensors)) {
+        data[arg] += outer_strides[arg];
+      }
+    }
+
+    // print_data<uint8_t>((uint8_t *)(base[0] - (size - 1) * sizeof(uint8_t)), size, "2 output");
+
+  };
+
+  int64_t grain_size = at::internal::GRAIN_SIZE;
+  iter.for_each(loop2d, grain_size);
+  iter.cast_outputs();
+}
+
+
 void cpu_vflip_memcpy(at::TensorIterator& iter) {
   // This is a vertical flip specialization using memcpy to speed-up the runtime
 
@@ -595,6 +753,11 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       }
       // other dtypes (float16, bfloat16, complex) are handled by cpu_kernel_vec (see below)
     } else if (iter.has_contiguous_first_dim()) {
+      // Special case: channels last hflip on (N, 3, H, W) and dtype=kByte
+      auto output_strides = iter.strides(0);
+      if (iter.dtype() == at::kByte && output_strides[1] == -3 /* TODO: MORE CONDITIONS MISSING */) {
+        return cpu_hflip_channels_last_uint8_ch3(iter);
+      }
       // Special case: vertical flip using memcpy (faster than generic cpu_kernel_vec)
       return cpu_vflip_memcpy(iter);
     }
