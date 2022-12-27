@@ -33,10 +33,6 @@ static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 //   1. Call pre hooks of the original AccumulateGrad to modify the input grad.
 //   2. Accumuate the guard to RPC context.
 //   3. Call post hooks of the original AccumulateGrad.
-//
-// NB: We don't need to call pre-hooks here because nodes for which grads are
-// captured have their pre-hooks called by the engine (this was not the case for
-// a while).
 class DistAccumulateGradCaptureHook
     : public GraphTask::ExecInfo::Capture::GradCaptureHook {
  public:
@@ -49,7 +45,6 @@ class DistAccumulateGradCaptureHook
   at::Tensor operator()(const at::Tensor& grad) override {
     ThreadLocalDistAutogradContext contextGuard{ContextPtr(autogradContext_)};
     variable_list inputGrads = {grad};
-
     // It's intended that pre/post hooks are still called even if the grad is
     // undefined here.
     for (const auto& hook : accumulateGrad_->pre_hooks()) {
