@@ -326,10 +326,10 @@ def sym_float(a):
 # Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
 # directly usable, but this has a more relaxed type signature for mypy
 # (mypy requires SupportFloat which is too strict)
-def sym_floor(x):
+def _sym_floor(x):
     return math.floor(x)  # type: ignore[type]
 
-def sym_ceil(x):
+def _sym_ceil(x):
     return math.ceil(x)  # type: ignore[type]
 
 def sym_int(a):
@@ -342,7 +342,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return sym_floor(a) if a > 0 else sym_ceil(a)
+        return _sym_floor(a) if a > 0 else _sym_ceil(a)
     return py_int(a)  # type: ignore[operator]
 
 # Check to see if we can load C extensions, and if not provide some guidance
