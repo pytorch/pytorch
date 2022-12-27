@@ -347,10 +347,6 @@ struct CodeImpl {
   void emitAwaitableWait(Node* node) {
     emitLoadInputs(node->inputs());
     const auto fn_idx = awaitable_to_function_table_idx_[node->input()];
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-              << "\n awaitableWait node:" << *node
-              << "\n awaitableWait node.input.node::" << *node->input()->node()
-              << std::endl;
     insertInstruction(AWAITABLE_WAIT, fn_idx);
   }
 

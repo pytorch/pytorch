@@ -1933,10 +1933,18 @@ void initJITBindings(PyObject* module) {
     return std::make_shared<PythonAwaitWrapper>(retval);
   });
   m.def("awaitable_nowait", [](py::handle input) {
-    auto iv = toTypeInferredIValue(input);
-    auto retval = c10::make_intrusive<c10::ivalue::Await>(iv.type());
-    retval->markCompleted(iv);
-    return std::make_shared<PythonAwaitWrapper>(retval);
+    auto iv = toTypeInferredIValueOptional(input);
+    c10::intrusive_ptr<c10::ivalue::Await> aw;
+    if (iv) {
+      aw = c10::make_intrusive<c10::ivalue::Await>(iv->type());
+      aw->markCompleted(*iv);
+    }
+
+    auto type = PyObjectType::get();
+    aw = c10::make_intrusive<c10::ivalue::Await>(type);
+    aw->markCompleted(toIValue(input, type));
+
+    return std::make_shared<PythonAwaitWrapper>(aw);
   });
   m.def("awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {
     TORCH_CHECK(py_aw, "Await can't be None");

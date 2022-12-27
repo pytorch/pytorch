@@ -1186,14 +1186,6 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         c10::intrusive_ptr<c10::ivalue::Await> await =
             createAwaitTypeFromGraphOutput(awaitGraph);
         p_node->Output(0) = await;
-
-        // auto* metadata = p_node->metadata();
-        // DCHECK(metadata);
-        // auto* launcher = metadata->launcher();
-        // DCHECK(launcher);
-        // ForkedSubgraphSRLauncher runtime_launcher(
-        //    smodule, args, future, *launcher);
-        //(*launcher)(std::move(runtime_launcher));
       };
     });
 /*
@@ -1242,7 +1234,6 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         TORCH_INTERNAL_ASSERT(p_node->Input(0).isAwait());
         auto await = p_node->Input(0).toAwait();
 
-        // blocking call: waiting for the future to be completed
         await->wait();
 
         TORCH_INTERNAL_ASSERT(await->completed());

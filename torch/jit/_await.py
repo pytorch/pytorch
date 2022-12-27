@@ -10,7 +10,7 @@ def awaitable(func, *args, **kwargs):
     return torch._C.awaitable(func, *args, **kwargs)
 
 def awaitable_wait(aw):
-    return torch._C.awaitable_wait(func)
+    return torch._C.awaitable_wait(aw)
 
 def awaitable_nowait(o):
     return torch._C.awaitable_nowait(o)

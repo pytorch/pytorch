@@ -124,6 +124,14 @@ class MutableTypePtrHelper {
         }
         return c10::nullopt;
       }
+      case TypeKind::AwaitType: {
+        if (auto maybe_mut_types = mapTypeToAliasTypeSet(
+                type->castRaw<AwaitType>()->getElementType())) {
+          return {AliasTypeSet{
+              AwaitType::create(*toSingleType(*maybe_mut_types))}};
+        }
+        return c10::nullopt;
+      }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
         for (const TypePtr& inner : type->expectRef<TupleType>().elements()) {
