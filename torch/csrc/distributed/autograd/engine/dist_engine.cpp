@@ -30,8 +30,9 @@ static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
 // This hook does 2 things:
-//   1. Accumuate the gard to RPC context.
-//   2. Call post hooks of the original AccumulateGrad.
+//   1. Call pre hooks of the original AccumulateGrad to modify the input grad.
+//   2. Accumuate the guard to RPC context.
+//   3. Call post hooks of the original AccumulateGrad.
 //
 // NB: We don't need to call pre-hooks here because nodes for which grads are
 // captured have their pre-hooks called by the engine (this was not the case for
@@ -49,6 +50,11 @@ class DistAccumulateGradCaptureHook
     ThreadLocalDistAutogradContext contextGuard{ContextPtr(autogradContext_)};
     variable_list inputGrads = {grad};
 
+    // It's intended that pre/post hooks are still called even if the grad is
+    // undefined here.
+    for (const auto& hook : accumulateGrad_->pre_hooks()) {
+      inputGrads = (*hook)(inputGrads);
+    }
     // It is possible that the grad is not defined since a separate
     // invocation of the autograd engine on the same node might actually
     // compute this gradient.
