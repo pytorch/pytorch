@@ -41,7 +41,7 @@ from torch._ops import PyOperator
 from torch._functorch.utils import enable_autograd_function
 from torch.autograd.function import _set_autograd_function_extension_enabled
 import torch.autograd.forward_ad as fwAD
-from torch.func import functional_call, stack_ensembled_state
+from torch.func import functional_call, stack_module_state
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -3236,6 +3236,32 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = combine_state_for_ensemble(models)
 
+    def test_stack_module_state_smoke(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        _ = stack_module_state(models)
+
+    def test_stack_module_state_error(self):
+        in_features = 2
+        out_features = 2
+
+        models = []
+        with self.assertRaisesRegex(RuntimeError, "stack_module_state:.* Expected at least one model"):
+            _ = stack_module_state(models)
+
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[1].eval()
+        with self.assertRaisesRegex(RuntimeError, "stack_module_state:.* same training/eval mode."):
+            _ = stack_module_state(models)
+
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[1] = torch.nn.Conv2d(3, 3, (3, 3))
+        with self.assertRaisesRegex(RuntimeError, "stack_module_state:.* models to be of the same class"):
+            _ = stack_module_state(models)
+
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_make_functional_state_correctly_returned_after_forward(self, mechanism):
         class Net(nn.Module):
@@ -3625,7 +3651,7 @@ class TestExamplesCorrectness(TestCase):
             if mechanism == "make_functional":
                 return combine_state_for_ensemble(models)[1]
             else:
-                return stack_ensembled_state(models)[0]
+                return stack_module_state(models)[0]
 
         def slice_weights(batched_weights, index):
             return tree_map(lambda weight: weight[index].detach().requires_grad_(), batched_weights)
@@ -3705,7 +3731,7 @@ class TestExamplesCorrectness(TestCase):
             if mechanism == "make_functional":
                 return combine_state_for_ensemble(models)[1]
             else:
-                return stack_ensembled_state(models)[0]
+                return stack_module_state(models)[0]
 
         batched_weights = init_fn(num_models=2)
         parallel_train_step_fn = vmap(train_step_fn, in_dims=(0, None, None, 0), randomness="same")
@@ -4241,6 +4267,12 @@ class TestPyOperatorInteraction(TestCase):
         y = grad(f)(x)
         z, = torch.autograd.grad(y.sum(), x)
         self.assertEqual(z, torch.full_like(x, 2))
+
+    def test_functional_call_multiple_dicts(self):
+        mod = nn.Linear(1, 1)
+        x = torch.randn((1, 1))
+        params = ({'weight': torch.zeros(1, 1)}, {'bias': torch.ones(1)})
+        functional_call(mod, params, x)
 
 
 only_for = ("cpu", "cuda")

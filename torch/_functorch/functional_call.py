@@ -23,12 +23,10 @@ def functional_call(
         please set the key as ``{submodule_name}.parametrizations.{parameter_name}.original``.
 
     .. note:: If the module performs in-place operations on parameters/buffers, these will be reflected
-        in the `parameters_and_buffers` input.
+        in the ``parameters_and_buffers`` input.
 
-    .. note:: If the user does not need grad tracking outside of grad transforms, they can detach all of the
-        parameters for better performance and memory usage
 
-        Example::
+         Example::
 
             >>> a = {'foo': torch.zeros(())}
             >>> # xdoctest: +SKIP
@@ -38,27 +36,54 @@ def functional_call(
             >>> print(mod.foo)  # tensor(0.)
             >>> print(a['foo'])  # tensor(1.)
 
+    An example of passing mutliple dictionaries
+
+    .. code-block:: python
+
+            a = ({'weight': torch.ones(1, 1)}, {'buffer': torch.zeros(1)})  # two separate dictionaries
+            mod = nn.Bar(1, 1)  # return self.weight @ x + self.buffer
+            print(mod.weight)  # tensor(...)
+            print(mod.buffer)  # tensor(...)
+            x = torch.randn((1, 1))
+            print(x)
+            functional_call(mod, a, x)  # same as x
+            print(mod.weight)  # same as before functional_call
+
+
+    And here is an example of applying the grad transform over the parameters
+    of a model.
+
+    .. code-block:: python
+
+        import torch
+        import torch.nn as nn
+        from torch.func import functional_call, grad
+
+        x = torch.randn(4, 3)
+        t = torch.randn(4, 3)
+        model = nn.Linear(3, 3)
+
+        def compute_loss(params, x, t):
+            y = functional_call(model, params, x)
+            return nn.functional.mse_loss(y, t)
+
+        grad_weights = grad(compute_loss)(dict(model.named_parameters()), x, t)
+
+    .. note:: If the user does not need grad tracking outside of grad transforms, they can detach all of the
+        parameters for better performance and memory usage
+
         Example::
 
-            >>> a = ({'weight': torch.ones(1, 1)}, {'buffer': torch.zeros(1)})  # two separate dictionaries
-            >>> # xdoctest: +SKIP
-            >>> mod = nn.Bar(1, 1)  # return self.weight @ x + self.buffer
-            >>> print(mod.weight)  # tensor(...)
-            >>> print(mod.buffer)  # tensor(...)
-            >>> x = torch.randn((1, 1))
-            >>> print(x)
-            >>> functional_call(mod, a, x)  # same as x
-            >>> print(mod.weight)  # same as before functional_call
+            >>> detached_params = {k: v.detach() for k, v in model.named_parameters()}
+            >>> grad_weights = grad(compute_loss)(detached_params, x, t)
+            >>> grad_weights.grad_fn  # None--it's not tracking gradients outside of grad
 
-        Example::
-
-            >>> mod = nn.Linear(1, 1)
-            >>> d = {k: v.detach() for k, v in mod.named_parameters()}
-            >>> grad(lambda x: functional_call(mod, d, x), torch.randn((1, 1)))  # doesn't tracks grads for params
+        This means that the user cannot call ``grad_weight.backward()``. However, if they don't need autograd tracking
+        outside of the transforms, this will result in less memory usage and faster speeds.
 
     Args:
         module (torch.nn.Module): the module to call
-        parameters_and_buffers (dict of str and Tensor or tuple of str and Tensors): the parameters that will be used in
+        parameters_and_buffers (Dict[str,Tensor] or tuple of Dict[str, Tensor]): the parameters that will be used in
             the module call. If given a tuple of dictionaries, they must have distinct keys so that all dictionaries can
             be used together
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
@@ -69,10 +94,11 @@ def functional_call(
     """
     parameters_and_buffers = parameter_and_buffer_dicts if isinstance(parameter_and_buffer_dicts, dict) else {}
     if isinstance(parameter_and_buffer_dicts, tuple):
-        keys = [parameter_and_buffer.keys() for parameter_and_buffer in parameter_and_buffer_dicts]
-        for key in keys:
-            if keys.count(key) > 1:
-                raise ValueError(f"{key} appeared in multiple dictionaries; behavior of functional call is ambiguous")
+        key_list = [i for dct in parameter_and_buffer_dicts for i in dct.keys()]
+        key_set = set(key_list)
+        if len(key_set) != len(key_list):
+            repeated_key = list(filter(lambda key: key_list.count(key) > 1, key_set))[0]
+            raise ValueError(f"{repeated_key} appeared in multiple dictionaries; behavior of functional call is ambiguous")
 
         parameters_and_buffers = {k: v for d in parameter_and_buffer_dicts for k, v in d.items()}
 
@@ -80,8 +106,8 @@ def functional_call(
 
 
 @exposed_in("torch.func")
-def stack_ensembled_state(models):
-    """stack_ensembled_state(models) -> params, buffers
+def stack_module_state(models):
+    """stack_module_state(models) -> params, buffers
 
     Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.
 
@@ -101,7 +127,7 @@ def stack_ensembled_state(models):
         def wrapper(params, buffers, data):
             return functorch.functional_call(model[0], (params, buffers), data)
 
-        params, buffers = stack_ensembled_state(models)
+        params, buffers = stack_module_state(models)
         output = vmap(wrapper, (0, 0, None))(params, buffers, data)
 
         assert output.shape == (num_models, batch_size, out_features)
@@ -112,13 +138,13 @@ def stack_ensembled_state(models):
         same mode (training vs eval).
     """
     if len(models) == 0:
-        raise RuntimeError('stack_ensembled_state: Expected at least one model, got 0.')
+        raise RuntimeError('stack_module_state: Expected at least one model, got 0.')
     if not (all(m.training for m in models) or all(not m.training for m in models)):
-        raise RuntimeError('stack_ensembled_state: Expected all models to '
+        raise RuntimeError('stack_module_state: Expected all models to '
                            'have the same training/eval mode.')
     model0_typ = type(models[0])
     if not all(type(m) == model0_typ for m in models):
-        raise RuntimeError('stack_ensembled_state: Expected all models to '
+        raise RuntimeError('stack_module_state: Expected all models to '
                            'be of the same class.')
     all_params = [{k: v for k, v in model.named_parameters()} for model in models]
     params = {k: torch.stack(tuple(params[k] for params in all_params)) for k in all_params[0]}
