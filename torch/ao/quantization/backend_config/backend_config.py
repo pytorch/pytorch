@@ -282,6 +282,9 @@ class BackendConfig:
         # the original patterns should go through `self.configs` instead.
         self._pattern_complex_format_to_config: Dict[Pattern, BackendPatternConfig] = {}
 
+    def __repr__(self):
+        return f"BackendConfig({self.__dict__})"
+
     def set_name(self, name: str) -> BackendConfig:
         """
         Set the name of the target backend.
@@ -370,6 +373,16 @@ class BackendPatternConfig:
         self._input_type_to_index: Dict[str, int] = {}
         self._input_output_observed: Optional[bool] = None
         self._pattern_complex_format: Optional[Pattern] = None
+
+    def __repr__(self):
+        dict_nonempty = {
+            k: v for k, v in self.__dict__.items()
+            if (
+                (not isinstance(v, (list, dict)) and v is not None)
+                or (isinstance(v, (list, dict)) and len(v) > 0)
+            )
+        }
+        return f"BackendPatternConfig({dict_nonempty})"
 
     def set_pattern(self, pattern: Pattern) -> BackendPatternConfig:
         """
