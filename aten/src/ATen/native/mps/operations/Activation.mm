@@ -410,65 +410,6 @@ TORCH_IMPL_FUNC(log_softmax_backward_mps_out) (
 
 }
 
-TORCH_IMPL_FUNC(sigmoid_out_mps)(
-  const Tensor& self,
-  const Tensor& output) {
-  using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
-  TORCH_CHECK(output.is_mps());
-
-  if(output.numel() == 0) {
-    return;
-  }
-
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    string key = "sigmoid_out_mps" + getTensorsStringKey({self});
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-    if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
-
-        CachedGraph *newCachedGraph = nil;
-
-        @autoreleasepool {
-          // Initialize graph
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-
-          MPSGraphTensor* outputTensor = [mpsGraph sigmoidWithTensor:inputTensor
-                                                                name:nil];
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
-    }
-
-    Placeholder selfPlaceholder   = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-
-  }
-
-}
-
 TORCH_IMPL_FUNC(sigmoid_backward_out_mps)(
   const Tensor& grad_output,
   const Tensor& output,

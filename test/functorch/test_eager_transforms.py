@@ -1116,7 +1116,7 @@ class TestAutogradFunction(TestCase):
 
 class TestAutogradFunctionVmapAPI(TestCase):
     @_set_autograd_function_extension_enabled()
-    def test_no_vmap_staticmethod(self, device):
+    def test_no_vmap_staticmethod_and_no_generate_vmap_rule(self, device):
         class NumpyCube(torch.autograd.Function):
             @staticmethod
             def forward(input):
@@ -1134,6 +1134,33 @@ class TestAutogradFunctionVmapAPI(TestCase):
 
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, 'does not have a vmap rule defined'):
+            vmap(NumpyCube.apply)(x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_has_vmap_staticmethod_and_has_generate_vmap_rule(self, device):
+        class NumpyCube(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(input):
+                input_np = to_numpy(input)
+                dinput = torch.tensor(3 * input_np ** 2, device=input.device)
+                return torch.tensor(input_np ** 3, device=input.device), dinput
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                ctx.save_for_backward(input, outputs[1])
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                raise RuntimeError("foobar")
+
+            @staticmethod
+            def vmap(infos, in_dims, x):
+                raise RuntimeError("foobar")
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'generate_vmap_rule=True and a vmap staticmethod'):
             vmap(NumpyCube.apply)(x)
 
     @_set_autograd_function_extension_enabled()
@@ -1872,6 +1899,41 @@ class TestJac(TestCase):
         out_val = out(x, y, z)
         self.assertEqual(out_val, expected_out)
 
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        y = torch.randn(1, 2, device=device)
+
+        def f(x, y):
+            return (x.sin(), x + y), (x + 2, x.sum())
+
+        for chunk_size in (1, 2, 3, 4, 7, 10, 1000):
+            expected = jacrev(f, argnums=(0, 1))(x, y)
+            actual = jacrev(f, argnums=(0, 1),
+                            chunk_size=chunk_size,
+                            _preallocate_and_copy=_preallocate_and_copy)(x, y)
+            self.assertEqual(actual, expected)
+
+        err_msg = "jacrev: `chunk_size` should be greater than 0."
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=0)(x, y)
+
+        with self.assertRaisesRegex(ValueError, err_msg):
+            jacrev(f, argnums=(0, ), chunk_size=-2)(x, y)
+
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev_composition(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        chunk_size = 3
+
+        def f(x):
+            return (x.sin(), x), (x + 2, x.sum())
+
+        expected = vmap(jacrev(jacrev(f)))(x)
+        actual = vmap(jacrev(jacrev(f, chunk_size=chunk_size,
+                             _preallocate_and_copy=_preallocate_and_copy), chunk_size=chunk_size))(x)
+        self.assertEqual(actual, expected)
+
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
@@ -2414,6 +2476,163 @@ class TestVmapJvpInplaceView(TestCase):
 
         self.assertEqual(tangents[0], yt.movedim(2, 0)[:, 0])
         self.assertEqual(tangents[1], yt.movedim(2, 0))
+
+
+# Use for testing miscellaneous helper functions
+class TestHelpers(TestCase):
+    def test_CtxWithSavedTensors_error_if_name_collision(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device, requires_grad=True)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx._pt_inner_ctx = 1
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, (y,))
+                return gy
+
+        class B(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx._pt_new_saved_tensors = 1
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, (y,))
+                return gy
+
+        out = A.apply(x)
+        with self.assertRaisesRegex(RuntimeError, 'name collision'):
+            out.backward()
+        out = B.apply(x)
+        with self.assertRaisesRegex(RuntimeError, 'name collision'):
+            out.backward()
+
+    def test_CtxWithSavedTensors_nesting(self, device):
+        CtxWithSavedTensors = torch._functorch.autograd_function.CtxWithSavedTensors
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device)
+        z = torch.randn([], device=device)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                ctx_y = CtxWithSavedTensors(ctx, (y,))
+                # Can't use self.assertEqual because that relies on TLS
+                # that is not available in multithread autograd
+                assert len(ctx_y.saved_tensors) == 1
+                assert torch.allclose(ctx_y.saved_tensors[0], y)
+
+                wrapped = CtxWithSavedTensors(ctx_y, (z,))
+
+                assert len(wrapped.saved_tensors) == 1
+                assert torch.allclose(wrapped.saved_tensors[0], z)
+
+                assert len(ctx_y.saved_tensors) == 1
+                assert torch.allclose(ctx_y.saved_tensors[0], y)
+
+                return gy * wrapped.saved_tensors[0]
+
+        out = A.apply(x)
+        out.backward()
+        self.assertEqual(x.grad, z)
+
+    def test_CtxWithSavedTensors_overrides_saved_tensors(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                # The override can be literally anything
+                override = (1, 2, 3)
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, override)
+                assert wrapped.saved_tensors == override
+                return gy
+
+        out = A.apply(x)
+        out.backward()
+
+    def test_CtxWithSavedTensors_passthrough(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x, y)
+                return x * y
+
+            @staticmethod
+            def backward(ctx, gz):
+                # The override can be literally anything
+                override = (1, 2, 3)
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, override)
+
+                assert wrapped.needs_input_grad[0] == ctx.needs_input_grad[0]
+                assert wrapped.needs_input_grad[1] == ctx.needs_input_grad[1]
+                wrapped.foo = 'bar'
+                assert wrapped.foo == 'bar'
+                assert ctx.foo == 'bar'
+                return gz, gz
+
+        out = A.apply(x, y)
+        out.backward()
+
+    def test_reductify_leaf(self, device):
+        reductify_leaf = torch._functorch.autograd_function.reductify_leaf
+        B = 2
+
+        # grad_input None case
+        output = reductify_leaf(None, None, 0, (3,), B)
+        self.assertIsNone(output)
+        output = reductify_leaf(None, None, None, (4, 3), B)
+        self.assertIsNone(output)
+
+        # grad_input has bdim, input does not have bdim
+        grad_input = torch.randn([B, 3, 4], device=device)
+        output = reductify_leaf(grad_input, 0, None, (3, 4), B)
+        self.assertEqual(output, grad_input.sum(0))
+
+        grad_input = torch.randn([3, B, 4], device=device)
+        output = reductify_leaf(grad_input, 1, None, (3,), B)
+        self.assertEqual(output, grad_input.sum(1))
+
+        # grad_input does not have bdim, input has bdim
+        # This can happen if the user returns a fresh Tensor from the backward pass
+        # that is unrelated to the input
+        grad_input = torch.randn([3, 4], device=device)
+        output = reductify_leaf(grad_input, None, 1, (3, 4), B)
+        self.assertEqual(output, grad_input.view(3, 1, 4).expand(3, B, 4))
+
+        grad_input = torch.randn([3, 4], device=device)
+        output = reductify_leaf(grad_input, None, 1, (4,), B)
+        self.assertEqual(output, grad_input.view(3, 4, 1).expand(3, 4, B).sum(0))
+
+        # grad_input has bdim, input has bdim
+        grad_input = torch.randn([B, 3, 4], device=device)
+        output = reductify_leaf(grad_input, 0, 1, (3, 4), B)
+        self.assertEqual(output, grad_input.movedim(0, 1))
+
+        grad_input = torch.randn([3, 4, 5, B], device=device)
+        output = reductify_leaf(grad_input, 3, 0, (5,), B)
+        self.assertEqual(output, grad_input.movedim(-1, 2).sum(0).sum(0))
 
 
 class TestComposability(TestCase):
@@ -3498,7 +3717,7 @@ class TestFunctionalize(TestCase):
             z = y2[0]
             z.add_(tmp)
             return y
-        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device), skip_vmap=True)
 
     # See https://github.com/pytorch/functorch/issues/780
     def test_linear(self, device):
@@ -3621,6 +3840,7 @@ def forward(self, x_1) -> torch.Tensor:
     view_copy = torch.ops.aten.view_copy.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view_copy, ones);  view_copy = ones = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4, 2]);  add = None
+    view_copy_2 = torch.ops.aten.view_copy.default(view_copy_1, [4, 2])
     copy_ = torch.ops.aten.copy_.default(x_1, view_copy_1);  x_1 = None
     return view_copy_1
     """)
@@ -3664,6 +3884,7 @@ def forward(self, inpt_1) -> torch.Tensor:
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4]);  add = None
     add_1 = torch.ops.aten.add.Tensor(view_copy_1, 1);  view_copy_1 = None
     view_copy_2 = torch.ops.aten.view_copy.default(add_1, [4]);  add_1 = None
+    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4])
     return view_copy_2
     """)
 
@@ -3693,6 +3914,7 @@ def forward(self, inpt_1) -> torch.Tensor:
     getitem = aminmax[0]
     getitem_1 = aminmax[1];  aminmax = None
     view_copy_2 = torch.ops.aten.view_copy.default(getitem_1, [2, 2]);  getitem_1 = None
+    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4])
     return (view_copy_2, getitem)
     """)
 
@@ -3715,6 +3937,7 @@ def forward(self, x_1) -> torch.Tensor:
     view = torch.ops.aten.view.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
     view_1 = torch.ops.aten.view.default(add, [4, 2]);  add = None
+    view_2 = torch.ops.aten.view.default(view_1, [4, 2])
     copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = None
     return view_1
     """)
@@ -3976,6 +4199,11 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestAutogradFunctionVmapAPI,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestHelpers,
     globals(),
     only_for=only_for,
 )
