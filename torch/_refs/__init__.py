@@ -3699,7 +3699,7 @@ def diagonal_scatter(
     dim1: int = 0,
     dim2: int = 1,
 ) -> TensorLikeType:
-    out = input.clone()
+    out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
     check(
         diag.shape == src.shape,
