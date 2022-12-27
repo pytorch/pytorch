@@ -1,6 +1,6 @@
 """Tool to fix the nvcc's dependecy file output
 
-Usage: python nvcc_fix_deps.py nvcc [nvcc args]...
+Usage: python nvcc_fix_deps.py [nvcc args]...
 
 This wraps nvcc to ensure that the dependency file created by nvcc with the
 -MD flag always uses absolute paths. nvcc sometimes outputs relative paths,
@@ -15,6 +15,9 @@ CMAKE_CUDA_COMPILER_LAUNCHER="python;tools/nvcc_fix_deps.py;ccache"
 
 import subprocess
 import sys
+import os
+import shlex
+import mslex
 from pathlib import Path
 from typing import List, Optional, TextIO
 
@@ -91,11 +94,22 @@ def extract_include_arg(include_dirs: List[Path], i: int, args: List[str]) -> No
         if path is not None:
             include_dirs.append(Path(path).resolve())
             return
-
+        
 
 if __name__ == "__main__":
+    
+    # Escape the command to prevent command injection
+    cmd = 'nvcc ' + sys.argv[1:]
+    if os.name == 'nt':
+        escaped_cmd = mslex.quote(cmd)
+    elif os.name == 'posix':
+        escaped_cmd = shlex.quote(cmd)
+    else:
+        return 'Could not determine operating system'
+    
+    # Run command
     ret = subprocess.run(
-        sys.argv[1:], stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr
+        escaped_cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr
     )
 
     depfile_path = None
