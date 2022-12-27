@@ -2141,7 +2141,8 @@ static int THPVariable_subclass_traverse(
       }
       if (autograd_meta) {
         for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-          if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+          if (auto pyhook =
+                  dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
             Py_VISIT(pyhook->dict);
           }
         }

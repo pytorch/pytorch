@@ -877,6 +877,26 @@ class TestAutograd(TestCase):
         # because they are executed after
         self.assertEqual(b.grad.item(), 3)
 
+    def test_retains_grad_can_always_observe_tensor_prehook(self):
+        def tensor_prehook(g):
+            return g * 2
+
+        a = torch.tensor(1., requires_grad=True)
+        b = a.clone()
+        b.register_hook(tensor_prehook)
+        b.retain_grad()
+        b.register_hook(tensor_prehook)
+
+        b.clone().backward()
+        self.assertEqual(b.grad.item(), 4)
+
+        a = torch.tensor(1., requires_grad=True)
+        b = a.clone()
+        b.retain_grad()
+        b.register_hook(tensor_prehook)
+
+        b.clone().backward()
+        self.assertEqual(b.grad.item(), 2)
 
     def test_accumulate_grad_posthooks_can_observe_tensor_prehook(self):
         # Post hooks on accumulate should be able to observe changes to

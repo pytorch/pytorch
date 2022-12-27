@@ -894,8 +894,7 @@ static variable_list call_function(
   auto& fn = *func;
   auto inputs =
       call_tensor_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
-  inputs =
-      call_pre_hooks(*func, inputs);
+  inputs = call_pre_hooks(*func, inputs);
   if (!graph_task->keep_graph_) {
     fn.will_release_variables();
   }
@@ -957,11 +956,12 @@ void Engine::evaluate_function(
     variable_list new_inputs = inputs.buffer;
     if (!fn_info.needed_) {
       // We always want to call tensor pre-hooks, but want to avoid calling it
-      // twice. needed_ = True indicates that we will call tensor pre-hooks later.
+      // twice. needed_ = True indicates that we will call tensor pre-hooks
+      // later.
       //
       // See NOTE [Hooks ordering] for more context.
-      new_inputs =
-          call_tensor_pre_hooks(*func, InputBuffer::variables(std::move(inputs)));
+      new_inputs = call_tensor_pre_hooks(
+          *func, InputBuffer::variables(std::move(inputs)));
     }
     if (auto* capture_vec = fn_info.captures_.get()) {
       const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
