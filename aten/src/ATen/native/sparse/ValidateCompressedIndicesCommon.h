@@ -4,7 +4,6 @@
 #include <ATen/Utils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/sparse/Macros.h>
-#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -258,6 +257,13 @@ void _validate_compressed_sparse_indices_kernel(
 
   // Invariants 5.1, 5.2, 5.3, 5.6
   {
+    // MAX_DIMS is copied from aten/src/ATen/cuda/detail/OffsetCalculator.cuh
+#if defined(USE_ROCM)
+    constexpr int MAX_DIMS = 16;
+#else
+    constexpr int MAX_DIMS = 25;
+#endif
+
     const auto cidx_first = cidx.slice(-1, 0, 1);
     const auto cidx_last = cidx.slice(-1, cdim, cdim + 1);
 
@@ -269,23 +275,16 @@ void _validate_compressed_sparse_indices_kernel(
     const auto batch_idx =
         at::arange(batch_count, cidx.options()).view(batch_dims).unsqueeze_(-1);
 
-    const Tensor batch_shape = at::tensor(batch_dims, idx.options());
-    const Tensor batch_idx_stride =
-        at::tensor(idx.strides().slice(0, idx.dim() - 1), idx.options());
-    const Tensor all_idx_offsets = at::arange(
-        batch_idx_stride.mul(batch_shape.sub(1)).sum().add(1).item(),
-        idx.options());
-    const Tensor idx_offsets =
-        all_idx_offsets.reshape({-1, 1})
-            .div(batch_idx_stride, "floor") // TODO: support zero strides
-            .remainder(batch_shape)
-            .mul(batch_idx_stride)
-            .sum(1)
-            .eq(all_idx_offsets)
-            .nonzero()
-            .to(idx.dtype())
-            .view(batch_dims)
-            .unsqueeze_(-1);
+    const auto idx_ndims = idx.dim();
+    const auto idx_sizes = idx.sizes();
+    const auto idx_strides = idx.strides();
+    const auto idx_contiguous_strides = c10::contiguous_strides(idx_sizes);
+    std::array<int64_t, 3 * MAX_DIMS> idx_sizes_and_strides;
+    for (int i = 0; i < idx_ndims; i++) {
+      idx_sizes_and_strides[i] = idx_sizes[i];
+      idx_sizes_and_strides[idx_ndims + i] = idx_strides[i];
+      idx_sizes_and_strides[2 * idx_ndims + i] = idx_contiguous_strides[i];
+    }
 
     auto iter = TensorIteratorConfig()
                     .set_check_mem_overlap(false)
@@ -294,22 +293,22 @@ void _validate_compressed_sparse_indices_kernel(
                     .add_input(cidx_last)
                     .add_input(cidx_curr)
                     .add_input(cidx_next)
-                    .add_input(idx_offsets)
                     .add_input(batch_idx)
                     .build();
 
     AT_DISPATCH_INDEX_TYPES(
-        idx.scalar_type(), NAME, [&iter, &idx, dim, nnz]() {
+        idx.scalar_type(),
+        NAME,
+        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes_and_strides]() {
           const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
           const auto zero = index_t{0};
           KernelLauncher::launch(
               iter,
-              [zero, dim, nnz, ptr_idx] FUNCAPI(
+              [zero, dim, nnz, idx_ndims, idx_sizes_and_strides, ptr_idx] FUNCAPI(
                   index_t cidx_first,
                   index_t cidx_last,
                   index_t cidx_curr,
                   index_t cidx_next,
-                  index_t idx_offset,
                   index_t batch_idx) -> index_t {
                 // Invariant 5.1
                 _check_first_cidx_is_zero<cdim_name, index_t>(cidx_first, zero);
@@ -323,6 +322,17 @@ void _validate_compressed_sparse_indices_kernel(
                 // NOTE: the implementation below is sync-less, but,
                 // unfortunately, work is not guaranteed to be well-balanced
                 // between different threads.
+                const int64_t* sizes = idx_sizes_and_strides.data();
+                const int64_t* strides = sizes + idx_ndims;
+                const int64_t* contiguous_strides = sizes + 2 * idx_ndims;
+                int64_t idx_offset = 0;
+                // assuming idx contiguity per batch:
+                const int64_t batch_idx_ = batch_idx * sizes[idx_ndims - 1];
+                for (int i = 0; i < idx_ndims - 1; i++) {
+                  idx_offset +=
+                      ((batch_idx_ / contiguous_strides[i]) % sizes[i]) *
+                      strides[i];
+                }
                 const auto* RESTRICT ptr_idx_batch = ptr_idx + idx_offset;
                 _check_idx_sorted_distinct_vals_slices_with_cidx<
                     cdim_name,
