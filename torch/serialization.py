@@ -971,12 +971,19 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 obj._torch_load_uninitialized = True
                 # TODO: Once we decide to break serialization FC, we can
                 # stop wrapping with TypedStorage
-                deserialized_objects[root_key] = torch.storage.TypedStorage(
+                typed_storage = torch.storage.TypedStorage(
                     wrap_storage=restore_location(obj, location),
                     dtype=dtype,
                     _internal=True)
+                deserialized_objects[root_key] = typed_storage
+            else:
+                typed_storage = deserialized_objects[root_key]
+                if typed_storage._data_ptr() == 0:
+                    typed_storage = torch.storage.TypedStorage(
+                        device=typed_storage._untyped_storage.device,
+                        dtype=dtype,
+                        _internal=True)
 
-            typed_storage = deserialized_objects[root_key]
             if view_metadata is not None:
                 view_key, offset, view_size = view_metadata
                 offset_bytes = offset * torch._utils._element_size(dtype)
@@ -1098,10 +1105,15 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         storage = zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)._typed_storage()._untyped_storage
         # TODO: Once we decide to break serialization FC, we can
         # stop wrapping with TypedStorage
-        loaded_storages[key] = torch.storage.TypedStorage(
+        typed_storage = torch.storage.TypedStorage(
             wrap_storage=restore_location(storage, location),
             dtype=dtype,
             _internal=True)
+
+        if typed_storage._data_ptr() != 0:
+            loaded_storages[key] = typed_storage
+
+        return typed_storage
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
@@ -1116,11 +1128,13 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         else:
             dtype = storage_type.dtype
 
-        if key not in loaded_storages:
+        if key in loaded_storages:
+            typed_storage = loaded_storages[key]
+        else:
             nbytes = numel * torch._utils._element_size(dtype)
-            load_tensor(dtype, nbytes, key, _maybe_decode_ascii(location))
+            typed_storage = load_tensor(dtype, nbytes, key, _maybe_decode_ascii(location))
 
-        return loaded_storages[key]
+        return typed_storage
 
     load_module_mapping: Dict[str, str] = {
         # See https://github.com/pytorch/pytorch/pull/51633
