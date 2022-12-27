@@ -41,11 +41,18 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             return e
         return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
 
-    assert isinstance(operands, (list, tuple)), "Cond operands must be either tuple or list"
+    assert isinstance(operands, (list, tuple)), "Cond operands must be tuple"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be all tensors"
 
-    true_graph = get_isolated_graphmodule(true_fn, operands, {})
-    false_graph = get_isolated_graphmodule(false_fn, operands, {})
+    true_outs = true_fn(*operands)
+    false_outs = false_fn(*operands)
+
+    flattened_inputs, spec = pytree.tree_flatten(operands)
+    true_graph = make_fx(true_fn)(*flattened_inputs)
+    false_graph = make_fx(false_fn)(*flattened_inputs)
+
+    true_graph._in_spec = spec
+    true_graph._out_spec =
 
     true_outs = []
     false_outs = []
@@ -85,7 +92,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
 
-    args = (pred, true_graph, false_graph, [operands])
+    args = (pred, true_graph, false_graph, operands)
 
     proxy_args = pytree.tree_map(_unwrap_proxy, args)
 

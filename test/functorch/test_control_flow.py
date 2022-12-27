@@ -40,6 +40,22 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(result_true, torch.sin(x))
         self.assertEqual(result_false, torch.cos(x))
 
+    def test_cond_retrace_functionalized(self):
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        def f(x):
+            return cond(x.all(), true_fn, false_fn, (x,))
+
+        inp = torch.ones(1, 2)
+        gm_non_functional = make_fx(f, tracing_mode="real")(inp)
+        gm_functional = make_fx(gm_non_functional, tracing_mode="real")(inp)
+
+        self.assertEqual(gm_functional(torch.zeros(1, 2)), f(torch.zeros(1, 2)))
+
     def test_cond_nested_traced(self):
         def true_nested(y):
             return y * y
