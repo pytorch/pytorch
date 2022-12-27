@@ -1622,7 +1622,14 @@ def _export(
                 custom_opsets,
             )
             if verbose:
-                torch.onnx.log("Exported graph: ", graph)
+                # Cruise: we capture this stdout and use it.
+                # In PyTorch 1.13 this was changed from simple `print` to `torch.onnx.log` which prints to stdout
+                # but it does it from the c++ extension.
+                # That breaks stdout capturing. It's possible to use os.dup2 file descriptors trickery
+                # to capture it, but that in turn breaks pytest. So we simply revert to the old behavior here.
+                #
+                # torch.onnx.log("Exported graph: ", graph)
+                print("Exported graph: ", graph)
             onnx_proto_utils._export_file(proto, f, export_type, export_map)
             # The ONNX checker only works for ONNX graph. So if the operator_export_type is not ONNX,
             # we can skip this check.
