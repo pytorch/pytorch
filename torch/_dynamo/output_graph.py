@@ -20,7 +20,6 @@ from typing import (
     Union,
 )
 
-import sympy
 from typing_extensions import Protocol
 
 import torch.nn
@@ -245,7 +244,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.unspec_variable_map: Dict[
             str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
         ] = {}
-        self.intermediary_symbols: Dict[sympy.Expr, None] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -403,7 +401,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             # Attrs that are tenors and symints and such need to be migrated to have their
             # own storage
             # alas, this is like this for now
-            self.intermediary_symbols.update({target.get_pyobj().expr: None})
 
             def wrap_name(module_key):
                 return DynamicShapeVariable.create(
@@ -587,12 +584,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["calls_captured"] += ncalls
         counters["stats"]["fusions_possible"] += ncalls - 1
 
-        if config.dynamic_propagation:
-            # free a bit of memory
-            for node in self.graph.nodes:
-                if "example_value" in node.meta:
-                    del node.meta["example_value"]
-            self.real_value_cache.clear()
+        # free a bit of memory
+        for node in self.graph.nodes:
+            if "example_value" in node.meta:
+                del node.meta["example_value"]
+        self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()

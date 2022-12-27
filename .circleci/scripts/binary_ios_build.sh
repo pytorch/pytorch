@@ -8,7 +8,7 @@ PROJ_ROOT=/Users/distiller/project
 export TCLLIBPATH="/usr/local/lib"
 
 # Install conda
-curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-py39_4.12.0-MacOSX-x86_64.sh
 chmod +x ~/conda.sh
 /bin/bash ~/conda.sh -b -p ~/anaconda
 export PATH="~/anaconda/bin:${PATH}"
@@ -22,7 +22,7 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 # sync submodules
 cd ${PROJ_ROOT}
 git submodule sync
-git submodule update --init --recursive --jobs 0
+git submodule update --init --recursive
 
 # run build script
 chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh

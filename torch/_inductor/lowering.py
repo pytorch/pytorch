@@ -1209,7 +1209,6 @@ make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_bilinear2d_backward, require_dense)
 
-
 add_layout_constraint(aten.convolution, constrain_to_fx_strides)
 
 
@@ -3618,6 +3617,11 @@ register_pointwise(
 
 register_pointwise(
     aten.expm1,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+register_pointwise(
+    aten.tanh,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 
