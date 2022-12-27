@@ -3,7 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.func import functional_call, grad_and_value, vmap, stack_ensembled_state
+from torch.func import functional_call, grad_and_value, vmap, stack_module_state
 
 # Adapted from http://willwhitney.com/parallel-training-jax.html , which is a
 # tutorial on Model Ensembling with JAX by Will Whitney.
@@ -106,7 +106,7 @@ step4()
 
 def init_fn(num_models):
     models = [MLPClassifier().to(DEVICE) for _ in range(num_models)]
-    params, _ = stack_ensembled_state(models)
+    params, _ = stack_module_state(models)
     return params
 
 # Step 6: Now, can we try multiple models at the same time?
