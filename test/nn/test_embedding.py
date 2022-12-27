@@ -691,6 +691,38 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                                                   per_sample_weights=p_s_weights, padding_idx=padding_idx,
                                                   mode=mode)
 
+    def test_embedding_bag_dimension_errors(self, device):
+        weight = torch.full((2, 0, 0, 6, 6,), 0, dtype=torch.float64, device=device)
+        indices = torch.full((2, 0, 0, 6, 6,), 2, dtype=torch.int64, device=device)
+        offsets = torch.full((2, 0, 0, 6, 6), 0, dtype=torch.int64, device=device)
+
+        with self.assertRaisesRegex(ValueError, r'input has to be 1D or 2D Tensor'):
+            torch.nn.functional.embedding_bag(indices, weight, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'input has to be a 1D or 2D Tensor'):
+            torch.embedding_bag(weight, indices, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'input has to be a 1D or 2D Tensor'):
+            torch._embedding_bag(weight, indices, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'input has to be a 1D or 2D Tensor'):
+            torch._embedding_bag_forward_only(weight, indices, offsets)
+
+        weight = torch.full((2,), 0, dtype=torch.float64, device=device)
+        indices = torch.full((2,), 2, dtype=torch.int64, device=device)
+
+        with self.assertRaisesRegex(ValueError, r'offsets has to be a 1D Tensor'):
+            torch.nn.functional.embedding_bag(indices, weight, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'offsets has to be a 1D Tensor'):
+            torch.embedding_bag(weight, indices, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'offsets has to be a 1D Tensor'):
+            torch._embedding_bag(weight, indices, offsets)
+
+        with self.assertRaisesRegex(RuntimeError, r'offsets has to be a 1D Tensor'):
+            torch._embedding_bag_forward_only(weight, indices, offsets)
+
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
         # Failure 1: mismatched embeddings / per_sample_weights dtype

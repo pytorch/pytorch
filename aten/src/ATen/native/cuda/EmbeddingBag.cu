@@ -336,6 +336,14 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
                    const Tensor &offsets_, const bool scale_grad_by_freq,
                    const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset, int64_t padding_idx) {
+  TORCH_CHECK(indices_.dim() == 1 || indices_.dim() == 2,
+      "input has to be a 1D or 2D Tensor, but got Tensor of dimension ",
+      indices_.dim());
+  if (indices_.dim() == 1) {
+    TORCH_CHECK(offsets_.dim() == 1,
+        "offsets has to be a 1D Tensor, but got Tensor of dimension ",
+        offsets_.dim());
+  }
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
