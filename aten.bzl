@@ -68,7 +68,7 @@ def generate_aten_impl(ctx):
         command = ctx.executable.generator.path + " $@",
         arguments = [
             "--source-path",
-            "aten/src/ATen",
+            "external/pytorch/aten/src/ATen",
             "--per-operator-headers",
             "--install_dir",
             install_dir,
