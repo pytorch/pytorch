@@ -1322,6 +1322,7 @@ class CyclicLR(LRScheduler):
         return lrs
 
     def state_dict(self):
+        # We are dropping the `_scale_fn_ref` attribute because it is a `weakref.WeakMethod` and can't be pickled
         return {key: value for key, value in self.__dict__.items() if key not in ("optimizer", "_scale_fn_ref")}
 
     def load_state_dict(self, state_dict):

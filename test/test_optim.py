@@ -5,6 +5,7 @@ import math
 import unittest
 import functools
 import itertools
+import pickle
 from copy import deepcopy
 
 import torch
@@ -3157,6 +3158,11 @@ class TestLRScheduler(TestCase):
         ref = test()
         assert ref() is None
         gc.enable()
+
+    def test_cycle_lr_state_dict_picklable(self):
+        adam_opt = optim.Adam(self.net.parameters())
+        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
+        pickle.dumps(scheduler.state_dict())
 
     def test_onecycle_lr_invalid_anneal_strategy(self):
         with self.assertRaises(ValueError):
