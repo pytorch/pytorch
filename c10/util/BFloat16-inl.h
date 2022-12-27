@@ -11,15 +11,17 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 namespace c10 {
 
 /// Constructors
-inline C10_HOST_DEVICE BFloat16::BFloat16(float value) :
+inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
+    :
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && \
     defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-  x(__bfloat16_as_ushort(__float2bfloat16(value)))
+      x(__bfloat16_as_ushort(__float2bfloat16(value)))
 #else
-  // RNE by default
-  x(detail::round_to_nearest_even(value))
+      // RNE by default
+      x(detail::round_to_nearest_even(value))
 #endif
-  {}
+{
+}
 
 /// Implicit conversions
 inline C10_HOST_DEVICE BFloat16::operator float() const {
