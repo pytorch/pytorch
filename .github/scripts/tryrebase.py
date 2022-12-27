@@ -49,11 +49,11 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
 
-    # steal the identity of the committer of the commit on the orig branch
+    # Steal the identity of the committer of the commit on the orig branch
     email = repo._run_git("log", orig_ref, "--pretty=format:%ae", "-1")
     name = repo._run_git("log", orig_ref, "--pretty=format:%an", "-1")
-    repo._run_git("config", "--global", "user.name", name)
     repo._run_git("config", "--global", "user.email", email)
+    repo._run_git("config", "--global", "user.name", name)
 
     os.environ["OAUTH_TOKEN"] = os.environ["GITHUB_TOKEN"]
     with open('.ghstackrc', 'w+') as f:
@@ -122,16 +122,31 @@ def main() -> None:
         return
 
     try:
+        email = name = ""
+
         if pr.is_ghstack_pr():
+            # Check the configured name and email. If they are available, store them so that
+            # we can put them back after rebasing here
+            email = repo._run_git("config", "user.email")
+            name = repo._run_git("config", "user.name")
+
             rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
-            return
-        rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+        else:
+            rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+
     except Exception as e:
         msg = f"Rebase failed due to {e}"
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
         gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+
+    finally:
+        if email:
+            repo._run_git("config", "--global", "user.email", email)
+
+        if name:
+            repo._run_git("config", "--global", "user.name", name)
 
 
 if __name__ == "__main__":

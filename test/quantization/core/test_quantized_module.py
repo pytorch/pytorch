@@ -1087,6 +1087,24 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                     batch_size, in_features, out_features, use_bias,
                     per_channel, negative_slope=neg_slope)
 
+    @skipIfNoONEDNN
+    def test_linear_tanh(self):
+        """test API functionality for nn.intrinsic.quantized.linear_tanh"""
+        with override_quantized_engine('onednn'):
+            options = itertools.product(
+                [1, 5],  # batch size
+                [16, 32],  # in_features
+                [4, 8],  # out_features
+                [True, False],  # use_bias
+                [True, False])  # negative slope
+            for (batch_size, in_features, out_features, use_bias,
+                 per_channel) in options:
+                self._test_linear_api_impl(
+                    nniq.LinearTanh, 'QuantizedLinearTanh',
+                    torch.ops.quantized.linear_tanh,
+                    batch_size, in_features, out_features, use_bias,
+                    per_channel)
+
 class TestDynamicQuantizedModule(QuantizationTestCase):
     def _test_qconv_impl(self, q_mod, dq_mod, dim, dtype, bias):
         in_channels = 3
@@ -1594,6 +1612,7 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
             weight_qparams_dict = {
                 "weight_ih": weight_qparams,
                 "weight_hh": weight_qparams,
+                "is_decomposed": False,
             }
             ref_kwargs = kwargs.copy()
             ref_kwargs["weight_qparams_dict"] = weight_qparams_dict
@@ -1638,12 +1657,13 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
                 bidirectional=bidirectional)
             # initialize ref rnn module
             weight_qparams = {
-                'qscheme': torch.per_tensor_affine,
-                'dtype': torch.qint8,
-                'scale': 2.0,
-                'zero_point': 5
+                "qscheme": torch.per_tensor_affine,
+                "dtype": torch.qint8,
+                "scale": 2.0,
+                "zero_point": 5
             }
             weight_qparams_dict = {key: weight_qparams for key in fp32_rnn._flat_weights_names if key.startswith("weight")}
+            weight_qparams_dict["is_decomposed"] = False
             ref_rnn = nnqr.LSTM(
                 input_size=input_size,
                 hidden_size=hidden_size,
@@ -1690,26 +1710,29 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
         }
 
         per_tensor_weight_qparams = {
-            'qscheme': torch.per_tensor_affine,
-            'dtype': torch.quint8,
-            'scale': 2.0,
-            'zero_point': 5,
+            "qscheme": torch.per_tensor_affine,
+            "dtype": torch.quint8,
+            "scale": 2.0,
+            "zero_point": 5,
+            "is_decomposed": False,
         }
 
         per_channel_weight_qparams = {
-            'qscheme': torch.per_channel_affine,
-            'dtype': torch.quint8,
-            'scale': torch.randn(10),
-            'zero_point': torch.randint(0, 255, (10,)),
-            'axis': 0,
+            "qscheme": torch.per_channel_affine,
+            "dtype": torch.quint8,
+            "scale": torch.randn(10),
+            "zero_point": torch.randint(0, 255, (10,)),
+            "axis": 0,
+            "is_decomposed": False,
         }
 
         per_channel_weight_qparams_quint4x2 = {
-            'qscheme': torch.per_channel_affine_float_qparams,
-            'dtype': torch.quint4x2,
-            'scale': torch.randn(10),
-            'zero_point': torch.randint(0, 255, (10,)),
-            'axis': 0,
+            "qscheme": torch.per_channel_affine_float_qparams,
+            "dtype": torch.quint4x2,
+            "scale": torch.randn(10),
+            "zero_point": torch.randint(0, 255, (10,)),
+            "axis": 0,
+            "is_decomposed": False,
         }
 
         weight_qparams_options = [
@@ -1719,7 +1742,7 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
         ]
         for fp_cls, weight_qparams in itertools.product([nn.Embedding, nn.EmbeddingBag], weight_qparams_options):
             # TODO: torch.quint4x2 not supported in quantize_per_channel, need to add support
-            if weight_qparams['dtype'] == torch.quint4x2:
+            if weight_qparams["dtype"] == torch.quint4x2:
                 continue
             ref_cls, args = fp_to_ref[fp_cls]
 
