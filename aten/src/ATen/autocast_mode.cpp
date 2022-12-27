@@ -414,7 +414,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(layer_norm, fp32)
   KERNEL(native_layer_norm, fp32)
   KERNEL(group_norm, fp32)
-  KERNEL(frobenius_norm, fp32)
   KERNEL2(frobenius_norm, dim, fp32)
   KERNEL(nuclear_norm, fp32)
   KERNEL2(nuclear_norm, dim, fp32)
