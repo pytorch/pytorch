@@ -1513,10 +1513,11 @@ class LoopNestWithSplit:
 
     @cache_on_self
     def max_parallel_depth(self):
-        """Maximal allowed depth for parallelism. That is to the levels without splitting."""
+        """Maximal allowed depth for parallelism: 1) Levels without splitting and 2) All reduction or non-reduction levels"""
         max_depth = 0
         loops = self.root
-        while len(loops) == 1:
+        is_reduction = loops[0].is_reduction() if loops else False
+        while len(loops) == 1 and loops[0].is_reduction() == is_reduction:
             max_depth += 1
             loops = loops[0].inner
         return max_depth
