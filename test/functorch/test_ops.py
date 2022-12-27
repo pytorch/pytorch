@@ -1390,8 +1390,6 @@ class TestOperators(TestCase):
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
         xfail('native_dropout_backward'),  # NYI
-        xfail('CubeGenVmapAutogradFunction'),  # NYI
-        xfail('SortGenVmapAutogradFunction'),  # NYI
 
     }))
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
@@ -1559,9 +1557,6 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
         xfail('native_dropout_backward'),
         xfail('nn.functional.prelu'),
-
-        xfail('CubeGenVmapAutogradFunction'),  # NYI
-        xfail('SortGenVmapAutogradFunction'),  # NYI
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -2069,12 +2064,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_jvpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
-        xfail('CubeGenVmapAutogradFunction'),  # NYI
-        xfail('MulGenVmapAutogradFunction'),  # NYI
-        xfail('ScaleGradGenVmapAutogradFunction'),  # NYI
-        xfail('SelectGenVmapAutogradFunction'),  # NYI
-        xfail('SortGenVmapAutogradFunction'),  # NYI
-        xfail('ZeroGradientsGenVmapAutogradFunction'),  # NYI
     })
     def test_jvpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -2104,12 +2093,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_jvpvmapvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
-        xfail('CubeGenVmapAutogradFunction'),  # NYI
-        xfail('MulGenVmapAutogradFunction'),  # NYI
-        xfail('ScaleGradGenVmapAutogradFunction'),  # NYI
-        xfail('SelectGenVmapAutogradFunction'),  # NYI
-        xfail('SortGenVmapAutogradFunction'),  # NYI
-        xfail('ZeroGradientsGenVmapAutogradFunction'),  # NYI
     })
     def test_jvpvmapvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -2145,12 +2128,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
-        xfail('CubeGenVmapAutogradFunction'),  # NYI
-        xfail('MulGenVmapAutogradFunction'),  # NYI
-        xfail('ScaleGradGenVmapAutogradFunction'),  # NYI
-        xfail('SelectGenVmapAutogradFunction'),  # NYI
-        xfail('SortGenVmapAutogradFunction'),  # NYI
-        xfail('ZeroGradientsGenVmapAutogradFunction'),  # NYI
     })
     def test_vmapjvpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -2187,13 +2164,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_jvpjvpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
-        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
-        xfail('CubeGenVmapAutogradFunction'),  # NYI
-        xfail('MulGenVmapAutogradFunction'),  # NYI
-        xfail('ScaleGradGenVmapAutogradFunction'),  # NYI
-        xfail('SelectGenVmapAutogradFunction'),  # NYI
-        xfail('SortGenVmapAutogradFunction'),  # NYI
-        xfail('ZeroGradientsGenVmapAutogradFunction'),  # NYI
     })
     def test_jvpjvpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -2224,13 +2194,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_jvpvjpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
-        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
-        xfail('CubeGenVmapAutogradFunction'),  # NYI
-        xfail('MulGenVmapAutogradFunction'),  # NYI
-        xfail('ScaleGradGenVmapAutogradFunction'),  # NYI
-        xfail('SelectGenVmapAutogradFunction'),  # NYI
-        xfail('SortGenVmapAutogradFunction'),  # NYI
-        xfail('ZeroGradientsGenVmapAutogradFunction'),  # NYI
     })
     def test_jvpvjpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
