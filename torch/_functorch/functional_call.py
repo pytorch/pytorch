@@ -125,7 +125,7 @@ def stack_module_state(models):
         data = torch.randn(batch_size, 3)
 
         def wrapper(params, buffers, data):
-            return functorch.functional_call(model[0], (params, buffers), data)
+            return torch.func.functional_call(model[0], (params, buffers), data)
 
         params, buffers = stack_module_state(models)
         output = vmap(wrapper, (0, 0, None))(params, buffers, data)
