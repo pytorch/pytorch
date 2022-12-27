@@ -269,7 +269,7 @@ inline float fp16_ieee_to_fp32_value(uint16_t h) {
   constexpr uint32_t exp_offset = UINT32_C(0xE0) << 23;
   // const float exp_scale = 0x1.0p-112f;
   constexpr uint32_t scale_bits = (uint32_t)15 << 23;
-  float exp_scale_val;
+  float exp_scale_val = NAN;
   std::memcpy(&exp_scale_val, &scale_bits, sizeof(exp_scale_val));
   const float exp_scale = exp_scale_val;
   const float normalized_value =
@@ -340,7 +340,7 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
   // const float scale_to_zero = 0x1.0p-110f;
   constexpr uint32_t scale_to_inf_bits = (uint32_t)239 << 23;
   constexpr uint32_t scale_to_zero_bits = (uint32_t)17 << 23;
-  float scale_to_inf_val, scale_to_zero_val;
+  float scale_to_inf_val = NAN, scale_to_zero_val = NAN;
   std::memcpy(&scale_to_inf_val, &scale_to_inf_bits, sizeof(scale_to_inf_val));
   std::memcpy(
       &scale_to_zero_val, &scale_to_zero_bits, sizeof(scale_to_zero_val));
@@ -545,3 +545,4 @@ C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
 } // namespace c10
 
 #include <c10/util/Half-inl.h> // IWYU pragma: keep
+#include <math.h>

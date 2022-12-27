@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include <math.h>
+
 #include <algorithm>
 #include <cassert>
 #include <climits>
@@ -607,7 +609,7 @@ inline uint64_t GreatestCommonDivisor64(uint64_t A, uint64_t B) {
 
 /// This function takes a 64-bit integer and returns the bit equivalent double.
 inline double BitsToDouble(uint64_t Bits) {
-  double D;
+  double D = NAN;
   static_assert(sizeof(uint64_t) == sizeof(double), "Unexpected type sizes");
   memcpy(&D, &Bits, sizeof(Bits));
   return D;
@@ -616,7 +618,7 @@ inline double BitsToDouble(uint64_t Bits) {
 /// This function takes a 32-bit integer and returns the bit equivalent float.
 inline float BitsToFloat(uint32_t Bits) {
   // TODO: Use bit_cast once C++20 becomes available.
-  float F;
+  float F = NAN;
   static_assert(sizeof(uint32_t) == sizeof(float), "Unexpected type sizes");
   memcpy(&F, &Bits, sizeof(Bits));
   return F;
@@ -626,7 +628,7 @@ inline float BitsToFloat(uint32_t Bits) {
 /// Note that copying doubles around changes the bits of NaNs on some hosts,
 /// notably x86, so this routine cannot be used if these bits are needed.
 inline uint64_t DoubleToBits(double Double) {
-  uint64_t Bits;
+  uint64_t Bits = 0;
   static_assert(sizeof(uint64_t) == sizeof(double), "Unexpected type sizes");
   memcpy(&Bits, &Double, sizeof(Double));
   return Bits;
@@ -636,7 +638,7 @@ inline uint64_t DoubleToBits(double Double) {
 /// Note that copying floats around changes the bits of NaNs on some hosts,
 /// notably x86, so this routine cannot be used if these bits are needed.
 inline uint32_t FloatToBits(float Float) {
-  uint32_t Bits;
+  uint32_t Bits = 0;
   static_assert(sizeof(uint32_t) == sizeof(float), "Unexpected type sizes");
   memcpy(&Bits, &Float, sizeof(Float));
   return Bits;
@@ -819,7 +821,7 @@ typename std::enable_if<std::is_unsigned<T>::value, T>::type SaturatingAdd(
     T X,
     T Y,
     bool* ResultOverflowed = nullptr) {
-  bool Dummy;
+  bool Dummy = false;
   bool& Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;
   // Hacker's Delight, p. 29
   T Z = X + Y;
@@ -838,7 +840,7 @@ typename std::enable_if<std::is_unsigned<T>::value, T>::type SaturatingMultiply(
     T X,
     T Y,
     bool* ResultOverflowed = nullptr) {
-  bool Dummy;
+  bool Dummy = false;
   bool& Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;
 
   // Hacker's Delight, p. 30 has a different algorithm, but we don't use that
@@ -884,7 +886,7 @@ typename std::enable_if<std::is_unsigned<T>::value, T>::type SaturatingMultiply(
 template <typename T>
 typename std::enable_if<std::is_unsigned<T>::value, T>::type
 SaturatingMultiplyAdd(T X, T Y, T A, bool* ResultOverflowed = nullptr) {
-  bool Dummy;
+  bool Dummy = false;
   bool& Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;
 
   T Product = SaturatingMultiply(X, Y, &Overflowed);
