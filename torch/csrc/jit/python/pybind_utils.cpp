@@ -678,7 +678,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     stack = createStackForSchema(
         op->schema(), std::move(args), kwargs, c10::nullopt);
 
-    return std::make_pair(op, stack);
+    return std::make_pair(std::move(op), std::move(stack));
   } else {
     std::vector<schema_match_error> errors;
     std::shared_ptr<Operator> found_op = nullptr;
@@ -700,7 +700,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
       throw std::runtime_error(ss.str());
     }
 
-    return std::make_pair(found_op, stack);
+    return std::make_pair(std::move(found_op), std::move(stack));
   }
 }
 
