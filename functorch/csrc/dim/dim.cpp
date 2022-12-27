@@ -21,7 +21,7 @@
 #include "arena.h"
 #include "python_variable_simple.h"
 
-#if PY_VERSION_HEX >= 0x030b0000
+#if IS_PYTHON_3_11_PLUS
 #define Py_BUILD_CORE
 #include "internal/pycore_opcode.h"
 #undef Py_BUILD_CORE
@@ -1465,7 +1465,7 @@ py::object create_dimlist(py::object name, py::handle size) {
 
 
 // Python wrappers that make new reflection primitives available for older runtimes
-#if PY_VERSION_HEX < 0x030b0000
+#if !(IS_PYTHON_3_11_PLUS)
 #define _PyCode_CODE(CO) ((_Py_CODEUNIT*)PyBytes_AS_STRING((CO)->co_code))
 #endif
 
@@ -1473,14 +1473,14 @@ struct PyInstDecoder {
     PyInstDecoder(PyCodeObject* code_object, int lasti)
     : code_object_(code_object), code_(_PyCode_CODE(code_object)), offset_(lasti / sizeof(_Py_CODEUNIT))  {}
     void next() {
-    #if PY_VERSION_HEX >= 0x030b0000
+    #if IS_PYTHON_3_11_PLUS
         offset_ += _PyOpcode_Caches[opcode()];
     #endif
         offset_ += 1;
     }
     int opcode() {
         auto r = _Py_OPCODE(code_[offset_]);
-    #if PY_VERSION_HEX >= 0x030b0000
+    #if IS_PYTHON_3_11_PLUS
         r = _PyOpcode_Deopt[r];
     #endif
         return r;
@@ -1542,7 +1542,7 @@ static PyObject* _dims(PyObject *self,
     auto c = py::obj<PyCodeObject>::steal(PyFrame_GetCode(f.ptr()));
     auto lasti = PyFrame_GetLasti(f.ptr());
     auto decoder = PyInstDecoder(c.ptr(), lasti);
-    #if PY_VERSION_HEX >= 0x030b0000
+    #if IS_PYTHON_3_11_PLUS
     // When py3.11 adapts bytecode lasti points to the precall
     // rather than the call instruction after it
     if (decoder.opcode() == PRECALL) {
