@@ -1463,6 +1463,7 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu)
 /*
  * Based on
  * https://github.com/scipy/scipy/blob/8a64c938ddf1ae4c02a08d2c5e38daeb8d061d38/scipy/sparse/sparsetools/csr.h
+ * Modified to ensure sorted BSR column indices.
  */
 template <class I, class T>
 void _csr_to_block_csr_cpu_kernel(
@@ -1491,7 +1492,7 @@ void _csr_to_block_csr_cpu_kernel(
   // Number of blocks along rows
   I n_brow = n_row / R;
   // Number of blocks along columns
-  // I n_bcol = n_col / C;
+  I n_bcol = n_col / C;
 
   // Number of elements per block
   I RC = R * C;
@@ -1502,6 +1503,20 @@ void _csr_to_block_csr_cpu_kernel(
 
   // Iterate over blocks along rows
   for (I block_i = 0; block_i < n_brow; block_i++) {
+    // Iterate over blocks along columns to locate non-zero blocks,
+    // this guarantees sorted block-column indices
+    for (I block_j = 0; block_j < n_bcol; block_j ++) {
+      for (I jj = input_crow_indices[R * block_i]; jj < input_crow_indices[R * (block_i + 1)]; jj++) {
+        I j = input_col_indices[jj]; // column index
+        if (j / C == block_j) {
+          blocks[block_j] = result_values + RC * n_blks;
+          result_col_indices[n_blks] = block_j;
+          n_blks++;
+          break;
+        }
+      }
+    }
+
     // Iterate over rows within block
     for (I r = 0; r < R; r++) {
       I i = R * block_i + r; // row index
@@ -1513,24 +1528,26 @@ void _csr_to_block_csr_cpu_kernel(
         // Column within block
         I c = j % C;
 
-        if (blocks[block_j] == 0) {
-          blocks[block_j] = result_values + RC * n_blks;
-          result_col_indices[n_blks] = block_j;
-          n_blks++;
-        }
-
         // Specific blocks entries should not be visited more than once.
         // Scipy code does an addition here. Why?
+        // A possible answer: Scipy code supports "uncoalesced CSR"
+        // format that allows repeated columns per row and column
+        // indices may be unsorted.
         *(blocks[block_j] + C * r + c) = input_values[jj];
       }
     }
 
-    for (I jj = input_crow_indices[R * block_i];
-         jj < input_crow_indices[R * (block_i + 1)];
-         jj++) {
-      blocks[input_col_indices[jj] / C] = 0;
-    }
-
+    // Scipy code has
+    /*
+      for (I jj = input_crow_indices[R * block_i];
+           jj < input_crow_indices[R * (block_i + 1)];
+           jj++) {
+             blocks[input_col_indices[jj] / C] = 0;
+           }
+    */
+    // but we don't need it because the modified code (see the block_j
+    // loop above) does not need to evaluate `blocks[block_j] == 0`
+    // that the original code did.
     result_crow_indices[block_i + 1] = n_blks;
   }
 }

@@ -2,10 +2,12 @@
 import contextlib
 import dataclasses
 import functools
+import glob
 import importlib
 import itertools
 import os
 import random
+import shutil
 import sys
 import typing
 import unittest
@@ -70,8 +72,12 @@ except (ImportError, AssertionError) as e:
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
+HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_multigpu = functools.partial(
+    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+)
 
 torch._inductor.config.triton.autotune = False  # too slow
 
@@ -2006,6 +2012,15 @@ class CommonTemplate:
             check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
+    @requires_multigpu()
+    def test_multi_gpu_device(self):
+        def fn(x, y):
+            r = torch.ops.aten.div(x, y)
+            r = r.to("cuda:1")
+            return 2 * r
+
+        self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
+
     def test_unbind(self):
         def fn(a):
             return torch.unbind(a), torch.unbind(a, -1)
@@ -2773,6 +2788,10 @@ class CommonTemplate:
             fn,
             (torch.randn([8, 16]),),
         )
+        self.common(
+            fn,
+            (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+        )
 
     def test_cat_upcasting(self):
         def fn(arg4_1, slice_7):
@@ -3095,6 +3114,26 @@ class CommonTemplate:
                 torch.tensor([0, 2, 1], dtype=torch.int64),
             ),
         )
+
+    def test_output_strides(self):
+        def fn(x):
+            y = x.permute(0, 2, 3, 1).contiguous()
+            torch._dynamo.graph_break()
+            return y.view(-1, 4)
+
+        inp = torch.rand([4, 4, 4, 4], device=self.device)
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+
+        self.assertEqual(fn(inp), fn_opt(inp))
+        self.assertEqual(fn(inp).stride(), fn_opt(inp).stride())
+
+        # no redundant copy
+        def foo(x):
+            return x[0:2:2].T[3:].squeeze(0)
+
+        foo_opt = torch._dynamo.optimize("inductor")(foo)
+        out = foo_opt(inp)
+        self.assertEqual(inp.storage(), out.storage())
 
     def test_index_select(self):
         def fn(a, b):
@@ -5198,15 +5237,26 @@ if HAS_CPU:
                 if isinstance(v, staticmethod):
                     cpp_op_list.append(k)
 
-            self.assertEqual(cpp_op_list.sort(), cpp_vec_op_list.sort())
+            diff = [
+                "index_expr",
+                "signbit",
+                "isinf",
+                "mod",
+                "masked",
+                "randn",
+                "isnan",
+                "rand",
+            ]
+            union = {*cpp_vec_op_list, *diff}
+            self.assertTrue(set(cpp_op_list).issubset(union))
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
-        def test_erf_cpu_only(self):
+        def test_new_vec_op_cpu_only(self):
             def fn(x):
-                return (torch.erf(x),)
+                return (torch.log1p(torch.expm1(torch.erf(x))),)
 
             x = torch.randn((2, 9))
             x[0, 0] = torch.nan
@@ -5307,7 +5357,7 @@ if HAS_CPU:
                 traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 1
+                assert metrics.generated_cpp_vec_kernel_count == 0
 
                 torch._dynamo.reset()
                 metrics.reset()
@@ -5840,6 +5890,22 @@ if HAS_CUDA:
             assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
+        counter = itertools.count(0)
+
+        class DebugDirManager(object):
+            def __init__(self):
+                self.id = next(TritonCodeGenTests.counter)
+                self.prev_debug_name = None
+
+            def __enter__(self):
+                self.prev_debug_name = torch._dynamo.config.debug_dir_root
+                self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
+                torch._dynamo.config.debug_dir_root = self.new_name
+
+            def __exit__(self, *args):
+                shutil.rmtree(self.new_name)
+                torch._dynamo.config.debug_dir_root = self.prev_debug_name
+
         from torch._inductor.triton_ops.autotune import CachingAutotuner
 
         class NoOpCompilerBackend:
@@ -5921,6 +5987,98 @@ if HAS_CUDA:
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
+
+        @staticmethod
+        def run_and_get_triton_code(fn, args):
+            from torch._inductor.debug import DebugContext
+            from torch._inductor.virtualized import V
+
+            torch._dynamo.reset()
+
+            context = DebugContext()
+
+            with TritonCodeGenTests.DebugDirManager(), patch.object(
+                config.trace, "enabled", True
+            ), context, V.set_debug_handler(context):
+
+                dir_name = "/".join(context._path.split("/")[:-1]) + "/"
+                fil = dir_name + "*inference*"
+                existing_dirs = glob.glob(fil)
+
+                fn(*args)
+
+                assert context._path is not None
+
+                dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
+
+                assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
+
+                full_name = os.path.join(dir_dbg[0], "output_code.py")
+                with open(full_name, "r") as f:
+                    return f.read()
+
+        def test_optimize_indexing_dtype(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
+
+            fn_opt = torch._dynamo.optimize("inductor")(fn)
+            inps = [torch.randn(2, 4, 16, 16).cuda()]
+            code = self.run_and_get_triton_code(fn_opt, inps)
+            self.assertTrue("to(tl.int32)" in code)
+            self.assertFalse("to(tl.int64)" in code)
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_cant_optimize_compute(self):
+            def ones():
+                return torch.ones([4], device="cuda")
+
+            def suffix(inp):
+                return (inp.to(torch.int64) + 1).to(torch.float64)
+
+            ten = torch.rand([4], device="cuda")
+
+            for foo in (
+                lambda x: x + 2147483657,
+                lambda x: torch.where(x < 0, ones(), ones() - 2) * (-(2 ** (40))),
+                lambda x: x + ten,
+                lambda x: x + ten.sum(),
+            ):
+
+                def fn():
+                    return suffix(foo(ones()))
+
+                fn_opt = torch._dynamo.optimize("inductor")(fn)
+                code = self.run_and_get_triton_code(fn_opt, [])
+
+                # this cannot be optimized away, value too large
+                self.assertTrue("to(tl.int64)" in code)
+                self.assertEqual(fn_opt(), fn())
+
+        def test_optimize_compute(self):
+            def ones():
+                return torch.ones([4], device="cuda")
+
+            def suffix(inp):
+                return (inp.to(torch.int64) + 1).to(torch.float64)
+
+            for foo in (
+                lambda x: x + 500,
+                lambda x: torch.where(x < 0, ones(), ones() - 2) * (-(2 ** (20))),
+                lambda x: x / 30,
+            ):
+
+                def fn():
+                    return suffix(foo(ones()))
+
+                fn_opt = torch._dynamo.optimize("inductor")(fn)
+                code = self.run_and_get_triton_code(fn_opt, [])
+
+                # this can be optimized away, value too large
+                self.assertTrue("to(tl.int64)" not in code)
+                self.assertTrue("to(tl.int32)" in code)
+
+                self.assertEqual(fn_opt(), fn())
 
 
 class ExprPrinterTests(TestCase):

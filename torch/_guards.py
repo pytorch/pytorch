@@ -2,16 +2,18 @@ import dataclasses
 import enum
 import logging
 import weakref
-from abc import ABC
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
+
+log = logging.getLogger(__name__)
 
 # TODO(voz): Stolen pattern, not sure why this is the case,
 # but mypy complains.
 try:
     import sympy  # type: ignore[import]
 except ImportError:
-    logging.warning("No sympy found")
+    log.warning("No sympy found")
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
@@ -31,7 +33,13 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
 
     def select(self, locals_, globals_):
-        if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE):
+        # SHAPE_ENV counts as locals, because the guard expressions
+        # created by shape env can reference f_locals
+        if self in (
+            GuardSource.LOCAL,
+            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.SHAPE_ENV,
+        ):
             return locals_
         if self in (GuardSource.GLOBAL, GuardSource.GLOBAL_NN_MODULE):
             return globals_
@@ -83,7 +91,7 @@ class Guard:
     #
     # Occasionally, name is not a valid Python expression; sometimes
     # it is meaningless.  Example create_fns that are like this include
-    # GRAD_MODE and SYMBOL_MATCH.
+    # GRAD_MODE and SHAPE_ENV.
     name: str
     source: GuardSource
     create_fn: Callable[[GuardBuilderBase, "Guard"], None]
@@ -182,6 +190,34 @@ class Guard:
 T = TypeVar("T")
 
 """
+Parent structure for guard env expressions.
+A GuardEnvExpr can have any subtype.
+Note: All subtypes must be handled exhaustively in
+torch._dynamo.guards._parse_guard_env_guards to avoid a RuntimeError.
+"""
+
+
+@dataclasses.dataclass
+class GuardEnvExpr:
+    pass
+
+
+"""
+A class representing a pair of duplicate inputs.
+input_pos_a and input_pos_b are input positions we have deduped.
+"""
+
+
+@dataclasses.dataclass
+class DuplicateInputs(GuardEnvExpr):
+    input_pos_a: int
+    input_pos_b: int
+
+    def __post_init__(self):
+        assert self.input_pos_a != self.input_pos_b
+
+
+"""
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
 copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot of any type that
@@ -195,11 +231,13 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 
 
 class Checkpointable(ABC, Generic[T]):
+    @abstractmethod
     def copy_graphstate(self) -> T:
-        pass
+        ...
 
+    @abstractmethod
     def restore_graphstate(self, state: T):
-        pass
+        ...
 
 
 """
@@ -241,6 +279,7 @@ prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
+        self.aotautograd_guards: List[GuardEnvExpr] = []
 
     def copy_graphstate(self):
         return GuardsCheckpointState(set(self.dynamo_guards))
@@ -283,8 +322,9 @@ class TracingContext:
     def get() -> Optional["TracingContext"]:
         return _CURRENT_TRACING_CONTEXT
 
-    def __init__(self):
+    def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
+        self.fake_mode = fake_mode
 
 
 """
