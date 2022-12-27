@@ -418,8 +418,7 @@ class TestMultiprocessing(TestCase):
         t = []
         for _ in range(5):
             t.append(q.get())
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(t[0], torch.full([5], 0.))
+        self.assertEqual(t[0], torch.full([5], 0, dtype=torch.int32))
         del t
         e.set()
         p.join(1)
@@ -642,7 +641,7 @@ if __name__ == "__main__":
         c2p.put(0)  # notify parent child is ready
         p2c.get()  # wait for record in parent
         e1.synchronize()
-        c2p.put(1)  # nofity synchronization is done in child
+        c2p.put(1)  # notify synchronization is done in child
         p2c.get()  # wait for parent to finish before destructing child event
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \

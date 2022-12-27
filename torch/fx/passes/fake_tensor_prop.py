@@ -4,9 +4,11 @@ import torch.fx
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch._subclasses.fake_tensor import FakeTensorMode
-from contextlib import nullcontext
 
 __all__ = ['FakeTensorProp']
+
+from torch.utils._python_dispatch import push_if_not_on_stack
+
 
 @compatibility(is_backward_compatible=False)
 class FakeTensorProp(torch.fx.Interpreter):
@@ -34,7 +36,6 @@ class FakeTensorProp(torch.fx.Interpreter):
         return result
 
     def propagate(self, *args):
-        ctx_mgr = nullcontext() if hasattr(self._mode, "tracking") and self._mode.tracking.on_stack else self._mode
-        with ctx_mgr:  # type: ignore[attr-defined]
+        with push_if_not_on_stack(self._mode):
             fake_args = [self._mode.from_tensor(a) for a in args]
             return super().run(*fake_args)

@@ -2030,6 +2030,22 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(2)
         self.assertEqual(f(x, y), opt_f(x, y))
 
+    def test_swin_base_tensor_attr(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # NB: not a parameter or buffer
+                self.t = torch.randn(3)
+
+            def forward(self, x):
+                return x + torch.cat((self.t, self.t))
+
+        mod = Foo()
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+        args = [torch.randn(6)]
+        self.assertTrue(same_two_models(mod, opt_mod, args))
+        opt_mod(*args)
+
     def test_while_loop_graph_break(self):
         # Repro of tacotron2 cache_size_recompilation
         def inner(x):

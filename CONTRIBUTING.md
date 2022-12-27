@@ -90,6 +90,7 @@ To develop PyTorch on your machine, here are some tips:
 * Python >= 3.7 (3.7.6+ recommended)
 
 ### Instructions
+_**Note**: If you get stuck at any step, check out the [tips and debugging](#tips-and-debugging) section below for common solutions_
 
 1. Uninstall all existing PyTorch installs. You may need to run `pip
 uninstall torch` multiple times. You'll know `torch` is fully
@@ -115,7 +116,7 @@ If you already have PyTorch from source, update it:
 ```bash
 git pull --rebase
 git submodule sync --recursive
-git submodule update --init --recursive --jobs 0
+git submodule update --init --recursive
 ```
 
 If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
@@ -157,15 +158,15 @@ that, you can install in `develop` mode again.
   git submodule deinit -f .
   git clean -xdf
   python setup.py clean
-  git submodule update --init --recursive --jobs 0 # very important to sync the submodules
-  python setup.py develop                          # then try running the command again
+  git submodule update --init --recursive # very important to sync the submodules
+  python setup.py develop                 # then try running the command again
   ```
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
   experiment with some environment variables, you can pass them into the command:
   ```bash
   ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
   ```
-* If you run into issue running `git submodule update --init --recursive --jobs 0`. Please try the following:
+* If you run into issue running `git submodule update --init --recursive`. Please try the following:
   - If you encounter an error such as
     ```
     error: Submodule 'third_party/pybind11' could not be updated

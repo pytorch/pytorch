@@ -184,8 +184,10 @@ struct C10_API PyInterpreterVTable {
   virtual void trace_gpu_stream_synchronization(uintptr_t stream) const = 0;
   virtual void trace_gpu_event_synchronization(uintptr_t event) const = 0;
 
-  virtual void mode_state_push_trampoline(std::shared_ptr<SafePyObject> mode) const = 0;
-  virtual void mode_state_pop_trampoline(std::shared_ptr<SafePyObject> mode) const = 0;
+  virtual void mode_state_push_trampoline(
+      std::shared_ptr<SafePyObject> mode) const = 0;
+  virtual void mode_state_pop_trampoline(
+      std::shared_ptr<SafePyObject> mode) const = 0;
 };
 
 struct C10_API PyInterpreter {

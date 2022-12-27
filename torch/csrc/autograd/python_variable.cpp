@@ -276,8 +276,10 @@ struct ConcretePyInterpreterVTable final
     CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
   }
 
-  void mode_state_push_trampoline(std::shared_ptr<c10::SafePyObject> mode) const override;
-  void mode_state_pop_trampoline(std::shared_ptr<c10::SafePyObject> mode) const override;
+  void mode_state_push_trampoline(
+      std::shared_ptr<c10::SafePyObject> mode) const override;
+  void mode_state_pop_trampoline(
+      std::shared_ptr<c10::SafePyObject> mode) const override;
 
   static ConcretePyInterpreterVTable* instance() {
     static ConcretePyInterpreterVTable s;
@@ -683,7 +685,7 @@ PyObject* THPVariable_pynew(
 
 static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   const auto& var = THPVariable_Unpack(self);
-  THPVariable_Wrap(var);
+  Py_DECREF(THPVariable_Wrap(var));
   Py_RETURN_NONE;
 }
 
@@ -2808,7 +2810,8 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
-void ConcretePyInterpreterVTable::mode_state_push_trampoline(const std::shared_ptr<SafePyObject> mode) const {
+void ConcretePyInterpreterVTable::mode_state_push_trampoline(
+    const std::shared_ptr<SafePyObject> mode) const {
   PyObject* mode_obj = mode->ptr(getPyInterpreter());
   const char* check_mode_push_name = "check_mode_state_push";
   py::gil_scoped_acquire acquire;
@@ -2826,7 +2829,8 @@ void ConcretePyInterpreterVTable::mode_state_push_trampoline(const std::shared_p
   }
 }
 
-void ConcretePyInterpreterVTable::mode_state_pop_trampoline(const std::shared_ptr<SafePyObject> mode) const {
+void ConcretePyInterpreterVTable::mode_state_pop_trampoline(
+    const std::shared_ptr<SafePyObject> mode) const {
   PyObject* mode_obj = mode->ptr(getPyInterpreter());
   const char* check_mode_pop_name = "check_mode_state_pop";
   py::gil_scoped_acquire acquire;

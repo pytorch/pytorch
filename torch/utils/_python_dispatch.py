@@ -99,6 +99,10 @@ def _pop_mode_temporarily():
         _push_mode(old)
 
 
+def push_if_not_on_stack(mode):
+    return contextlib.nullcontext() if hasattr(mode, "tracking") and mode.tracking.on_stack else mode
+
+
 @contextlib.contextmanager
 def _disable_current_modes():
     mode_len = _len_torch_dispatch_stack()
