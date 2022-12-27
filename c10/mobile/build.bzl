@@ -3,7 +3,6 @@ def define_targets(rules):
         name = "CPUCachingAllocator",
         srcs = ["CPUCachingAllocator.cpp"],
         hdrs = ["CPUCachingAllocator.h"],
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
@@ -16,7 +15,6 @@ def define_targets(rules):
         name = "CPUProfilingAllocator",
         srcs = ["CPUProfilingAllocator.cpp"],
         hdrs = ["CPUProfilingAllocator.h"],
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [

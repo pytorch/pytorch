@@ -6,7 +6,6 @@ def define_targets(rules):
         # This library defines a flag, The use of alwayslink keeps it
         # from being stripped.
         alwayslink = True,
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
@@ -21,7 +20,6 @@ def define_targets(rules):
     rules.cc_library(
         name = "ScalarType",
         hdrs = ["ScalarType.h"],
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = ["//c10/util:base"],
@@ -30,7 +28,6 @@ def define_targets(rules):
     rules.cc_library(
         name = "alignment",
         hdrs = ["alignment.h"],
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
     )
@@ -42,7 +39,6 @@ def define_targets(rules):
         # This library defines flags, The use of alwayslink keeps them
         # from being stripped.
         alwayslink = True,
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
@@ -77,7 +73,6 @@ def define_targets(rules):
         # This library uses flags and registration. Do not let the
         # linker remove them.
         alwayslink = True,
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [

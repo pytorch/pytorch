@@ -48,7 +48,6 @@ def intern_build_aten_ops(copts, deps, extra_impls):
                 "-DCPU_CAPABILITY_" + cpu_capability,
             ] + CAPABILITY_COMPILER_FLAGS[cpu_capability],
             deps = deps,
-            linkstatic = 1,
         )
     cc_library(
         name = "ATen_CPU",
