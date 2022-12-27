@@ -5,11 +5,7 @@ from weakref import ref, ReferenceType, WeakKeyDictionary
 
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import (
-    detach_variable,
-    get_device_states,
-    set_device_states,
-)
+from torch.utils.checkpoint import detach_variable, get_device_states, set_device_states
 
 from .contract import contract
 
@@ -260,9 +256,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
         if checkpoint.state(module).enable_hook:
             torch.set_grad_enabled(checkpoint.state(module).orig_grad_enabled)
             if checkpoint.state(module).use_reentrant:
-                return _ModuleHookCheckpointFunction.apply(
-                    module, output, *inputs
-                )
+                return _ModuleHookCheckpointFunction.apply(module, output, *inputs)
             else:
                 checkpoint.state(module).saved_tensor_hooks.__exit__()
                 checkpoint.state(module).saved_tensor_hooks = None
