@@ -37,6 +37,7 @@ enum class RecordType {
   ViewOp,
   PermuteOp,
   IndexSelectOp,
+  FullOp
 };
 
 //! RecordFunctor is the base class record for operations recorded by
@@ -327,7 +328,7 @@ struct ViewOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", original_shape=[";
     bool first_arg = true;
@@ -414,7 +415,7 @@ struct PermuteOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", dims=[";
     bool first_arg = true;
@@ -498,7 +499,7 @@ struct SqueezeOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", original_shape=[";
     bool first_arg = true;
@@ -650,7 +651,7 @@ struct BroadcastInDimOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", output_shape=[";
     bool first_arg = true;
@@ -798,7 +799,7 @@ struct BroadcastOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", is_broadcast_dim=[";
     bool first_arg = true;
@@ -894,7 +895,7 @@ struct CastOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
@@ -947,7 +948,7 @@ struct ConstantRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     if (std::is_same<ValueType, bool>::value) {
       bool value = torch::jit::fuser::cuda::__toBool(value_);
@@ -1089,7 +1090,7 @@ struct TensorRecord : RecordFunctor {
     fd.addInput(tv);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << "symbolic_sizes=[";
     bool first_arg = true;
@@ -1282,7 +1283,7 @@ struct ReductionOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", axes=[";
     bool first_arg = true;
@@ -1398,7 +1399,7 @@ struct ScalarRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << "dtype=" << dtypeToPyString(dtype_);
     if (close_function) {
@@ -1456,7 +1457,7 @@ struct NormOpRecord : RecordFunctor {
         correction_(correction),
         keep_dim_(keep_dim) {}
   virtual ~NormOpRecord() = default;
-  virtual RecordFunctor* clone() = 0;
+  RecordFunctor* clone() override = 0;
 
   // I am skipping the bassel's correction value in the hash because
   // I suspect we might change it to a bool from a 64-bit value
@@ -1497,7 +1498,7 @@ struct NormOpRecord : RecordFunctor {
   }
 
   //! Each NormOp Child should define the operator() to build the IR
-  virtual void operator()(FusionDefinition& fd) = 0;
+  void operator()(FusionDefinition& fd) override = 0;
 
   virtual void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
@@ -1695,6 +1696,96 @@ struct TensorSizesRecord : RecordFunctor {
     }
   }
 };
+
+struct FullOpRecord : RecordFunctor {
+  FullOpRecord(
+      std::vector<State> _args,
+      std::vector<State> _outputs,
+      std::vector<int64_t>& shape,
+      Nvf::DataType dtype)
+      : RecordFunctor(
+            std::move(_args),
+            std::move(_outputs),
+            "ops.full",
+            RecordType::FullOp),
+        shape_(std::move(shape)),
+        dtype_(dtype) {}
+  virtual ~FullOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new FullOpRecord(*this);
+  }
+
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 --- 24 | 23 --------------------------  0 |
+  //! | Dtype     | Shape hash code                  |
+  virtual size_t hash() const final {
+    auto result = RecordFunctor::hash();
+    size_t shape_hash = 0;
+    for (auto p : shape_) {
+      shape_hash ^= static_cast<size_t>(p);
+    }
+    result |= ((static_cast<size_t>(dtype_) & 0xff) << 24);
+    result |= (shape_hash & 0xffff);
+    return result;
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const FullOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      if (result) {
+        result = (shape_.size() == child_ptr->shape_.size());
+        if (result) {
+          for (size_t i = 0; i < shape_.size(); ++i) {
+            if (shape_[i] != child_ptr->shape_[i]) {
+              result = false;
+              break;
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<Nvf::Val>();
+
+    std::vector<torch::jit::fuser::cuda::Val*> nvf_shape(
+        shape_.size(), nullptr);
+    for (const auto idx : c10::irange(shape_.size())) {
+      nvf_shape[idx] = Nvf::IrBuilder::create<Nvf::Int>(shape_.at(idx));
+    }
+    auto output = torch::jit::fuser::cuda::full(nvf_shape, arg, dtype_);
+    fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
+    RecordFunctor::print(os, false);
+    os << ", shape=[";
+    bool first_arg = true;
+    for (auto p : shape_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << p;
+    }
+    os << "]";
+    os << ", dtype=" << dtypeToPyString(dtype_);
+    if (close_function) {
+      os << ")";
+    }
+  }
+
+ private:
+  //! Represents shape of new tensor
+  std::vector<int64_t> shape_;
+  //! Type of output
+  Nvf::DataType dtype_;
+};
+
 } // namespace nvfuser
 
 //! Creating the template specialized hash and equal_to functions for a

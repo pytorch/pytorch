@@ -3,21 +3,16 @@
 import contextlib
 import math
 import random
-import string
 import unittest
 import io
-import unittest.mock as mock
 import itertools
 import warnings
 import pickle
 from copy import deepcopy
 from itertools import product
-from functools import reduce, partial
-from operator import mul
+from functools import partial
 from collections import OrderedDict
 from tempfile import NamedTemporaryFile
-import weakref
-import gc
 
 import torch
 
@@ -30,30 +25,28 @@ import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_
-import torch.nn.utils.parametrize as parametrize
-import torch.nn.utils.prune as prune
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
+from torch.nn.utils.fusion import fuse_conv_bn_weights
+from torch.nn.utils.fusion import fuse_linear_bn_weights
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps,\
-    TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
-    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, IS_WINDOWS, \
-    skipIfTorchDynamo
+    TEST_WITH_UBSAN, IS_PPC, \
+    parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
+    skipIfTorchDynamo, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
-    module_tests, criterion_tests, loss_reference_fns, \
+    module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types
-from torch.nn import MultiheadAttention
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
@@ -71,7 +64,6 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 load_tests = load_tests
 
 if TEST_SCIPY:
-    from scipy import stats
     import scipy.signal
     import scipy.ndimage
 
@@ -143,26 +135,6 @@ class TestNN(NNTestCase):
             d_params.append(p.grad)
         return params, d_params
 
-    def _create_basic_net(self):
-        class Layer(nn.Module):
-            def __init__(self):
-                super(Layer, self).__init__()
-                self.layer_dummy_param = Parameter(torch.empty(3, 5))
-                self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
-
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l1 = Layer()
-                self.dummy_param = Parameter(torch.empty(3, 5))
-                self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
-
-        l = Layer()
-        n = Net()
-        s = nn.Sequential(n, n)
-
-        return l, n, s
-
     def test_parse_to(self):
         # Test for buggy use of THPMemoryFormat_New
         self.assertEqual(
@@ -171,7 +143,7 @@ class TestNN(NNTestCase):
         )
 
     def test_requires_grad_(self):
-        m = self._create_basic_net()[-1]
+        m = _create_basic_net()[-1]
         assert len(list(m.buffers())) > 0, 'invalid test'
         assert all(not b.requires_grad for b in m.buffers()) > 0, 'invalid test'
         assert len(list(m.parameters())) > 0, 'invalid test'
@@ -214,464 +186,6 @@ class TestNN(NNTestCase):
             self.assertTrue(p.storage().is_shared())
         for b in net.buffers():
             self.assertTrue(b.storage().is_shared())
-
-    def _test_hooks(self, backward_register_fn):
-        module = nn.Sigmoid()
-        input = torch.ones(5, 5, requires_grad=True)
-
-        counter = {
-            'forwards': 0,
-            'backwards': 0
-        }
-
-        def fw_hook(inc, h_module, input, output):
-            self.assertIsInstance(input, tuple)
-            self.assertTrue(isinstance(output, torch.Tensor))
-            self.assertTrue(h_module is module)
-            self.assertEqual(input[0], torch.ones(5, 5))
-            self.assertEqual(output, torch.empty(5, 5).fill_(1 / (1 + 1 / math.e)))
-            counter['forwards'] += inc
-
-        def bw_hook(inc, h_module, grad_input, grad_output):
-            self.assertIsInstance(grad_input, tuple)
-            self.assertIsInstance(grad_output, tuple)
-            self.assertTrue(h_module is module)
-            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
-            counter['backwards'] += inc
-
-        # backward_pre_hook expects callback with only `module` and `grad_output`
-        # as arguments.
-        def bw_pre_hook(inc, h_module, grad_output):
-            self.assertIsInstance(grad_output, tuple)
-            self.assertTrue(h_module is module)
-            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
-            counter['backwards'] += inc
-
-        test_fwd = module.register_forward_hook(lambda *args: fw_hook(1, *args))
-
-        module(input)
-        module(input)
-        self.assertEqual(counter['forwards'], 2)
-        self.assertEqual(counter['backwards'], 0)
-
-        bw_hook_fn = bw_pre_hook if backward_register_fn == 'register_full_backward_pre_hook' else bw_hook
-        test_bwd = getattr(module, backward_register_fn)(
-            lambda *args: bw_hook_fn(1, *args))
-
-        output = module(input)
-        self.assertEqual(counter['forwards'], 3)
-        self.assertEqual(counter['backwards'], 0)
-
-        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
-        self.assertEqual(counter['forwards'], 3)
-        self.assertEqual(counter['backwards'], 1)
-
-        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
-        self.assertEqual(counter['forwards'], 3)
-        self.assertEqual(counter['backwards'], 2)
-
-        test2_fwd = module.register_forward_hook(lambda *args: fw_hook(2, *args))
-
-        output = module(input)
-        self.assertEqual(counter['forwards'], 6)
-        self.assertEqual(counter['backwards'], 2)
-
-        test2_bwd = getattr(module, backward_register_fn)(lambda *args: bw_hook_fn(2, *args))
-
-        module(input).backward(torch.ones(5, 5) * 2)
-        self.assertEqual(counter['forwards'], 9)
-        self.assertEqual(counter['backwards'], 5)
-
-        test2_bwd.remove()
-
-        module(input).backward(torch.ones(5, 5) * 2)
-        self.assertEqual(counter['forwards'], 12)
-        self.assertEqual(counter['backwards'], 6)
-
-        test2_fwd.remove()
-
-        module(input).backward(torch.ones(5, 5) * 2)
-        self.assertEqual(counter['forwards'], 13)
-        self.assertEqual(counter['backwards'], 7)
-
-        test_fwd.remove()
-        test_bwd.remove()
-
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_hooks(self):
-        self._test_hooks("register_backward_hook")
-        self._test_hooks("register_full_backward_hook")
-        self._test_hooks("register_full_backward_pre_hook")
-
-    def test_hook_cpp(self):
-        bn = nn.BatchNorm1d(5)
-
-        def hook(module, grad_inputs, grad_outputs):
-            self.assertEqual(len(grad_inputs), 1)
-            self.assertEqual(len(grad_outputs), 1)
-            self.assertEqual(module, bn)
-
-        bn.register_full_backward_hook(hook)
-        output = bn(torch.randn(5, 5, requires_grad=True))
-        output.sum().backward()
-
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_backward_hooks_interaction(self):
-        # Test to make sure that the grad_outputs
-        # updated by full_backward_pre_hook are received by
-        # the full_backward_hook
-        module = torch.nn.Sigmoid()
-
-        cnt = {'backward_cnt': 0}
-
-        def bw_pre_hook(m, grad_output):
-            cnt['backward_cnt'] += 1
-            return (grad_output[0] * 0.5, )
-
-        def bw_hook(m, grad_in, grad_output):
-            self.assertEqual(torch.full_like(grad_output[0], 0.5), grad_output[0])
-            cnt['backward_cnt'] += 1
-            return grad_output
-
-        module.register_full_backward_pre_hook(bw_pre_hook)
-        module.register_full_backward_hook(bw_hook)
-
-        t = torch.ones(1, 2, requires_grad=True)
-        module(t).sum().backward()
-        self.assertEqual(cnt['backward_cnt'], 2)
-
-    def test_hook_invalid_outputs(self):
-        module = nn.Sigmoid()
-        input = torch.randn(5, 5, requires_grad=True)
-
-        def bw_fail1(self, grad_input, grad_output):
-            return grad_input[:-1]
-
-        def bw_fail2(self, grad_input, grad_output):
-            return grad_input + (torch.randn(2, 2),)
-
-        with module.register_backward_hook(bw_fail1):
-            with self.assertRaisesRegex(RuntimeError, 'got 0, but expected 1'):
-                module(input).sum().backward()
-
-        with module.register_backward_hook(bw_fail2):
-            with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
-                module(input).sum().backward()
-
-        def bw_pre_fail1(self, grad_output):
-            return ()
-
-        def bw_pre_fail2(self, grad_output):
-            return grad_output + (torch.randn(2, 2),)
-
-        with module.register_full_backward_pre_hook(bw_pre_fail1):
-            with self.assertRaisesRegex(RuntimeError, 'got 0, but expected 1'):
-                module(input).sum().backward()
-
-        with module.register_full_backward_pre_hook(bw_pre_fail2):
-            with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
-                module(input).sum().backward()
-
-    def test_hook_requires_grad(self):
-        test_self = self
-
-        class MyModule(nn.Module):
-            def forward(self, arg1, arg2, arg3):
-                test_self.assertTrue(arg1.requires_grad)
-                test_self.assertFalse(arg2.requires_grad)
-                test_self.assertTrue(arg3.requires_grad)
-                return arg1.sum() + arg2.sum() + arg3.sum()
-
-        inp = torch.rand(2, requires_grad=True)
-        mod = MyModule()
-
-        mod(inp, inp.detach(), inp)
-        # Ensure that requires grad is properly propagated
-        mod.register_full_backward_hook(lambda mod, gI, gO: None)
-        mod(inp, inp.detach(), inp)
-
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_hook_no_requires_grad(self):
-        mod = nn.Linear(2, 3)
-
-        inp = torch.rand(1, 2)
-
-        return_val = "None"
-        hook_called = [0]
-
-        def hook(mod, grad_input, grad_output):
-            hook_called[0] += 1
-            for gI in grad_input:
-                self.assertIsNone(gI)
-            for gO in grad_output:
-                self.assertEqual(gO.size(), (1, 3))
-
-            if return_val == "grad_input":
-                return grad_input
-            elif return_val == "invalid":
-                # If the inputs were requiring gradients, this would be
-                # a valid return
-                return inp
-            elif return_val == "None":
-                return None
-            else:
-                raise RuntimeError("Invalid return_val string")
-
-        mod.register_full_backward_hook(hook)
-
-        # This should run and trigger the hook properly
-        mod(inp).sum().backward()
-        self.assertEqual(hook_called[0], 1)
-
-        return_val = "grad_input"
-
-        mod(inp).sum().backward()
-        self.assertEqual(hook_called[0], 2)
-
-        return_val = "invalid"
-        with self.assertRaisesRegex(RuntimeError, "where no input requires gradient"):
-            mod(inp).sum().backward()
-
-    def test_hook_last_arg_requires_grad(self):
-        mod = nn.L1Loss()
-        inp = torch.rand(1, requires_grad=True)
-        mod.register_full_backward_hook(lambda m, gI, gO: None)
-
-        try:
-            mod(inp.detach(), inp)
-        except Exception as ex:
-            self.fail("Unexpected exception: %s" % ex)
-
-    def test_hook_extra_input(self):
-        class MyModule(nn.Module):
-            def forward(self, non_tensor, tensor):
-                return tensor.clone(), non_tensor
-
-        inp = torch.rand(2, requires_grad=True)
-        mod = MyModule()
-
-        def hook(mod, grad_input, grad_output):
-            self.assertIsNone(grad_input[0])
-            self.assertIsInstance(grad_input[1], torch.Tensor)
-
-            self.assertIsInstance(grad_output[0], torch.Tensor)
-            self.assertIsNone(grad_output[1])
-
-        mod.register_full_backward_hook(hook)
-        out, _ = mod(True, inp)
-        out.sum().backward()
-
-    def test_hook_inplace(self):
-        class MyModule(nn.Module):
-            def forward(self, inp, do_inplace):
-                self.inp = inp
-                if do_inplace:
-                    inp += 1
-                return inp.clone()
-
-        hook_called = [0]
-
-        def hook(mod, grad_input, grad_output):
-            hook_called[0] += 1
-
-        def hook_pre(mod, grad_output):
-            hook_called[0] += 1
-
-        inp = torch.rand(10, requires_grad=True)
-        mod = MyModule()
-        for hook_fn, register_fn in [(hook, mod.register_full_backward_hook),
-                                     (hook_pre, mod.register_full_backward_pre_hook)]:
-            hook_called[0] = 0
-            with register_fn(hook_fn):
-                # No inplace should work
-                mod(inp, False).sum().backward()
-                self.assertEqual(hook_called[0], 1)
-
-                # Input inplace error should throw an error
-                with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
-                                            "a view and is being modified inplace."):
-                    mod(inp.clone(), True)
-
-                # Input inplace error should throw an error if we try to re-use the view after they have
-                # been modified
-                local_inp = inp.clone()
-                out = mod(local_inp, False)
-                local_inp[0] *= 1
-                with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
-                                            "a view and its base or another view"):
-                    # Any operation involving the view will fail here
-                    mod.inp + 2
-
-                # Output inplace error should throw an error
-                out = mod(inp, False)
-                with self.assertRaisesRegex(RuntimeError, "BackwardHookFunctionBackward is a view "
-                                            "and is being modified inplace."):
-                    out += 1
-
-    def test_hook_non_full_warning(self):
-        def noop(*args):
-            pass
-
-        a = torch.rand(2, requires_grad=True)
-        b = torch.rand(2, requires_grad=True)
-
-        # Check invalid input container
-        class MyModule(nn.Module):
-            def forward(self, l):
-                return l[0].clone(), l[1].clone()
-
-        m = MyModule()
-        m.register_backward_hook(noop)
-
-        with self.assertWarnsRegex(UserWarning, "does not take as input a single Tensor or a tuple of Tensors"):
-            m([a, b])
-
-        # Check invalid output container
-        class MyModule(nn.Module):
-            def forward(self, a, b):
-                return [a.clone(), b.clone()]
-
-        m = MyModule()
-        m.register_backward_hook(noop)
-
-        with self.assertWarnsRegex(UserWarning, "does not return a single Tensor or a tuple of Tensors"):
-            m(a, b)
-
-        # Check invalid output from different Nodes
-        class MyModule(nn.Module):
-            def forward(self, a, b):
-                return a.clone(), b.clone()
-
-        m = MyModule()
-        m.register_backward_hook(noop)
-
-        with self.assertWarnsRegex(UserWarning, "outputs are generated by different autograd Nodes"):
-            m(a, b)
-
-        # Check invalid forward with multiple Nodes
-        class MyModule(nn.Module):
-            def forward(self, a):
-                return a.clone().clone()
-
-        m = MyModule()
-        m.register_backward_hook(noop)
-
-        with self.assertWarnsRegex(UserWarning, "the forward contains multiple autograd Nodes"):
-            m(a)
-
-    def test_hook_backward_size(self):
-        # Make module with multiple operations in forward
-        # And different size for input and outputs
-        class MyModule(nn.Module):
-            def forward(self, arg1, arg2):
-                tmp = arg1.sum() * arg2
-                tmp = tmp + arg2.sum() * arg1.sum()
-                tmp = tmp.sum().view(1)
-                tmp = tmp.expand(8).contiguous()
-                return tmp
-
-        module = MyModule()
-        inp1 = torch.randn(5, 5, requires_grad=True)
-        inp2 = torch.randn(10, 10, requires_grad=True)
-
-        def bw_hook(module, grad_input, grad_output):
-            self.assertEqual(len(grad_input), 2)
-            self.assertEqual(grad_input[0].size(), torch.Size([5, 5]))
-            self.assertEqual(grad_input[1].size(), torch.Size([10, 10]))
-            self.assertEqual(len(grad_output), 1)
-            self.assertEqual(grad_output[0].size(), torch.Size([8]))
-
-        with module.register_full_backward_hook(bw_hook):
-            module(inp1, inp2).sum().backward()
-
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_hook_backward_writeable(self):
-        module = nn.Sigmoid()
-        input = torch.randn(5, 5, requires_grad=True)
-        sig_x = torch.nn.functional.sigmoid(input)
-
-        def bw_hook(module, grad_input, grad_output):
-            for grad in grad_input:
-                self.assertTrue(isinstance(grad, torch.Tensor))
-            for grad in grad_output:
-                self.assertTrue(isinstance(grad, torch.Tensor))
-            return tuple(gi * 2 for gi in grad_input)
-
-        module.register_backward_hook(bw_hook)
-        module(input).backward(torch.ones(5, 5))
-        expected_grad = sig_x * (1 - sig_x) * 2
-        self.assertEqual(input.grad, expected_grad)
-
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_hook_forward_preforward_writable(self):
-        module = nn.Sigmoid()
-        input = torch.randn(5, 5, requires_grad=True)
-        sig_x = torch.nn.functional.sigmoid(input)
-
-        def forward_pre_hook(m, input):
-            return torch.nn.functional.relu(input[0])
-
-        def forward_hook(m, input, output):
-            return -output
-
-        module.register_forward_pre_hook(forward_pre_hook)
-        module.register_forward_hook(forward_hook)
-        output = module(input)
-        expected_res = -torch.nn.functional.sigmoid(torch.nn.functional.relu(input))
-        self.assertEqual(output, expected_res)
-        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
-        mask = (input > 0).double()
-        expected_grad = -sig_x * (1 - sig_x) * 2 * mask
-        self.assertEqual(input.grad, expected_grad)
-
-    def test_hook_buffer_registration(self):
-        for return_buffer in (True, False):
-            def buffer_registration_hook(module, name, buffer):
-                buffer.registered = True
-                if return_buffer:
-                    return buffer
-            handle = torch.nn.modules.module.register_module_buffer_registration_hook(
-                buffer_registration_hook
-            )
-            try:
-                l, n, s = self._create_basic_net()
-                for b in s.buffers():
-                    self.assertTrue(getattr(b, "registered", False))
-            finally:
-                handle.remove()
-
-    def test_hook_submodule_registration(self):
-        for return_submodule in (True, False):
-            def module_registration_hook(module, name, submodule):
-                module.registered = True
-                submodule.registered = True
-                if return_submodule:
-                    return submodule
-            handle = torch.nn.modules.module.register_module_module_registration_hook(
-                module_registration_hook
-            )
-            try:
-                l, n, s = self._create_basic_net()
-                for m in s.modules():
-                    self.assertTrue(getattr(m, "registered", False))
-            finally:
-                handle.remove()
-
-    def test_hook_parameter_registration(self):
-        for return_parameter in (True, False):
-            def parameter_registration_hook(module, name, parameter):
-                parameter.registered = True
-                if return_parameter:
-                    return parameter
-            handle = torch.nn.modules.module.register_module_parameter_registration_hook(
-                parameter_registration_hook
-            )
-            try:
-                l, n, s = self._create_basic_net()
-                for p in s.parameters():
-                    self.assertTrue(getattr(p, "registered", False))
-            finally:
-                handle.remove()
 
     def test_to(self):
         m = nn.Linear(3, 5)
@@ -744,7 +258,7 @@ class TestNN(NNTestCase):
         def names(named_parameters):
             return [k for k, _ in named_parameters]
 
-        l, n, s = self._create_basic_net()
+        l, n, s = _create_basic_net()
 
         self.assertEqual(len(list(l.parameters())), 1)
         self.assertEqual(
@@ -798,7 +312,7 @@ class TestNN(NNTestCase):
         def names(named_buffers):
             return [k for k, _ in named_buffers]
 
-        l, n, s = self._create_basic_net()
+        l, n, s = _create_basic_net()
 
         self.assertEqual(len(list(l.buffers())), 1)
         self.assertEqual(
@@ -2238,2001 +1752,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         sample = next(model.parameters())[0, 0, 0]
         self.assertTrue(torch.equal(sample.data, vec.data[:5]))
 
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
-    # torch/nn/utils/parametrize
-    @skipIfNoLapack
-    def test_register_and_remove_parametrization(self):
-        r"""Test that it is possible to add a few parametrizations
-        on a parameter or a buffer and that removing them restores the initial state
-        It also tests that backpropagating through them works as expected
-        """
-        # Define a couple matrix parametrizations
-        class Skew(nn.Module):
-            def forward(self, X):
-                X = X.tril(-1)
-                return X - X.T
-
-        class Orthogonal(nn.Module):
-            def forward(self, X):
-                # Cayley map
-                # If X is skew-symmetric it returns an orthogonal matrix
-                Id = torch.eye(X.size(0), device=X.device)
-                # We call contiguous because solve returns a tensor with strides that are Fortran-contiguous
-                # and autograd raises a performance warning.
-                # This happens when we remove the parametrization with leave_parametrized=True,
-                # which does a set_ with a non-contiguous tensor while the gradient is contiguous
-                return torch.linalg.solve(Id + X, Id - X).contiguous()
-
-        class Resize(nn.Module):
-            def forward(self, X):
-                return X[[0]]
-
-        class NoResize(nn.Module):
-            def forward(self, X):
-                return X
-
-        # Define a couple vector parametrizations
-        class FirstZero(nn.Module):
-            def forward(self, x):
-                return torch.cat([x.new_zeros(1), x[1:]])
-
-        class LastZero(nn.Module):
-            def forward(self, x):
-                return torch.cat([x[:-1], x.new_zeros(1)])
-
-        model = nn.Linear(8, 8)
-        initial_weight_id = id(model.weight)
-        initial_bias_id = id(model.bias)
-        initial_model = deepcopy(model)
-
-        # Test unsafe flag
-        with self.assertRaisesRegex(ValueError, "Registering a parametrization may not change the shape of the tensor"):
-            parametrize.register_parametrization(model, "weight", Resize())  # default unsafe = False
-            model(torch.ones(8, 8))
-
-        # One parametrization with unsafe=True
-        parametrize.register_parametrization(model, "weight", Resize(), unsafe=True)
-        self.assertTrue(hasattr(model, "parametrizations"))
-        self.assertTrue(parametrize.is_parametrized(model))
-        self.assertTrue(parametrize.is_parametrized(model, "weight"))
-        self.assertFalse(parametrize.is_parametrized(model, "bias"))
-        self.assertNotIn("weight", model._parameters)
-        A = model.weight
-        self.assertTrue(A.shape[0] == 1)
-        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        self.assertFalse(hasattr(model, "parametrizations"))
-        self.assertEqual(model.weight, initial_model.weight)
-        self.assertEqual(id(model.weight), initial_weight_id)
-        self.assertEqual(model.__class__, nn.Linear)
-
-        # Two parametrizations with unsafe=True
-        parametrize.register_parametrization(model, "weight", Resize(), unsafe=True)
-        parametrize.register_parametrization(model, "weight", NoResize(), unsafe=False)
-        self.assertTrue(hasattr(model, "parametrizations"))
-        self.assertTrue(parametrize.is_parametrized(model))
-        self.assertTrue(parametrize.is_parametrized(model, "weight"))
-        self.assertFalse(parametrize.is_parametrized(model, "bias"))
-        self.assertNotIn("weight", model._parameters)
-        A = model.weight
-        self.assertTrue(A.shape[0] == 1)
-        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        self.assertFalse(hasattr(model, "parametrizations"))
-        self.assertEqual(model.weight, initial_model.weight)
-        self.assertEqual(id(model.weight), initial_weight_id)
-        self.assertEqual(model.__class__, nn.Linear)
-
-        # Test unsafe flag doesn't change expected behavior
-        parametrize.register_parametrization(model, "weight", Skew(), unsafe=True)
-        self.assertTrue(hasattr(model, "parametrizations"))
-        self.assertTrue(parametrize.is_parametrized(model))
-        self.assertTrue(parametrize.is_parametrized(model, "weight"))
-        self.assertFalse(parametrize.is_parametrized(model, "bias"))
-        self.assertNotIn("weight", model._parameters)
-        # Result should be skew-symmetric
-        A = model.weight
-        self.assertEqual(A, -A.T)
-        # Remove and check consistency
-        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        self.assertFalse(hasattr(model, "parametrizations"))
-        self.assertEqual(model.weight, initial_model.weight)
-        self.assertEqual(id(model.weight), initial_weight_id)
-        self.assertEqual(model.__class__, nn.Linear)
-
-        # Test one parametrization
-        parametrize.register_parametrization(model, "weight", Skew())
-        self.assertTrue(hasattr(model, "parametrizations"))
-        self.assertTrue(parametrize.is_parametrized(model))
-        self.assertTrue(parametrize.is_parametrized(model, "weight"))
-        self.assertFalse(parametrize.is_parametrized(model, "bias"))
-        self.assertNotIn("weight", model._parameters)
-        # Result should be skew-symmetric
-        A = model.weight
-        self.assertEqual(A, -A.T)
-        # Remove and check consistency
-        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        self.assertFalse(hasattr(model, "parametrizations"))
-        self.assertEqual(model.weight, initial_model.weight)
-        self.assertEqual(id(model.weight), initial_weight_id)
-        self.assertEqual(model.__class__, nn.Linear)
-
-        # Test two parametrizations at the same time and removing them
-        parametrize.register_parametrization(model, "weight", Skew())
-        parametrize.register_parametrization(model, "weight", Orthogonal())
-        # Result should be orthogonal
-        X = model.weight
-        Id = torch.eye(X.size(0), device=X.device)
-        self.assertEqual(X.T @ X, Id)
-        # Structure tests
-        self.assertTrue(hasattr(model, "parametrizations"))
-        self.assertTrue(parametrize.is_parametrized(model))
-        self.assertTrue(parametrize.is_parametrized(model, "weight"))
-        self.assertFalse(parametrize.is_parametrized(model, "bias"))
-        self.assertIn("weight", model.parametrizations)
-        self.assertNotIn("weight", model._parameters)
-        # Remove
-        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        self.assertEqual(model.weight, initial_model.weight)
-        self.assertEqual(id(model.weight), initial_weight_id)
-        self.assertFalse(hasattr(model, "parametrizations"))
-        self.assertEqual(model.__class__, nn.Linear)
-
-        # Add everything
-        parametrize.register_parametrization(model, "weight", Skew())
-        parametrize.register_parametrization(model, "weight", Orthogonal())
-        parametrize.register_parametrization(model, "bias", FirstZero())
-        parametrize.register_parametrization(model, "bias", LastZero())
-
-        # Basic tests
-        self.assertTrue(parametrize.is_parametrized(model))
-        self.assertTrue(parametrize.is_parametrized(model, "weight"))
-        self.assertTrue(parametrize.is_parametrized(model, "bias"))
-        self.assertEqual(model.bias[0].item(), 0.)
-        self.assertEqual(model.bias[-1].item(), 0.)
-        self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happpened
-        # Should not throw
-
-        sgd = torch.optim.SGD(model.parameters(), lr=0.01)
-
-        weight_copy = model.weight.clone()
-        bias_copy = model.bias.clone()
-        sgd.zero_grad()
-        (model.weight.T @ model.bias).sum().backward()
-        sgd.step()
-        self.assertNotEqual(model.weight, weight_copy)
-        self.assertNotEqual(model.bias, bias_copy)
-
-        # Remove first parametrization.
-        # Check that the model is still parametrized and so is the second parameter
-        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        self.assertTrue(parametrize.is_parametrized(model))             # Still parametrized
-        self.assertFalse(parametrize.is_parametrized(model, "weight"))  # Parametrization removed
-        self.assertTrue(parametrize.is_parametrized(model, "bias"))     # Still parametrized
-        self.assertEqual(model.bias[0].item(), 0.)                      # Still parametrized
-        self.assertEqual(model.bias[-1].item(), 0.)                     # Still parametrized
-        self.assertNotEqual(model.weight, initial_model.weight)         # Has been updated
-        self.assertEqual(id(model.weight), initial_weight_id)           # Keeps the same id
-        self.assertEqual(len(list(model.parameters())), 2)              # Nothing weird has happened
-        # Should not throw
-        weight_copy = model.weight.clone()
-        bias_copy = model.bias.clone()
-        sgd.zero_grad()
-        (model.weight.T @ model.bias).sum().backward()
-        sgd.step()
-        self.assertNotEqual(model.weight, weight_copy)
-        self.assertNotEqual(model.bias, bias_copy)
-
-        # Remove the second parametrization.
-        # Check that the module is not parametrized
-        parametrize.remove_parametrizations(model, "bias", leave_parametrized=False)
-        self.assertFalse(parametrize.is_parametrized(model))  # Not parametrized
-        self.assertNotEqual(model.bias, initial_model.bias)   # Has been updated
-        self.assertNotEqual(model.bias[0].item(), 0.)         # Not parametrized
-        self.assertNotEqual(model.bias[-1].item(), 0.)        # Not parametrized
-        self.assertEqual(id(model.bias), initial_bias_id)     # Keeps the same id
-        self.assertFalse(hasattr(model, "parametrizations"))  # Not parametrized the module
-        self.assertEqual(model.__class__, nn.Linear)          # Resores the previous class
-        self.assertEqual(len(list(model.parameters())), 2)    # Nothing weird has happeed
-
-        # Should not throw things are updated
-        weight_copy = model.weight.clone()
-        bias_copy = model.bias.clone()
-        sgd.zero_grad()
-        (model.weight.T @ model.bias).sum().backward()
-        sgd.step()
-        self.assertNotEqual(model.weight, weight_copy)
-        self.assertNotEqual(model.bias, bias_copy)
-
-        # Test leave_parametrized=True
-        for _ in range(2):
-            parametrize.register_parametrization(model, "weight", Skew())
-            parametrize.register_parametrization(model, "weight", Orthogonal())
-            parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
-            # We didn't change the dtype nor had multiple inputs, so the id should be the same
-            self.assertEqual(id(model.weight), initial_weight_id)
-            self.assertEqual(id(model.bias), initial_bias_id)
-
-            # Should not throw. Things are updated
-            weight_copy = model.weight.clone()
-            bias_copy = model.bias.clone()
-            sgd.zero_grad()
-            (model.weight.T @ model.bias).sum().backward()
-            sgd.step()
-            self.assertNotEqual(model.weight, weight_copy)
-            self.assertNotEqual(model.bias, bias_copy)
-
-    def test_register_and_remove_nested_parametrization(self):
-        r"""Test that it is possible to nest the parametrizations
-        meaning that the original param is parametrized again
-        """
-        class Skew(nn.Module):
-            def forward(self, X):
-                X = X.tril(-1)
-                return X - X.T
-
-        model = nn.Linear(8, 8)
-        # Add top level parametrization
-        parametrize.register_parametrization(model, "weight", Skew())
-        self.assertTrue(hasattr(model, "parametrizations"))
-        self.assertTrue(parametrize.is_parametrized(model))
-        self.assertTrue(parametrize.is_parametrized(model, "weight"))
-        self.assertFalse(parametrize.is_parametrized(model, "bias"))
-        self.assertNotIn("weight", model._parameters)
-        # Result should be skew-symmetric
-        A = model.weight
-        self.assertEqual(A, -A.T)
-
-        # Add nested parametrization
-        param_mod = model.parametrizations.weight
-        self.assertFalse(hasattr(param_mod, "parametrizations"))
-        self.assertFalse(parametrize.is_parametrized(param_mod))
-        self.assertFalse(parametrize.is_parametrized(param_mod, "original"))
-
-        parametrize.register_parametrization(param_mod, "original", Skew())
-        self.assertTrue(hasattr(param_mod, "parametrizations"))
-        self.assertTrue(parametrize.is_parametrized(param_mod))
-        self.assertTrue(parametrize.is_parametrized(param_mod, "original"))
-        self.assertNotIn("original", param_mod._parameters)
-        # Result should be skew-symmetric
-        A = param_mod.original
-        self.assertEqual(A, -A.T)
-
-        # Remove nested param and check consistency
-        parametrize.remove_parametrizations(param_mod, "original", leave_parametrized=False)
-        self.assertFalse(hasattr(param_mod, "parametrizations"))
-        self.assertEqual(param_mod.__class__, parametrize.ParametrizationList)
-
-        # Remove top level and check consistency
-        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        self.assertFalse(hasattr(model, "parametrizations"))
-        self.assertEqual(model.__class__, nn.Linear)
-
-    def test_register_and_remove_buffer_parametrization(self):
-        r"""Test that it is possible to add and remove parametrizations on buffers"""
-        # Define a couple vector parametrizations
-        class FirstZero(nn.Module):
-            def forward(self, x):
-                return torch.cat([x.new_zeros(1), x[1:]])
-
-        class LastZero(nn.Module):
-            def forward(self, x):
-                return torch.cat([x[:-1], x.new_zeros(1)])
-
-        model = nn.Linear(8, 8)
-
-        # Instantiate parametrizations on buffers. It should work as expected
-        delattr(model, "bias")
-        model.register_buffer("bias", torch.ones(8))
-        parametrize.register_parametrization(model, "bias", FirstZero())
-        parametrize.register_parametrization(model, "bias", LastZero())
-        self.assertTrue(parametrize.is_parametrized(model))
-        self.assertTrue(parametrize.is_parametrized(model, "bias"))
-        self.assertEqual(model.bias[0].item(), 0.)
-        self.assertEqual(model.bias[-1].item(), 0.)
-        self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
-        self.assertEqual(len(list(model.parameters())), 1)
-
-        # Remove parametrizations on buffers. It should work as expected
-        parametrize.remove_parametrizations(model, "bias", leave_parametrized=True)
-        self.assertFalse(parametrize.is_parametrized(model))
-        self.assertFalse(parametrize.is_parametrized(model, "bias"))
-        self.assertEqual(model.bias[0].item(), 0.)
-        self.assertEqual(model.bias[-1].item(), 0.)
-        self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
-        self.assertEqual(len(list(model.parameters())), 1)
-
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
-    @skipIfNoLapack
-    def test_serialization_parametrization(self):
-        r"""Test that it is possible to serialize a parametrized model via state_dict"""
-        # A stateful parametrization
-        class Orthogonal(nn.Module):
-            def __init__(self, n):
-                super().__init__()
-                self.register_buffer("id", torch.eye(n))
-                self.register_buffer("B", torch.empty(n, n))
-                init.orthogonal_(self.B)
-
-            def forward(self, X):
-                A = X.triu(1)
-                A = A - A.T
-                return self.B @ torch.linalg.solve(self.id + A, self.id - A)
-
-        def get_model():
-            model = torch.nn.Sequential(
-                torch.nn.Linear(5, 5),
-                torch.nn.ReLU(),
-                torch.nn.Linear(5, 1),
-            )
-
-            parametrize.register_parametrization(model[0], "weight", Orthogonal(5))
-            return model
-
-        model = get_model()
-
-        prev_weight = model[0].weight
-        prev_B = model[0].parametrizations.weight[0].B
-
-        new_model = get_model()
-        with TemporaryFileName() as fname:
-            torch.save(model.state_dict(), fname)
-            new_model.load_state_dict(torch.load(fname))
-
-        # Integrity tests
-        self.assertTrue(parametrize.is_parametrized(new_model[0], "weight"))
-        self.assertEqual(prev_weight, new_model[0].weight)
-        self.assertEqual(prev_B, new_model[0].parametrizations.weight[0].B)
-
-        # Trying to save the whole parametrized model raises
-        with self.assertRaisesRegex(RuntimeError, "state_dict"):
-            with TemporaryFileName() as fname:
-                torch.save(model, fname)
-
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
-    @skipIfNoLapack
-    def test_initialization_parametrization(self):
-        r"""Test that it is possible to initialize a parametrization when it
-            implements a `right_inverse` method
-        """
-        class Skew(nn.Module):
-            def forward(self, X):
-                A = X.triu(1)
-                return A - A.T
-
-            def is_skew(self, A):
-                return torch.allclose(A, -A.T, atol=1e-6)
-
-            def right_inverse(self, X):
-                if not self.is_skew(X):
-                    raise ValueError("The matrix is not skew-symmetric.")
-                return X.triu(1)
-
-        # Implements a Cayley map where right_inverse is not quite the inverse of forward
-        class Orthogonal(nn.Module):
-            def __init__(self, n):
-                super().__init__()
-                self.register_buffer("B", torch.eye(n))
-
-            def forward(self, X):
-                Id = torch.eye(X.size(0))
-                return self.B @ torch.linalg.solve(Id + X, Id - X)
-
-            def is_orthogonal(self, X):
-                Id = torch.eye(X.size(0))
-                return torch.allclose(X.T @ X, Id, atol=1e-4)
-
-            def right_inverse(self, X):
-                if not self.is_orthogonal(X):
-                    raise ValueError("The input is not orthogonal.")
-                # cayley(0) == Id, so B @ cayley(0) == B
-                self.B = X
-                return torch.zeros_like(X)
-
-        N = 5
-        model = nn.Linear(N, N)
-        # Register the skew-symmetric constraint. The result is now skew-symmetric
-        skew = Skew()
-        # Make the weight skew-symmetric before registering the parametrization
-        with torch.no_grad():
-            model.weight.set_(skew(model.weight))
-        parametrize.register_parametrization(model, "weight", skew)
-        X = torch.rand(N, N)
-        # X is not skew-symmetric, so it throws an error
-        with self.assertRaises(ValueError):
-            model.weight = X
-        # Make X skew-symmetric
-        X = X - X.T
-        model.weight = X
-        self.assertEqual(model.parametrizations.weight.original, X.triu(1))
-        self.assertEqual(model.weight, X)
-
-        # Having several parametrizations registered should work in the same way
-        parametrize.register_parametrization(model, "weight", Orthogonal(N))
-        # Register now the Cayley map. The result is now orthogonal
-        X = torch.rand(N, N)
-        # X is not orthogonal, so it throws an error
-        with self.assertRaises(ValueError):
-            model.weight = X
-        init.orthogonal_(X)
-        model.weight = X
-        self.assertEqual(model.weight, X)
-        self.assertEqual(model.parametrizations.weight.original, torch.zeros_like(X))
-
-    def test_errors_unparametrized_tensor_parametrization(self):
-        # Test errors when registering a parametrization on an unparametrized tensor
-        module = nn.Linear(3, 4)
-        weight_init = module.weight.clone()
-
-        class Identity(nn.Module):
-            def forward(self, x):
-                return x
-
-        # Register a parametrization on a non-existing parameter throws
-        with self.assertRaisesRegex(ValueError, "does not have a parameter"):
-            parametrize.register_parametrization(module, "foo", Identity())
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # Removing parametrizations from an unparametrized tensor throws
-        with self.assertRaisesRegex(ValueError, "does not have a parametrization"):
-            parametrize.remove_parametrizations(module, "bias")
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # A correct parametrization with several outputs
-        class Sum(nn.Module):
-            def forward(self, x, y):
-                return x + y
-
-            def right_inverse(self, z):
-                return z, torch.zeros_like(z)
-
-        parametrize.register_parametrization(module, "weight", Sum())
-        # Cannot remove a parametrization with several outputs with `leave_parametrized=False`
-        with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
-            parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
-
-        # A parametrization with an incorrect number of outputs
-        class WrongNumberParams(nn.Module):
-            def forward(self, x, y, z):
-                return x + y + z
-
-            def right_inverse(self, w):
-                return w, torch.zeros_like(w)
-
-        # Makes param(*param.right_inverse(X)) fail
-        with self.assertRaisesRegex(TypeError, "positional argument"):
-            parametrize.register_parametrization(module, "weight", WrongNumberParams())
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # A parametrization with a right_inverse that does not return a Tensor or Sequence[Tensor]
-        class WrongRightInverse(Identity):
-            def right_inverse(self, z):
-                return None
-
-        # right_inverse should return a Tensor or a Sequence[Tensor]
-        with self.assertRaisesRegex(ValueError, "Tensor or a Sequence of"):
-            parametrize.register_parametrization(module, "weight", WrongRightInverse())
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # If it's a sequence, it must to be a sequence of tensors
-        class WrongRightInverseSequence(nn.Module):
-            def forward(self, x, y):
-                return x
-
-            def right_inverse(self, z):
-                return None, z
-
-        with self.assertRaisesRegex(ValueError, "of the sequence with type"):
-            parametrize.register_parametrization(module, "weight", WrongRightInverseSequence())
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # A parametrization from one tensor to one tensor that changes the dtype
-        class ChangeDtypeInverse(nn.Module):
-            def forward(self, x):
-                return x.float()
-
-            def right_inverse(self, w):
-                return w.bool()
-
-        # For parametrizations that return one tensor, right_inverse may not change the dtype
-        with self.assertRaisesRegex(ValueError, "outputs one tensor, it may not change the dtype"):
-            parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # Doesn't return a tensor
-        class NotTensor(nn.Module):
-            def forward(self, x):
-                return 2
-
-        # Forward must return a tensor
-        with self.assertRaisesRegex(ValueError, "must return a tensor"):
-            parametrize.register_parametrization(module, "weight", NotTensor())
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # A parametrization from one tensor to one tensor that changes the dtype
-        class ChangeDtype(nn.Module):
-            def forward(self, x):
-                return x.bool()
-
-        # forward should not change the initial dtype
-        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
-            parametrize.register_parametrization(module, "weight", ChangeDtype())
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # Change shape
-        class ChangeShape(nn.Module):
-            def forward(self, x):
-                return x[:-1]
-
-        # forward should not change the original shape
-        with self.assertRaisesRegex(ValueError, "may not change the shape"):
-            parametrize.register_parametrization(module, "weight", ChangeShape())
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # Many to one that changes dtype
-        class ChangeDtypeMulti(nn.Module):
-            def forward(self, x, y):
-                return (x + y).bool()
-
-            def right_inverse(self, w):
-                return w, w + 1
-
-        # forward should not change the original shape even for parametrizations with many inputs
-        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
-            parametrize.register_parametrization(module, "weight", ChangeDtypeMulti())
-        self.assertFalse(parametrize.is_parametrized(module))
-
-        # Returning a sequence of size one, although weird, it's correct
-        class SequenceLen1(nn.Module):
-            def forward(self, x):
-                return x
-
-            def right_inverse(self, w):
-                return (w,)
-
-        parametrize.register_parametrization(module, "weight", SequenceLen1())
-        self.assertTrue(hasattr(module.parametrizations.weight, "original0"))
-        self.assertFalse(hasattr(module.parametrizations.weight, "original1"))
-        _ = module.weight   # Does not throw
-        self.assertTrue(parametrize.is_parametrized(module))
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
-
-        # None of the operations above should have altered the weight
-        self.assertFalse(parametrize.is_parametrized(module))
-        self.assertEqual(module.weight, weight_init)
-
-    def test_errors_parametrized_tensor_parametrization(self):
-        # Test errors when registering a parametrization on a parametrized tensor
-
-        class Identity(nn.Module):
-            def forward(self, x):
-                return x
-
-        module = nn.Linear(3, 4)
-        parametrize.register_parametrization(module, "weight", Identity())
-
-        # Has to return a tensor
-        class WrongReturn(nn.Module):
-            def forward(self, x):
-                return x, x
-
-        with self.assertRaisesRegex(ValueError, "must return a tensor"):
-            parametrize.register_parametrization(module, "weight", WrongReturn())
-        self.assertTrue(parametrize.is_parametrized(module))
-        self.assertEqual(len(module.parametrizations.weight), 1)
-        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
-
-        # Cannot change dtype
-        class ChangeDtype(nn.Module):
-            def forward(self, x):
-                return x.bool()
-
-        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
-            parametrize.register_parametrization(module, "weight", ChangeDtype())
-        self.assertTrue(parametrize.is_parametrized(module))
-        self.assertEqual(len(module.parametrizations.weight), 1)
-        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
-
-        # Cannot change shape
-        class ChangeShape(nn.Module):
-            def forward(self, x):
-                return x[:-1]
-
-        with self.assertRaisesRegex(ValueError, "may not change the shape"):
-            parametrize.register_parametrization(module, "weight", ChangeShape())
-        self.assertTrue(parametrize.is_parametrized(module))
-        self.assertEqual(len(module.parametrizations.weight), 1)
-        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
-
-        # The following checks are mostly due to bugs in the code of the parametrization
-
-        # right_inverse has to return a tensor
-        class WrongReturnInverse(Identity):
-            def right_inverse(self, x):
-                return x, x
-
-        with self.assertRaisesRegex(ValueError, "right_inverse must return a tensor"):
-            parametrize.register_parametrization(module, "weight", WrongReturnInverse())
-        self.assertTrue(parametrize.is_parametrized(module))
-        self.assertEqual(len(module.parametrizations.weight), 1)
-        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
-
-        # Cannot change dtype
-        class ChangeDtypeInverse(Identity):
-            def right_inverse(self, x):
-                return x.bool()
-
-        with self.assertRaisesRegex(ValueError, "must have the same dtype"):
-            parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
-        self.assertTrue(parametrize.is_parametrized(module))
-        self.assertEqual(len(module.parametrizations.weight), 1)
-        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
-
-        # Cannot change shape
-        class ChangeShapeInverse(Identity):
-            def right_inverse(self, x):
-                return x[:-1]
-
-        with self.assertRaisesRegex(ValueError, "must have the same shape"):
-            parametrize.register_parametrization(module, "weight", ChangeShapeInverse())
-        self.assertTrue(parametrize.is_parametrized(module))
-        self.assertEqual(len(module.parametrizations.weight), 1)
-        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
-
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
-    @skipIfNoLapack
-    def test_multiple_inputs_parametrization(self):
-        # A parametrization with several outputs
-        class RankOne(nn.Module):
-            def forward(self, x, y):
-                # Form a rank-1 matrix from a pair of vectors
-                return x.unsqueeze(-1) @ y.unsqueeze(-2)
-
-            def right_inverse(self, Y):
-                # We project the given matrix onto the rank 1 matrices
-                U, S, Vh = torch.linalg.svd(Y, full_matrices=False)
-                # S is ordered in a decreasing way.
-                s0_sqrt = S[0].sqrt().unsqueeze(-1)
-                return U[..., :, 0] * s0_sqrt, Vh[..., 0, :] * s0_sqrt
-
-        # Simple parametrisation
-        class Double(nn.Module):
-            def forward(self, x):
-                return 2.0 * x
-
-            def right_inverse(self, w):
-                return 0.5 * w
-
-        model = nn.Linear(3, 3)
-        # Test one parametrization
-        parametrize.register_parametrization(model, "weight", RankOne())
-        self.assertTrue(hasattr(model, "parametrizations"))
-        self.assertTrue(parametrize.is_parametrized(model))
-        self.assertTrue(parametrize.is_parametrized(model, "weight"))
-        self.assertTrue(hasattr(model.parametrizations.weight, "original0"))
-        self.assertIn("original0", model.parametrizations.weight._parameters)
-        self.assertTrue(hasattr(model.parametrizations.weight, "original1"))
-        self.assertIn("original1", model.parametrizations.weight._parameters)
-        self.assertFalse(parametrize.is_parametrized(model, "bias"))
-        self.assertNotIn("weight", model._parameters)
-        # Result should be rank 1
-        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
-
-        with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
-            # Cannot remove a parametrization with multiple inputs and not leave it parametrized
-            parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        # Remove parametrization and check consistency
-        parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
-        self.assertFalse(hasattr(model, "parametrizations"))
-        self.assertEqual(model.__class__, nn.Linear)
-        self.assertFalse(parametrize.is_parametrized(model))
-        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
-        self.assertIn("weight", model._parameters)
-
-        # Registering parametrizations with one input on top of one with multiple inputs should work
-        init_weight = model.weight.clone()
-        parametrize.register_parametrization(model, "weight", RankOne())
-        # Projecting a rank 1 matrix onto the matrices of rank one does not change the matrix
-        self.assertEqual(init_weight, model.weight)
-        parametrize.register_parametrization(model, "weight", Double())
-        # The matrix now is twice the initial matrix
-        self.assertEqual(2.0 * init_weight, model.weight)
-        # Multiplying by a scalar does not change the rank
-        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
-
-        # The model has now three parameters
-        self.assertEqual(len(list(model.parameters())), 3)
-
-        sgd = torch.optim.SGD(model.parameters(), lr=0.1)
-
-        # Test backward. Should not throw
-        for _ in range(2):
-            sgd.zero_grad()
-            loss = (model.weight.T @ model.bias).sum()
-            loss.backward()
-            sgd.step()
-
-        # Same drill as before, removing should work as expected
-        with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
-            # Cannot remove a parametrization with multiple inputs and not leave it parametrized
-            parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        # Remove parametrization and check consistency
-        parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
-        self.assertFalse(hasattr(model, "parametrizations"))
-        self.assertEqual(model.__class__, nn.Linear)
-        self.assertFalse(parametrize.is_parametrized(model))
-        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
-        self.assertIn("weight", model._parameters)
-
-        # The model has now two parameters
-        self.assertEqual(len(list(model.parameters())), 2)
-
-        # Test backward. Should not throw
-        sgd = torch.optim.SGD(model.parameters(), lr=0.1)
-        for _ in range(2):
-            sgd.zero_grad()
-            loss = (model.weight.T @ model.bias).sum()
-            loss.backward()
-            sgd.step()
-
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
-    @skipIfNoLapack
-    def test_caching_parametrization(self):
-        r"""Test the caching system of a parametrization"""
-        # Define a couple matrix parametrizations
-        class Skew(nn.Module):
-            def forward(self, X):
-                X = X.tril(-1)
-                return X - X.T
-
-        class Orthogonal(nn.Module):
-            def forward(self, X):
-                Id = torch.eye(X.size(0), device=X.device)
-                return torch.linalg.solve(Id + X, Id - X)
-
-        model = nn.Linear(5, 5)
-        parametrize.register_parametrization(model, "weight", Skew())
-        parametrize.register_parametrization(model, "weight", Orthogonal())
-
-        # Test that the caching system works
-        with parametrize.cached():
-            X = model.weight
-            Y = model.weight
-            self.assertEqual(id(X), id(Y))
-
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    #        and remove the `@skipIfNoLapack` (see #70995)
-    @skipIfNoLapack
-    def test_caching_parametrization_with_transfer_parametrizations_and_params(self):
-        r"""Test that transferring parametrizations doesn't cause issues with caching"""
-        class Skew(nn.Module):
-            def forward(self, X):
-                X = X.tril(-1)
-                return X - X.T
-
-        class Orthogonal(nn.Module):
-            def forward(self, X):
-                Id = torch.eye(X.size(0), device=X.device)
-                return torch.linalg.solve(Id + X, Id - X)
-
-        model = nn.Linear(5, 5)
-        parametrize.register_parametrization(model, "weight", Skew())
-        parametrize.register_parametrization(model, "weight", Orthogonal())
-
-        to_model = nn.Linear(5, 5)
-        parametrize.transfer_parametrizations_and_params(model, to_model)
-
-        with parametrize.cached():
-            X = model.weight
-            Y = model.weight
-            self.assertEqual(id(X), id(Y))
-
-            A = to_model.weight
-            B = to_model.weight
-            self.assertEqual(id(A), id(B))
-
-            # test that the results are distinct objects for each module
-            self.assertNotEqual(id(A), id(X))
-
-    def test_parametrization_same_training_mode(self):
-        r"""Test training mode updated on parametrization registration"""
-        class Identity(nn.Module):
-            def forward(self, X):
-                return X
-
-        module = nn.Linear(4, 4)
-        module.eval()
-        parametrize.register_parametrization(module, "weight", Identity())
-        self.assertFalse(module.parametrizations.weight[0].training)
-        module.train()
-        parametrize.register_parametrization(module, "weight", Identity().eval())
-        self.assertTrue(module.parametrizations.weight[0].training)
-        self.assertTrue(module.parametrizations.weight[1].training)
-
-    def test_type_before_parametrizations(self):
-        r"""Test that type_before_parametrizations always retrieves original type"""
-
-        class Identity(nn.Module):
-            def forward(self, X):
-                return X
-
-        model = nn.Linear(5, 5)
-        original_type = type(model)
-        self.assertTrue(
-            parametrize.type_before_parametrizations(model) == original_type
-        )
-        parametrize.register_parametrization(model, "weight", Identity())
-        self.assertTrue(
-            parametrize.type_before_parametrizations(model) == original_type
-        )
-
-    def test_deepcopy_after_parametrization(self):
-        r"""Test that we are able to create a deepcopy of the module when it's parametrized."""
-
-        class AddOne(nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        class ModelWithoutDeepcopy(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = nn.Parameter(torch.tensor([1., 1., 1., 1.]), requires_grad=True)
-                self.bias = nn.Parameter(torch.tensor([0., 0., 0., 0.]), requires_grad=True)
-                self.attr = [1.0, 2.0, 3.0, 4.0]
-
-        class ActualModel(ModelWithoutDeepcopy):
-            # Emulate custom implementation of the deepcopying.
-            def __deepcopy__(self, memo):
-                result = self.__new__(self.__class__)
-                memo[id(self)] = result
-                result.__dict__ = deepcopy(self.__dict__, memo)
-                return result
-
-        def check_deepcopy(m1: nn.Module, m2: nn.Module):
-            w1 = m1.parametrizations.weight.original
-            w2 = m2.parametrizations.weight.original
-            b1 = m1.parametrizations.bias.original if parametrize.is_parametrized(m1, "bias") else m1.bias
-            b2 = m2.parametrizations.bias.original if parametrize.is_parametrized(m2, "bias") else m2.bias
-            # Weights, biases and attributes should be equal but they must be different objects.
-            self.assertEqual(m1.__dict__.keys(), m2.__dict__.keys())
-            self.assertIsNot(m1, m2)
-            self.assertEqual(w1, w2)
-            self.assertIsNot(w1, w2)
-            self.assertEqual(b1, b2)
-            self.assertIsNot(b1, b2)
-            self.assertEqual(m1.attr, m2.attr)
-            self.assertIsNot(m1.attr, m2.attr)
-
-        for model in (ModelWithoutDeepcopy(), ActualModel()):
-            # General check that we are able to create deepcopy.
-            parametrize.register_parametrization(model, "weight", AddOne())
-            check_deepcopy(model, deepcopy(model))
-            # Check that this works on models with several parametrized tensors.
-            parametrize.register_parametrization(model, "bias", AddOne())
-            check_deepcopy(model, deepcopy(model))
-            # Check that this works on models where tensors have more than one parametrization.
-            parametrize.register_parametrization(model, "weight", AddOne())
-            check_deepcopy(model, deepcopy(model))
-
-    def test_transfer_parametrizations_and_params(self):
-        r"""Test that all parametrizations and their associated parameters are transferred."""
-
-        class AddOne(nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        class Double(nn.Module):
-            def forward(self, x):
-                return 2.0 * x
-
-            def right_inverse(self, x):
-                return 0.5 * x
-
-        class MinusOne(nn.Module):
-            def forward(self, x):
-                return x - 1.0
-
-        model = nn.Linear(5, 5)
-        parametrize.register_parametrization(model, "weight", AddOne())
-        parametrize.register_parametrization(model, "weight", Double())
-        parametrize.register_parametrization(model, "weight", MinusOne())
-        hold_weight = model.weight
-
-        to_model = torch.ao.nn.qat.Linear(
-            5, 5, qconfig=torch.ao.quantization.get_default_qconfig()
-        )
-        parametrize.transfer_parametrizations_and_params(model, to_model)
-
-        # checks that final and original value are correct and the to_model is parametrized
-        self.assertTrue(torch.nn.utils.parametrize.is_parametrized(to_model, "weight"))
-        self.assertEqual(model.weight, to_model.weight)
-        self.assertEqual(
-            model.parametrizations.weight.original,
-            to_model.parametrizations.weight.original,
-        )
-
-        # check that the transfer didn't affect the original value
-        self.assertEqual(hold_weight, model.weight)
-
-        # testing that changes to one set of parametrizations do not affect the other
-        parametrize.remove_parametrizations(to_model, "weight")
-        self.assertFalse(torch.nn.utils.parametrize.is_parametrized(to_model, "weight"))
-        self.assertTrue(torch.nn.utils.parametrize.is_parametrized(model, "weight"))
-
-        # also test that parameters that don't exist in to_model get transferred
-        model.test_param = Parameter(torch.randn(5, 5))
-
-        self.assertTrue(not hasattr(to_model, "test_param"))
-        parametrize.register_parametrization(model, "test_param", Double())
-        hold_test_param = model.test_param
-        parametrize.transfer_parametrizations_and_params(model, to_model, "test_param")
-
-        # check that previously missing params got transferred correctly
-        self.assertEqual(model.test_param, to_model.test_param)
-        self.assertEqual(
-            model.parametrizations.test_param.original,
-            to_model.parametrizations.test_param.original,
-        )
-
-        # check that the new transfer didn't change the value for the from_module
-        self.assertEqual(hold_test_param, model.test_param)
-
-    def test_transfer_parametrizations_and_params_right_inverse(self):
-        r"""Test that all parametrizations and their associated parameters are transferred."""
-
-        class Double(nn.Module):
-            def forward(self, x):
-                return 2.0 * x
-
-            def right_inverse(self, x):
-                return 0.5 * x
-
-        model = nn.Linear(5, 5)
-        parametrize.register_parametrization(model, "weight", Double())
-        hold_weight = model.weight
-
-        to_model = torch.ao.nn.qat.Linear(
-            5, 5, qconfig=torch.ao.quantization.get_default_qconfig()
-        )
-        parametrize.transfer_parametrizations_and_params(model, to_model)
-
-        # check that transfer occurs successfully
-        self.assertEqual(model.weight, to_model.weight)
-        self.assertEqual(
-            model.parametrizations.weight.original,
-            to_model.parametrizations.weight.original,
-        )
-
-        # check that transfer doesn't affect the from_model weight
-        self.assertEqual(hold_weight, model.weight)
-
-    def test_transfer_parametrizations_and_params_single_param(self):
-        r"""Test that all parametrizations and their associated parameters are transferred."""
-
-        class AddOne(nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        class Double(nn.Module):
-            def forward(self, x):
-                return 2.0 * x
-
-        class MinusOne(nn.Module):
-            def forward(self, x):
-                return x - 1.0
-
-        model = nn.Linear(5, 5, bias=True)
-        parametrize.register_parametrization(model, "weight", AddOne())
-        parametrize.register_parametrization(model, "weight", Double())
-        parametrize.register_parametrization(model, "weight", MinusOne())
-        parametrize.register_parametrization(model, "bias", AddOne())
-        parametrize.register_parametrization(model, "bias", Double())
-        parametrize.register_parametrization(model, "bias", MinusOne())
-
-        to_model = torch.ao.nn.qat.Linear(
-            5, 5, bias=True, qconfig=torch.ao.quantization.get_default_qconfig()
-        )
-        parametrize.transfer_parametrizations_and_params(model, to_model, "weight")
-
-        # check that weight and only weight was transferred
-        self.assertEqual(model.weight, to_model.weight)
-        self.assertEqual(
-            model.parametrizations.weight.original,
-            to_model.parametrizations.weight.original,
-        )
-        self.assertTrue("bias" not in to_model.parametrizations)
-
-    # FIXME: Rewrite this test using functions not depending on LAPACK
-    # and remove the `@skipIfNoLapack` (see #70995)
-    @skipIfNoLapack
-    def test_transfer_parametrizations_and_params_many_to_one(self):
-        # A parametrization with several outputs
-        class RankOne(nn.Module):
-            def forward(self, x, y):
-                # Form a rank-1 matrix from a pair of vectors
-                return x.unsqueeze(-1) @ y.unsqueeze(-2)
-
-            def right_inverse(self, Y):
-                # We project the given matrix onto the rank 1 matrices
-                U, S, Vh = torch.linalg.svd(Y, full_matrices=False)
-                # S is ordered in a decreasing way.
-                s0_sqrt = S[0].sqrt().unsqueeze(-1)
-                return U[..., :, 0] * s0_sqrt, Vh[..., 0, :] * s0_sqrt
-
-        class Double(nn.Module):
-            def forward(self, x):
-                return 2.0 * x
-
-        model = nn.Linear(3, 3)
-        parametrize.register_parametrization(model, "weight", RankOne())
-        parametrize.register_parametrization(model, "weight", Double())
-        hold_weight = model.weight
-
-        to_model = torch.ao.nn.qat.Linear(
-            3, 3, qconfig=torch.ao.quantization.get_default_qconfig()
-        )
-
-        parametrize.transfer_parametrizations_and_params(model, to_model)
-
-        # checks that final and original value are correct and the to_model is parametrized
-        self.assertTrue(torch.nn.utils.parametrize.is_parametrized(to_model, "weight"))
-        self.assertEqual(model.weight, to_model.weight)
-        self.assertEqual(
-            model.parametrizations.weight.original0,
-            to_model.parametrizations.weight.original0,
-        )
-        self.assertEqual(
-            model.parametrizations.weight.original1,
-            to_model.parametrizations.weight.original1,
-        )
-
-        # check that the transfer didn't affect the original value
-        self.assertEqual(hold_weight, model.weight)
-
-        # testing that changes to one set of parametrizations do not affect the other
-        model.test_param = Parameter(torch.randn(3, 3))
-
-        self.assertTrue(not hasattr(to_model, "test_param"))
-        parametrize.register_parametrization(model, "test_param", RankOne())
-        hold_test_param = model.test_param
-        parametrize.transfer_parametrizations_and_params(model, to_model, "test_param")
-
-        # also check that previously missing params got transferred correctly
-        self.assertEqual(model.test_param, to_model.test_param)
-        self.assertEqual(
-            model.parametrizations.test_param.original0,
-            to_model.parametrizations.test_param.original0,
-        )
-        self.assertEqual(
-            model.parametrizations.test_param.original1,
-            to_model.parametrizations.test_param.original1,
-        )
-
-        # check that the new transfer didn't change the value for the from_module
-        self.assertEqual(hold_test_param, model.test_param)
-
-    # torch/nn/utils/prune.py
-    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
-    def test_validate_pruning_amount_init(self):
-        r"""Test the first util function that validates the pruning
-        amount requested by the user the moment the pruning method
-        is initialized. This test checks that the expected errors are
-        raised whenever the amount is invalid.
-        The original function runs basic type checking + value range checks.
-        It doesn't check the validity of the pruning amount with
-        respect to the size of the tensor to prune. That's left to
-        `_validate_pruning_amount`, tested below.
-        """
-        # neither float not int should raise TypeError
-        with self.assertRaises(TypeError):
-            prune._validate_pruning_amount_init(amount="I'm a string")
-
-        # float not in [0, 1] should raise ValueError
-        with self.assertRaises(ValueError):
-            prune._validate_pruning_amount_init(amount=1.1)
-        with self.assertRaises(ValueError):
-            prune._validate_pruning_amount_init(amount=20.)
-
-        # negative int should raise ValueError
-        with self.assertRaises(ValueError):
-            prune._validate_pruning_amount_init(amount=-10)
-
-        # all these should pass without errors because they're valid amounts
-        prune._validate_pruning_amount_init(amount=0.34)
-        prune._validate_pruning_amount_init(amount=1500)
-        prune._validate_pruning_amount_init(amount=0)
-        prune._validate_pruning_amount_init(amount=0.)
-        prune._validate_pruning_amount_init(amount=1)
-        prune._validate_pruning_amount_init(amount=1.)
-        self.assertTrue(True)
-
-    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
-    def test_validate_pruning_amount(self):
-        r"""Tests the second util function that validates the pruning
-        amount requested by the user, this time with respect to the size
-        of the tensor to prune. The rationale is that if the pruning amount,
-        converted to absolute value of units to prune, is larger than
-        the number of units in the tensor, then we expect the util function
-        to raise a value error.
-        """
-        # if amount is int and amount > tensor_size, raise ValueError
-        with self.assertRaises(ValueError):
-            prune._validate_pruning_amount(amount=20, tensor_size=19)
-
-        # amount is a float so this should not raise an error
-        prune._validate_pruning_amount(amount=0.3, tensor_size=0)
-
-        # this is okay
-        prune._validate_pruning_amount(amount=19, tensor_size=20)
-        prune._validate_pruning_amount(amount=0, tensor_size=0)
-        prune._validate_pruning_amount(amount=1, tensor_size=1)
-        self.assertTrue(True)
-
-    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
-    def test_compute_nparams_to_prune(self):
-        r"""Test that requested pruning `amount` gets translated into the
-        correct absolute number of units to prune.
-        """
-        self.assertEqual(
-            prune._compute_nparams_toprune(amount=0, tensor_size=15),
-            0
-        )
-        self.assertEqual(
-            prune._compute_nparams_toprune(amount=10, tensor_size=15),
-            10
-        )
-        # if 1 is int, means 1 unit
-        self.assertEqual(
-            prune._compute_nparams_toprune(amount=1, tensor_size=15),
-            1
-        )
-        # if 1. is float, means 100% of units
-        self.assertEqual(
-            prune._compute_nparams_toprune(amount=1., tensor_size=15),
-            15
-        )
-        self.assertEqual(
-            prune._compute_nparams_toprune(amount=0.4, tensor_size=17),
-            7
-        )
-
-    def test_random_pruning_sizes(self):
-        r"""Test that the new parameters and buffers created by the pruning
-        method have the same size as the input tensor to prune. These, in
-        fact, correspond to the pruned version of the tensor itself, its
-        mask, and its original copy, so the size must match.
-        """
-        # fixturize test
-        # TODO: add other modules
-        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
-        names = ['weight', 'bias']
-
-        for m in modules:
-            for name in names:
-                with self.subTest(m=m, name=name):
-                    original_tensor = getattr(m, name)
-
-                    prune.random_unstructured(m, name=name, amount=0.1)
-                    # mask has the same size as tensor being pruned
-                    self.assertEqual(
-                        original_tensor.size(),
-                        getattr(m, name + '_mask').size()
-                    )
-                    # 'orig' tensor has the same size as the original tensor
-                    self.assertEqual(
-                        original_tensor.size(),
-                        getattr(m, name + '_orig').size()
-                    )
-                    # new tensor has the same size as the original tensor
-                    self.assertEqual(
-                        original_tensor.size(),
-                        getattr(m, name).size()
-                    )
-
-    def test_random_pruning_orig(self):
-        r"""Test that original tensor is correctly stored in 'orig'
-        after pruning is applied. Important to make sure we don't
-        lose info about the original unpruned parameter.
-        """
-        # fixturize test
-        # TODO: add other modules
-        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
-        names = ['weight', 'bias']
-
-        for m in modules:
-            for name in names:
-                with self.subTest(m=m, name=name):
-
-                    # tensor prior to pruning
-                    original_tensor = getattr(m, name)
-                    prune.random_unstructured(m, name=name, amount=0.1)
-                    self.assertEqual(
-                        original_tensor,
-                        getattr(m, name + '_orig')
-                    )
-
-    def test_random_pruning_new_weight(self):
-        r"""Test that module.name now contains a pruned version of
-        the original tensor obtained from multiplying it by the mask.
-        """
-        # fixturize test
-        # TODO: add other modules
-        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
-        names = ['weight', 'bias']
-
-        for m in modules:
-            for name in names:
-                with self.subTest(m=m, name=name):
-                    # tensor prior to pruning
-                    original_tensor = getattr(m, name)
-                    prune.random_unstructured(m, name=name, amount=0.1)
-                    # weight = weight_orig * weight_mask
-                    self.assertEqual(
-                        getattr(m, name),
-                        getattr(m, name + '_orig')
-                        * getattr(m, name + '_mask').to(
-                            dtype=original_tensor.dtype
-                        ),
-                    )
-
-    def test_identity_pruning(self):
-        r"""Test that a mask of 1s does not change forward or backward.
-        """
-        input_ = torch.ones(1, 5)
-        m = nn.Linear(5, 2)
-        y_prepruning = m(input_)  # output prior to pruning
-
-        # compute grad pre-pruning and check it's equal to all ones
-        y_prepruning.sum().backward()
-        old_grad_weight = m.weight.grad.clone()  # don't grab pointer!
-        self.assertEqual(old_grad_weight, torch.ones_like(m.weight))
-        old_grad_bias = m.bias.grad.clone()
-        self.assertEqual(old_grad_bias, torch.ones_like(m.bias))
-
-        # remove grads
-        m.zero_grad()
-
-        # force the mask to be made of all 1s
-        prune.identity(m, name="weight")
-
-        # with mask of 1s, output should be identical to no mask
-        y_postpruning = m(input_)
-        self.assertEqual(y_prepruning, y_postpruning)
-
-        # with mask of 1s, grad should be identical to no mask
-        y_postpruning.sum().backward()
-        self.assertEqual(old_grad_weight, m.weight_orig.grad)
-        self.assertEqual(old_grad_bias, m.bias.grad)
-
-        # calling forward twice in a row shouldn't change output
-        y1 = m(input_)
-        y2 = m(input_)
-        self.assertEqual(y1, y2)
-
-    def test_random_pruning_0perc(self):
-        r"""Test that a mask of 1s does not change forward or backward.
-        """
-        input_ = torch.ones(1, 5)
-        m = nn.Linear(5, 2)
-        y_prepruning = m(input_)  # output prior to pruning
-
-        # compute grad pre-pruning and check it's equal to all ones
-        y_prepruning.sum().backward()
-        old_grad_weight = m.weight.grad.clone()  # don't grab pointer!
-        self.assertEqual(old_grad_weight, torch.ones_like(m.weight))
-        old_grad_bias = m.bias.grad.clone()
-        self.assertEqual(old_grad_bias, torch.ones_like(m.bias))
-
-        # remove grads
-        m.zero_grad()
-
-        # force the mask to be made of all 1s
-        with mock.patch(
-            "torch.nn.utils.prune.RandomUnstructured.compute_mask"
-        ) as compute_mask:
-            compute_mask.return_value = torch.ones_like(m.weight)
-            prune.random_unstructured(m, name='weight', amount=0.9)  # amount won't count
-
-        # with mask of 1s, output should be identical to no mask
-        y_postpruning = m(input_)
-        self.assertEqual(y_prepruning, y_postpruning)
-
-        # with mask of 1s, grad should be identical to no mask
-        y_postpruning.sum().backward()
-        self.assertEqual(old_grad_weight, m.weight_orig.grad)
-        self.assertEqual(old_grad_bias, m.bias.grad)
-
-        # calling forward twice in a row shouldn't change output
-        y1 = m(input_)
-        y2 = m(input_)
-        self.assertEqual(y1, y2)
-
-    def test_random_pruning(self):
-        input_ = torch.ones(1, 5)
-        m = nn.Linear(5, 2)
-
-        # define custom mask to assign with mock
-        mask = torch.ones_like(m.weight)
-        mask[1, 0] = 0
-        mask[0, 3] = 0
-
-        # check grad is zero for masked weights
-        with mock.patch(
-            "torch.nn.utils.prune.RandomUnstructured.compute_mask"
-        ) as compute_mask:
-            compute_mask.return_value = mask
-            prune.random_unstructured(m, name='weight', amount=0.9)
-
-        y_postpruning = m(input_)
-        y_postpruning.sum().backward()
-        # weight_orig is the parameter, so it's the tensor that will accumulate the grad
-        self.assertEqual(m.weight_orig.grad, mask)  # all 1s, except for masked units
-        self.assertEqual(m.bias.grad, torch.ones_like(m.bias))
-
-        # make sure that weight_orig update doesn't modify [1, 0] and [0, 3]
-        old_weight_orig = m.weight_orig.clone()
-        # update weights
-        learning_rate = 1.
-        for p in m.parameters():
-            p.data.sub_(p.grad.data * learning_rate)
-        # since these are pruned, they should not be updated
-        self.assertEqual(old_weight_orig[1, 0], m.weight_orig[1, 0])
-        self.assertEqual(old_weight_orig[0, 3], m.weight_orig[0, 3])
-
-    def test_random_pruning_forward(self):
-        r"""check forward with mask (by hand).
-        """
-        input_ = torch.ones(1, 5)
-        m = nn.Linear(5, 2)
-
-        # define custom mask to assign with mock
-        mask = torch.zeros_like(m.weight)
-        mask[1, 0] = 1
-        mask[0, 3] = 1
-
-        with mock.patch(
-            "torch.nn.utils.prune.RandomUnstructured.compute_mask"
-        ) as compute_mask:
-            compute_mask.return_value = mask
-            prune.random_unstructured(m, name='weight', amount=0.9)
-
-        yhat = m(input_)
-        self.assertEqual(yhat[0, 0], m.weight_orig[0, 3] + m.bias[0])
-        self.assertEqual(yhat[0, 1], m.weight_orig[1, 0] + m.bias[1])
-
-    def test_remove_pruning_forward(self):
-        r"""Remove pruning and check forward is unchanged from previous
-        pruned state.
-        """
-        input_ = torch.ones(1, 5)
-        m = nn.Linear(5, 2)
-
-        # define custom mask to assign with mock
-        mask = torch.ones_like(m.weight)
-        mask[1, 0] = 0
-        mask[0, 3] = 0
-
-        # check grad is zero for masked weights
-        with mock.patch(
-            "torch.nn.utils.prune.RandomUnstructured.compute_mask"
-        ) as compute_mask:
-            compute_mask.return_value = mask
-            prune.random_unstructured(m, name='weight', amount=0.9)
-
-        y_postpruning = m(input_)
-
-        prune.remove(m, 'weight')
-
-        y_postremoval = m(input_)
-        self.assertEqual(y_postpruning, y_postremoval)
-
-    def test_pruning_id_consistency(self):
-        r"""Test that pruning doesn't change the id of the parameters, which
-        would otherwise introduce issues with pre-existing optimizers that
-        point to old parameters.
-        """
-        m = nn.Linear(5, 2, bias=False)
-
-        tensor_id = id(list(m.parameters())[0])
-
-        prune.random_unstructured(m, name="weight", amount=0.9)
-        self.assertEqual(tensor_id, id(list(m.parameters())[0]))
-
-        prune.remove(m, "weight")
-        self.assertEqual(tensor_id, id(list(m.parameters())[0]))
-
-    def test_random_pruning_pickle(self):
-        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
-        names = ['weight', 'bias']
-
-        for m in modules:
-            for name in names:
-                with self.subTest(m=m, name=name):
-                    prune.random_unstructured(m, name=name, amount=0.1)
-                    m_new = pickle.loads(pickle.dumps(m))
-                    self.assertIsInstance(m_new, type(m))
-
-    def test_multiple_pruning_calls(self):
-        # if you call pruning twice, the hook becomes a PruningContainer
-        m = nn.Conv3d(2, 2, 2)
-        prune.l1_unstructured(m, name='weight', amount=0.1)
-        weight_mask0 = m.weight_mask  # save it for later sanity check
-
-        # prune again
-        prune.ln_structured(m, name='weight', amount=0.3, n=2, dim=0)
-        hook = next(iter(m._forward_pre_hooks.values()))
-        self.assertIsInstance(
-            hook,
-            torch.nn.utils.prune.PruningContainer
-        )
-        # check that container._tensor_name is correctly set no matter how
-        # many pruning methods are in the container
-        self.assertEqual(hook._tensor_name, 'weight')
-
-        # check that the pruning container has the right length
-        # equal to the number of pruning iters
-        self.assertEqual(len(hook), 2)  # m.weight has been pruned twice
-
-        # check that the entries of the pruning container are of the expected
-        # type and in the expected order
-        self.assertIsInstance(hook[0], torch.nn.utils.prune.L1Unstructured)
-        self.assertIsInstance(hook[1], torch.nn.utils.prune.LnStructured)
-
-        # check that all entries that are 0 in the 1st mask are 0 in the
-        # 2nd mask too
-        self.assertTrue(torch.all(m.weight_mask[weight_mask0 == 0] == 0))
-
-        # prune again
-        prune.ln_structured(m, name='weight', amount=0.1, n=float('inf'), dim=1)
-        # check that container._tensor_name is correctly set no matter how
-        # many pruning methods are in the container
-        hook = next(iter(m._forward_pre_hooks.values()))
-        self.assertEqual(hook._tensor_name, 'weight')
-
-    def test_pruning_container(self):
-        # create an empty container
-        container = prune.PruningContainer()
-        container._tensor_name = 'test'
-        self.assertEqual(len(container), 0)
-
-        p = prune.L1Unstructured(amount=2)
-        p._tensor_name = 'test'
-
-        # test adding a pruning method to a container
-        container.add_pruning_method(p)
-
-        # test error raised if tensor name is different
-        q = prune.L1Unstructured(amount=2)
-        q._tensor_name = 'another_test'
-        with self.assertRaises(ValueError):
-            container.add_pruning_method(q)
-
-        # test that adding a non-pruning method object to a pruning container
-        # raises a TypeError
-        with self.assertRaises(TypeError):
-            container.add_pruning_method(10)
-        with self.assertRaises(TypeError):
-            container.add_pruning_method('ugh')
-
-    def test_pruning_container_compute_mask(self):
-        r"""Test `compute_mask` of pruning container with a known `t` and
-        `default_mask`. Indirectly checks that Ln structured pruning is
-        acting on the right axis.
-        """
-        # create an empty container
-        container = prune.PruningContainer()
-        container._tensor_name = 'test'
-
-        # 1) test unstructured pruning
-        # create a new pruning method
-        p = prune.L1Unstructured(amount=2)
-        p._tensor_name = 'test'
-        # add the pruning method to the container
-        container.add_pruning_method(p)
-
-        # create tensor to be pruned
-        t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).to(dtype=torch.float32)
-        # create prior mask by hand
-        default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
-        # since we are pruning the two lowest magnitude units, the outcome of
-        # the calculation should be this:
-        expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]], dtype=torch.float32)
-        computed_mask = container.compute_mask(t, default_mask)
-        self.assertEqual(expected_mask, computed_mask)
-
-        # 2) test structured pruning
-        q = prune.LnStructured(amount=1, n=2, dim=0)
-        q._tensor_name = 'test'
-        container.add_pruning_method(q)
-        # since we are pruning the lowest magnitude one of the two rows, the
-        # outcome of the calculation should be this:
-        expected_mask = torch.tensor([[0, 0, 0, 0], [1, 1, 0, 1]], dtype=torch.float32)
-        computed_mask = container.compute_mask(t, default_mask)
-        self.assertEqual(expected_mask, computed_mask)
-
-        # 2) test structured pruning, along another axis
-        r = prune.LnStructured(amount=1, n=2, dim=1)
-        r._tensor_name = 'test'
-        container.add_pruning_method(r)
-        # since we are pruning the lowest magnitude of the four columns, the
-        # outcome of the calculation should be this:
-        expected_mask = torch.tensor([[0, 1, 1, 0], [0, 1, 0, 1]], dtype=torch.float32)
-        computed_mask = container.compute_mask(t, default_mask)
-        self.assertEqual(expected_mask, computed_mask)
-
-    def test_l1_unstructured_pruning(self):
-        r"""Test that l1 unstructured pruning actually removes the lowest
-        entries by l1 norm (by hand). It also checks that applying l1
-        unstructured pruning more than once respects the previous mask.
-        """
-        m = nn.Linear(4, 2)
-        # modify its weight matrix by hand
-        m.weight = torch.nn.Parameter(
-            torch.tensor(
-                [[1, 2, 3, 4], [-4, -3, -2, -1]], dtype=torch.float32
-            )
-        )
-
-        prune.l1_unstructured(m, 'weight', amount=2)
-        expected_weight = torch.tensor([[0, 2, 3, 4], [-4, -3, -2, 0]],
-                                       dtype=m.weight.dtype)
-        self.assertEqual(expected_weight, m.weight)
-
-        # check that pruning again removes the next two smallest entries
-        prune.l1_unstructured(m, 'weight', amount=2)
-        expected_weight = torch.tensor([[0, 0, 3, 4], [-4, -3, 0, 0]],
-                                       dtype=m.weight.dtype)
-        self.assertEqual(expected_weight, m.weight)
-
-    def test_l1_unstructured_pruning_with_importance_scores(self):
-        r"""Test that l1 unstructured pruning actually removes the lowest
-        entries of importance scores and not the parameter by l1 norm (by hand).
-        It also checks that applying l1 unstructured pruning more than once
-        respects the previous mask.
-        """
-        m = nn.Linear(4, 2)
-        # modify its weight matrix by hand
-        m.weight = torch.nn.Parameter(
-            torch.tensor(
-                [[1, 2, 3, 4], [-4, -3, -2, -1]], dtype=torch.float32
-            )
-        )
-        importance_scores = torch.tensor(
-            [[4, 2, 1, 3], [-3, -1, -2, -4]], dtype=torch.float32
-        )
-
-        prune.l1_unstructured(m, 'weight', amount=2, importance_scores=importance_scores)
-        expected_weight = torch.tensor([[1, 2, 0, 4], [-4, 0, -2, -1]],
-                                       dtype=m.weight.dtype)
-        self.assertEqual(expected_weight, m.weight)
-
-        # check that pruning again removes two entries of m.weight that are colocated with
-        # the next two smallest absolute values of importance scores.
-        prune.l1_unstructured(m, 'weight', amount=2, importance_scores=importance_scores)
-        expected_weight = torch.tensor([[1, 0, 0, 4], [-4, 0, 0, -1]],
-                                       dtype=m.weight.dtype)
-        self.assertEqual(expected_weight, m.weight)
-
-    def test_unstructured_pruning_same_magnitude(self):
-        r"""Since it may happen that the tensor to prune has entries with the
-        same exact magnitude, it is important to check that pruning happens
-        consistenly based on the bottom % of weights, and not by threshold,
-        which would instead kill off *all* units with magnitude = threshold.
-        """
-        AMOUNT = 0.2
-        p = prune.L1Unstructured(amount=AMOUNT)
-        # create a random tensors with entries in {-2, 0, 2}
-        t = 2 * torch.randint(low=-1, high=2, size=(10, 7))
-        nparams_toprune = prune._compute_nparams_toprune(AMOUNT, t.nelement())
-
-        computed_mask = p.compute_mask(t, default_mask=torch.ones_like(t))
-        nparams_pruned = torch.sum(computed_mask == 0)
-        self.assertEqual(nparams_toprune, nparams_pruned)
-
-    def test_random_structured_pruning_amount(self):
-        AMOUNT = 0.6
-        AXIS = 2
-        p = prune.RandomStructured(amount=AMOUNT, dim=AXIS)
-        t = 2 * torch.randint(low=-1, high=2, size=(5, 4, 2)).to(
-            dtype=torch.float32
-        )
-        nparams_toprune = prune._compute_nparams_toprune(AMOUNT, t.shape[AXIS])
-
-        computed_mask = p.compute_mask(t, default_mask=torch.ones_like(t))
-        # check that 1 column is fully prune, the others are left untouched
-        remaining_axes = [_ for _ in range(len(t.shape)) if _ != AXIS]
-        per_column_sums = sorted(
-            torch.sum(computed_mask == 0, axis=remaining_axes)
-        )
-        assert per_column_sums == [0, 20]
-
-    def test_ln_structured_pruning(self):
-        r"""Check Ln structured pruning by hand.
-        """
-        m = nn.Conv2d(3, 1, 2)
-        m.weight.data = torch.tensor(
-            [[[[1., 2.], [1., 2.5]],
-             [[0.5, 1.], [0.1, 0.1]],
-             [[-3., -5.], [0.1, -1.]]]]
-        )
-        # expected effect of pruning 1 of the 3 channels by L2-norm
-        expected_mask_axis1 = torch.ones_like(m.weight)
-        expected_mask_axis1[:, 1] = 0.
-
-        prune.ln_structured(m, 'weight', amount=1, n=2, dim=1)
-        self.assertEqual(expected_mask_axis1, m.weight_mask)
-
-        # expected effect of pruning 1 of the 2 columns along axis -1 by L1-norm
-        expected_mask_axis3 = expected_mask_axis1
-        expected_mask_axis3[:, :, :, 0] = 0.
-
-        prune.ln_structured(m, 'weight', amount=1, n=1, dim=-1)
-        self.assertEqual(expected_mask_axis3, m.weight_mask)
-
-    def test_ln_structured_pruning_importance_scores(self):
-        r"""Check Ln structured pruning by hand.
-        """
-        m = nn.Conv2d(3, 1, 2)
-        m.weight.data = torch.tensor(
-            [[[[1., 2.], [1., 2.5]],
-             [[0.5, 1.], [0.1, 0.1]],
-             [[-3., -5.], [0.1, -1.]]]]
-        )
-        importance_scores = torch.tensor(
-            [[[[10., 1.], [10., 1.]],
-             [[30., 3.], [30., 3.]],
-             [[-20., -2.], [-20., -2.]]]]
-        )
-        # expected effect of pruning 1 of the 3 channels by L2-norm
-        expected_mask_axis1 = torch.ones_like(m.weight)
-        expected_mask_axis1[:, 0] = 0.
-
-        prune.ln_structured(m, 'weight', amount=1, n=2, dim=1, importance_scores=importance_scores)
-        self.assertEqual(expected_mask_axis1, m.weight_mask)
-
-        # expected effect of pruning 1 of the 2 columns along axis -1 by L1-norm
-        expected_mask_axis3 = expected_mask_axis1
-        expected_mask_axis3[:, :, :, 1] = 0.
-
-        prune.ln_structured(m, 'weight', amount=1, n=1, dim=-1, importance_scores=importance_scores)
-        self.assertEqual(expected_mask_axis3, m.weight_mask)
-
-    def test_remove_pruning(self):
-        r"""`prune.remove` removes the hook and the reparametrization
-        and makes the pruning final in the original parameter.
-        """
-        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
-        names = ['weight', 'bias']
-
-        for m in modules:
-            for name in names:
-                with self.subTest(m=m, name=name):
-                    # first prune
-                    prune.random_unstructured(m, name, amount=0.5)
-                    self.assertIn(name + "_orig", dict(m.named_parameters()))
-                    self.assertIn(name + "_mask", dict(m.named_buffers()))
-                    self.assertNotIn(name, dict(m.named_parameters()))
-                    self.assertTrue(hasattr(m, name))
-                    pruned_t = getattr(m, name)
-
-                    # then remove pruning
-                    prune.remove(m, name)
-                    self.assertIn(name, dict(m.named_parameters()))
-                    self.assertNotIn(name + "_orig", dict(m.named_parameters()))
-                    self.assertNotIn(name + "_mask", dict(m.named_buffers()))
-                    final_t = getattr(m, name)
-
-                    self.assertEqual(pruned_t, final_t)
-
-    def test_remove_pruning_exception(self):
-        r"""Removing from an unpruned tensor throws an assertion error
-        """
-        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
-        names = ['weight', 'bias']
-
-        for m in modules:
-            for name in names:
-                with self.subTest(m=m, name=name):
-                    # check that the module isn't pruned
-                    self.assertFalse(prune.is_pruned(m))
-                    # since it isn't pruned, pruning can't be removed from it
-                    with self.assertRaises(ValueError):
-                        prune.remove(m, name)
-
-
-    def test_global_pruning(self):
-        r"""Test that global l1 unstructured pruning over 2 parameters removes
-        the `amount=4` smallest global weights across the 2 parameters.
-        """
-        m = nn.Linear(4, 2)
-        n = nn.Linear(3, 1)
-        # modify the weight matrices by hand
-        m.weight = torch.nn.Parameter(
-            torch.tensor([[1, 2, 3, 4], [-4, -3, -2, -1]]).to(
-                dtype=torch.float32)
-        )
-        n.weight = torch.nn.Parameter(
-            torch.tensor([[0, 0.1, -2]]).to(
-                dtype=torch.float32)
-        )
-
-        params_to_prune = (
-            (m, 'weight'),
-            (n, 'weight'),
-        )
-
-        # prune the 4 smallest weights globally by L1 magnitude
-        prune.global_unstructured(
-            params_to_prune,
-            pruning_method=prune.L1Unstructured,
-            amount=4
-        )
-
-        expected_mweight = torch.tensor([[0, 2, 3, 4], [-4, -3, -2, 0]],
-                                        dtype=m.weight.dtype)
-        self.assertEqual(expected_mweight, m.weight)
-
-        expected_nweight = torch.tensor([[0, 0, -2]]).to(dtype=n.weight.dtype)
-        self.assertEqual(expected_nweight, n.weight)
-
-    def test_global_pruning_importance_scores(self):
-        r"""Test that global l1 unstructured pruning over 2 parameters removes
-        the `amount=4` smallest global weights across the 2 parameters.
-        """
-        m = nn.Linear(4, 2)
-        n = nn.Linear(3, 1)
-        # modify the weight matrices by hand
-        m.weight = torch.nn.Parameter(
-            torch.tensor([[1, 2, 3, 4], [-4, -3, -2, -1]]).to(
-                dtype=torch.float32)
-        )
-        m_importance_scores = torch.tensor(
-            [[4, 2, 1, 3], [-3, -1, -2, -4]], dtype=torch.float32
-        )
-        n.weight = torch.nn.Parameter(
-            torch.tensor([[0, 0.1, -2]]).to(
-                dtype=torch.float32)
-        )
-        n_importance_scores = torch.tensor([[0, 10., -0.2]]).to(dtype=torch.float32)
-
-        params_to_prune = (
-            (m, 'weight'),
-            (n, 'weight'),
-        )
-        importance_scores = {
-            (m, 'weight'): m_importance_scores,
-            (n, 'weight'): n_importance_scores,
-        }
-
-        # prune the 4 smallest weights globally by L1 magnitude
-        prune.global_unstructured(
-            params_to_prune,
-            pruning_method=prune.L1Unstructured,
-            amount=4,
-            importance_scores=importance_scores,
-        )
-
-        expected_m_weight = torch.tensor([[1, 2, 0, 4], [-4, 0, -2, -1]],
-                                         dtype=m.weight.dtype)
-        self.assertEqual(expected_m_weight, m.weight)
-
-        expected_n_weight = torch.tensor([[0, 0.1, 0]]).to(dtype=n.weight.dtype)
-        self.assertEqual(expected_n_weight, n.weight)
-
-    def test_custom_from_mask_pruning(self):
-        r"""Test that the CustomFromMask is capable of receiving
-        as input at instantiation time a custom mask, and combining it with
-        the previous default mask to generate the correct final mask.
-        """
-        # new mask
-        mask = torch.tensor([[0, 1, 1, 0], [0, 0, 1, 1]])
-        # old mask
-        default_mask = torch.tensor([[0, 0, 0, 0], [1, 1, 1, 1]])
-
-        # some tensor (not actually used)
-        t = torch.rand_like(mask.to(dtype=torch.float32))
-
-        p = prune.CustomFromMask(mask=mask)
-
-        computed_mask = p.compute_mask(t, default_mask)
-        expected_mask = torch.tensor([[0, 0, 0, 0], [0, 0, 1, 1]], dtype=computed_mask.dtype)
-
-        self.assertEqual(computed_mask, expected_mask)
-
-    def test_pruning_rollback(self):
-        r"""Test that if something fails when the we try to compute the mask,
-        then the model isn't left in some intermediate half-pruned state.
-        The try/except statement in `apply` should handle rolling back
-        to the previous state before pruning began.
-        """
-        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
-        names = ['weight', 'bias']
-
-        for m in modules:
-            for name in names:
-                with self.subTest(m=m, name=name):
-
-                    with mock.patch(
-                        "torch.nn.utils.prune.L1Unstructured.compute_mask"
-                    ) as compute_mask:
-                        compute_mask.side_effect = Exception('HA!')
-                        with self.assertRaises(Exception):
-                            prune.l1_unstructured(m, name=name, amount=0.9)
-
-                        self.assertTrue(
-                            name in dict(m.named_parameters())
-                        )
-                        self.assertFalse(
-                            name + '_mask' in dict(m.named_buffers())
-                        )
-                        self.assertFalse(
-                            name + '_orig' in dict(m.named_parameters())
-                        )
-
-    def test_pruning_serialization_model(self):
-        # create a model
-        model = torch.nn.Sequential(
-            torch.nn.Linear(10, 10),
-            torch.nn.ReLU(),
-            torch.nn.Linear(10, 1),
-        )
-        # check that everything looks normal before pruning
-        self.assertNotIn('0.weight_orig', model.state_dict())
-        self.assertNotIn('0.weight_mask', model.state_dict())
-        self.assertIn('0.weight', model.state_dict())
-
-        # prune one of its parameters
-        prune.l1_unstructured(module=model[0], name='weight', amount=0.9)
-
-        # check that the original weight and the new mask are present
-        self.assertIn('0.weight_orig', model.state_dict())
-        self.assertIn('0.weight_mask', model.state_dict())
-        self.assertNotIn('0.weight', model.state_dict())
-        self.assertTrue(hasattr(model[0], 'weight'))
-
-        pruned_weight = model[0].weight
-
-        with TemporaryFileName() as fname:
-            torch.save(model, fname)
-            new_model = torch.load(fname)
-
-        # check that the original weight and the new mask are present
-        self.assertIn('0.weight_orig', new_model.state_dict())
-        self.assertIn('0.weight_mask', new_model.state_dict())
-        self.assertNotIn('0.weight', new_model.state_dict())
-        self.assertTrue(hasattr(new_model[0], 'weight'))
-
-        self.assertEqual(pruned_weight, new_model[0].weight)
-
-    def test_pruning_serialization_state_dict(self):
-        # create a model
-        model = torch.nn.Sequential(
-            torch.nn.Linear(10, 10),
-            torch.nn.ReLU(),
-            torch.nn.Linear(10, 1),
-        )
-        # check that everything looks normal before pruning
-        self.assertNotIn('0.weight_orig', model.state_dict())
-        self.assertNotIn('0.weight_mask', model.state_dict())
-        self.assertIn('0.weight', model.state_dict())
-
-        # prune one of its parameters
-        prune.l1_unstructured(module=model[0], name='weight', amount=0.9)
-
-        # check that the original weight and the new mask are present
-        self.assertIn('0.weight_orig', model.state_dict())
-        self.assertIn('0.weight_mask', model.state_dict())
-        self.assertNotIn('0.weight', model.state_dict())
-        self.assertTrue(hasattr(model[0], 'weight'))
-
-        pruned_weight = model[0].weight
-
-        # make pruning permanent and restore parameter names as in base
-        # architecture
-        prune.remove(module=model[0], name='weight')
-
-        # check that the original weight and the new mask are no longer present
-        self.assertNotIn('0.weight_orig', model.state_dict())
-        self.assertNotIn('0.weight_mask', model.state_dict())
-        self.assertIn('0.weight', model.state_dict())
-
-        # save the state dict of model and reload it into new_model
-        new_model = torch.nn.Sequential(
-            torch.nn.Linear(10, 10),
-            torch.nn.ReLU(),
-            torch.nn.Linear(10, 1),
-        )
-        with TemporaryFileName() as fname:
-            torch.save(model.state_dict(), fname)
-            new_model.load_state_dict(torch.load(fname))
-
-        # check that the original weight and the new mask are not present in
-        # new_model either.
-        self.assertNotIn('0.weight_orig', new_model.state_dict())
-        self.assertNotIn('0.weight_mask', new_model.state_dict())
-        self.assertIn('0.weight', new_model.state_dict())
-
-        self.assertEqual(pruned_weight, new_model[0].weight)
-
-    def test_prune(self):
-        # create a new pruning method
-        p = prune.L1Unstructured(amount=2)
-        # create tensor to be pruned
-        t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).to(dtype=torch.float32)
-        # create prior mask by hand
-        default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
-        # since we are pruning the two lowest magnitude units, the outcome of
-        # the calculation should be this:
-        expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]])
-        pruned_tensor = p.prune(t, default_mask)
-        self.assertEqual(t * expected_mask, pruned_tensor)
-
-    def test_prune_importance_scores(self):
-        # create a new pruning method
-        p = prune.L1Unstructured(amount=2)
-        # create tensor to be pruned
-        t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).to(dtype=torch.float32)
-        importance_scores = torch.tensor(
-            [[1, 2, 3, 4], [1.5, 1.6, 1.7, 1.8]]
-        ).to(dtype=torch.float32)
-        # create prior mask by hand
-        default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
-        # since we are pruning the two lowest magnitude units, the outcome of
-        # the calculation should be this:
-        expected_mask = torch.tensor([[0, 1, 1, 0], [0, 1, 0, 1]])
-        pruned_tensor = p.prune(t, default_mask, importance_scores=importance_scores)
-        self.assertEqual(t * expected_mask, pruned_tensor)
-
-    def test_prune_importance_scores_mimic_default(self):
-        # create a new pruning method
-        p = prune.L1Unstructured(amount=2)
-        # create tensor to be pruned
-        t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).to(dtype=torch.float32)
-        # create prior mask by hand
-        default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
-        # since we are pruning the two lowest magnitude units, the outcome of
-        # the calculation should be this:
-        expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]])
-        pruned_tensor_without_importance_scores = p.prune(t, default_mask)
-        pruned_tensor_with_importance_scores = p.prune(t, default_mask, importance_scores=t)
-        self.assertEqual(pruned_tensor_without_importance_scores, pruned_tensor_with_importance_scores)
-        self.assertEqual(t * expected_mask, pruned_tensor_without_importance_scores)
-
-    def test_rnn_pruning(self):
-        l = torch.nn.LSTM(32, 32)
-        # This Module has 4 parameters called:
-        # 'weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0'
-
-        # Pruning one of them causes one of the weights to become a tensor
-        prune.l1_unstructured(l, 'weight_ih_l0', 0.5)
-        assert (
-            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
-            == 3
-        )
-
-        # Removing the pruning reparametrization restores the Parameter
-        prune.remove(l, 'weight_ih_l0')
-        assert (
-            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
-            == 4
-        )
-
-        # Make sure that, upon removal of the reparametrization, the
-        # `._parameters` and `.named_parameters` contain the right params.
-        # Specifically, the original weight ('weight_ih_l0') should be placed
-        # back in the parameters, while the reparametrization component
-        # ('weight_ih_l0_orig') should be removed.
-        assert 'weight_ih_l0' in l._parameters
-        assert l._parameters['weight_ih_l0'] is not None
-        assert 'weight_ih_l0_orig' not in l._parameters
-        assert 'weight_ih_l0' in dict(l.named_parameters())
-        assert dict(l.named_parameters())['weight_ih_l0'] is not None
-        assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
-
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
             # This Module has 4 or 5 parameters called:
@@ -4508,266 +2027,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                     gradcheck(fn, (m.weight_orig,))
 
-    def test_new_spectral_norm(self):
-        input = torch.randn(3, 5)
-        m = nn.Linear(5, 7)
-        m = torch.nn.utils.parametrizations.spectral_norm(m)
-        spectral_norm_m = m.parametrizations.weight[0]
-
-        self.assertEqual(spectral_norm_m._u.size(), torch.Size([m.weight.size(0)]))
-
-        # .parametrizations.weight.original should be trainable
-        self.assertTrue(hasattr(m.parametrizations.weight, 'original'))
-        self.assertTrue('original' in m.parametrizations.weight._parameters)
-
-        # u should be just a reused buffer
-        self.assertTrue(hasattr(spectral_norm_m, '_u'))
-        self.assertTrue('_u' in spectral_norm_m._buffers)
-        self.assertTrue('_v' in spectral_norm_m._buffers)
-
-        # weight should be a plain attribute, not counted as a buffer or a param
-        self.assertIsNotNone(m.weight)
-        self.assertFalse('weight' in m._buffers)
-        self.assertFalse('weight' in m._parameters)
-
-        # it should also be sharing storage as `weight_orig`
-        # self.assertEqual(m.parametrizations.weight.original.storage(), m.weight.storage())
-        self.assertEqual(m.parametrizations.weight.original.size(), m.weight.size())
-        self.assertEqual(m.parametrizations.weight.original.stride(), m.weight.stride())
-
-        m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
-
-        # spectral_norm is the only parametrization
-        self.assertFalse(hasattr(m, 'parametrizations'))
-        self.assertTrue('weight' in m._parameters)
-
-        # We can register spectral_norm multiple times on the same parameter
-        # and on multiple parameters in the same module
-        m = torch.nn.utils.parametrizations.spectral_norm(m, 'weight')
-        m = torch.nn.utils.parametrizations.spectral_norm(m, 'weight')
-        m = torch.nn.utils.parametrizations.spectral_norm(m, 'bias')
-
-        # If we remove the parametrization on bias, weight is still parametrized
-        # Removing a parametrization runs forward in eval mode if leave_parametrized=True
-        m = torch.nn.utils.parametrize.remove_parametrizations(m, 'bias')
-        self.assertTrue('bias' in m._parameters)
-        self.assertTrue(hasattr(m, 'parametrizations'))
-        self.assertFalse('weight' in m._parameters)
-
-        m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
-        # Neither weight and bias are parametrized
-        self.assertFalse(hasattr(m, 'parametrizations'))
-        self.assertTrue('weight' in m._parameters)
-        self.assertFalse(torch.nn.utils.parametrize.is_parametrized(m))
-
-        # test correctness in training/eval modes and cpu/multi-gpu settings
-        for apply_dp in (True, False):
-            if apply_dp:
-                if not TEST_MULTIGPU:
-                    continue
-                device = torch.device('cuda:0')
-
-                def maybe_wrap(m):
-                    return torch.nn.DataParallel(m, [0, 1])
-            else:
-                device = torch.device('cpu')
-
-                def maybe_wrap(m):
-                    return m
-
-            for requires_grad in (True, False):
-                def get_modules():
-                    m = nn.Linear(3, 4).to(device)
-                    m.weight.requires_grad_(requires_grad)
-                    m = torch.nn.utils.parametrizations.spectral_norm(m)
-                    wrapped_m = maybe_wrap(m)
-                    spectral_norm_m = m.parametrizations.weight[0]
-                    return m, wrapped_m, spectral_norm_m
-
-                input = torch.randn(2, 3, device=device)
-
-                m, wrapped_m, spectral_norm_m = get_modules()
-
-                self.assertTrue(hasattr(spectral_norm_m, '_u'))
-                u0 = spectral_norm_m._u.clone()
-                v0 = spectral_norm_m._v.clone()
-
-                # TEST TRAINING BEHAVIOR
-
-                # We perform GD first to modify the initial matrix
-                opt = torch.optim.SGD(wrapped_m.parameters(), lr=0.1)
-
-                opt.zero_grad()
-                wrapped_m(input).sum().backward()
-                opt.step()
-
-                out = wrapped_m(input)
-                if requires_grad:
-                    # run forward again and assert that u and v are updated
-                    self.assertNotEqual(u0, spectral_norm_m._u)
-                    self.assertNotEqual(v0, spectral_norm_m._v)
-
-                # assert that backprop reaches original weight
-                # can't use gradcheck because the function changes as we
-                # activate through it in training mode
-                if requires_grad:
-                    torch.autograd.grad(out.sum(), m.parametrizations.weight.original)
-
-                # test backward works with multiple forwards
-                # it uses training mode so we need to reset `u` and `v` vectors
-                # to same value at beginning for finite difference test to pass
-                saved_u = spectral_norm_m._u.clone()
-                saved_v = spectral_norm_m._v.clone()
-
-                def fn(input):
-                    spectral_norm_m._u.data.copy_(saved_u)
-                    spectral_norm_m._v.data.copy_(saved_v)
-                    out0 = wrapped_m(input)
-                    out1 = wrapped_m(input)
-                    return out0 + out1
-
-                # Make sure we can compute gradients wrt to all the parameters in the case
-                # of double forward
-                fn(input.clone().requires_grad_()).sum().backward()
-                gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
-
-                # test removing
-                # spectral norm module needs to be in eval mode if we'd like to
-                # avoid doing another power iteration
-                m, wrapped_m, _ = get_modules()
-                pre_remove_out = wrapped_m(input)
-                m.eval()
-                m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
-                self.assertEqual(wrapped_m(input), pre_remove_out)
-
-                torch.nn.utils.parametrizations.spectral_norm(m)
-                for _ in range(3):
-                    pre_remove_out = wrapped_m(input)
-                m.eval()
-                m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
-                self.assertEqual(wrapped_m(input), pre_remove_out)
-
-                # TEST EVAL BEHAVIOR
-                m, wrapped_m, spectral_norm_m = get_modules()
-                wrapped_m(input)
-                last_train_out = wrapped_m(input)
-                last_train_u = spectral_norm_m._u.clone()
-                last_train_v = spectral_norm_m._v.clone()
-                wrapped_m.zero_grad()
-                wrapped_m.eval()
-
-                eval_out0 = wrapped_m(input)
-                # assert eval gives same result as last training iteration
-                self.assertEqual(eval_out0, last_train_out)
-                # assert doing more iteartion in eval don't change things
-                self.assertEqual(eval_out0, wrapped_m(input))
-                self.assertEqual(last_train_u, spectral_norm_m._u)
-                self.assertEqual(last_train_v, spectral_norm_m._v)
-
-                # FIXME: the code below is flaky when executed with DataParallel
-                # see https://github.com/pytorch/pytorch/issues/13818
-                if apply_dp:
-                    continue
-
-                # test backward works with multiple forwards in mixed training
-                # and eval modes
-                # it uses training mode so we need to reset `u` and `v` vectors
-                # to same value at beginning for finite difference test to pass
-                saved_u = spectral_norm_m._u.clone()
-                saved_v = spectral_norm_m._v.clone()
-
-                def fn(input):
-                    spectral_norm_m._u.data.copy_(saved_u)
-                    spectral_norm_m._v.data.copy_(saved_v)
-                    wrapped_m.train()
-                    out0 = wrapped_m(input)
-                    wrapped_m.eval()
-                    out1 = wrapped_m(input)
-                    wrapped_m.train()
-                    out2 = wrapped_m(input)
-                    wrapped_m.eval()
-                    out3 = wrapped_m(input)
-                    return out0 + out1 + out2 + out3
-
-                gradcheck(fn, (input.clone().requires_grad_(),))
-
-                # assert that backprop reaches weight_orig in eval
-                if requires_grad:
-                    def fn(weight):
-                        return wrapped_m(input)
-
-                    gradcheck(fn, (m.parametrizations.weight.original,))
-
-    def test_new_spectral_norm_load_state_dict(self):
-        for activate_times in (0, 3):
-            inp = torch.randn(2, 3)
-            m = nn.Linear(3, 5)
-            snm = torch.nn.utils.parametrizations.spectral_norm(m)
-            snm.train()
-
-            for _ in range(activate_times):
-                snm(inp)
-
-            state_dict = deepcopy(snm.state_dict())
-            self.assertEqual({
-                'parametrizations.weight.original',
-                'bias',
-                'parametrizations.weight.0._v',
-                'parametrizations.weight.0._u'
-            }, set(state_dict.keys()))
-
-            # test that non-strict loading works
-            non_strict_state_dict = deepcopy(state_dict)
-            non_strict_state_dict['nonsense'] = 'nonsense'
-            with self.assertRaisesRegex(RuntimeError, r'Unexpected key\(s\) in state_dict: "nonsense"'):
-                snm.load_state_dict(non_strict_state_dict, strict=True)
-            snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['parametrizations.weight.original']
-            snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['parametrizations.weight.0._u']
-            snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['parametrizations.weight.0._v']
-            snm.load_state_dict(non_strict_state_dict, strict=False)
-            non_strict_state_dict['weight'] = snm.weight.detach().clone()     # set W as a buffer
-            snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict._metadata['parametrizations.weight.0']  # remove metadata info
-            snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['weight']                               # remove W buffer
-            snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['bias']
-            snm.load_state_dict(non_strict_state_dict, strict=False)
-
-            # normal state_dict
-
-            # test that re-wrapping does not matter
-            m = torch.nn.utils.parametrize.remove_parametrizations(snm, 'weight')
-            snm = torch.nn.utils.parametrizations.spectral_norm(m)
-
-            snm.load_state_dict(state_dict)
-            with torch.no_grad():
-                snm.eval()
-                out0_eval = snm(inp)
-                snm.train()
-                out1_train = snm(inp)
-                out2_train = snm(inp)
-                snm.eval()
-                out3_eval = snm(inp)
-
-            # test that re-wrapping does not matter
-            m = torch.nn.utils.parametrize.remove_parametrizations(snm, 'weight')
-            snm = torch.nn.utils.parametrizations.spectral_norm(m)
-
-            # Test normal loading
-            snm.load_state_dict(state_dict)
-            with torch.no_grad():
-                snm.eval()
-                self.assertEqual(out0_eval, snm(inp))
-                snm.train()
-                self.assertEqual(out1_train, snm(inp))
-                self.assertEqual(out2_train, snm(inp))
-                snm.eval()
-                self.assertEqual(out3_eval, snm(inp))
-
     @skipIfNoLapack
     def test_spectral_norm_load_state_dict(self):
         inp = torch.randn(2, 3)
@@ -4875,16 +2134,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # check that u refers to the same dimension
         self.assertEqual(m.weight_u.shape, m.weight_orig[0, :, 0, 0].shape)
 
-    def test_new_spectral_norm_dim(self):
-        inp = torch.randn(2, 3, 10, 12)
-        m = nn.ConvTranspose2d(3, 4, (5, 6))
-        m = torch.nn.utils.parametrizations.spectral_norm(m)
-        snm = m.parametrizations.weight[0]
-        # this should not run into incompatible shapes
-        x = m(inp)
-        # check that u refers to the same dimension
-        self.assertEqual(snm._u.shape, m.parametrizations.weight.original[0, :, 0, 0].shape)
-
     def test_spectral_norm_forward(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
@@ -4901,163 +2150,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expect_out = m(input)
         self.assertEqual(expect_out, out_hat)
 
-    def test_new_spectral_norm_forward(self):
-        input = torch.randn(3, 5)
-        m = nn.Linear(5, 7)
-        m = torch.nn.utils.parametrizations.spectral_norm(m)
-        snm = m.parametrizations.weight[0]
-        # naive forward
-        _weight = m.parametrizations.weight.original
-        _bias, _v = m.bias, snm._v
-        _weight_mat = _weight.view(_weight.size(0), -1)
-        _u = torch.mv(_weight_mat, _v)
-        _u = F.normalize(_u, dim=0, eps=1e-12)
-        _v = torch.mv(_weight_mat.t(), _u)
-        _v = F.normalize(_v, dim=0, eps=1e-12)
-        _weight.data /= torch.dot(_u, torch.matmul(_weight_mat, _v))
-        out_hat = torch.nn.functional.linear(input, _weight, _bias)
-        expect_out = m(input)
-        self.assertEqual(expect_out, out_hat)
-
     def test_spectral_norm_pickle(self):
         m = torch.nn.utils.spectral_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
-
-    @skipIfNoLapack
-    def test_orthogonal_parametrization(self):
-        # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of use_trivialization)
-
-        def assert_is_orthogonal(X):
-            n, k = X.size(-2), X.size(-1)
-            if n < k:
-                X = X.mT
-                n, k = k, n
-            Id = torch.eye(k, dtype=X.dtype, device=X.device).expand(*(X.size()[:-2]), k, k)
-            eps = 10 * n * torch.finfo(X.dtype).eps
-            torch.testing.assert_close(X.mH @ X, Id, atol=eps, rtol=0.)
-
-
-        def assert_weight_allclose_Q(weight, W):
-            # Test that weight is equal to the Q part of the QR decomposition of W
-            # (or of its transpose if the matrix is wide)
-            wide_matrix = W.size(-2) < W.size(-1)
-            if wide_matrix:
-                W = W.mT
-            Q, R = torch.linalg.qr(W)
-            Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
-            if wide_matrix:
-                Q = Q.mT
-            torch.testing.assert_close(Q, weight, atol=1e-5, rtol=0.)
-
-
-        for shape, dtype, use_linear in product(((4, 4), (5, 3), (3, 5)),  # square/ tall / wide
-                                                (torch.float32, torch.complex64),
-                                                (True, False)):
-            # Conv2d does not support complex yet
-            if not use_linear:
-                continue
-
-            if use_linear:
-                input = torch.randn(3, shape[0], dtype=dtype)
-            else:
-                input = torch.randn(2, 2, shape[0] + 2, shape[1] + 1, dtype=dtype)
-
-            for parametrization, use_trivialization in product(("matrix_exp", "cayley", "householder"),
-                                                               (False, True)):
-                # right_inverse for Cayley and matrix_exp not implemented for use_trivialization=False
-                # See Note [right_inverse expm cayley]
-                can_initialize = use_trivialization or parametrization == "householder"
-
-                # We generate them every time to always start with fresh weights
-                if use_linear:
-                    m = nn.Linear(*shape, dtype=dtype)
-                else:
-                    m = nn.Conv2d(2, 3, shape, dtype=dtype)
-
-                # We do not support householder for complex inputs
-                # See Note [Householder complex]
-                w_init = m.weight.clone()
-                if parametrization == "householder" and m.weight.is_complex():
-                    msg = "householder parametrization does not support complex tensors"
-                    with self.assertRaisesRegex(ValueError, msg):
-                        torch.nn.utils.parametrizations.orthogonal(m,
-                                                                   "weight",
-                                                                   parametrization,
-                                                                   use_trivialization=use_trivialization)
-                    continue
-
-                wide_matrix = w_init.size(-2) < w_init.size(-1)
-                torch.nn.utils.parametrizations.orthogonal(m,
-                                                           "weight",
-                                                           parametrization,
-                                                           use_trivialization=use_trivialization)
-                # Forwards works as expected
-                self.assertEqual(w_init.shape, m.weight.shape)
-                assert_is_orthogonal(m.weight)
-                if can_initialize:
-                    assert_weight_allclose_Q(m.weight, w_init)
-
-                # Intializing with a given orthogonal matrix works
-                X = torch.randn_like(m.weight)
-                if wide_matrix:
-                    X = X.mT
-                w_new = torch.linalg.qr(X).Q
-                if wide_matrix:
-                    w_new = w_new.mT
-                if can_initialize:
-                    m.weight = w_new
-                    torch.testing.assert_close(w_new, m.weight, atol=1e-5, rtol=0.)
-                else:
-                    msg = "assign to the matrix exponential or the Cayley parametrization"
-                    with self.assertRaisesRegex(NotImplementedError, msg):
-                        m.weight = w_new
-
-                # Intializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
-                w_new = torch.randn_like(m.weight)
-                if can_initialize:
-                    m.weight = w_new
-                    assert_weight_allclose_Q(m.weight, w_new)
-                else:
-                    msg = "assign to the matrix exponential or the Cayley parametrization"
-                    with self.assertRaisesRegex(NotImplementedError, msg):
-                        m.weight = w_new
-
-                opt = torch.optim.SGD(m.parameters(), lr=0.1)
-                for _ in range(2):
-                    opt.zero_grad()
-                    m(input).norm().backward()
-                    grad = m.parametrizations.weight.original.grad
-                    self.assertIsNotNone(grad)
-                    # We do not update the upper triangular part of the matrix if tall tril if wide
-                    if grad.size(-2) >= grad.size(-1):
-                        zeros_grad = grad.triu(1)
-                    else:
-                        zeros_grad = grad.tril(-1)
-                    self.assertEqual(zeros_grad, torch.zeros_like(zeros_grad))
-                    # The gradient in the diagonal can only be imaginary because a skew-Hermitian
-                    # matrix has imaginary diagonal
-                    diag_grad = grad.diagonal(dim1=-2, dim2=-1)
-                    if grad.is_complex():
-                        diag_grad = diag_grad.real
-                    self.assertEqual(diag_grad, torch.zeros_like(diag_grad))
-                    opt.step()
-                    assert_is_orthogonal(m.weight)
-
-    @skipIfNoLapack
-    def test_orthogonal_errors(self):
-        m = nn.Linear(3, 4)
-        with self.assertRaisesRegex(ValueError, "has to be one of"):
-            torch.nn.utils.parametrizations.orthogonal(m, "weight", "foo")
-
-        with self.assertRaisesRegex(ValueError, "Expected a matrix"):
-            torch.nn.utils.parametrizations.orthogonal(m, "bias")
-
-        torch.nn.utils.parametrizations.orthogonal(m, "weight")
-        with self.assertRaisesRegex(ValueError, "matrices of shape"):
-            m.weight = torch.randn(5, 5)
-        torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
-
 
     def test_threshold_int(self):
         x = torch.tensor([-3, -2, -1, 0, 1, 2, 3])
@@ -5138,491 +2234,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         mask[0, 0] = False
         mask[0, 2] = False
         self.assertRaises(RuntimeError, lambda: torch._nested_tensor_from_mask(input, mask))
-
-    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
-    @parametrize_test("average_attn_weights", [True, False])
-    def test_multihead_attention(self, average_attn_weights):
-        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None,
-                                 average_attn_weights=average_attn_weights):
-            """ Numpy-based reference implementation of scaled dot attention
-            for testing"""
-
-            QKT = _batchmatmul(
-                Q,
-                np.transpose(K, axes=[0, 1, 3, 2])
-                / np.sqrt(dims[3], dtype=np.float32),  # divide by sqrt(d_head)
-            )
-            b1, b2, s1, s2 = QKT.shape
-            if unseen_mask is not None or key_padding_mask is not None:
-                # assert s1 == s2
-                for i in range(b1):
-                    for j in range(b2):
-                        for m in range(s1):
-                            for n in range(s2):
-                                if unseen_mask is not None and unseen_mask[m][n] == 0:
-                                    QKT[i, j, m, n] = -np.inf
-                                if key_padding_mask is not None and key_padding_mask[i][n]:
-                                    QKT[i, j, m, n] = -np.inf
-
-            reference = _softmax(QKT)
-            ref_attn_weight = reference
-            if average_attn_weights:
-                ref_attn_weight = np.sum(ref_attn_weight, axis=1) / b2
-            reference = _batchmatmul(reference, V)
-            return reference, ref_attn_weight
-
-        def _batchmatmul(a, b):  # batchmatmul over 4 dim matrix
-            """ Numpy-based batch matrix multiply over 4 dim matrix"""
-            assert a.shape[0] == b.shape[0]
-            assert a.shape[1] == b.shape[1]
-            retval = np.zeros(
-                (a.shape[0], a.shape[1], a.shape[2], b.shape[3]), dtype=np.float32
-            )
-            for i in range(a.shape[0]):
-                for j in range(a.shape[1]):
-                    retval[i, j, :, :] = np.matmul(a[i, j, :, :], b[i, j, :, :])
-            return retval
-
-        def _softmax(x):  # softmax over 4 dim matrix
-            """ Numpy-based reference softmax over 4 dim matrix"""
-            np.seterr(invalid='ignore')
-            output = np.zeros(x.shape, dtype=np.float64)
-            for i in range(x.shape[0]):
-                for j in range(x.shape[1]):
-                    for k in range(x.shape[2]):
-                        x_curr = x[i, j, k, :]
-                        e_x = np.exp(x_curr - np.amax(x_curr))
-                        output[i, j, k, :] = e_x / np.sum(e_x)
-            return output
-
-        def _split_heads_ref(X, dims, nheads, d_head):
-            X_split = np.reshape(X, dims[:2] + [nheads, d_head])
-            X_split_transposed = np.transpose(X_split, [0, 2, 1, 3])
-            reference = np.reshape(X_split_transposed, [dims[0], nheads, dims[1], d_head])
-            return reference
-
-        def _combine_heads_ref(X, dims, nheads, d_head):
-            X_transposed = np.transpose(X, [0, 2, 1, 3])
-            reference = np.reshape(X_transposed, dims[:2] + [nheads * d_head])
-            return reference
-
-        def _fc(X, X_weight, X_bias):
-            X_fc_b = X_bias.detach().numpy()
-            X_fc_w = X_weight.detach().numpy()
-            return np.matmul(X, np.transpose(X_fc_w)) + X_fc_b
-
-        def _create_src_lengths_mask(batch_size, src_lengths):
-            """
-            Generate boolean mask to prevent attention beyond the end of source
-            Inputs:
-              batch_size : int
-              src_lengths : [batch_size] of sentence lengths
-            Outputs:
-              [batch_size, max_src_len]
-            """
-            max_srclen = src_lengths.max()
-            src_indices = torch.arange(0, max_srclen).unsqueeze(0).to(src_lengths)
-            src_indices = src_indices.expand(batch_size, max_srclen)
-            src_lengths = src_lengths.unsqueeze(dim=1).expand(batch_size, max_srclen)
-            # returns [batch_size, max_seq_len]
-            return (src_indices < src_lengths).int().detach()
-
-        def _multihead_attn_test_helper(add_key_padding_mask=False, add_bias_kv=False, add_zero_attn=False,
-                                        saved_kv=False, same_embed_dim=False,
-                                        average_attn_weights=average_attn_weights):
-            for _ in range(100):
-                batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
-                d_head = random.randint(3, 10)
-                nheads = random.randint(2, 5) * 2
-                d_model = d_head * nheads
-                if same_embed_dim:
-                    kv_dim = d_model
-                else:
-                    kv_dim = random.randint(5, 20)
-                dims = [batch_sz, seq_len, kv_dim]
-
-                saved_k = None
-                saved_k_tensor = None
-                saved_v = None
-                saved_v_tensor = None
-                if saved_kv:
-                    saved_k = np.random.rand(batch_sz * nheads, seq_len, d_head)
-                    saved_k_tensor = torch.from_numpy(saved_k).to(torch.get_default_dtype())
-                    saved_v = np.random.rand(batch_sz * nheads, seq_len, d_head)
-                    saved_v_tensor = torch.from_numpy(saved_v).to(torch.get_default_dtype())
-
-                key_padding_mask = None
-                key_padding_mask_tensor = None
-                if add_key_padding_mask:
-                    seq_mask = np.random.randint(0, 2, (1, seq_len))
-                    key_padding_mask = (np.repeat(seq_mask, batch_sz, axis=0) == 1)
-                    key_padding_mask_tensor = torch.from_numpy(key_padding_mask)
-                decoder_state = np.random.rand(batch_sz, d_model)
-                K = np.random.rand(*dims)
-                V = K
-                Q = np.expand_dims(decoder_state, 1)
-                attn_mask = np.random.randint(0 , 2, size=(1, seq_len))
-                attn_mask_tensor = torch.from_numpy(attn_mask).float()
-                attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
-                attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
-                attn_mask_tensor = attn_mask_tensor.double()
-
-                decoder_state_tensor = torch.from_numpy(decoder_state).to(torch.get_default_dtype())
-                source_hid_tensor = torch.from_numpy(K).to(torch.get_default_dtype()).transpose(0, 1)
-
-                multihead_attn_module = MultiheadAttention(d_model, nheads,
-                                                           add_bias_kv=add_bias_kv,
-                                                           add_zero_attn=add_zero_attn,
-                                                           kdim=kv_dim, vdim=kv_dim)
-
-                if add_bias_kv:
-                    bias_k = multihead_attn_module.bias_k.detach().numpy()
-                    bias_v = multihead_attn_module.bias_v.detach().numpy()
-                else:
-                    bias_k = None
-                    bias_v = None
-
-                _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1)
-                _V = source_hid_tensor
-                _K = source_hid_tensor
-
-                if multihead_attn_module._qkv_same_embed_dim:
-                    result, result_weight = torch.nn.functional.multi_head_attention_forward(
-                        _Q, _K, _V,
-                        d_model, nheads,
-                        multihead_attn_module.in_proj_weight, multihead_attn_module.in_proj_bias,
-                        multihead_attn_module.bias_k, multihead_attn_module.bias_v,
-                        multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
-                        multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
-                        multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
-                        static_k=saved_k_tensor, static_v=saved_v_tensor,
-                        average_attn_weights=average_attn_weights)
-                else:
-                    result, result_weight = torch.nn.functional.multi_head_attention_forward(
-                        _Q, _K, _V,
-                        d_model, nheads,
-                        None, multihead_attn_module.in_proj_bias,
-                        multihead_attn_module.bias_k, multihead_attn_module.bias_v,
-                        multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
-                        multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
-                        multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
-                        True, multihead_attn_module.q_proj_weight,
-                        multihead_attn_module.k_proj_weight, multihead_attn_module.v_proj_weight,
-                        static_k=saved_k_tensor, static_v=saved_v_tensor,
-                        average_attn_weights=average_attn_weights)
-
-                result = result.squeeze(0).detach().numpy()
-
-                if multihead_attn_module._qkv_same_embed_dim:
-                    q_proj_weight = multihead_attn_module.in_proj_weight[:d_model]
-                    k_proj_weight = multihead_attn_module.in_proj_weight[d_model:(d_model * 2)]
-                    v_proj_weight = multihead_attn_module.in_proj_weight[(d_model * 2):]
-                else:
-                    q_proj_weight = multihead_attn_module.q_proj_weight
-                    k_proj_weight = multihead_attn_module.k_proj_weight
-                    v_proj_weight = multihead_attn_module.v_proj_weight
-
-                Q_fc = _fc(Q, q_proj_weight, multihead_attn_module.in_proj_bias[:d_model])
-                K_fc = _fc(K, k_proj_weight, multihead_attn_module.in_proj_bias[d_model:(d_model * 2)])
-                V_fc = _fc(V, v_proj_weight, multihead_attn_module.in_proj_bias[(d_model * 2):])
-
-                if add_bias_kv:
-                    K_fc = np.concatenate((K_fc, np.repeat(bias_k, K_fc.shape[0], axis=0)), axis=1)
-                    V_fc = np.concatenate((V_fc, np.repeat(bias_v, V_fc.shape[0], axis=0)), axis=1)
-                    if attn_mask is not None:
-                        attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
-                    if key_padding_mask is not None:
-                        key_padding_mask = np.concatenate((key_padding_mask, np.full((batch_sz, 1), False, dtype=bool)), axis=1)
-                    dims[1] += 1
-                Q_split = _split_heads_ref(
-                    Q_fc, [batch_sz, 1, d_model], nheads, d_head
-                )
-
-                if saved_k is not None:
-                    K_split = np.reshape(saved_k, [dims[0], nheads, dims[1], d_head])
-                else:
-                    K_split = _split_heads_ref(K_fc, dims, nheads, d_head)
-
-                if saved_v is not None:
-                    V_split = np.reshape(saved_v, [dims[0], nheads, dims[1], d_head])
-                else:
-                    V_split = _split_heads_ref(V_fc, dims, nheads, d_head)
-
-                if add_zero_attn:
-                    dims[1] += 1
-                    K_split = np.concatenate((K_split, np.zeros([K_split.shape[0], K_split.shape[1], 1, K_split.shape[3]])), axis=2)
-                    V_split = np.concatenate((V_split, np.zeros([V_split.shape[0], V_split.shape[1], 1, V_split.shape[3]])), axis=2)
-
-                    if attn_mask is not None:
-                        attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
-
-                    if key_padding_mask is not None:
-                        key_padding_mask = np.concatenate((key_padding_mask, np.full((batch_sz, 1), False, dtype=bool)), axis=1)
-                attn_heads, ref_attn_weight = _scaled_dot_attn_ref(
-                    Q=Q_split,
-                    K=K_split,
-                    V=V_split,
-                    dims=Q_split.shape,
-                    unseen_mask=attn_mask,
-                    key_padding_mask=key_padding_mask
-                )
-                combined_attn_heads = _combine_heads_ref(
-                    X=attn_heads, dims=[batch_sz, 1], nheads=nheads, d_head=d_head
-                )
-
-                reference = _fc(combined_attn_heads, multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias)
-                reference = np.squeeze(reference, axis=1)
-
-                # result = reference
-                self.assertEqual(tuple(result.shape), (batch_sz, d_model))
-                np.testing.assert_allclose(result, reference, atol=1e-5)
-
-                # result_weight = ref_attn_weight
-                result_weight = result_weight.detach().numpy()
-                self.assertEqual(tuple(result_weight.shape), tuple(ref_attn_weight.shape))
-                np.testing.assert_allclose(result_weight, ref_attn_weight, atol=1e-5)
-
-        def test_multihead_attn_add_bias_kv():
-            _multihead_attn_test_helper(add_bias_kv=True)
-
-        def test_multihead_attn_add_zero_attn():
-            _multihead_attn_test_helper(add_zero_attn=True)
-
-        def test_multihead_attn_no_masking():
-            _multihead_attn_test_helper()
-
-        def test_multihead_attn_key_padding_mask():
-            _multihead_attn_test_helper(add_key_padding_mask=True)
-
-        def test_multihead_attn_saved_kv():
-            _multihead_attn_test_helper(saved_kv=True)
-
-        def test_multihead_attn_add_bias_kv_zero_attn():
-            _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
-                                        add_zero_attn=True)
-
-        def test_multihead_attn_all_arguments1():
-            _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True, saved_kv=True)
-
-        def test_multihead_attn_all_arguments2():
-            _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
-                                        add_zero_attn=True, saved_kv=True)
-
-        def test_multihead_attn_all_arguments3():
-            _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True,
-                                        saved_kv=True, same_embed_dim=True)
-
-        test_multihead_attn_add_zero_attn()  # Test MultiheadAttention with add_zero_attn
-        test_multihead_attn_add_bias_kv()  # Test MultiheadAttention with add_bias_kv
-        test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
-        test_multihead_attn_key_padding_mask()  # Test MultiheadAttention with src lengths
-        test_multihead_attn_saved_kv()  # Test MultiheadAttention with static kv.
-        test_multihead_attn_add_bias_kv_zero_attn()  # Test MultiheadAttention with bias_kv and zero_attn.
-        test_multihead_attn_all_arguments1()  # Test MultiheadAttention with all the argument.
-        with self.assertRaisesRegex(AssertionError, "bias cannot be added to static key."):
-            test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
-        test_multihead_attn_all_arguments3()  # Test MultiheadAttention with all the argument.
-
-    def test_multihead_attn_3d_attn_mask(self):
-        embed_dim = 8
-        num_heads = 4
-        batch_size = 8
-        src_len = 3
-        tgt_len = 2
-
-        query = torch.rand(batch_size, tgt_len, embed_dim)  # [N, T, D]
-        key = torch.rand(batch_size, src_len, embed_dim)  # [N, S, D]
-        value = key  # [N, S, D]
-        attn_mask = torch.randint(0, 2, (batch_size, tgt_len, src_len)).float()  # [N, T, S]
-        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
-
-        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads)
-
-        # Generate 3D results
-        attn_mask_3d = torch.repeat_interleave(attn_mask, num_heads, dim=0)  # [N * H, T, S]
-        output_3d = mta_model(query.transpose(0, 1), key.transpose(0, 1), value.transpose(0, 1), attn_mask=attn_mask_3d)[0]
-        output_3d = output_3d.transpose(0, 1)  # [N, T, D]
-
-        for i in range(0, batch_size):
-            output_2d = mta_model(query[i].unsqueeze(0).transpose(0, 1),
-                                  key[i].unsqueeze(0).transpose(0, 1),
-                                  value[i].unsqueeze(0).transpose(0, 1),
-                                  attn_mask=attn_mask[i])[0]
-
-            # output_2d in shape of [T, 1, D]
-            self.assertEqual(output_3d[i].unsqueeze(0).transpose(0, 1), output_2d)
-
-    def test_multihead_attn_no_bias(self):
-        embed_dim = 8
-        num_heads = 4
-        mha = torch.nn.MultiheadAttention(embed_dim, num_heads, bias=False)
-
-        # Verify that bias=False applies to both in and out projection layers.
-        self.assertIsNone(mha.in_proj_bias)
-        self.assertIsNone(mha.out_proj.bias)
-
-    def _test_multihead_attn_invalid_shape_impl(self, mha):
-        # Batched (3D) query cases
-        query = torch.randn(4, 4, 4)
-        key = torch.randn(4, 4, 4)
-        value = torch.randn(4, 4, 4)
-
-        msg = "expected `key` and `value` to be 3-D but found 2-D and 3-D tensors respectively"
-        # 3D query, 2D key and 3D value
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, torch.randn(4, 4), value)
-
-        msg = "expected `key` and `value` to be 3-D but found 3-D and 2-D tensors respectively"
-        # 3D query, 3D key and 2D value
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, torch.randn(4, 4))
-
-        msg = "expected `key_padding_mask` to be `None` or 2-D but found 1-D tensor instead"
-        # 3D query, 3D key, 3D value and 1D key_padding_mask
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, key_padding_mask=torch.tensor([False, False, True, True], dtype=torch.bool))
-
-        msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
-        # 3D query, 3D key, 3D value and 1D attn_mask
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.tensor([False, False, True, True], dtype=torch.bool))
-
-        # Unbatched (2D) query cases
-        query = torch.randn(4, 4)
-        key = torch.randn(4, 4)
-        value = torch.randn(4, 4)
-
-        msg = "expected `key` and `value` to be 2-D but found 3-D and 2-D tensors respectively"
-        # 2D query, 3D key and 2D value
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, torch.randn(4, 4, 4), value)
-
-        msg = "expected `key` and `value` to be 2-D but found 2-D and 3-D tensors respectively"
-        # 2D query, 3D key and 2D value
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, torch.randn(4, 4, 4))
-
-        msg = "expected `key_padding_mask` to be `None` or 1-D but found 2-D tensor instead"
-        # 2D query, 2D key, 2D value and 1D key_padding_mask
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, key_padding_mask=torch.tensor([[False, False, True, True] * 2], dtype=torch.bool))
-
-        msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
-        # 2D query, 2D key, 2D value and 1D attn_mask
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.tensor([False, False, True, True], dtype=torch.bool))
-
-        msg = r"Expected `attn_mask` shape to be \(4, 4, 4\)"
-        # 2D query, 2D key, 2D value and 3D incorrect attn_mask
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.randn(5, 4, 4).bernoulli_().to(torch.bool))
-
-    def test_multihead_attn_invalid_shape(self):
-        mha = torch.nn.MultiheadAttention(4, 4)
-        self._test_multihead_attn_invalid_shape_impl(mha)
-        # Give the test a chance to hit the fast path. (Right now, it
-        # won't, but gating may be less restricted in the future.)
-        with torch.no_grad():
-            self._test_multihead_attn_invalid_shape_impl(mha.eval())
-
-    @torch.no_grad()
-    def test_multihead_attn_fast_path_invalid_shape(self):
-        mha = torch.nn.MultiheadAttention(4, 4, batch_first=True).eval()
-
-        # Batched (3D) query cases
-        query = torch.randn(4, 4, 4)
-        key = torch.randn(4, 4, 4)
-        value = torch.randn(4, 4, 4)
-
-        # Currently, this case will just go to the slow path and get
-        # the usual message because it fails the requirement to be
-        # batched.
-        msg = "expected `key` and `value` to be 3-D but found 2-D and 3-D tensors respectively"
-        # 3D query, 2D key and 3D value
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, torch.randn(3, 3), value, need_weights=False)
-
-        # Currently, this case will just go to the slow path and get
-        # the usual message because it fails the requirement to be
-        # batched.
-        msg = "expected `key` and `value` to be 3-D but found 3-D and 2-D tensors respectively"
-        # 3D query, 3D key and 2D value
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, torch.randn(3, 3), need_weights=False)
-
-        msg = "expected `key_padding_mask` to be `None` or 2-D but found 1-D tensor instead"
-        # 3D query, 3D key, 3D value and 1D key_padding_mask
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, key_padding_mask=torch.tensor([False, True, True], dtype=torch.bool), need_weights=False)
-
-        msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
-        # 3D query, 3D key, 3D value and 1D attn_mask
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.tensor([False, True, True], dtype=torch.bool), need_weights=False)
-
-        # Unbatched (2D) query cases
-        # NOTE: error messages are the same as regular path because the fast path doesn't support 2D.
-        query = torch.randn(4, 4)
-        key = torch.randn(4, 4)
-        value = torch.randn(4, 4)
-
-        msg = "expected `key` and `value` to be 2-D but found 3-D and 2-D tensors respectively"
-        # 2D query, 3D key and 2D value
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, torch.randn(4, 4, 4), value)
-
-        msg = "expected `key` and `value` to be 2-D but found 2-D and 3-D tensors respectively"
-        # 2D query, 3D key and 2D value
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, torch.randn(4, 4, 4))
-
-        msg = "expected `key_padding_mask` to be `None` or 1-D but found 2-D tensor instead"
-        # 2D query, 2D key, 2D value and 1D key_padding_mask
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, key_padding_mask=torch.tensor([[False, False, True, True] * 2], dtype=torch.bool))
-
-        msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
-        # 2D query, 2D key, 2D value and 1D attn_mask
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.tensor([False, False, True, True], dtype=torch.bool))
-
-        msg = r"Expected `attn_mask` shape to be \(4, 4, 4\)"
-        # 2D query, 2D key, 2D value and 3D incorrect attn_mask
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(query, key, value, attn_mask=torch.randn(5, 4, 4).bernoulli_().to(torch.bool))
-
-    def test_multihead_attn_nested_tensor_outside_fast_path(self):
-        mha = torch.nn.MultiheadAttention(4, 4, batch_first=True).eval()
-        nt = torch.nested.nested_tensor([torch.randn(4, 4)])
-        # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
-        # or more of these. Take advantage of that to test the torch_function bailout.
-        has_torch_func = torch.overrides.has_torch_function(
-            (nt, mha.in_proj_weight, mha.in_proj_bias, mha.out_proj.weight, mha.out_proj.bias))
-        if has_torch_func:
-            msg = "MultiheadAttention does not support NestedTensor.*argument has_torch_function"
-        else:
-            msg = ("MultiheadAttention does not support NestedTensor outside of its fast path.*grad is " +
-                   "enabled and.*or biases requires_grad")
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(nt, nt, nt)
-
-        if has_torch_func:
-            # Just give up, they're all going to fail with the same message.
-            return
-
-        with torch.no_grad():
-            mha(nt, nt, nt)
-        with torch.inference_mode():
-            mha(nt, nt, nt)
-        nt = torch.nested.nested_tensor([torch.randn(4, 4, requires_grad=False)])
-        nt.requires_grad = False
-        with self.assertRaisesRegex(AssertionError, msg):
-            mha(nt, nt, nt)
-        mha.in_proj_weight.requires_grad = False
-        mha.in_proj_bias.requires_grad = False
-        mha.out_proj.weight.requires_grad = False
-        mha.out_proj.bias.requires_grad = False
-        mha(nt, nt, nt)
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
@@ -5839,6 +2450,60 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         model[0][0]._register_load_state_dict_pre_hook(hook_fn, with_module=True)
         model.load_state_dict(model.state_dict(), strict=True)
+
+    @unittest.skipIf(IS_WINDOWS, "Tempfile permission issue on windows")
+    def test_register_state_dict_pre_hook_backward_compat(self):
+        called = False
+
+        def my_state_dict_pre_hook(*args, **kwargs):
+            nonlocal called
+            called = True
+
+        m = nn.Linear(1, 1)
+        self.assertTrue(hasattr(m, '_state_dict_pre_hooks'))
+        delattr(m, '_state_dict_pre_hooks')
+        # Save and load, ensure we can still call state_dict
+        # without running into issues.
+        with NamedTemporaryFile() as f:
+            # Note that torch.save / torch.load is not recommended
+            # to save / load modules.
+            torch.save(m, f.name)
+            m = torch.load(f.name)
+
+        # Ensure we can run state_dict without issues
+        _ = m.state_dict()
+        self.assertFalse(called)
+        m.register_state_dict_pre_hook(my_state_dict_pre_hook)
+        _ = m.state_dict()
+        self.assertTrue(called)
+
+    def test_register_state_dict_pre_hook(self):
+        _state_dict_prefix = "foo."
+        state_dict_pre_hook_count = 0
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3))
+
+            def forward(self, x):
+                return self.a(x)
+
+        def my_state_dict_pre_hook(module, prefix, keep_vars):
+            nonlocal keep_var_setting
+            self.assertEqual(keep_vars, keep_var_setting)
+            nonlocal state_dict_pre_hook_count
+            state_dict_pre_hook_count += 1
+            self.assertTrue(prefix.startswith(_state_dict_prefix))
+
+        mod = MyModule()
+        mod.register_state_dict_pre_hook(my_state_dict_pre_hook)
+        # Test to ensure submodules run the hook as well.
+        mod.a.register_state_dict_pre_hook(my_state_dict_pre_hook)
+        for keep_var_setting in [True, False]:
+            _ = mod.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
+            self.assertEqual(2, state_dict_pre_hook_count)
+            state_dict_pre_hook_count = 0
 
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
@@ -6158,19 +2823,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
-
-    def test_poisson_nll_loss_reduction_modes(self):
-        input = torch.tensor([0.5, 1.5, 2.5])
-        target = torch.tensor([1., 2., 3.])
-        component_wise_loss = torch.exp(input) - target * input
-        self.assertEqual(component_wise_loss,
-                         F.poisson_nll_loss(input, target, reduction='none'))
-        self.assertEqual(torch.sum(component_wise_loss),
-                         F.poisson_nll_loss(input, target, reduction='sum'))
-        self.assertEqual(torch.mean(component_wise_loss),
-                         F.poisson_nll_loss(input, target, reduction='mean'))
-        with self.assertRaisesRegex(ValueError, 'is not valid'):
-            F.poisson_nll_loss(input, target, reduction='total')
 
     def test_gaussian_nll_loss_broadcasting(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
@@ -8351,11 +5003,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             helper(self, shape, torch.bfloat16, False)
             helper(self, shape, torch.bfloat16, True)
 
-    def test_batchnorm_non_contig_cpu(self):
+    @parametrize_test('bn_module', [torch.nn.BatchNorm2d, torch.nn.SyncBatchNorm])
+    def test_batchnorm_non_contig_cpu(self, bn_module):
         input = torch.arange(6, dtype=torch.float).reshape(1, 3, 2, 1).cpu()
         input = input.permute(0, 2, 1, 3)
 
-        bn = torch.nn.BatchNorm2d(2).cpu().float().eval()
+        bn = bn_module(2).cpu().float().eval()
         bn.weight.data.uniform_()
         bn.bias.data.uniform_()
 
@@ -8373,7 +5026,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_bf = torch.arange(24, dtype=torch.bfloat16).reshape(1, 3, 2, 4)
         input_bf = input_bf.permute(0, 2, 1, 3)
         input_f = input_bf.float()
-        bn_mix = torch.nn.BatchNorm2d(2).float().eval()
+        bn_mix = bn_module(2).float().eval()
         ref_bn_f = deepcopy(bn_mix)
         out_bf = bn_mix(input_bf)
         ref_out_bf = ref_bn_f(input_f)
@@ -9777,12 +6430,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
             outf = m(inputf)
             out = m(input)
-            self.assertEqual(out.dtype, dtype)
-            self.assertEqualIgnoreType(out, outf, atol=0.1, rtol=0.0)
+            self.assertEqual(out, outf.to(dtype), atol=0.1, rtol=0.0)
 
             out.sum().backward()
             outf.sum().backward()
-            self.assertEqual(input.grad.dtype, dtype)
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
 
         for device in ['cpu']:
@@ -9802,7 +6453,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         input = torch.ones((1, 1, in_s), device='cuda', requires_grad=True)
         # note we allocated grad_output to be larger so out of bound access
-        # woudl be visible in grad_input
+        # would be visible in grad_input
         grad = torch.ones((1, 1, out_s * 2), device='cuda', requires_grad=True)
         grad = grad[:, :, :out_s]
 
@@ -9817,6 +6468,67 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         self.assertEqual(out_ref, out)
         self.assertEqual(input_ref.grad, input.grad)
+
+    def test_interpolate_buffer_overflow(self):
+        # Test buffer overflow issue due to inaccurate floating point
+        # representation for integer values. See issue below for details.
+        # https://github.com/pytorch/pytorch/issues/88939
+
+        def helper(size, dtype, mode, device, is_channels_last):
+            input = torch.ones(size, dtype=dtype, device=device)
+            if is_channels_last:
+                if len(size) == 3:
+                    input = input.transpose(1, 2).contiguous().transpose(1, 2)
+                elif len(size) == 4:
+                    input = input.to(memory_format=torch.channels_last)
+                else:
+                    input = input.to(memory_format=torch.channels_last_3d)
+            output1 = F.interpolate(input, 2, mode=mode, align_corners=True)
+            # reset the corner value and expect the output is changed as well
+            # the output won't be changed on buffer overflow
+            input[(-1,) * len(size)] = 0.5
+            output2 = F.interpolate(input, 2, mode=mode, align_corners=True)
+            self.assertNotEqual(output1, output2)
+
+        size_dtype_list = []
+        # We set the size larger than the floating point exactly representable range
+        # float: exact representable range (-2**24,2**24)
+        size_dtype_list.append(([1, 10, 2**24 + 4], torch.float))
+        size_dtype_list.append(([1, 10, 2, 2**24 + 4], torch.float))
+        size_dtype_list.append(([1, 10, 2, 2, 2**24 + 4], torch.float))
+        # bfloat16: exact representable range (-2**8, 2**8)
+        size_dtype_list.append(([1, 10, 2**8 + 4], torch.bfloat16))
+        size_dtype_list.append(([1, 10, 2, 2**8 + 4], torch.bfloat16))
+        size_dtype_list.append(([1, 10, 2, 2, 2**8 + 4], torch.bfloat16))
+        # half: exact representable range (-2**11, 2**11)
+        size_dtype_list.append(([1, 10, 2**11 + 4], torch.half))
+        size_dtype_list.append(([1, 10, 2, 2**11 + 4], torch.half))
+        size_dtype_list.append(([1, 10, 2, 2, 2**11 + 4], torch.half))
+
+        # TODO: turn on cuda test after buffer overflow issue is fixed in cuda kernel
+        # devices = ['cpu'] + (['cuda'] if torch.cuda.is_available() else [])
+        devices = ['cpu']
+
+        for mode in ('linear', 'bilinear', 'bicubic', 'trilinear'):
+            for size_dtype in size_dtype_list:
+                size, dtype = size_dtype
+                if (
+                    mode == 'linear' and len(size) != 3
+                    or (mode == 'bilinear' and len(size) != 4)
+                    or (mode == 'bicubic' and len(size) != 4)
+                    or (mode == 'trilinear' and len(size) != 5)
+                ):
+                    continue
+                for device in devices:
+                    if (
+                        device == 'cpu' and dtype == torch.half
+                        or (device == 'cuda' and dtype == torch.bfloat16)
+                    ):
+                        # no half precision support on cpu or bfloat16 on cuda yet
+                        continue
+                    for is_channels_last in (True, False):
+                        helper(size, dtype, mode, device, is_channels_last)
+
 
     def test_interpolate(self):
         def _test_interpolate_helper(in_t, scale_factor, layer):
@@ -10053,12 +6765,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input = inputf.to(dtype).detach().requires_grad_(True)
             outf = F.log_softmax(inputf, dim=dim)
             out = F.log_softmax(input, dim=dim)
-            self.assertEqual(out.dtype, dtype)
             self.assertEqual(out, outf.to(dtype=dtype), atol=0.1, rtol=0)
 
             out.sum().backward()
             outf.sum().backward()
-            self.assertEqual(input.grad.dtype, dtype)
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
 
     def test_softmax_cpu(self, dtype=torch.bfloat16):
@@ -10067,12 +6777,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input = inputf.to(dtype).detach().requires_grad_(True)
             outf = F.softmax(inputf, dim=dim)
             out = F.softmax(input, dim=dim)
-            self.assertEqual(out.dtype, dtype)
-            self.assertEqualIgnoreType(out, outf, atol=1e-3, rtol=0)
+            self.assertEqual(out, outf.to(dtype), atol=1e-3, rtol=0)
 
             out.sum().backward()
             outf.sum().backward()
-            self.assertEqual(input.grad.dtype, dtype)
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
 
     def test_adaptive_log_softmax(self):
@@ -10183,12 +6891,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         outf = loss_cpu(inputf, target)
         out = loss_cpu(input, target)
-        self.assertEqual(out.dtype, dtype)
         self.assertEqual(out, outf.to(dtype=dtype), atol=1e-1, rtol=0)
 
         outf.backward()
         out.backward()
-        self.assertEqual(input.grad.dtype, dtype)
         self.assertEqual(input.grad, inputf.grad.to(dtype=dtype), atol=1e-1, rtol=0)
 
     def test_cross_entropy_loss_precision(self):
@@ -10283,16 +6989,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         #   fwd: torch.batch_norm_stats, torch.batch_norm_gather_stats_with_counts, torch.batch_norm_elemt
         #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
 
-        def _batch_norm_stats(data):
+        def _batch_norm_stats(data, memory_format, mean_axes):
             mean1, _ = torch.batch_norm_stats(data, 1e-5)
-            mean2, _ = torch.batch_norm_stats(data.to(memory_format=torch.channels_last), 1e-5)
-            mean_ref = torch.mean(data, (0, 2, 3), keepdim=False)
+            mean2, _ = torch.batch_norm_stats(data.to(memory_format=memory_format), 1e-5)
+            mean_ref = torch.mean(data, mean_axes, keepdim=False)
 
             self.assertEqual(mean_ref, mean1)
             self.assertEqual(mean_ref, mean2)
 
-        data = torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda')
-        _batch_norm_stats(data)
+        _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last, (0, 2, 3))
+        _batch_norm_stats(torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last_3d, (0, 2, 3, 4))
 
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
@@ -10381,411 +7087,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=(3, 3))
         y = net(x)
 
-
-class TestNNInit(TestCase):
-    def setUp(self):
-        super(TestNNInit, self).setUp()
-        random.seed(123)
-
-    def _is_normal(self, tensor, mean, std):
-        samples = tensor.view(-1).tolist()
-        p_value = stats.kstest(samples, 'norm', args=(mean, std))[1]
-        return p_value > 0.0001
-
-    def _is_trunc_normal(self, tensor, mean, std, a, b):
-        # scipy's trunc norm is suited for data drawn from N(0, 1),
-        # so we need to transform our data to test it using scipy.
-        z_samples = (tensor.view(-1) - mean) / std
-        z_samples = z_samples.tolist()
-        a0 = (a - mean) / std
-        b0 = (b - mean) / std
-        p_value = stats.kstest(z_samples, 'truncnorm', args=(a0, b0))[1]
-        return p_value > 0.0001
-
-    def _is_uniform(self, tensor, a, b):
-        samples = tensor.view(-1).tolist()
-        p_value = stats.kstest(samples, 'uniform', args=(a, (b - a)))[1]
-        return p_value > 0.0001
-
-    def _create_random_nd_tensor(self, dims, size_min, size_max):
-        size = [random.randint(size_min, size_max) for _ in range(dims)]
-        tensor = torch.zeros(size)
-        return tensor
-
-    def _random_float(self, a, b):
-        return (b - a) * random.random() + a
-
-    def test_calculate_gain_linear(self):
-        for fn in ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose2d', 'conv_transpose2d', 'conv_transpose3d']:
-            gain = init.calculate_gain(fn)
-            self.assertEqual(gain, 1)
-
-    def test_calculate_gain_nonlinear(self):
-        for fn in ['sigmoid', 'tanh', 'relu', 'leaky_relu']:
-            gain = init.calculate_gain(fn)
-            if fn == 'sigmoid':
-                self.assertEqual(gain, 1)
-            elif fn == 'tanh':  # 5 / 3
-                self.assertEqual(gain, 1.6666666666666667)
-            elif fn == 'relu':  # sqrt(2)
-                self.assertEqual(gain, 1.4142135623730951)
-            elif fn == 'leaky_relu':  # sqrt(2 / 1 + slope^2))
-                self.assertEqual(gain, 1.4141428569978354)
-            elif fn == 'selu':
-                self.assertEqual(gain, 0.75)
-
-    def test_calculate_gain_leaky_relu(self):
-        for param in [None, 0, 0.01, 10]:
-            gain = init.calculate_gain('leaky_relu', param)
-            if param is None:  # Default slope is 0.01
-                self.assertEqual(gain, 1.4141428569978354)
-            elif param == 0:  # No slope = same gain as normal ReLU
-                self.assertEqual(gain, 1.4142135623730951)
-            elif param == 0.01:
-                self.assertEqual(gain, 1.4141428569978354)
-            elif param == 10:
-                self.assertEqual(gain, 0.14071950894605836)
-
-    def test_calculate_gain_leaky_relu_only_accepts_numbers(self):
-        for param in [True, [1], {'a': 'b'}]:
-            with self.assertRaises(ValueError):
-                init.calculate_gain('leaky_relu', param)
-
-    def test_calculate_gain_only_accepts_valid_nonlinearities(self):
-        for n in [2, 5, 25]:
-            # Generate random strings of lengths that definitely aren't supported
-            random_string = ''.join([random.choice(string.ascii_lowercase) for i in range(n)])
-            with self.assertRaises(ValueError):
-                init.calculate_gain(random_string)
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    def test_uniform(self):
-        for dims in [1, 2, 4]:
-            input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
-            a = self._random_float(-3, 3)
-            b = a + self._random_float(1, 5)
-            init.uniform_(input_tensor, a=a, b=b)
-            assert self._is_uniform(input_tensor, a, b)
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    def test_normal(self):
-        for dims in [1, 2, 4]:
-            input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
-            mean = self._random_float(-3, 3)
-            std = self._random_float(1, 5)
-            init.normal_(input_tensor, mean=mean, std=std)
-
-            assert self._is_normal(input_tensor, mean, std)
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    def test_trunc_normal(self):
-        for dims in [1, 2, 4]:
-            input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
-            mean = self._random_float(-3, 3)
-            std = self._random_float(.01, 1)
-            a = self._random_float(mean - 2 * std, mean)
-            b = self._random_float(mean, mean + 2 * std)
-            init.trunc_normal_(input_tensor, mean=mean, std=std, a=a, b=b)
-
-            assert self._is_trunc_normal(input_tensor, mean, std, a, b)
-
-    def test_constant(self):
-        for dims in [1, 2, 4]:
-            input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5)
-            val = self._random_float(1, 10)
-            init.constant_(input_tensor, val)
-
-            self.assertEqual(input_tensor, input_tensor.clone().fill_(val))
-
-    def test_ones_and_zeros(self):
-        for init_fn_, val in zip([init.ones_, init.zeros_], [1, 0]):
-            for dims in [1, 2, 4]:
-                input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5)
-                init_fn_(input_tensor)
-
-                self.assertEqual(input_tensor, input_tensor.clone().fill_(val))
-
-    def test_eye(self):
-        input_tensor = self._create_random_nd_tensor(2, size_min=1, size_max=5)
-        init.eye_(input_tensor)
-
-        # Check every single element
-        for i in range(input_tensor.size(0)):
-            for j in range(input_tensor.size(1)):
-                if i == j:
-                    assert input_tensor[i][j] == 1
-                else:
-                    assert input_tensor[i][j] == 0
-
-    def test_eye_only_works_on_2d_inputs(self):
-        for dims in [1, 3]:
-            with self.assertRaises(ValueError):
-                tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3)
-                init.eye_(tensor)
-
-    def test_dirac_properties(self):
-        for dims in [3, 4, 5]:
-            for groups in [1, 2, 3]:
-                # prepare random tensor with random sizes, but fits groups
-                a, c, d, e = (random.randint(1, 5) for _ in range(4))
-                b = random.randint(1, 5 * groups)  # same range as a*groups but all range allowed
-                # make sure first dim divides by groups
-                input_tensor = torch.randn((a * groups, b, c, d, e)[:dims])
-
-                init.dirac_(input_tensor, groups)
-
-                c_out, c_in = input_tensor.size(0) // groups, input_tensor.size(1)
-                min_d = min(c_out, c_in)
-                # Check number of nonzeros is equivalent to smallest dim (for each group)
-                assert torch.nonzero(input_tensor).size(0) == min_d * groups
-                # Check sum of values (can have precision issues, hence assertEqual) is also equivalent
-                self.assertEqual(input_tensor.sum(), min_d * groups)
-
-
-    def test_dirac_identity(self):
-        for groups in [1, 3]:
-            batch, in_c, out_c, size, kernel_size = 8, 3, 9, 5, 3  # in_c, out_c must divide by groups
-            eff_out_c = out_c // groups
-
-            # Test 1D
-            input_var = torch.randn(batch, in_c, size)
-            filter_var = torch.zeros(eff_out_c, in_c, kernel_size)
-            filter_var = torch.cat([filter_var] * groups)
-            init.dirac_(filter_var, groups)
-            output_var = F.conv1d(input_var, filter_var)
-            input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
-            for g in range(groups):
-                # Assert in_c outputs are preserved (per each group)
-                self.assertEqual(input_tensor[:, :, 1:-1],
-                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :])
-                # Assert extra outputs are 0
-                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :]).numel() == 0
-
-            # Test 2D
-            input_var = torch.randn(batch, in_c, size, size)
-            filter_var = torch.zeros(eff_out_c, in_c, kernel_size, kernel_size)
-            filter_var = torch.cat([filter_var] * groups)
-            init.dirac_(filter_var, groups)
-            output_var = F.conv2d(input_var, filter_var)
-            input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
-            for g in range(groups):
-                # Assert in_c outputs are preserved (per each group)
-                self.assertEqual(input_tensor[:, :, 1:-1, 1:-1],
-                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :, :])
-                # Assert extra outputs are 0
-                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :, :]).numel() == 0
-
-            # Test 3D
-            input_var = torch.randn(batch, in_c, size, size, size)
-            filter_var = torch.zeros(eff_out_c, in_c, kernel_size, kernel_size, kernel_size)
-            filter_var = torch.cat([filter_var] * groups)
-            init.dirac_(filter_var, groups)
-            output_var = F.conv3d(input_var, filter_var)
-            input_tensor, output_tensor = input_var.data, output_var.data
-            for g in range(groups):
-                # Assert in_c outputs are preserved (per each group)
-                self.assertEqual(input_tensor[:, :, 1:-1, 1:-1, 1:-1],
-                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :, :, :])
-                # Assert extra outputs are 0
-                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :, :, :]).numel() == 0
-
-    def test_dirac_only_works_on_3_4_5d_inputs(self):
-        for dims in [1, 2, 6]:
-            with self.assertRaises(ValueError):
-                tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3)
-                init.dirac_(tensor)
-
-    def test_xavier_uniform_errors_on_inputs_smaller_than_2d(self):
-        for dims in [0, 1]:
-            tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1)
-            with self.assertRaises(ValueError):
-                init.xavier_uniform_(tensor)
-
-    def test_xavier_normal_errors_on_inputs_smaller_than_2d(self):
-        for dims in [0, 1]:
-            tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1)
-            with self.assertRaises(ValueError):
-                init.xavier_normal_(tensor)
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    def test_xavier_uniform(self):
-        for use_gain in [True, False]:
-            for dims in [2, 4]:
-                input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
-                gain = 1
-
-                if use_gain:
-                    gain = self._random_float(0.1, 2)
-                    init.xavier_uniform_(input_tensor, gain=gain)
-                else:
-                    init.xavier_uniform_(input_tensor)
-
-                fan_in = input_tensor.size(1)
-                fan_out = input_tensor.size(0)
-                if input_tensor.dim() > 2:
-                    fan_in *= input_tensor[0, 0].numel()
-                    fan_out *= input_tensor[0, 0].numel()
-
-                expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-                bounds = expected_std * math.sqrt(3)
-                assert self._is_uniform(input_tensor, -bounds, bounds)
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    def test_xavier_normal(self):
-        for use_gain in [True, False]:
-            for dims in [2, 4]:
-                input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
-                gain = 1
-
-                if use_gain:
-                    gain = self._random_float(0.1, 2)
-                    init.xavier_normal_(input_tensor, gain=gain)
-                else:
-                    init.xavier_normal_(input_tensor)
-
-                fan_in = input_tensor.size(1)
-                fan_out = input_tensor.size(0)
-                if input_tensor.dim() > 2:
-                    fan_in *= input_tensor[0, 0].numel()
-                    fan_out *= input_tensor[0, 0].numel()
-
-                expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-                assert self._is_normal(input_tensor, 0, expected_std)
-
-    def test_kaiming_uniform_errors_on_inputs_smaller_than_2d(self):
-        for dims in [0, 1]:
-            with self.assertRaises(ValueError):
-                tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1)
-                init.kaiming_uniform_(tensor)
-
-    def test_kaiming_normal_errors_on_inputs_smaller_than_2d(self):
-        for dims in [0, 1]:
-            with self.assertRaises(ValueError):
-                tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1)
-                init.kaiming_normal_(tensor)
-
-    def test_kaiming_uniform_warning_on_0element_tensor(self):
-        tensor = torch.empty(0, 1)
-        with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op"):
-            _ = init.kaiming_uniform_(tensor)
-
-    def test_kaiming_normal_warning_on_0element_tensor(self):
-        tensor = torch.empty(0, 1)
-        with self.assertWarnsRegex(UserWarning, "Initializing zero-element tensors is a no-op"):
-            _ = init.kaiming_normal_(tensor)
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    def test_kaiming_uniform(self):
-        for use_a in [True, False]:
-            for dims in [2, 4]:
-                for mode in ['fan_in', 'fan_out']:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
-                    if use_a:
-                        a = self._random_float(0.1, 2)
-                        init.kaiming_uniform_(input_tensor, a=a, mode=mode)
-                    else:
-                        a = 0
-                        init.kaiming_uniform_(input_tensor, mode=mode)
-
-                    fan_in = input_tensor.size(1)
-                    fan_out = input_tensor.size(0)
-                    if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0, 0].numel()
-                        fan_out *= input_tensor[0, 0].numel()
-
-                    if mode == 'fan_in':
-                        n = fan_in
-                    else:
-                        n = fan_out
-
-                    expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
-                    bounds = expected_std * math.sqrt(3.0)
-                    assert self._is_uniform(input_tensor, -bounds, bounds)
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    def test_kaiming_normal(self):
-        for use_a in [True, False]:
-            for dims in [2, 4]:
-                for mode in ['fan_in', 'fan_out']:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
-                    if use_a:
-                        a = self._random_float(0.1, 2)
-                        init.kaiming_normal_(input_tensor, a=a, mode=mode)
-                    else:
-                        a = 0
-                        init.kaiming_normal_(input_tensor, mode=mode)
-
-                    fan_in = input_tensor.size(1)
-                    fan_out = input_tensor.size(0)
-                    if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0, 0].numel()
-                        fan_out *= input_tensor[0, 0].numel()
-
-                    if mode == 'fan_in':
-                        n = fan_in
-                    else:
-                        n = fan_out
-
-                    expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
-                    assert self._is_normal(input_tensor, 0, expected_std)
-
-    def test_sparse_only_works_on_2d_inputs(self):
-        for dims in [1, 3]:
-            with self.assertRaises(ValueError):
-                sparsity = self._random_float(0.1, 0.9)
-                tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3)
-                init.sparse_(tensor, sparsity)
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    def test_sparse_default_std(self):
-        for use_random_std in [True, False]:
-            input_tensor = self._create_random_nd_tensor(2, size_min=30, size_max=35)
-            rows, cols = input_tensor.size(0), input_tensor.size(1)
-            sparsity = self._random_float(0.1, 0.2)
-
-            std = 0.01  # default std
-            if use_random_std:
-                std = self._random_float(0.01, 0.2)
-                init.sparse_(input_tensor, sparsity=sparsity, std=std)
-            else:
-                init.sparse_(input_tensor, sparsity=sparsity)
-
-            for col_idx in range(input_tensor.size(1)):
-                column = input_tensor[:, col_idx]
-                assert column[column == 0].nelement() >= math.ceil(sparsity * rows)
-
-            assert self._is_normal(input_tensor[input_tensor != 0], 0, std)
-
-    @skipIfNoLapack
-    def test_orthogonal(self):
-        for use_gain in [True, False]:
-            for tensor_size in [[3, 4], [4, 3], [20, 2, 3, 4], [2, 3, 4, 5]]:
-                input_tensor = torch.zeros(tensor_size)
-                gain = 1.0
-
-                if use_gain:
-                    gain = self._random_float(0.1, 2)
-                    init.orthogonal_(input_tensor, gain=gain)
-                else:
-                    init.orthogonal_(input_tensor)
-
-                rows, cols = tensor_size[0], reduce(mul, tensor_size[1:])
-                flattened_tensor = input_tensor.view(rows, cols)
-                if rows > cols:
-                    self.assertEqual(torch.mm(flattened_tensor.t(), flattened_tensor),
-                                     torch.eye(cols) * gain ** 2, atol=1e-6, rtol=0)
-                else:
-                    self.assertEqual(torch.mm(flattened_tensor, flattened_tensor.t()),
-                                     torch.eye(rows) * gain ** 2, atol=1e-6, rtol=0)
-
-    def test_deprecation(self):
-        x = torch.randn(3, 3)
-
-        def fn():
-            init.normal(x)
-
-        with self.assertWarnsRegex(UserWarning, 'deprecated', msg='methods not suffixed with underscore should be deprecated'):
-            fn()
 
 class TestFusionEval(TestCase):
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),)),
@@ -11418,6 +7719,17 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
+    def _test_LayerNorm_cpu_mixed_dtype(self, device):
+        for elementwise_affine in [True, False]:
+            # layer norm input shape is normalized to m x n, cpu vectorized on n,
+            # so make sure n exceeds vector length
+            input = torch.empty(2, 3, 11, 3, device=device, dtype=torch.bfloat16).random_(1, 10)
+            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, torch.bfloat16)
+            m2 = deepcopy(m).to(device, torch.float)
+            out = m(input)
+            out2 = m2(input)
+            self.assertEqual(out, out2)
+
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
             (1, 2, 3, 4): 2,
@@ -11478,6 +7790,20 @@ class TestNNDeviceType(NNTestCase):
         output = m(input)
         output.sum().backward()
         self.assertEqualTypeString(output, input)
+
+    def _test_GroupNorm_cpu_mixed_dtype(self):
+        def helper(self, size, groups, memory_format):
+            channels = size[1]
+            input = torch.empty(size, dtype=torch.bfloat16).cpu().random_(1, 10)
+            input = input.contiguous(memory_format=memory_format)
+            m = nn.GroupNorm(groups, channels).cpu().bfloat16()
+            m2 = deepcopy(m).float()
+            out = m(input)
+            out2 = m2(input)
+            self.assertEqual(out, out2)
+        helper(self, (1, 8, 3, 4), 4, torch.contiguous_format)
+        helper(self, (1, 8, 4, 3), 2, torch.channels_last)
+        helper(self, (1, 9, 3, 4, 5), 3, torch.channels_last_3d)
 
     def _test_module_empty_inputs(self, module, inputs):
         for _inp in inputs:
@@ -11734,6 +8060,36 @@ class TestNNDeviceType(NNTestCase):
         data = torch.rand(880801, 1, 1, 1, device=device, dtype=dtype)
         out = bn(data).sum().backward()
 
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.complex128)
+    @dtypes(torch.float, torch.double, torch.bfloat16, torch.complex128)
+    def test_conv_empty_input(self, device, dtype):
+        def help(input, conv, memory_format):
+            ref_out = conv(input)
+            conv_cl = conv.to(memory_format=memory_format)
+            out_cl = conv_cl(input)
+            self.assertEqual(ref_out, out_cl)
+            input_cl = input.to(memory_format=memory_format)
+            out_cl2 = conv(input_cl)
+            self.assertEqual(out_cl, out_cl2)
+            out_cl3 = conv_cl(input_cl)
+            self.assertEqual(out_cl, out_cl3)
+
+        # channels_last case
+        input2d = torch.randn((0, 4, 20, 20)).to(device=device, dtype=dtype)
+        conv2d = torch.nn.Conv2d(4, 4, 3, 1).to(device=device, dtype=dtype)
+        help(input2d, conv2d, torch.channels_last)
+        # channels_last_3d case
+        input3d = torch.randn((0, 4, 20, 20, 20)).to(device=device, dtype=dtype)
+        conv3d = torch.nn.Conv3d(4, 4, 3, 1).to(device=device, dtype=dtype)
+        help(input3d, conv3d, torch.channels_last_3d)
+        # non-contiguous case
+        weight = torch.rand(4, 8, 3, 3)[:, ::2, :, :].to(device=device, dtype=dtype)
+        bias = torch.rand(4).to(device=device, dtype=dtype)
+        out = F.conv2d(input2d, weight, bias, (1, 1), 0, (1, 1), 1)
+        weight = weight.contiguous()
+        out_ref = F.conv2d(input2d, weight, bias, (1, 1), 0, (1, 1), 1)
+        self.assertEqual(out_ref, out)
+
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
@@ -11802,6 +8158,9 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
 
+        if self.device_type == 'cpu':
+            self._test_LayerNorm_cpu_mixed_dtype(device)
+
     @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):
         def layer_norm_ref(X, gamma, beta, normalized_shape, eps):
@@ -11856,6 +8215,9 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_GroupNorm_cuda_half()
+
+        if self.device_type == 'cpu':
+            self._test_GroupNorm_cpu_mixed_dtype()
 
     def test_GroupNorm_raises_error_if_one_value_per_group(self, device):
         x = torch.rand(10)[None, :, None]
@@ -13122,10 +9484,10 @@ class TestNNDeviceType(NNTestCase):
         s = exp.sum(dim=3, keepdim=True).expand(exp.size())
         return exp / s
 
-    def test_masked_softmax_mask_types_0_1(self, device):
-        # Test that mask type 0 (LxL attention mask) and mask type 1 (BxL padding mask)
-        # are processed correctly on the fast path and the results match explicit slow
-        # calculation.
+    def test_masked_softmax_mask_types(self, device):
+        # Test that mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
+        # and mask type 2 (generic BxHxLxL mask) are processed correctly on the
+        # fast path and the results match explicit slow calculation.
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
 
         for (B, num_heads, L) in sizes:
@@ -13138,7 +9500,12 @@ class TestNNDeviceType(NNTestCase):
             src_key_padding_mask_orig = torch.randint(0, 2, (B, L)).bool()
             src_key_padding_mask = src_key_padding_mask_orig.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
 
-            masks = [(src_mask_orig, src_mask, 0), (src_key_padding_mask_orig, src_key_padding_mask, 1)]
+            # mask_type == 2 =>  shape BxHxLxL
+            generic_mask = torch.randint(0, 2, (B, num_heads, L, L)).bool()
+            masks = [(src_mask_orig, src_mask, 0),
+                     (src_key_padding_mask_orig, src_key_padding_mask, 1),
+                     (generic_mask, generic_mask, 2)
+                     ]
             for dim in [0, 3]:
                 for mask_orig, mask, mask_type in masks:
                     if (self.device_type == "cuda") and (num_heads % 2) and (mask_type == 1):
@@ -13173,8 +9540,8 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     def test_masked_softmax_devices_parity(self):
-        # Test that softmax with mask type 0 (LxL attention mask) and mask type 1 (BxL padding mask)
-        # gives the same result on CPU and on CUDA
+        # Test that softmax with mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
+        # and mask type 2 (BxHxLxL generic mask) gives the same result on CPU and on CUDA.
 
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for (B, num_heads, L) in sizes:
@@ -13182,7 +9549,9 @@ class TestNNDeviceType(NNTestCase):
             src_mask = torch.randint(0, 2, (L, L)).bool()
             # mask_type == 1 => padding mask of shape BxL
             src_key_padding_mask = torch.randint(0, 2, (B, L)).bool()
-            masks = [(src_mask, 0), (src_key_padding_mask, 1)]
+            # mask_type == 2 => generic mask of shape BxHxLxL
+            generic_mask = torch.randint(0, 2, (B, num_heads, L, L)).bool()
+            masks = [(src_mask, 0), (src_key_padding_mask, 1), (generic_mask, 2)]
             input = torch.randn((B, num_heads, L, L))
             for dim in [0, 3]:
                 for mask, mask_type in masks:
@@ -13197,8 +9566,10 @@ class TestNNDeviceType(NNTestCase):
                         softmax_res = torch._masked_softmax(input_device, mask_device, dim, mask_type)
                         if mask_type == 0:
                             mask_expanded = mask_device.reshape(1, 1, L, L).expand(B, num_heads, L, L).bool()
-                        else:
+                        elif mask_type == 1:
                             mask_expanded = mask_device.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+                        else:
+                            mask_expanded = mask_device
                         # In result, should only fill the entirely masked out rows since those are non-deterministic (*may* be 0)
                         # Fill rows with all True's with 0
                         mask_out = mask_expanded.all(dim, keepdim=True).expand(mask_expanded.shape)
@@ -13575,6 +9946,23 @@ class TestNNDeviceType(NNTestCase):
 
             small_image.grad.zero_()
             large_view.grad.zero_()
+
+    @onlyCUDA
+    def test_grid_sample_half_precision(self):
+        def helper(shape_in, shape_out):
+            for mode in ('bilinear', 'nearest', 'bicubic'):
+                if len(shape_in) != 4 and mode == 'bicubic':
+                    continue
+                data = torch.randn(shape_in, device='cuda', dtype=torch.half)
+                grid = torch.rand(shape_out, device='cuda', dtype=torch.half) * 2.0 - 1.0
+
+                out_half = F.grid_sample(data, grid, mode=mode, padding_mode='zeros', align_corners=False)
+                out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros', align_corners=False)
+
+                self.assertEqual(out_half, out_double.half(), msg="grid_sample with mode = {} doesn't match".format(mode))
+
+        helper((32, 64, 16, 16), (32, 8, 8, 2))
+        helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3))
 
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float, device=device)
@@ -13969,47 +10357,6 @@ class TestNNDeviceType(NNTestCase):
         outf.backward(gO)
         # should be bitwise equal
         self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0, rtol=0)
-
-    @onlyCUDA
-    @dtypes(torch.half, torch.float, torch.double)
-    def test_multihead_attention_dtype(self, device, dtype):
-        embed_dim = 128
-        num_heads = 8
-        sl = 10
-        bs = 8
-        model = nn.MultiheadAttention(embed_dim, num_heads).cuda().to(dtype)
-        q = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype)
-        k = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype)
-        v = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype)
-        out = model(q, k, v)
-        self.assertEqual(q.size(), out[0].size())
-        self.assertEqual(dtype, out[0].dtype)
-
-    @onlyCUDA
-    @dtypes(torch.half, torch.float, torch.double)
-    def test_multihead_attention_dtype_batch_first(self, device, dtype):
-        embed_dim = 128
-        num_heads = 8
-        sl = 10
-        bs = 8
-        # With batch_first=True, we have the possibility of hitting
-        # the native fast path if we call .eval() and enable inference
-        # mode. Test both paths.
-        for training in (True, False):
-            model = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).cuda().to(dtype)
-            if not training:
-                model = model.eval()
-                cm = torch.no_grad()
-            else:
-                cm = contextlib.nullcontext()
-            with cm:
-                q = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype)
-                k = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype)
-                v = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype)
-                # fast path currently doesn't support weights
-                out = model(q, k, v, need_weights=False)
-                self.assertEqual(q.size(), out[0].size())
-                self.assertEqual(dtype, out[0].dtype)
 
     def _test_batchnorm_grad(self, device, dtype=torch.double):
         bs, n_feat, size_feat = 4, 5, 6
@@ -14512,6 +10859,9 @@ class TestNNDeviceType(NNTestCase):
             test_bfloat16(torch.nn.Softshrink(), device, shape, prec=1e-2)
             test_bfloat16(torch.nn.Hardswish(), device, shape, prec=2e-2)
             test_bfloat16(torch.nn.Softplus(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.SiLU(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.Hardtanh(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.Mish(), device, shape, prec=1e-2)
 
     @onlyCUDA
     def test_activations_bfloat16(self, device):
@@ -15528,60 +11878,37 @@ class TestNNDeviceType(NNTestCase):
                 with cm:
                     _test(batch_first=batch_first, training=training, atol=atol, rtol=rtol)
 
-    @dtypes(torch.double)
-    @torch.no_grad()
-    def test_multihead_attn_fast_path_query_and_bias_have_different_dtypes(self, device, dtype):
-        mha = torch.nn.MultiheadAttention(4, 4, batch_first=True, dtype=dtype, device=device).eval()
-        mha.in_proj_bias = torch.nn.Parameter(mha.in_proj_bias.to(torch.half).to(device))
-        query = torch.randn(4, 4, 4, dtype=dtype, device=device)
-        mha(query, query, query)
-
-    @dtypes(torch.double)
-    @torch.no_grad()
-    def test_multihead_attn_fast_path_small_test(self, device, dtype):
-        mha = torch.nn.MultiheadAttention(4, 4, batch_first=True, dtype=dtype, device=device).eval()
-        query = torch.randn(4, 4, 4, dtype=dtype, device=device)
-        mha(query, query, query)
-
-    @dtypes(torch.double)
-    @torch.no_grad()
-    def test_multihead_attn_in_proj_bias_none(self, device, dtype):
-        mha = torch.nn.MultiheadAttention(2, 2, bias=False, dtype=dtype, device=device)
-        query = torch.rand(2, 2, 2, dtype=dtype, device=device)
-        mha(query, query, query)
-
-    @dtypes(torch.double)
-    @torch.no_grad()
-    def test_multihead_attn_in_proj_weight_none(self, device, dtype):
-        # Setting kdim == vdim == 2 means that vdim != embed_dim
-        # will cause the logic to use per-input project weights, thereby
-        # forcing self.in_proj_weight = None
-        mha = torch.nn.MultiheadAttention(4, 4, vdim=2, kdim=2, dtype=dtype, device=device)
-        query = torch.rand(4, 4, 4, dtype=dtype, device=device)
-        key = torch.rand(4, 4, 2, dtype=dtype, device=device)
-        mha(query, key, key)
-
     @onlyCPU
     @dtypes(torch.double)
     def test_transformerencoderlayer_fast_path(self, device, dtype):
         """
         Test transformer fast path on CPU with different valid mask types and shapes
         """
-        model = torch.nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True, device=device, dtype=dtype)
+        d_model = 512
+        nhead = 8
+        batch_size = 32
+        src_len = 10
+
+        model = torch.nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True,
+                                                 device=device, dtype=dtype, dropout=0)
         model.eval()
 
         # Batched inputs
-        src = torch.rand(32, 10, 512)
+        src = torch.rand(batch_size, src_len, 512)
 
         # Attention mask of shape (src_len, src_len)
-        src_mask = torch.zeros(10, 10).to(torch.bool)
+        src_mask = torch.zeros(src_len, src_len).to(torch.bool)
         with torch.no_grad():
             model(src, src_mask=src_mask)
 
         # Padding mask of shape (batch_size, src_len)
-        src_key_padding_mask = torch.zeros(32, 10).to(torch.bool)
+        src_key_padding_mask = torch.zeros(batch_size, src_len).to(torch.bool)
         with torch.no_grad():
             model(src, src_key_padding_mask=src_key_padding_mask)
+
+        # Provide both masks
+        with torch.no_grad():
+            model(src, src_mask=src_mask, src_key_padding_mask=src_key_padding_mask)
 
 
     @dtypes(torch.float)
@@ -15665,291 +11992,6 @@ class TestNNDeviceType(NNTestCase):
                 _test(activation=activation, batch_first=batch_first, training=training)
 
 
-class TestModuleGlobalHooks(TestCase):
-
-    def tearDown(self):
-        nn.modules.module._global_backward_hooks = OrderedDict()
-        nn.modules.module._global_forward_hooks = OrderedDict()
-        nn.modules.module._global_forward_pre_hooks = OrderedDict()
-
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_module_global_hooks(self):
-        module = nn.Sigmoid
-
-        module_1 = module()
-        module_2 = module()
-        module_3 = module()
-
-        input = torch.ones(5, 5, requires_grad=True)
-
-        counter = {
-            'forwards': 0,
-            'backwards': 0
-        }
-
-        def fw_hook(inc, h_module, input, output):
-            self.assertIsInstance(input, tuple)
-            self.assertTrue(isinstance(output, torch.Tensor))
-            self.assertTrue(isinstance(h_module, module))
-            self.assertEqual(input[0], torch.ones(5, 5))
-            self.assertEqual(output, torch.empty(5, 5).fill_(1 / (1 + 1 / math.e)))
-            counter['forwards'] += inc
-
-        def bw_hook(inc, h_module, grad_input, grad_output):
-            self.assertIsInstance(grad_input, tuple)
-            self.assertIsInstance(grad_output, tuple)
-            self.assertTrue(isinstance(h_module, module))
-            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
-            counter['backwards'] += inc
-
-        test_fwd = nn.modules.module.register_module_forward_hook(lambda *args: fw_hook(1, *args))
-
-        module_1(input)
-        module_2(input)
-        module_3(input)
-        self.assertEqual(counter['forwards'], 3)
-        self.assertEqual(counter['backwards'], 0)
-
-        test_bwd = nn.modules.module.register_module_backward_hook(
-            lambda *args: bw_hook(1, *args))
-
-        output_1 = module_1(input)
-        output_2 = module_2(input)
-        output_3 = module_3(input)
-        self.assertEqual(counter['forwards'], 6)
-        self.assertEqual(counter['backwards'], 0)
-
-        output_1.backward(torch.ones(5, 5) * 2, retain_graph=True)
-        output_2.backward(torch.ones(5, 5) * 2, retain_graph=False)
-        output_3.backward(torch.ones(5, 5) * 2, retain_graph=False)
-        self.assertEqual(counter['forwards'], 6)
-        self.assertEqual(counter['backwards'], 3)
-
-        output_1.backward(torch.ones(5, 5) * 2, retain_graph=True)
-        self.assertEqual(counter['forwards'], 6)
-        self.assertEqual(counter['backwards'], 4)
-
-        test2_fwd = nn.modules.module.register_module_forward_hook(lambda *args: fw_hook(2, *args))
-
-        output = module_1(input)
-        output = module_2(input)
-        output = module_3(input)
-        self.assertEqual(counter['forwards'], 15)
-        self.assertEqual(counter['backwards'], 4)
-
-        test2_bwd = nn.modules.module.register_module_backward_hook(lambda *args: bw_hook(2, *args))
-
-        module_1(input).backward(torch.ones(5, 5) * 2)
-        self.assertEqual(counter['forwards'], 18)
-        self.assertEqual(counter['backwards'], 7)
-
-        test2_bwd.remove()
-
-        module_2(input).backward(torch.ones(5, 5) * 2)
-        self.assertEqual(counter['forwards'], 21)
-        self.assertEqual(counter['backwards'], 8)
-
-        test2_fwd.remove()
-
-        module_3(input).backward(torch.ones(5, 5) * 2)
-        self.assertEqual(counter['forwards'], 22)
-        self.assertEqual(counter['backwards'], 9)
-
-        test_fwd.remove()
-        test_bwd.remove()
-
-    def test_module_global_hook_invalid_outputs(self):
-        module = nn.Sigmoid()
-        input = torch.randn(5, 5, requires_grad=True)
-
-        def bw_fail1(self, grad_input, grad_output):
-            return grad_input[:-1]
-
-        def bw_fail2(self, grad_input, grad_output):
-            return grad_input + (torch.randn(2, 2),)
-
-        with nn.modules.module.register_module_backward_hook(bw_fail1):
-            with self.assertRaisesRegex(RuntimeError, 'got 0, but expected 1'):
-                module(input).sum().backward()
-
-        with nn.modules.module.register_module_backward_hook(bw_fail2):
-            with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
-                module(input).sum().backward()
-
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/847")
-    def test_module_backward_global_hook_writeable(self):
-        module = nn.Sigmoid()
-        input = torch.randn(5, 5, requires_grad=True)
-        sig_x = torch.sigmoid(input)
-
-        def bw_hook(module, grad_input, grad_output):
-            for grad in grad_input:
-                self.assertTrue(isinstance(grad, torch.Tensor))
-            for grad in grad_output:
-                self.assertTrue(isinstance(grad, torch.Tensor))
-            return tuple(gi * 2 for gi in grad_input)
-
-        nn.modules.module.register_module_backward_hook(bw_hook)
-        module(input).backward(torch.ones(5, 5))
-        expected_grad = sig_x * (1 - sig_x) * 2
-        self.assertEqual(input.grad, expected_grad)
-
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_module_global_forward_preforward_hook_writeable(self):
-        module = nn.Sigmoid()
-        input = torch.randn(5, 5, requires_grad=True)
-        sig_x = torch.sigmoid(input)
-
-        def forward_pre_hook(m, input):
-            return torch.nn.functional.relu(input[0])
-
-        def forward_hook(m, input, output):
-            return -output
-
-        nn.modules.module.register_module_forward_pre_hook(forward_pre_hook)
-        nn.modules.module.register_module_forward_hook(forward_hook)
-        output = module(input)
-        expected_res = -torch.sigmoid(torch.nn.functional.relu(input))
-        self.assertEqual(output, expected_res)
-        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
-        mask = (input > 0).double()
-        expected_grad = -sig_x * (1 - sig_x) * 2 * mask
-        self.assertEqual(input.grad, expected_grad)
-
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_module_forward_preforward_hook_removable(self):
-        """
-        This test is to test when multiple pre-forward hook functions can be
-        registered successfully and used correctly, if the handle can be removable
-        during the pre-forward hook function call.
-        """
-        module = nn.Sigmoid()
-
-        def removable_hook(m, input):
-            nonlocal handle
-            handle.remove()
-            return input
-
-        def removable_hook_2(m, input):
-            nonlocal handle_2
-            handle_2.remove()
-            return input
-
-        handle = module.register_forward_pre_hook(removable_hook)
-        handle_2 = module.register_forward_pre_hook(removable_hook_2)
-
-        # make sure hook register is successful
-        self.assertEqual(len(handle.hooks_dict_ref()), 2)
-        self.assertEqual(len(handle_2.hooks_dict_ref()), 2)
-
-        input = torch.randn(2, 2)
-        output = module(input)
-        self.assertEqual(torch.sigmoid(input), output)
-
-        # make sure hook removal is successful
-        self.assertFalse(handle.id in handle.hooks_dict_ref())
-        self.assertFalse(handle_2.id in handle.hooks_dict_ref())
-        self.assertEqual(len(handle.hooks_dict_ref()), 0)
-        self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
-
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_module_forward_forward_hook_removable(self):
-        """
-        This test is to test when multiple forward hook functions can be registered
-        successfully and used correctly, if the handle can be removable during the
-        forward hook function call.
-        """
-        module = nn.Sigmoid()
-
-        def removable_hook(m, input, output):
-            nonlocal handle
-            handle.remove()
-            return output
-
-        def removable_hook_2(m, input, output):
-            nonlocal handle_2
-            handle_2.remove()
-            return output
-
-        handle = module.register_forward_hook(removable_hook)
-        handle_2 = module.register_forward_hook(removable_hook_2)
-
-        # make sure hook register is successful
-        self.assertEqual(len(handle.hooks_dict_ref()), 2)
-        self.assertEqual(len(handle_2.hooks_dict_ref()), 2)
-
-        input = torch.randn(2, 2)
-        output = module(input)
-        self.assertEqual(torch.sigmoid(input), output)
-
-        # make sure hook removal is successful
-        self.assertFalse(handle.id in handle.hooks_dict_ref())
-        self.assertFalse(handle_2.id in handle.hooks_dict_ref())
-        self.assertEqual(len(handle.hooks_dict_ref()), 0)
-        self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
-
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_global_and_local_hooks_order(self):
-        module = nn.Sigmoid()
-
-        global_forward_pre_called = False
-        local_forward_pre_called = False
-        global_forward_called = False
-        local_forward_called = False
-        global_backward_called = False
-        local_backward_called = False
-
-        def global_forward_pre_hook(m, input):
-            nonlocal global_forward_pre_called
-            self.assertTrue(not local_forward_pre_called)
-            global_forward_pre_called = True
-            return input
-
-        def local_forward_pre_hook(m, input):
-            nonlocal local_forward_pre_called
-            self.assertTrue(global_forward_pre_called)
-            local_forward_pre_called = True
-            return input
-
-        def global_forward_hook(m, input, output):
-            nonlocal global_forward_called
-            self.assertTrue(not local_forward_called)
-            global_forward_called = True
-            return output
-
-        def local_forward_hook(m, input, output):
-            nonlocal local_forward_called
-            self.assertTrue(global_forward_called)
-            local_forward_called = True
-            return output
-
-        def global_backward_hook(m, input, output):
-            nonlocal global_backward_called
-            self.assertTrue(not local_backward_called)
-            global_backward_called = True
-            return input
-
-        def local_backward_hook(m, input, output):
-            nonlocal local_backward_called
-            self.assertTrue(global_backward_called)
-            local_backward_called = True
-            return input
-
-        input = torch.randn(5, 5, requires_grad=True)
-        nn.modules.module.register_module_forward_pre_hook(global_forward_pre_hook)
-        module.register_forward_pre_hook(local_forward_pre_hook)
-        nn.modules.module.register_module_forward_hook(global_forward_hook)
-        module.register_forward_hook(local_forward_hook)
-        nn.modules.module.register_module_backward_hook(global_backward_hook)
-        module.register_backward_hook(local_backward_hook)
-
-        output = module(input)
-        self.assertTrue(local_forward_called and local_forward_pre_called and global_forward_called and global_forward_pre_called)
-
-        output.backward(torch.ones(5, 5), retain_graph=True)
-        self.assertTrue(local_backward_called and global_backward_called)
-
-
 class TestFunctionalPickle(TestCase):
 
     # issue gh-38137
@@ -15957,210 +11999,33 @@ class TestFunctionalPickle(TestCase):
         # Make sure it does not throw an exception
         s = pickle.dumps(F.softsign)
 
-def _hook_to_pickle(*args, **kwargs):
-    pass
 
-class TestStateDictHooks(TestCase):
+class TestFusionUtils(TestCase):
+    def test_fuse_conv_bn_requires_grad(self):
+        conv = torch.nn.Conv2d(3, 3, 3)
+        bn = torch.nn.BatchNorm2d(3)
+        cases = itertools.product([True, False], [True, False])
+        for w_rg, b_rg in cases:
+            conv.weight.requires_grad = w_rg
+            conv.bias.requires_grad = b_rg
+            weight, bias = \
+                fuse_conv_bn_weights(conv.weight, conv.bias,
+                                     bn.running_mean, bn.running_var, bn.eps, bn.weight, bn.bias)
+            self.assertEqual(weight.requires_grad, w_rg)
+            self.assertEqual(bias.requires_grad, b_rg)
 
-    def test_load_state_dict_pre_hook(self):
-
-        m = nn.Linear(10, 10)
-        m_state_dict = m.state_dict()
-
-        m_load = nn.Linear(10, 10)
-
-        hook_called = 0
-
-        def hook_without_module(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
-            self.assertEqual(m_state_dict, state_dict)
-            nonlocal hook_called
-            hook_called += 1
-
-        def hook_with_module(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
-            self.assertEqual(m_state_dict, state_dict)
-            self.assertTrue(m_load is module)
-            nonlocal hook_called
-            hook_called += 1
-
-        hook_called = 0
-        m_load._register_load_state_dict_pre_hook(hook_without_module)
-        m_load.load_state_dict(m_state_dict)
-        self.assertEqual(1, hook_called)
-
-        hook_called = 0
-        m_load._register_load_state_dict_pre_hook(hook_with_module, True)
-        m_load.load_state_dict(m_state_dict)
-        self.assertEqual(2, hook_called)
-
-    def test_no_extra_ref_to_module(self):
-        try:
-            gc.disable()
-            m = nn.Linear(10, 10)
-
-            m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
-            weak_m = weakref.ref(m)
-            del m
-
-            self.assertEqual(weak_m(), None)
-        finally:
-            gc.enable()
-
-    def test_pickled_hook(self):
-        m = nn.Linear(10, 10)
-        m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
-        pickle.loads(pickle.dumps(m))
-
-    def test_load_state_dict_module_pre_hook(self):
-        hook_called = 0
-
-        # Test with module instance method as hook
-        class MyModule(nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.foo = torch.nn.Parameter(torch.rand(10))
-
-            def my_pre_load_hook(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
-                assert [] == error_msgs
-                assert [] == unexpected_keys
-                assert [] == missing_keys
-                assert strict
-                nonlocal hook_called
-                hook_called += 1
-
-            def my_pre_load_hook_with_module(
-                self,
-                module,
-                state_dict,
-                prefix,
-                local_metadata,
-                strict,
-                missing_keys,
-                unexpected_keys,
-                error_msgs,
-            ):
-                assert [] == error_msgs
-                assert [] == unexpected_keys
-                assert [] == missing_keys
-                assert strict
-                assert self is module
-                nonlocal hook_called
-                hook_called += 1
-
-        # Test that hooks registered on a submodule are also called
-        # appropriately, i.e. with the submodule as module argument in
-        # my_pre_load_hook_with_module.
-        class MyModuleContainer(nn.Module):
-            def __init__(self, mod):
-                super().__init__()
-                self.mod = mod
-
-        for ctor in [MyModuleContainer, lambda x: x]:
-            m = ctor(MyModule())
-            state_dict = m.state_dict()
-            if isinstance(m, MyModuleContainer):
-                mod = m.mod
-            else:
-                mod = m
-
-            hook_called = 0
-            mod._register_load_state_dict_pre_hook(
-                mod.my_pre_load_hook
-            )
-            m.load_state_dict(state_dict)
-            self.assertEqual(1, hook_called)
-
-            hook_called = 0
-            mod._register_load_state_dict_pre_hook(
-                mod.my_pre_load_hook_with_module, True
-            )
-            m.load_state_dict(state_dict)
-            self.assertEqual(2, hook_called)
-
-    def test_load_state_dict_post_hook(self):
-        hook_called = 0
-
-        class MyModule(nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.foo = torch.nn.Parameter(torch.rand(10))
-
-            def my_post_load_hook(self, module, incompatible_keys):
-                assert module is self
-                nonlocal hook_called
-                incompatible_keys.missing_keys.append("foo")
-                incompatible_keys.unexpected_keys.append("bar")
-                hook_called += 1
-
-        nested = MyModule()
-        wrapped = nn.ModuleList([nested])
-        handle = nested.register_load_state_dict_post_hook(
-            nested.my_post_load_hook,
-        )
-        # Hook must be called even if it is wrapped
-        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
-        self.assertEqual(hook_called, 1)
-        # Ensure that the hook modified missing_keys and unexpected_keys
-        missing = ret.missing_keys
-        unexpected = ret.unexpected_keys
-        self.assertEqual(missing, ["foo"])
-        self.assertEqual(unexpected, ["bar"])
-        # When called with strict=True, the error raised should mention the
-        # missing and unexpected keys the hook added.
-        with self.assertRaisesRegex(RuntimeError, "foo.*\n.*bar"):
-            wrapped.load_state_dict(wrapped.state_dict(), strict=True)
-        self.assertEqual(hook_called, 2)
-        # Removing the hook via handle.remove() should cause it not to
-        # fire anymore.
-        handle.remove()
-        # Hook did not run so it should not have added any keys
-        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
-        self.assertEqual(ret.missing_keys, [])
-        self.assertEqual(ret.unexpected_keys, [])
-        # hook_called should not have been incremented
-        self.assertEqual(hook_called, 2)
-
-        def load_hook_clear_incompatible(module, incompatible_keys):
-            incompatible_keys.missing_keys.clear()
-            incompatible_keys.unexpected_keys.clear()
-
-        nested.register_load_state_dict_post_hook(load_hook_clear_incompatible)
-        state_dict = wrapped.state_dict()
-        state_dict["extra"] = torch.ones(1)
-        # load state_dict with strict=True should not throw.
-        ret = wrapped.load_state_dict(state_dict, strict=True)
-        # explicitly ensure that the post hook clearned out incompatible_keys
-        self.assertEqual([], ret.missing_keys)
-        self.assertEqual([], ret.unexpected_keys)
-
-    @unittest.skipIf(IS_WINDOWS, "Tempfile permission issue on windows")
-    def test_load_state_dict_post_hook_backward_compatibility(self):
-        def my_post_load_hook(mod, _):
-            nonlocal called
-            called = True
-
-        for m in [nn.Softmin(10), nn.Softmax(10), nn.LogSoftmax(10)]:
-            called = False
-            sd = deepcopy(m.state_dict())
-            self.assertTrue(hasattr(m, '_load_state_dict_post_hooks'))
-            # Simulate an older model that did not have this attr
-            delattr(m, '_load_state_dict_post_hooks')
-            # Save and load, and ensure that load_state_dict works (without proper
-            # BC we would run into errors because this attribute would be expected).
-            # In particular, Softmax runs into the issue described here:
-            # https://github.com/pytorch/pytorch/issues/77280
-            with NamedTemporaryFile() as f:
-                # Note that torch.save / torch.load is not recommended to save/load
-                # modules.
-                torch.save(m, f.name)
-                m = torch.load(f.name)
-                m.load_state_dict(sd)
-                self.assertFalse(called)
-
-            # Ensure hooks can be registered and called.
-            m.register_load_state_dict_post_hook(my_post_load_hook)
-            m.load_state_dict(sd)
-            self.assertTrue(called)
-
+    def test_fuse_linear_bn_requires_grad(self):
+        linear = torch.nn.Linear(3, 3)
+        bn = torch.nn.BatchNorm1d(3)
+        cases = itertools.product([True, False], [True, False])
+        for w_rg, b_rg in cases:
+            linear.weight.requires_grad = w_rg
+            linear.bias.requires_grad = b_rg
+            weight, bias = \
+                fuse_linear_bn_weights(linear.weight, linear.bias,
+                                       bn.running_mean, bn.running_var, bn.eps, bn.weight, bn.bias)
+            self.assertEqual(weight.requires_grad, w_rg)
+            self.assertEqual(bias.requires_grad, b_rg)
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)

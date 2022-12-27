@@ -42,11 +42,12 @@ class CachingAutotuner(KernelInterface):
     configs, and does not rely on the Triton JIT.
     """
 
-    def __init__(self, fn, meta, configs, save_cache_hook):
+    def __init__(self, fn, meta, configs, save_cache_hook, mutated_arg_names):
         super().__init__()
         self.fn = fn
         self.meta = meta
         self.save_cache_hook = save_cache_hook
+        self.mutated_arg_names = mutated_arg_names
         self.configs = configs
         self.launchers = []
         self.lock = threading.Lock()
@@ -68,7 +69,6 @@ class CachingAutotuner(KernelInterface):
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
-
         if warm_cache_only_with_cc:
             triton.compile(
                 self.fn,
@@ -78,12 +78,14 @@ class CachingAutotuner(KernelInterface):
             )
             return
 
-        torch.cuda.set_device(torch.cuda.current_device())
-
-        binary = triton.compile(
-            self.fn,
-            **compile_meta,
-        )
+        # load binary to the correct device
+        with torch.cuda.device(compile_meta["device"]):
+            # need to initialize context
+            torch.cuda.synchronize(torch.cuda.current_device())
+            binary = triton.compile(
+                self.fn,
+                **compile_meta,
+            )
 
         call_args = [
             arg
@@ -132,26 +134,26 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        import inspect
-
         from triton.testing import do_bench
 
-        if "fast_flush" in inspect.signature(do_bench).parameters.keys():
-            return do_bench(kernel_call, rep=40, fast_flush=True)
-        else:
-            return do_bench(kernel_call, rep=40)
+        return do_bench(kernel_call, rep=40, fast_flush=True)
 
     @dynamo_utils.dynamo_timed
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
         from ..compile_fx import clone_preserve_strides
 
-        # clone the input args to avoid autotune contaminating them if
-        # the kernel does in-place stores
-        cloned_args = [
-            clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
-            for arg in args
-        ]
+        # clone inplace buffers to avoid autotune contaminating them if
+        # the kernel does in-place stores. avoid cloning other buffers because
+        # it leads to increase memory use
+        cloned_args = []
+        for i, arg in enumerate(args):
+            if self.fn.arg_names[i] in self.mutated_arg_names:
+                assert isinstance(arg, torch.Tensor)
+                cloned_args.append(clone_preserve_strides(arg))
+            else:
+                cloned_args.append(arg)
+
         timings = {
             launcher: self.bench(launcher, *cloned_args, **kwargs)
             for launcher in self.launchers
@@ -183,7 +185,7 @@ class CachingAutotuner(KernelInterface):
                 raise RuntimeError(
                     """Consider updating Triton with
 `pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`"""
-                )
+                ) from e
             else:
                 raise e
 
@@ -213,7 +215,8 @@ def load_cached_autotuning(
     if not os.path.exists(cache_filename):
         return None
 
-    best_config = json.loads(open(cache_filename).read())
+    with open(cache_filename, "r") as fd:
+        best_config = json.loads(fd.read())
     if best_config.get("configs_hash") != configs_hash:
         return None
 
@@ -255,9 +258,15 @@ def cached_autotune(
     else:
         save_cache_hook = None
 
+    mutated_arg_names = meta.pop("mutated_arg_names", ())
+
     def decorator(fn):
         return CachingAutotuner(
-            fn, meta=meta, configs=configs, save_cache_hook=save_cache_hook
+            fn,
+            meta=meta,
+            configs=configs,
+            save_cache_hook=save_cache_hook,
+            mutated_arg_names=mutated_arg_names,
         )
 
     return decorator

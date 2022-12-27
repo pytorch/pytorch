@@ -4,25 +4,51 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, no_type_check, Union
+from typing import (
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    no_type_check,
+    Optional,
+    Set,
+)
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
+from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+
+from .api import FullStateDictConfig, StateDictConfig, StateDictType
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
 
-# We leverage Python's dynamic attribute definition to unify the state
-# management for the wrapper and non-wrapper approaches. The `Any` represents
-# the `_State` object in _composable/contract.py, but we do not import it to
-# avoid circular imports.
-_FSDPState = Union[nn.Module, Any]
+class _FSDPState(_State):
+    def __init__(self) -> None:
+        # TODO: Move all the attributes to this class to enable typing for
+        # FSDP/fully_shard.
+        self._use_orig_params: bool = False
+        self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
+        self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
+        self._state_dict_config: StateDictConfig = FullStateDictConfig()
+        self._is_root: Optional[bool] = None
+        self._handles: List[flat_param_file.FlatParamHandle] = []
+        self._ignored_modules: Set[nn.Module] = set()
+        self.rank: int = -1
+
+
+def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
+    state = _get_module_state(module)
+    if state is None or not isinstance(state, _FSDPState):
+        return None
+    return state
 
 
 class TrainingState(Enum):
@@ -53,12 +79,47 @@ def _is_composable(state: _FSDPState):
 
 
 @no_type_check
-def _all_handles(state: _FSDPState) -> List:
-    return (
-        state._handles
-        if _is_composable(state)
-        else state._fsdp_handles(state)  # `FullyShardedDataParallel`
-    )
+def _module_handles(state: _FSDPState, module: nn.Module) -> List:
+    """
+    Returns the ``FlatParamHandle`` s corresponding to ``module``. These are
+    the handles that contain some parameter in ``module``.
+    """
+    if _is_composable(state):
+        assert (
+            module in state._fully_sharded_module_to_handles
+        ), f"Expects a `comm_module` but got {module} on rank {state.rank}"
+        return state._fully_sharded_module_to_handles[module][:]
+    else:
+        # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
+        return module._handles[:]
+
+
+@no_type_check
+def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
+    """Returns if ``module`` has parameters managed by FSDP."""
+    return len(_module_handles(state, module)) > 0
+
+
+def _get_sharding_strategy(handles: Iterable):
+    """
+    Returns the sharding strategy of the group of handles given by ``handles``
+    or ``None`` if ``handles`` is empty. The input should be the handles
+    corresponding to one module, so we enforce that they all share the same
+    sharding strategy.
+    """
+    sharding_strategy = None
+    for handle in handles:
+        if sharding_strategy is None:
+            sharding_strategy = handle._sharding_strategy
+        elif (
+            sharding_strategy is not None
+            and sharding_strategy != handle._sharding_strategy
+        ):
+            raise AssertionError(
+                "Expects each group of handles to have the same sharding "
+                f"strategy but got {sharding_strategy} and {handle._sharding_strategy}"
+            )
+    return sharding_strategy
 
 
 def clean_tensor_name(tensor_name: str) -> str:
@@ -182,3 +243,27 @@ def _assert_in_training_states(
             print(f"ERROR: {msg}")
             traceback.print_stack()
         raise ValueError(msg)
+
+
+def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
+    """
+    Returns:
+        Set[nn.Module]: The subset of ``modules`` that are root modules (i.e.
+        parent-less) with respect to the modules in the set itself. In other
+        words, these are the modules in ``modules`` that are not the child of
+        any other module in ``modules``.
+    """
+    root_modules: Set[nn.Module] = set()
+    module_to_submodules = {module: set(module.modules()) for module in modules}
+    for candidate_module in modules:
+        is_root_module = True
+        for module, submodules in module_to_submodules.items():
+            is_child_module = (
+                candidate_module is not module and candidate_module in submodules
+            )
+            if is_child_module:
+                is_root_module = False
+                break
+        if is_root_module:
+            root_modules.add(candidate_module)
+    return root_modules

@@ -375,6 +375,12 @@ def _check_dill_version(pickle_module) -> None:
                 pickle_module.__version__
             ))
 
+def _check_save_filelike(f):
+    if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
+        raise AttributeError((
+            "expected 'f' to be string, path, or a file-like object with "
+            "a 'write' attribute"))
+
 def save(
     obj: object,
     f: FILE_LIKE,
@@ -421,7 +427,9 @@ def save(
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
     """
+    torch._C._log_api_usage_once("torch.save")
     _check_dill_version(pickle_module)
+    _check_save_filelike(f)
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
@@ -753,6 +761,7 @@ def load(
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
     """
+    torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
         "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
         " will likely succeed, but it can result in arbitrary code execution."
@@ -764,7 +773,7 @@ def load(
 
     if weights_only:
         if pickle_module is not None:
-            raise RuntimeError("Can not safely load weights when expiclit picke_module is specified")
+            raise RuntimeError("Can not safely load weights when explicit pickle_module is specified")
     else:
         if pickle_module is None:
             pickle_module = pickle

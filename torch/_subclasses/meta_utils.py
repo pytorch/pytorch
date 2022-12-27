@@ -1,10 +1,12 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager
+from typing import ContextManager, Optional
 
 import torch
+from torch._guards import Source
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import WeakIdRef
 
 
 def safe_is_leaf(t):
@@ -58,39 +60,6 @@ def assert_metadata_eq(assert_eq, m1, m2, *, skip_symbolic=False):
     return go(m1, m2)
 
 
-# torch.Tensors cannot be used as a key in a dictionary
-# because they define a custom __eq__ function which when used
-# to resolve hash collisions will throw when comparing tensors:
-# "RuntimeError: bool value of Tensor with more than one value is ambiguous."
-# To avoid that, we use an object which will hold a Tensor and use
-# its id for both hashing and equality.
-# In order to use this as a weak key reference, we cannot
-# simply use weakref.WeakKeyDictionary because the newly constructed
-# WeakTensorRefKey only use would be a dictionary so it would have no strong
-# references.
-# To get around this issue, we can use it as a normal key, and then set
-# `weakref.finalize` to delete the key when its contained tensor dies.
-
-
-class WeakTensorRefKey(object):
-    def __init__(self, ten):
-        self.ten = weakref.ref(ten)
-        # store id since as soon as ten is deallocated
-        # the old id will no longer be recoverable, and
-        # we need to be able to remove the WeakTensorRefKey
-        # from the dictionary by hashing it to the same
-        # value it had when ten was alive
-        self.id = id(self.ten())
-
-    def __hash__(self):
-        return self.id
-
-    def __eq__(self, other):
-        if id(self) == id(other):
-            return True
-        return self.id == other.id
-
-
 # This is a class for converting multiple tensors into meta tensors which
 # share the same view/storage structure.  The operation model is you allocate
 # one of these, and then call it repeatedly on all the tensors you want to
@@ -134,17 +103,17 @@ class MetaConverter:
         )
 
     def get_tensor_memo(self, t):
-        return self.tensor_memo.get(WeakTensorRefKey(t), None)
+        return self.tensor_memo.get(WeakIdRef(t), None)
 
     def set_tensor_memo(self, t, v):
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if t.is_sparse:
+        if t.is_sparse or t.is_mkldnn:
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
-        tensor_ref_key = WeakTensorRefKey(t)
+        tensor_ref_key = WeakIdRef(t)
 
         def del_ten():
             # tensor outlives the converter
@@ -185,7 +154,20 @@ class MetaConverter:
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
-    def meta_tensor(self, t, shape_env=None, callback=lambda t: t()):
+    # NB: name here is used in a conventional way by Dynamo; it corresponds
+    # precisely to the Source.name() of the tensor we're fakeifying and
+    # corresponds to a valid Python expression.  When we construct sub-names
+    # as part of this process, we will maintain this invariant!  (Even though
+    # other users of this may not need it this property to be upheld.)
+    def meta_tensor(
+        self, t, shape_env=None, callback=lambda t: t(), source: Optional[Source] = None
+    ):
+        if source is None:
+            from torch._dynamo.source import ConstantSource
+
+            # TODO: make a dedicated UnknownSource for this?
+            source = ConstantSource(f"__unknown_tensor{len(self.tensor_memo)}")
+
         # This indicates you set no_dispatch() before calling into this
         # function.  This is an error: we may be creating fake tensors and
         # will perform operations on them which need fake tensor mode to
@@ -196,18 +178,40 @@ class MetaConverter:
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
+        # When we make as_strided calls, we end up generating a guard
+        # that the new as_strided tensor is in bounds for the old storage
+        # for the base (since as_strided calls can "bust" out of their
+        # bounding box.)  This guard is unnecessary: if a user is able
+        # to provide us a tensor with the view base setup this way, we
+        # don't need to produce a guard, because the fact that they
+        # were able to produce the view base means its in bounds.
+        #
+        # Now, ordinarily, this guard would be harmless.  However, the
+        # generated guard refers to variables bound on the base variable.
+        # At the moment, Dynamo doesn't actually guard on x._base, because
+        # according to Voz this results in a lot of spurious invalidations,
+        # and also if the user doesn't directly make use of _base, its
+        # pointless anyway (because programs should be parametric over
+        # whether or not the input tensor is a view or not--unless you're
+        # mutating the input, but that's a whole 'nother ballgame).  So
+        # for expediency, we suppress these guards so we don't have to
+        # deal with this (yet, anyway.)
+        #
+        # NB: An old version of this code suppressed guards for ALL operations
+        # happening during meta conversion, not just as_strided calls.
+        # This is too aggressive: we do duck sizing and 0/1 simplification
+        # as we allocate variables, and we do need to register guards for
+        # these cases.
+        maybe_suppress = contextlib.nullcontext
+        if shape_env is not None:
+            maybe_suppress = shape_env.suppress_guards
+
         make_symbolic = shape_env is not None
 
-        def sym(x):
+        def sym_sizes_strides_storage_offset(t):
             if make_symbolic:
-                return shape_env.create_symintnode(shape_env.create_symbol(x))
-            else:
-                return x
-
-        def sym_sizes_strides(t):
-            if make_symbolic:
-                return shape_env.create_symbolic_sizes_strides(t)
-            return (t.size(), t.stride())
+                return shape_env.create_symbolic_sizes_strides_storage_offset(t, source)
+            return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
         self.check_expired_count += 1
@@ -243,7 +247,22 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
-
+                elif t.is_mkldnn:
+                    is_leaf = safe_is_leaf(t)
+                    sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
+                        t
+                    )
+                    r = callback(
+                        lambda: torch.empty_strided(
+                            sizes, strides, dtype=t.dtype, device="meta"
+                        )
+                    )
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
+                    if t.requires_grad:
+                        r.requires_grad = True
+                    if t.requires_grad and not is_leaf:
+                        with torch.enable_grad():
+                            r = r.clone()
                 elif t._is_view():
                     # Construct views in two steps: recursively meta-fy their
                     # base, and then create view(s) off that.  NB: doing it
@@ -251,7 +270,11 @@ class MetaConverter:
                     # version counters to get shared.
                     assert t._is_view()
 
-                    base = self.meta_tensor(t._base, shape_env, callback)
+                    from torch._dynamo.source import AttrSource
+
+                    base = self.meta_tensor(
+                        t._base, shape_env, callback, source=AttrSource(source, "_base")
+                    )
 
                     def is_c_of_r(complex_dtype, real_dtype):
                         return (
@@ -303,24 +326,24 @@ class MetaConverter:
                         # So we may have to do *two* views out of the base to
                         # recreate this situation.
 
-                        sizes, strides = sym_sizes_strides(t)
+                        (
+                            sizes,
+                            strides,
+                            storage_offset,
+                        ) = sym_sizes_strides_storage_offset(t)
 
                         if safe_is_leaf(t):
                             # Leaf views that track view metadata are created by
                             # creating a view inside a no_grad block
-                            with torch.no_grad():
-                                r = base.as_strided(
-                                    sizes, strides, sym(t.storage_offset())
-                                )
+                            with torch.no_grad(), maybe_suppress():
+                                r = base.as_strided(sizes, strides, storage_offset)
                             # As it's a leaf, we can directly assign requires_grad
                             r.requires_grad = t.requires_grad
                         else:
                             if t._base.requires_grad == t.requires_grad:
                                 # Easy case, just run the view op
-                                with torch.enable_grad():
-                                    r = base.as_strided(
-                                        sizes, strides, sym(t.storage_offset())
-                                    )
+                                with torch.enable_grad(), maybe_suppress():
+                                    r = base.as_strided(sizes, strides, storage_offset)
                             else:
                                 # Obscure case.  Create a leaf view and give it the
                                 # correct requires_grad, then do the final view.
@@ -329,10 +352,8 @@ class MetaConverter:
                                 with torch.no_grad():
                                     mid = base.view(base.shape)
                                 mid.requires_grad = t.requires_grad
-                                with torch.enable_grad():
-                                    r = mid.as_strided(
-                                        sizes, strides, sym(t.storage_offset())
-                                    )
+                                with torch.enable_grad(), maybe_suppress():
+                                    r = mid.as_strided(sizes, strides, storage_offset)
                     finally:
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude
@@ -340,8 +361,7 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
-                    sizes, strides = sym_sizes_strides(t)
-                    storage_offset = sym(t.storage_offset())
+                    sizes, strides, storage_offset = sym_sizes_strides_storage_offset(t)
                     r = callback(
                         lambda: torch.empty_strided(
                             sizes, strides, dtype=t.dtype, device="meta"
@@ -408,7 +428,14 @@ class MetaConverter:
                             r.set_(r_s, storage_offset, sizes, strides)
 
                 if safe_grad(t) is not None:
-                    r.grad = self.meta_tensor(safe_grad(t), shape_env, callback)
+                    from torch._dynamo.source import AttrSource
+
+                    r.grad = self.meta_tensor(
+                        safe_grad(t),
+                        shape_env,
+                        callback,
+                        source=AttrSource(source, "grad"),
+                    )
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
             # This can be skipped if necessary for performance reasons
@@ -417,7 +444,15 @@ class MetaConverter:
 
         return self.get_tensor_memo(t)
 
-    def __call__(self, t, shape_env=None, *, callback=lambda t: t()):
+    def __call__(
+        self,
+        t,
+        shape_env=None,
+        *,
+        callback=lambda t: t(),
+        ignore_subclass=False,
+        source=None,
+    ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
         from torch._subclasses.fake_tensor import FakeTensor
@@ -425,13 +460,13 @@ class MetaConverter:
         if (
             type(t) is torch.Tensor
             or type(t) is torch.nn.Parameter
+            or (ignore_subclass and isinstance(t, torch.Tensor))
             or isinstance(t, FakeTensor)
         ):
             if any(
                 [
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
-                    t.is_mkldnn,
                     t.is_quantized,
                     t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
@@ -455,7 +490,18 @@ class MetaConverter:
                 return NotImplemented
             else:
                 self.hit += 1
-                r = self.meta_tensor(t, shape_env=shape_env, callback=callback)
+                # When ignoring subclasses, we treat the input tensor "as if" it
+                # were a normal tensor and create a non-subclassed fake tensor
+                # that, modulo type and attributes, resembles the original tensor.
+                # This can be helpful if you're planning to simulate the subclassness
+                # by hand, e.g., as is done in Dynamo
+                ctx = contextlib.nullcontext()
+                if ignore_subclass:
+                    ctx = torch._C.DisableTorchFunction()
+                with ctx:
+                    r = self.meta_tensor(
+                        t, shape_env=shape_env, callback=callback, source=source
+                    )
                 # TODO: this is suspicious, now that we have callback argument
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(r, requires_grad=r.requires_grad)

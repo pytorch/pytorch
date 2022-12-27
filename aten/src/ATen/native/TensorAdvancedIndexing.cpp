@@ -135,6 +135,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 namespace at {
@@ -458,7 +459,7 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
     }
   }
 
-  auto info = at::native::make_info(self, indices);
+  auto info = at::native::make_info(self, std::move(indices));
   build_index_op(*this, info, result);
   return TORCH_PRECOMPUTE_STRUCT2(index, Tensor)()
       .set_sizes(std::move(info.indexed_sizes))
@@ -1512,10 +1513,6 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& index,
  const Tensor& src,
  const Tensor& out) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries, src is a tensor,
-  // and reduce=None
-  at::globalContext().alertNotDeterministic("scatter with src tensor and reduce=None");
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub);

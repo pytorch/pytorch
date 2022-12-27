@@ -154,8 +154,8 @@ def _collate_helper(conversion, item):
             try:
                 import torcharrow.pytorch as tap  # type: ignore[import]
                 collation_fn = tap.rec.Default()
-            except Exception:
-                raise Exception("unable to import default collation function from the TorchArrrow")
+            except Exception as e:
+                raise Exception("unable to import default collation function from the TorchArrow") from e
 
         tuple_names.append(str(name))
         value = collation_fn(df[name])

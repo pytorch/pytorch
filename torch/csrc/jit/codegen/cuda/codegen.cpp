@@ -1236,7 +1236,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const LoadStoreOp* ldst) {
+  void handle(const LoadStoreOp* ldst) final {
     // TODO:
     //  Need to gradually merge the code path of this
     //   with UnaryOp::Set for vectorization.

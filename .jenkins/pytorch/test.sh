@@ -6,6 +6,9 @@
 
 set -ex
 
+echo "Environment variables:"
+env
+
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
@@ -16,6 +19,7 @@ BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
 export VALGRIND=ON
+export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
@@ -215,6 +219,7 @@ test_dynamo_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+  python tools/dynamo/verify_dynamo.py
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
   time python test/run_test.py \
@@ -235,7 +240,7 @@ test_dynamo_shard() {
       test_python_dispatch \
       test_fx \
       test_package \
-      test_vmap \
+      test_legacy_vmap \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
@@ -249,26 +254,63 @@ test_inductor_distributed() {
 }
 
 test_inductor() {
-  python test/run_test.py --include test_modules --verbose
-  # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
-  # seen intest_ops_gradients.py
-  # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
+  python tools/dynamo/verify_dynamo.py
+  python test/run_test.py --include test_modules test_ops test_ops_gradients test_torch --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
 }
 
-test_inductor_huggingface_shard() {
-  if [[ -z "$NUM_TEST_SHARDS" ]]; then
-    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
-    exit 1
-  fi
+test_inductor_benchmark() {
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  PARTITION_FLAGS=""
+  if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
+    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
+  fi
   mkdir -p "$TEST_REPORTS_DIR"
-  python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
+  # Check inference with --float32
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/$1.py --ci --accuracy \
+    --device cuda --inductor --float32 $PARTITION_FLAGS --output "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
+  # Check training with --amp
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/$1.py --ci --training --accuracy \
+    --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+  # Check training with symbolic shapes (not actually inductor)
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/$1.py --ci --training --accuracy --dynamic-shapes \
+    --device cuda --backend aot_eager $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_$1.csv
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_$1.csv
+}
+
+test_inductor_benchmark_perf() {
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  PARTITION_FLAGS=""
+  if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
+    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
+  fi
+  mkdir -p "$TEST_REPORTS_DIR"
+  # Check training with --amp
+  # Not checking accuracy for perf test for now
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
+    --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+}
+test_inductor_huggingface() {
+  test_inductor_benchmark huggingface
+}
+
+test_inductor_huggingface_perf() {
+  test_inductor_benchmark_perf huggingface
 }
 
 test_inductor_timm_shard() {
@@ -276,15 +318,23 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  # Use test-reports directory under test folder will allow the CI to automatically pick up
-  # the test reports and upload them to S3. Need to use full path here otherwise the script
-  # will bark about file not found later on
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir -p "$TEST_REPORTS_DIR"
-  python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
+  test_inductor_benchmark timm_models "$1"
+}
+
+test_inductor_timm_perf_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  test_inductor_benchmark_perf timm_models "$1"
+}
+
+test_inductor_torchbench() {
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench
+}
+
+test_inductor_torchbench_perf() {
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark_perf torchbench
 }
 
 test_python_gloo_with_tls() {
@@ -698,6 +748,13 @@ test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
 
+test_executorch() {
+  # Test torchgen generated code for Executorch.
+  echo "Testing Executorch op registration"
+  "$BUILD_BIN_DIR"/test_edge_op_registration
+  assert_git_not_dirty
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -741,25 +798,44 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
-elif [[ "${TEST_CONFIG}" == *inductor_timm* && $SHARD_NUMBER -lt 3 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
+    test_inductor_huggingface_perf
+  else
+    test_inductor_huggingface
+  fi
+elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_timm
   id=$((SHARD_NUMBER-1))
-  test_inductor_timm_shard $id
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
+    test_inductor_timm_perf_shard $id
+  else
+    test_inductor_timm_shard $id
+  fi
+elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  install_triton
+  checkout_install_torchbench
+  if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
+    test_inductor_torchbench_perf
+  else
+    test_inductor_torchbench
+  fi
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   test_inductor
   test_inductor_distributed
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  install_huggingface
-  test_inductor_huggingface_shard 0
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -806,4 +882,5 @@ else
   test_custom_backend
   test_torch_function_benchmark
   test_benchmarks
+  test_executorch
 fi

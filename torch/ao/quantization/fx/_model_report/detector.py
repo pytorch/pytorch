@@ -10,7 +10,7 @@ from torch.ao.quantization.fx._model_report.model_report_observer import ModelRe
 from torch.ao.quantization.qconfig import (
     QConfig,
     default_qconfig,
-    assert_valid_qconfig,
+    _assert_valid_qconfig,
 )
 from torch.ao.quantization.observer import (
     ObserverBase,
@@ -23,7 +23,7 @@ from torch.ao.quantization.fx._equalize import (
     default_equalization_qconfig,
     EqualizationQConfig,
 )
-from torch.ao.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.observer import _is_activation_post_process
 
 # Names for observer insert keys
 DETECTOR_TARGET_NODE_KEY = "target_node"
@@ -43,7 +43,7 @@ class DetectorQConfigInfo():
 
     Args:
         module_fqn (str): The fully qualified name (fqn) of the module that this
-            information contains info relavent to qconfig for
+            information contains info relevant to qconfig for
     """
 
     def __init__(self, module_fqn: str):
@@ -84,7 +84,7 @@ class DetectorQConfigInfo():
             weight = default_per_channel_weight_observer if rec[1] else default_weight_observer
             test_config = QConfig(activation, weight)
             try:
-                assert_valid_qconfig(test_config, module)
+                _assert_valid_qconfig(test_config, module)
                 module_qconfig = test_config
                 break
             except AssertionError:
@@ -282,7 +282,7 @@ class PerChannelDetector(DetectorBase):
         Each entry maps the fully-qualified-name to information on whether per_channel quantization.
 
         Args:
-            module: The current module that is being checked to see if it is per_channel qunatizable
+            model: The current module that is being checked to see if it is per_channel quantizable
 
         Returns dictionary mapping fqns to if per_channel quantization is possible
         """
@@ -811,8 +811,8 @@ class InputWeightEqualizationDetector(DetectorBase):
         # find the range of weights
         weight_values: Dict[str, Dict] = self._extract_weight_info(model)
 
-        # calculate per_channel comparision statistic s_c
-        comp_stats: Dict[str, torch.Tensor] = self._generate_comparision_values(input_values, weight_values)
+        # calculate per_channel comparison statistic s_c
+        comp_stats: Dict[str, torch.Tensor] = self._generate_comparison_values(input_values, weight_values)
 
         # generate the return dictionary
         input_weight_equalization_info: Dict[str, Dict] = self._generate_dict_info(input_values, weight_values, comp_stats)
@@ -879,7 +879,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     def _extract_input_info(self, model: GraphModule) -> Dict[str, Dict]:
         r"""
-        Takes in a callibrated GraphModule and then finds the relevant observers.
+        Takes in a calibrated GraphModule and then finds the relevant observers.
         It then extracts the input information for each observer returns it
 
         Args
@@ -912,7 +912,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     def _extract_weight_info(self, model: GraphModule) -> Dict[str, Dict]:
         r"""
-        Takes in a callibrated GraphModule and then finds the relavent observers.
+        Takes in a calibrated GraphModule and then finds the relavent observers.
         It then extracts the weight information for each layer an observer is attached to.
 
         Args
@@ -993,7 +993,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         return ratio
 
-    def _generate_comparision_values(self, input_info: Dict, weight_info: Dict) -> Dict[str, torch.Tensor]:
+    def _generate_comparison_values(self, input_info: Dict, weight_info: Dict) -> Dict[str, torch.Tensor]:
         r"""
         Takes in the information on the min and max values of the inputs and weights and:
             Calculates the comp stat for each channel: s_c = sqrt(w_c/W)/sqrt(i_c/I)
@@ -1101,7 +1101,6 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         Args:
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
-            weight_info (Dict): Maps modules of interest to information on their weights to be analyzed
 
         Returns a tuple with two elements:
             String report of of whether input weight equalization is recommended for certain modules
@@ -1120,8 +1119,8 @@ class InputWeightEqualizationDetector(DetectorBase):
         # find the range of weights
         weight_values: Dict[str, Dict] = self._extract_weight_info(model)
 
-        # calculate per_channel comparision statistic s_c
-        comp_stats: Dict[str, torch.Tensor] = self._generate_comparision_values(input_values, weight_values)
+        # calculate per_channel comparison statistic s_c
+        comp_stats: Dict[str, torch.Tensor] = self._generate_comparison_values(input_values, weight_values)
 
         # generate the return dictionary
         input_weight_equalization_info: Dict[str, Dict] = self._generate_dict_info(input_values, weight_values, comp_stats)
@@ -1273,7 +1272,7 @@ class OutlierDetector(DetectorBase):
         # case for insertion of module
         # check if the module has any children and isn't observer
         num_children = len(list(module.children()))
-        return num_children == 0 and not is_activation_post_process(module)
+        return num_children == 0 and not _is_activation_post_process(module)
 
     def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
         r""" Returns the DetectorQConfigInfo for each module_fqn relavent
@@ -1346,7 +1345,7 @@ class OutlierDetector(DetectorBase):
         total_batches: int,
     ) -> Dict[str, List[bool]]:
         r"""
-        Gives info on whether the percentile ratios cacluated would be considered outliers
+        Gives info on whether the percentile ratios calculated would be considered outliers
         Also gives information on whether the collected data is statistically significant to make this claim
 
         Args:
@@ -1487,7 +1486,7 @@ class OutlierDetector(DetectorBase):
 
         # suggestion for constant batch check since that can make it no outliers
         constant_str = "\tFor channel {}, we found {} constant value batches. {}\n"
-        constant_suggestion = "We recommend taking a look at the dict and data to see how frequent this occured and why."
+        constant_suggestion = "We recommend taking a look at the dict and data to see how frequent this occurred and why."
 
         # compile the suggestion string
         for module_fqn in info_dict:

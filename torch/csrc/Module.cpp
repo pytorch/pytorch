@@ -9,10 +9,10 @@
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
-#include <ATen/VmapMode.h>
 #include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
@@ -56,6 +56,7 @@
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -83,6 +84,10 @@
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
 #endif
+#endif
+
+#if defined(USE_MPS)
+#include <ATen/mps/MPSDevice.h>
 #endif
 
 #if defined(USE_VALGRIND)
@@ -738,6 +743,27 @@ PyObject* THPModule_allowFP16ReductionCuBLAS(
   Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setAllowBF16ReductionCuBLAS(
+    PyObject* _unused,
+    PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_allow_bf16_reduction_cublas expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowBF16ReductionCuBLAS(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_allowBF16ReductionCuBLAS(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().allowBF16ReductionCuBLAS()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -873,6 +899,13 @@ PyObject* THPModule_getCurrentGraphTaskExecutionOrder(
 PyObject* THPModule_getCurrentGraphTaskId(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(torch::autograd::get_current_graph_task_id());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_getCurrentNode(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return torch::autograd::functionToPyObject(
+      torch::autograd::get_current_node());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1051,6 +1084,14 @@ static PyMethodDef TorchMethods[] = {
      THPModule_setAllowFP16ReductionCuBLAS,
      METH_O,
      nullptr},
+    {"_get_cublas_allow_bf16_reduced_precision_reduction",
+     THPModule_allowBF16ReductionCuBLAS,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cublas_allow_bf16_reduced_precision_reduction",
+     THPModule_setAllowBF16ReductionCuBLAS,
+     METH_O,
+     nullptr},
     {"_vmapmode_increment_nesting",
      THPModule_vmapmode_increment_nesting,
      METH_NOARGS,
@@ -1093,6 +1134,7 @@ static PyMethodDef TorchMethods[] = {
      THPModule_getCurrentGraphTaskId,
      METH_NOARGS,
      nullptr},
+    {"_current_autograd_node", THPModule_getCurrentNode, METH_NOARGS, nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
      METH_NOARGS,
@@ -1119,8 +1161,8 @@ static PyMethodDef TorchMethods[] = {
      METH_O,
      nullptr},
     {"_has_torch_function_variadic",
-     MAYBE_WRAP_FASTCALL(THPModule_has_torch_function_variadic),
-     MAYBE_METH_FASTCALL,
+     (PyCFunction)(void (*)(void))THPModule_has_torch_function_variadic,
+     METH_FASTCALL,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
@@ -1407,10 +1449,10 @@ Call this whenever a new thread is created in order to propagate values from
          const at::Tensor& weight,
          const c10::optional<at::Tensor>& bias_opt,
          at::IntArrayRef stride_,
-         at::IntArrayRef padding_,
+         at::SymIntArrayRef padding_,
          at::IntArrayRef dilation_,
          bool transposed_,
-         at::IntArrayRef output_padding_,
+         at::SymIntArrayRef output_padding_,
          int64_t groups_) {
         return at::native::select_conv_backend(
             input,
@@ -1441,13 +1483,13 @@ Call this whenever a new thread is created in order to propagate values from
          const at::Tensor& weight,
          const c10::optional<at::Tensor>& bias,
          at::IntArrayRef stride_,
-         at::IntArrayRef padding_,
+         at::SymIntArrayRef padding_,
          at::IntArrayRef dilation_,
          bool transposed_,
-         at::IntArrayRef output_padding_,
+         at::SymIntArrayRef output_padding_,
          int64_t groups_,
-         c10::optional<std::vector<int64_t>> bias_sizes_opt) {
-        c10::OptionalArrayRef<int64_t> ref = c10::nullopt;
+         c10::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
+        c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
         if (bias_sizes_opt) {
           ref = (*bias_sizes_opt);
         }
@@ -1505,6 +1547,13 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
   ASSERT_TRUE(set_module_attr("has_mps", has_mps));
   py_module.def("_is_mps_available", []() { return at::hasMPS(); });
+  py_module.def("_is_mps_on_macos_13_or_newer", []() {
+#ifdef USE_MPS
+    return at::mps::is_macos_13_or_newer();
+#else
+    return false;
+#endif
+  });
 
   ASSERT_TRUE(
       set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
@@ -1544,6 +1593,12 @@ Call this whenever a new thread is created in order to propagate values from
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });
   py_module.def(
       "_set_neg", [](const at::Tensor& x, bool neg) { x._set_neg(neg); });
+  py_module.def("_get_tensor_metadata", &torch::jit::getTensorMetadata);
+  py_module.def(
+      "_set_tensor_metadata",
+      static_cast<void (*)(
+          const at::Tensor&, std::unordered_map<std::string, bool>)>(
+          torch::jit::setTensorMetadata));
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
   });

@@ -56,6 +56,7 @@ class Transformer(Module):
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(Transformer, self).__init__()
+        torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
 
         if custom_encoder is not None:
             self.encoder = custom_encoder
@@ -186,18 +187,26 @@ class TransformerEncoder(Module):
 
     def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
         super(TransformerEncoder, self).__init__()
+        torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
         self.enable_nested_tensor = enable_nested_tensor
         self.mask_check = mask_check
 
-    def forward(self, src: Tensor, mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+            self,
+            src: Tensor,
+            mask: Optional[Tensor] = None,
+            src_key_padding_mask: Optional[Tensor] = None,
+            is_causal: bool = False) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
 
         Args:
             src: the sequence to the encoder (required).
             mask: the mask for the src sequence (optional).
+            is_causal: If specified, applies a causal mask as mask (optional). Mutually exclusive with providing mask.
+                Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
@@ -276,8 +285,18 @@ class TransformerEncoder(Module):
                 output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
                 src_key_padding_mask_for_layers = None
 
+        # Prevent type refinement
+        make_causal = False
+        if mask is not None:
+            if is_causal:
+                raise RuntimeError("specify either mask or is_causal, but not both")
+
+        if make_causal:
+            is_causal = True
+            mask = None
+
         for mod in self.layers:
-            output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask_for_layers)
+            output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
 
         if convert_to_nested:
             output = output.to_padded_tensor(0.)
@@ -307,6 +326,7 @@ class TransformerDecoder(Module):
 
     def __init__(self, decoder_layer, num_layers, norm=None):
         super(TransformerDecoder, self).__init__()
+        torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
@@ -434,13 +454,19 @@ class TransformerEncoderLayer(Module):
             self.activation = F.relu
 
 
-    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None,
-                src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+            self,
+            src: Tensor,
+            src_mask: Optional[Tensor] = None,
+            src_key_padding_mask: Optional[Tensor] = None,
+            is_causal: bool = False) -> Tensor:
         r"""Pass the input through the encoder layer.
 
         Args:
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
+            is_causal: If specified, applies a causal mask as src_mask. Mutually exclusive with providing src_mask.
+              Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
@@ -467,9 +493,7 @@ class TransformerEncoderLayer(Module):
         elif not (self.norm1.eps == self.norm2.eps):
             why_not_sparsity_fast_path = "norm1.eps is not equal to norm2.eps"
         elif src.is_nested and (src_key_padding_mask is not None or src_mask is not None):
-            why_not_sparsity_fast_path = "src_key_padding_mask and src_mask are not supported with NestedTensor input"
-        elif (not src.is_nested) and (src_key_padding_mask is not None and src_mask is not None):
-            why_not_sparsity_fast_path = "src_key_padding_mask and src_mask were both supplied"
+            why_not_sparsity_fast_path = "neither src_key_padding_mask nor src_mask are not supported with NestedTensor input"
         elif self.self_attn.num_heads % 2 == 1:
             why_not_sparsity_fast_path = "num_head is odd"
         elif torch.is_autocast_enabled():
@@ -502,6 +526,7 @@ class TransformerEncoderLayer(Module):
                                               "input/output projection weights or biases requires_grad")
 
             if not why_not_sparsity_fast_path:
+                merged_mask, mask_type = self.self_attn.merge_masks(src_mask, src_key_padding_mask, src)
                 return torch._transformer_encoder_layer_fwd(
                     src,
                     self.self_attn.embed_dim,
@@ -521,11 +546,8 @@ class TransformerEncoderLayer(Module):
                     self.linear1.bias,
                     self.linear2.weight,
                     self.linear2.bias,
-                    # TODO: if src_mask and src_key_padding_mask merge to single 4-dim mask
-                    src_mask if src_mask is not None else src_key_padding_mask,
-                    1 if src_key_padding_mask is not None else
-                    0 if src_mask is not None else
-                    None,
+                    merged_mask,
+                    mask_type,
                 )
 
 
@@ -624,8 +646,17 @@ class TransformerDecoderLayer(Module):
             state['activation'] = F.relu
         super(TransformerDecoderLayer, self).__setstate__(state)
 
-    def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None, memory_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self,
+        tgt: Tensor,
+        memory: Tensor,
+        tgt_mask: Optional[Tensor] = None,
+        memory_mask: Optional[Tensor] = None,
+        tgt_key_padding_mask: Optional[Tensor] = None,
+        memory_key_padding_mask: Optional[Tensor] = None,
+        tgt_is_causal: bool = False,
+        memory_is_causal: bool = False,
+    ) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:
@@ -635,7 +666,10 @@ class TransformerDecoderLayer(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-
+            tgt_is_causal: If specified, applies a causal mask as tgt mask.
+                Mutually exclusive with providing tgt_mask. Default: ``False``.
+            memory_is_causal: If specified, applies a causal mask as tgt mask.
+                Mutually exclusive with providing memory_mask. Default: ``False``.
         Shape:
             see the docs in Transformer class.
         """
@@ -643,31 +677,33 @@ class TransformerDecoderLayer(Module):
 
         x = tgt
         if self.norm_first:
-            x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask)
-            x = x + self._mha_block(self.norm2(x), memory, memory_mask, memory_key_padding_mask)
+            x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal)
+            x = x + self._mha_block(self.norm2(x), memory, memory_mask, memory_key_padding_mask, memory_is_causal)
             x = x + self._ff_block(self.norm3(x))
         else:
-            x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask))
-            x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask))
+            x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask, tgt_is_causal))
+            x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask, memory_is_causal))
             x = self.norm3(x + self._ff_block(x))
 
         return x
 
     # self-attention block
     def _sa_block(self, x: Tensor,
-                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
+                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool = False) -> Tensor:
         x = self.self_attn(x, x, x,
                            attn_mask=attn_mask,
                            key_padding_mask=key_padding_mask,
+                           is_causal=is_causal,
                            need_weights=False)[0]
         return self.dropout1(x)
 
     # multihead attention block
     def _mha_block(self, x: Tensor, mem: Tensor,
-                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
+                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool = False) -> Tensor:
         x = self.multihead_attn(x, mem, mem,
                                 attn_mask=attn_mask,
                                 key_padding_mask=key_padding_mask,
+                                is_causal=is_causal,
                                 need_weights=False)[0]
         return self.dropout2(x)
 

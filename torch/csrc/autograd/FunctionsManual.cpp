@@ -5,9 +5,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
@@ -571,7 +571,7 @@ Tensor permute_backwards(const Tensor& grad, IntArrayRef fwd_dims) {
 Tensor rad2deg_backward(const Tensor& grad) {
   constexpr double M_180_PI =
       57.295779513082320876798154814105170332405472466564;
-  return at::mul(grad, at::native::wrapped_scalar_tensor(Scalar(M_180_PI)));
+  return at::mul(grad, Scalar(M_180_PI));
 }
 
 Tensor deg2rad_backward(const Tensor& grad) {
@@ -905,7 +905,7 @@ std::vector<Tensor> cat_tensors_backward(
       grad_inputs[i] = at::zeros({0}, grad_val.options());
       continue;
     }
-    auto size = shape[dim];
+    const auto& size = shape[dim];
     accumulate += size;
     grad_inputs[i] = grad_val.narrow_symint(dim, accumulate - size, size);
   }
@@ -1410,7 +1410,7 @@ Tensor repeat_backward(
   at::SymDimVector grad_size;
   at::DimVector sum_dims;
   for (const auto dim : c10::irange(input_dims)) {
-    auto repeat = repeats[dim + num_unsqueezed];
+    const auto& repeat = repeats[dim + num_unsqueezed];
     // Reshape gradient (repeat > 1)
     // Index:      [..., dim    , ...]    [..., dim   ,  dim+1        , ...]
     // Shape: From [..., dimsize, ...] to [..., repeat, dimsize/repeat, ...]
@@ -1625,7 +1625,7 @@ Tensor masked_scatter_backward(
     const Tensor& mask,
     c10::SymIntArrayRef sizes) {
   c10::SymInt numel = 1;
-  for (auto size : sizes) {
+  for (const auto& size : sizes) {
     numel *= size;
   }
   auto mask_selected = grad.masked_select(mask);
@@ -1825,7 +1825,7 @@ Tensor split_with_sizes_backward(
     if (grads[j].defined()) {
       grads_all_defined[j] = grads[j];
     } else {
-      auto length = split_sizes[j];
+      const auto& length = split_sizes[j];
       auto grad_size = sizes.vec();
       grad_size[dim] = length;
       grads_all_defined[j] = at::zeros_symint(grad_size, options);
@@ -1843,7 +1843,7 @@ Tensor split_backward(
     c10::SymIntArrayRef sym_sizes,
     const at::TensorOptions& options) {
   dim = at::maybe_wrap_dim(dim, sym_sizes.size());
-  auto dim_size = sym_sizes[dim];
+  const auto& dim_size = sym_sizes[dim];
   int64_t num_splits = grads.size();
   std::vector<c10::SymInt> split_sizes(num_splits, split_size);
   split_sizes[num_splits - 1] =
@@ -2732,7 +2732,7 @@ static inline bool _maybe_overlapping_memory(
 
     c10::SymInt max_index_in_slice = 0;
     for (auto i : argsort) {
-      auto stride_ = strides[i];
+      const auto& stride_ = strides[i];
       if (stride_ <= max_index_in_slice) {
         return true;
       }
@@ -2751,7 +2751,7 @@ static inline c10::SymInt _min_storage_size(
   c10::SymInt storage_size = storage_offset + 1;
   int64_t dim = sizes.size();
   for (const auto i : c10::irange(dim)) {
-    auto size_i = sizes[i];
+    const auto& size_i = sizes[i];
     if (size_i == 0) {
       return storage_offset;
     }
@@ -2783,8 +2783,8 @@ Tensor as_strided_backward(
   out_sizes_.reserve(odim);
   out_strides_.reserve(odim);
   for (int64_t i = odim - 1; i >= 0; i--) {
-    auto size_i = sym_sizes[i];
-    auto stride_i = sym_strides[i];
+    const auto& size_i = sym_sizes[i];
+    const auto& stride_i = sym_strides[i];
     if (size_i == 0) {
       return at::zeros_symint(input_geometry.sym_sizes(), grad.options());
     } else if (size_i == 1) {
@@ -2814,8 +2814,8 @@ Tensor as_strided_backward(
   inp_sizes_.reserve(idim);
   inp_strides_.reserve(idim);
   for (int64_t i = idim - 1; i >= 0; i--) {
-    auto size_i = inp_sizes[i];
-    auto stride_i = inp_strides[i];
+    const auto& size_i = inp_sizes[i];
+    const auto& stride_i = inp_strides[i];
     if (size_i == 0) {
       return at::zeros_symint(input_geometry.sym_sizes(), grad.options());
     } else if (size_i != 1) {
@@ -3099,7 +3099,7 @@ Tensor prelu_backward_weight_jvp(
     }
   }
   const auto dw = dw_full.sum(reduction_dims);
-  return dw;
+  return dw.view_as(w);
 }
 
 Tensor gelu_double_backward(
@@ -4846,7 +4846,7 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
     // materialized so if self is strided and grad is sparse nothing unepected
     // happens memory wise
     TORCH_WARN(
-        "log1p_backward: recived self with sparse layout, but backward requires materialization of a dense tensor with this shape");
+        "log1p_backward: received self with sparse layout, but backward requires materialization of a dense tensor with this shape");
     self_p1_conj = (self.to_dense() + 1).conj();
   } else {
     // Although calling self.to_dense() would just return self when it has
@@ -4891,10 +4891,10 @@ Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
   return at::constant_pad_nd_symint(grad, negated_pad, 0);
 }
 
-Tensor embedding_dense_double_backward(
+Tensor embedding_dense_double_backward_symint(
     const Tensor& grad,
     const Tensor& indices,
-    int64_t padding_idx) {
+    c10::SymInt padding_idx) {
   // since first backward takes care of scaling by frequency,
   // we don't need to worry about it here.
   auto gg_weight = grad.index_select(0, indices.reshape(-1));
@@ -6767,6 +6767,22 @@ Tensor take_backward(
     return grad_self.put(indices, grad, true);
   }
   return grad_self.put_(indices, grad, true);
+}
+
+Tensor to_sparse_backward(
+    const Tensor& grad,
+    const c10::Layout self_layout,
+    const c10::OptionalArrayRef<c10::SymInt>& self_blocksize) {
+  // Path for strided and nested
+  if (self_layout == c10::kStrided) {
+    return grad.to_dense();
+  } else {
+    OptionalIntArrayRef blocksize = c10::nullopt;
+    if (self_blocksize.has_value()) {
+      blocksize = c10::asIntArrayRefSlowOpt(*self_blocksize);
+    }
+    return grad.to_sparse(self_layout, blocksize);
+  }
 }
 
 } // namespace details

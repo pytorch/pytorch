@@ -20,6 +20,15 @@ class GradcheckError(RuntimeError):
     pass
 
 
+
+def _is_sparse_compressed_tensor(obj: torch.Tensor):
+    return obj.layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
+
+
+def _is_sparse_any_tensor(obj: torch.Tensor):
+    return _is_sparse_compressed_tensor(obj) or obj.layout is torch.sparse_coo
+
+
 def _is_float_or_complex_tensor(obj):
     return is_tensor_like(obj) and (obj.is_floating_point() or obj.is_complex())
 
@@ -80,7 +89,7 @@ def _iter_tensor(x_tensor):
     #
     # where x is the t.data of the original tensor. Perturbing the entry of x
     # at index (1, 1) yields the 3rd column of the overall Jacobian matrix.
-    if x_tensor.is_sparse:
+    if _is_sparse_any_tensor(x_tensor):
         def get_stride(size):
             dim = len(size)
             tmp = 1
@@ -91,8 +100,35 @@ def _iter_tensor(x_tensor):
             return stride
         x_nnz = x_tensor._nnz()
         x_size = list(x_tensor.size())
-        x_indices = x_tensor._indices().t()
-        x_values = x_tensor._values()
+        if x_tensor.layout is torch.sparse_coo:
+            x_indices = x_tensor._indices().t()
+            x_values = x_tensor._values()
+        elif x_tensor.layout is torch.sparse_csr:
+            x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.crow_indices(), x_tensor.col_indices()).t()
+            x_values = x_tensor.values()
+        elif x_tensor.layout is torch.sparse_csc:
+            x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True).t()
+            x_values = x_tensor.values()
+        elif x_tensor.layout is torch.sparse_bsr:
+            x_block_values = x_tensor.values()
+            x_blocksize = x_block_values.size()[1:3]
+            x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.crow_indices(), x_tensor.col_indices()) \
+                             .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1) \
+                             .mul_(torch.tensor(x_blocksize).reshape(2, 1)) \
+                             .add_(torch.stack(torch.where(torch.ones(x_blocksize))).repeat(1, x_nnz)).t()
+            x_values = x_block_values.flatten(0, 2)
+            x_nnz = x_values.size(0)
+        elif x_tensor.layout is torch.sparse_bsc:
+            x_block_values = x_tensor.values()
+            x_blocksize = x_block_values.size()[1:3]
+            x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True) \
+                             .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1) \
+                             .mul_(torch.tensor(x_blocksize).reshape(2, 1)) \
+                             .add_(torch.stack(torch.where(torch.ones(x_blocksize))).repeat(1, x_nnz)).t()
+            x_values = x_block_values.flatten(0, 2)
+            x_nnz = x_values.size(0)
+        else:
+            raise NotImplementedError(f'_iter_tensor for {x_tensor.layout} input')
         x_stride = get_stride(x_size)
         # Use .data here to get around the version check
         x_values = x_values.data
@@ -249,7 +285,7 @@ def _prepare_input(input: torch.Tensor, maybe_perturbed_input: Optional[torch.Te
             return maybe_perturbed_input.to_mkldnn()
         else:
             return input
-    elif input.layout == torch.sparse_coo:
+    elif _is_sparse_any_tensor(input):
         if fast_mode and maybe_perturbed_input is not None:
             # entry is already a "cloned" version of the original tensor
             # thus changes to entry are not reflected in the input
@@ -386,7 +422,7 @@ def _get_input_to_perturb(input):
     if input.layout == torch._mkldnn:  # type: ignore[attr-defined] # no attr _mkldnn
         # Convert to dense so we can perform operations that require strided tensors
         input_to_perturb = input.to_dense()
-    elif input.layout == torch.sparse_coo:
+    elif _is_sparse_any_tensor(input):
         # Clone because input may require grad, and copy_ calls resize_,
         # which is not allowed for .data
         input_to_perturb = input.clone()
@@ -414,10 +450,10 @@ def _get_numerical_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn):
 def _reshape_tensor_or_tuple(u, shape):
     # We don't need to reshape when input corresponding to u is sparse
     if isinstance(u, tuple):
-        if u[0].layout != torch.sparse_coo:
+        if not _is_sparse_any_tensor(u[0]):
             return (u[0].reshape(shape), u[1].reshape(shape))
     else:
-        if u.layout != torch.sparse_coo:
+        if not _is_sparse_any_tensor(u):
             return u.reshape(shape)
     return u
 
@@ -642,7 +678,7 @@ def _get_analytical_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[L
 
 
 def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
-    if not check_sparse_nnz and any(t.is_sparse or t.is_sparse_csr for t in tupled_inputs if isinstance(t, torch.Tensor)):
+    if not check_sparse_nnz and any(_is_sparse_any_tensor(t) for t in tupled_inputs if isinstance(t, torch.Tensor)):
         raise GradcheckError('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
@@ -656,7 +692,7 @@ def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
                     'not of double precision floating point or complex. ')
             if inp.is_sparse:
                 content = inp._values()
-            elif inp.is_sparse_csr:
+            elif _is_sparse_compressed_tensor(inp):
                 content = inp.values()
             else:
                 content = inp
@@ -679,7 +715,7 @@ def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
 
 
 def _check_outputs(outputs) -> None:
-    if any(t.layout == torch.sparse_coo for t in outputs if isinstance(t, torch.Tensor)):
+    if any(_is_sparse_any_tensor(t) for t in outputs if isinstance(t, torch.Tensor)):
         # it is easier to call to_dense() on the sparse output than
         # to modify analytical jacobian
         raise ValueError('Sparse output is not supported at gradcheck yet. '
@@ -801,7 +837,7 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
         except RuntimeError as ex:
             # Rethrow to provide a better error message
             raise GradcheckError(
-                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG_FWD_AD}')
+                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG_FWD_AD}') from ex
 
         for input_idx, (res, exp) in enumerate(zip(result, expected)):
             if torch.allclose(res, exp):
@@ -834,7 +870,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
     # NB: this doesn't work for CUDA tests: https://github.com/pytorch/pytorch/issues/50209
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="There is a performance drop")
-        warnings.filterwarnings("ignore", message="Please use functorch.vmap")
+        warnings.filterwarnings("ignore", message="Please use torch.vmap")
         try:
             result = vmap(vjp)(torch.stack(grad_outputs))
         except RuntimeError as ex:
@@ -843,7 +879,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
             # autograd.grad instead of the C++ traceback of what line in the
             # backward formula
             raise GradcheckError(
-                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG}')
+                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG}') from ex
 
     for input_idx, (res, exp) in enumerate(zip(result, expected)):
         if torch.allclose(res, exp):
@@ -866,11 +902,12 @@ def _test_backward_mul_by_grad_output(outputs, inputs, check_sparse_nnz) -> bool
         if isinstance(gi, torch.Tensor) and gi.layout != torch.strided:
             if gi.layout != di.layout:
                 raise GradcheckError('grad is incorrect layout (' + str(gi.layout) + ' is not ' + str(di.layout) + ')')
-            if gi.layout == torch.sparse_coo:
+            if _is_sparse_any_tensor(gi):
+                sparse_kind = str(gi.layout).replace('torch.', '').replace('_coo', '')
                 if gi.sparse_dim() != di.sparse_dim():
-                    raise GradcheckError('grad is sparse tensor, but has incorrect sparse_dim')
+                    raise GradcheckError(f'grad is {sparse_kind} tensor, but has incorrect sparse_dim')
                 if gi.dense_dim() != di.dense_dim():
-                    raise GradcheckError('grad is sparse tensor, but has incorrect dense_dim')
+                    raise GradcheckError(f'grad is {sparse_kind} tensor, but has incorrect dense_dim')
             gi = gi.to_dense()
             di = di.to_dense()
 
@@ -958,12 +995,12 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
         try:
             grads_input = torch.autograd.grad(output_to_check, diff_input_list,
                                               grads_output, allow_unused=True)
-        except RuntimeError:
+        except RuntimeError as e:
             warn_bc_breaking()
             raise GradcheckError((
                 'Expected backward function to handle undefined output grads. '
                 'Please look at "Notes about undefined output gradients" in '
-                '"tools/autograd/derivatives.yaml"'))
+                '"tools/autograd/derivatives.yaml"')) from e
 
         for gi, i in zip(grads_input, diff_input_list):
             if (gi is not None) and (not gi.eq(0).all()):
@@ -1164,9 +1201,21 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
         dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
         values = torch.rand(x_values.numel(), generator=generator) \
             .to(dtype=dtype, device=x.device) \
-            .reshape(x_values.shape)
+            .view(x_values.shape)
         values /= values.norm()
         vec = torch.sparse_coo_tensor(x._indices(), values, x.size())
+    elif _is_sparse_compressed_tensor(x):
+        if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            compressed_indices, plain_indices = x.crow_indices(), x.col_indices()
+        else:
+            compressed_indices, plain_indices = x.ccol_indices(), x.row_indices()
+        x_values = x.values()
+        dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
+        values = torch.rand(x_values.numel(), generator=generator) \
+            .to(dtype=dtype, device=x.device) \
+            .view(x_values.shape)
+        values /= values.norm()
+        vec = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, x.size(), layout=x.layout)
     else:
         dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
         vec = torch.rand(x.numel(), generator=generator).to(dtype=dtype, device=x.device)
@@ -1189,6 +1238,7 @@ def _adjusted_atol(atol, u, v):
     # matrix): v^T M u = \sum_{i} \sum_{j} u_i * v_j = (\sum_{i} u_i)(\sum_{i} v_i)
     # TODO: properly handle case when u is tuple instead of only taking first element
     u = u[0] if isinstance(u, tuple) else u
+    # TODO: replace torch.sparse.sum(u) with u.sum()
     sum_u = torch.sparse.sum(u) if u.layout == torch.sparse_coo else u.sum()
     sum_v = 1. if v is None else torch.sparse.sum(v) if v.layout == torch.sparse_coo else v.sum()
     return atol * float(sum_u) * float(sum_v)
@@ -1241,7 +1291,7 @@ def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output
 
 
 def _to_flat_dense_if_sparse(tensor):
-    if tensor.layout == torch.sparse_coo:
+    if _is_sparse_any_tensor(tensor):
         return tensor.to_dense().reshape(-1)
     else:
         return tensor

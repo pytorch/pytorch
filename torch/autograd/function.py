@@ -1,12 +1,15 @@
 import torch
 import torch._C as _C
 from torch._C import _functions
+import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._six import with_metaclass
+from torch.autograd.grad_mode import _DecoratorContextManager
 import functools
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional
+from torch._functorch.autograd_function import custom_function_call
 
 __all__ = ["FunctionCtx", "BackwardCFunction", "FunctionMeta", "Function", "once_differentiable", "traceable",
            "InplaceFunction", "NestedIOFunction"]
@@ -199,12 +202,12 @@ class FunctionCtx(object):
         self.non_differentiable = args
 
     def set_materialize_grads(self, value: bool):
-        r"""Sets whether to materialize output grad tensors. Default is ``True``.
+        r"""Sets whether to materialize grad tensors. Default is ``True``.
 
         **This should be called only from inside the** :func:`forward` **method**
 
-        If ``True``, undefined output grad tensors will be expanded to tensors full
-        of zeros prior to calling the :func:`backward` method.
+        If ``True``, undefined grad tensors will be expanded to tensors full of zeros
+        prior to calling the :func:`backward` and :func:`jvp` methods.
 
         Example::
             >>> class SimpleFunc(Function):
@@ -290,54 +293,7 @@ class FunctionMeta(type):
 
 
 # mypy doesn't understand `with_metaclass` from torch._six
-class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _HookMixin)):  # type: ignore[misc]
-    r"""Base class to create custom `autograd.Function`
-
-    To create a custom `autograd.Function`, subclass this class and implement
-    the :meth:`forward` and :meth:`backward` static methods. Then, to use your custom
-    op in the forward pass, call the class method ``apply``. Do not call
-    :meth:`forward` directly.
-
-    To ensure correctness and best performance, make sure you are calling the
-    correct methods on ``ctx`` and validating your backward function using
-    :func:`torch.autograd.gradcheck`.
-
-    See :ref:`extending-autograd` for more details on how to use this class.
-
-    Examples::
-
-        >>> class Exp(Function):
-        >>>     @staticmethod
-        >>>     def forward(ctx, i):
-        >>>         result = i.exp()
-        >>>         ctx.save_for_backward(result)
-        >>>         return result
-        >>>
-        >>>     @staticmethod
-        >>>     def backward(ctx, grad_output):
-        >>>         result, = ctx.saved_tensors
-        >>>         return grad_output * result
-        >>>
-        >>> # Use it by calling the apply method:
-        >>> # xdoctest: +SKIP
-        >>> output = Exp.apply(input)
-    """
-    def __init__(self, *args, **kwargs):
-        cls = self.__class__
-        warnings.warn(f"{cls} should not be instantiated. Methods on autograd functions"
-                      "are all static, so you should invoke them on the class itself. "
-                      "Instantiating an autograd function will raise an "
-                      "error in a future version of PyTorch.", DeprecationWarning)
-
-    def __call__(self, *args, **kwargs):
-        raise RuntimeError(
-            "Legacy autograd function with non-static forward method is deprecated. "
-            "Please use new-style autograd function with static forward method. "
-            "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)")
-
-    # for the tracer
-    is_traceable = False
-
+class _SingleLevelFunction(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _HookMixin)):  # type: ignore[misc]
     @staticmethod
     def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
         r"""Performs the operation.
@@ -409,6 +365,75 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _Hook
         raise NotImplementedError("You must implement the jvp function for custom "
                                   "autograd.Function to use it with forward mode AD.")
 
+
+class Function(_SingleLevelFunction):
+    r"""Base class to create custom `autograd.Function`
+
+    To create a custom `autograd.Function`, subclass this class and implement
+    the :meth:`forward` and :meth:`backward` static methods. Then, to use your custom
+    op in the forward pass, call the class method ``apply``. Do not call
+    :meth:`forward` directly.
+
+    To ensure correctness and best performance, make sure you are calling the
+    correct methods on ``ctx`` and validating your backward function using
+    :func:`torch.autograd.gradcheck`.
+
+    See :ref:`extending-autograd` for more details on how to use this class.
+
+    Examples::
+
+        >>> class Exp(Function):
+        >>>     @staticmethod
+        >>>     def forward(ctx, i):
+        >>>         result = i.exp()
+        >>>         ctx.save_for_backward(result)
+        >>>         return result
+        >>>
+        >>>     @staticmethod
+        >>>     def backward(ctx, grad_output):
+        >>>         result, = ctx.saved_tensors
+        >>>         return grad_output * result
+        >>>
+        >>> # Use it by calling the apply method:
+        >>> # xdoctest: +SKIP
+        >>> output = Exp.apply(input)
+    """
+    def __init__(self, *args, **kwargs):
+        cls = self.__class__
+        warnings.warn(f"{cls} should not be instantiated. Methods on autograd functions"
+                      "are all static, so you should invoke them on the class itself. "
+                      "Instantiating an autograd function will raise an "
+                      "error in a future version of PyTorch.", DeprecationWarning)
+
+    def __call__(self, *args, **kwargs):
+        raise RuntimeError(
+            "Legacy autograd function with non-static forward method is deprecated. "
+            "Please use new-style autograd function with static forward method. "
+            "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)")
+
+    # for the tracer
+    is_traceable = False
+
+    @classmethod
+    def apply(cls, *args, **kwargs):
+        if not torch._C._is_autograd_function_extension_enabled():
+            return super().apply(*args, **kwargs)
+
+        if not torch._C._are_functorch_transforms_active():
+            # See NOTE: [functorch vjp and autograd interaction]
+            args = _functorch.utils.unwrap_dead_wrappers(args)
+            return super().apply(*args, **kwargs)
+
+        if not hasattr(cls, 'setup_context'):
+            # TODO: link documentation in error message
+            # https://github.com/pytorch/pytorch/issues/90224
+            raise RuntimeError(
+                'In order to use an autograd.Function with functorch transforms ',
+                '(vmap, grad, jvp, jacrev, ...), it must have a setup_context ',
+                'staticmethod.')
+
+        return custom_function_call(cls, *args, **kwargs)
+
 def once_differentiable(fn):
 
     @functools.wraps(fn)
@@ -468,6 +493,19 @@ def traceable(fn_cls):
     return fn_cls
 
 
+# Private feature flag. Not user-facing.
+class _set_autograd_function_extension_enabled(_DecoratorContextManager):
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+
+    def __enter__(self):
+        self.prev_state = torch._C._is_autograd_function_extension_enabled()
+        torch._C._set_autograd_function_extension_enabled(self.enabled)
+
+    def __exit__(self, *args, **kwargs):
+        torch._C._set_autograd_function_extension_enabled(self.prev_state)
+
+
 class InplaceFunction(Function):
 
     def __init__(self, inplace=False):
@@ -516,13 +554,11 @@ def _iter_filter(condition, allow_unknown=False, condition_msg=None,
             return
         elif isinstance(obj, (list, tuple)):
             for o in obj:
-                for var in _iter(o):
-                    yield var
+                yield from _iter(o)
         elif isinstance(obj, dict):
             # We only accept primitive key types, so we needn't inspect them
             for o in obj.values():
-                for var in _iter(o):
-                    yield var
+                yield from _iter(o)
         elif allow_unknown:
             yield obj
         else:

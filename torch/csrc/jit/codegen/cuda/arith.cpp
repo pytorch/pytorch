@@ -1297,7 +1297,7 @@ static TensorView* newForReduction(
 
   TORCH_INTERNAL_ASSERT(
       !axes_set.empty(),
-      "Asked for ouput of reduction, but no reduction axis provided.");
+      "Asked for output of reduction, but no reduction axis provided.");
 
   TORCH_INTERNAL_ASSERT(
       (*(axes_set.rbegin())) < orig_domain.size(),
@@ -2678,7 +2678,7 @@ static TensorView* newForMma(
 
   TORCH_INTERNAL_ASSERT(
       !axes_set.empty(),
-      "Asked for ouput of reduction, but no reduction axis provided.");
+      "Asked for output of reduction, but no reduction axis provided.");
 
   TORCH_INTERNAL_ASSERT(
       (*(axes_set.rbegin())) < orig_domain_a.size(),

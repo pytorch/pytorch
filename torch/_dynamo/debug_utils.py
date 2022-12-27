@@ -84,6 +84,11 @@ class NNModuleToString:
 
         for module_name, module in gm.named_children():
             module_str = f"{module.__repr__()}"
+            # module should be a core torch.nn.Module, so all parameters
+            # should be on the same device.
+            example_param = next(module.parameters(), None)
+            if example_param is not None and example_param.is_cuda:
+                module_str = f"{module_str}.cuda()"
             model_str += f"{tab*2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
@@ -95,12 +100,16 @@ class NNModuleToString:
                 tensor_str = (
                     f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
                 )
+            if buffer.is_cuda:
+                tensor_str = f"{tensor_str}.cuda()"
             model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
 
         for param_name, param in gm._parameters.items():
             if param is None:
                 continue
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}))"
+            if param.is_cuda:
+                tensor_str = f"{tensor_str}.cuda()"
             model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
@@ -130,13 +139,9 @@ def _cuda_system_info_comment():
     except FileNotFoundError:
         model_str += "# nvcc not found\n"
 
-    gpu_names = subprocess.run(
-        ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
-        stdout=subprocess.PIPE,
+    gpu_names = Counter(
+        torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())
     )
-    gpu_names = gpu_names.stdout.decode().split("\n")
-    gpu_names = [name for name in gpu_names if name not in ("", "name")]
-    gpu_names = Counter(gpu_names)
 
     model_str += "# GPU Hardware Info: \n"
     for name, count in gpu_names.items():
@@ -145,15 +150,35 @@ def _cuda_system_info_comment():
     return model_str
 
 
+def generate_config_string():
+    import torch._inductor.config
+
+    return textwrap.dedent(
+        f"""\
+import {config.dynamo_import}.config
+import {config.inductor_import}.config
+{config.dynamo_import}.config.load_config({repr(torch._dynamo.config.save_config())})
+{config.inductor_import}.config.load_config({repr(torch._inductor.config.save_config())})
+        """
+    )
+
+
+TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
+
+
 def generate_compiler_repro_string(gm, args):
     model_str = textwrap.dedent(
         f"""
-        import torch
-        from torch import tensor, device
-        import torch.fx as fx
-        from {config.dynamo_import}.testing import rand_strided
-        from math import inf
-        from torch.fx.experimental.proxy_tensor import make_fx
+import torch
+from torch import tensor, device
+import torch.fx as fx
+from {config.dynamo_import}.testing import rand_strided
+from math import inf
+from torch.fx.experimental.proxy_tensor import make_fx
+
+{generate_config_string()}
+
+{TEST_REPLACEABLE_COMMENT}
 
         """
     )
@@ -170,7 +195,7 @@ def generate_compiler_repro_string(gm, args):
     model_str += (
         "args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]\n"
     )
-    model_str += 'mod = make_fx(Repro().to(device="cuda"))(*args)\n'
+    model_str += "mod = make_fx(Repro())(*args)\n"
     return model_str
 
 
@@ -197,7 +222,8 @@ def dump_compiler_graph_state(gm, args, compiler_name):
     log.warning(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
     with open(file_name, "w") as fd:
         save_graph_repro(fd, gm, args, compiler_name)
-    repro_path = os.path.join(config.base_dir, "repro.py")
+    curdir = os.getcwd()
+    repro_path = os.path.join(curdir, "repro.py")
     try:
         shutil.copyfile(file_name, repro_path)
         log.warning(f"Copying repro file for convenience to {repro_path}")
@@ -207,6 +233,12 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
+    sync_line = ""
+    for arg in args:
+        if arg.is_cuda:
+            sync_line = "torch.cuda.synchronize() # Ensures that segfaults are surfaced"
+            break
+
     if "inductor" in compiler_name:
         fd.write(f"import {config.inductor_import}.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
@@ -216,7 +248,10 @@ def save_graph_repro(fd, gm, args, compiler_name):
             textwrap.dedent(
                 f"""
                 compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
-                assert same_two_models(mod, compiled, args, only_fwd=True), "Accuracy failed"
+                class AccuracyError(Exception):
+                    pass
+                if not same_two_models(mod, compiled, args, only_fwd=True):
+                    raise AccuracyError("Bad accuracy detected")
                 """
             )
         )
@@ -225,13 +260,14 @@ def save_graph_repro(fd, gm, args, compiler_name):
             textwrap.dedent(
                 f"""
                 compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
-                compiled(args)
+                ref = compiled(args)
+                {sync_line}
                 """
             )
         )
 
 
-def isolate_fails(fx_g, args, compiler_name: str, env=None):
+def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
     if env is None:
         env = {}
     subdir = os.path.join(os.getcwd(), "isolate")
@@ -239,7 +275,10 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
     with open(file_name, "w") as fd:
-        fd.write(generate_compiler_repro_string(fx_g, args))
+        repro_code = generate_compiler_repro_string(fx_g, args)
+        if patch_code is not None:
+            repro_code = repro_code.replace(TEST_REPLACEABLE_COMMENT, patch_code)
+        fd.write(repro_code)
         fail_fn = COMPILER_REPRO_OPTIONS[compiler_name][2]
         fd.write(
             textwrap.dedent(
@@ -258,11 +297,14 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
                 """
             )
         )
+    with open(file_name, "r") as fd:
+        print(fd.read())
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
     stdout, stderr = TemporaryFile(), TemporaryFile()
     p = subprocess.Popen(
         ["python", file_name],
+        cwd=subdir,
         stdout=stdout,
         stderr=stderr,
         env=new_env,
@@ -274,16 +316,26 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         stderr.seek(0)
         print(textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "))
         print(textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "))
+        # print(f"Isolated test failed - {file_name}")
         return True
     return False
 
 
 def inductor_fails(fx_g, args, check_str=None):
+    has_cuda = False
+    for arg in args:
+        if arg.is_cuda:
+            has_cuda = True
+            break
+
+    def sync():
+        if has_cuda:
+            # Ensures that segfaults are surfaced
+            torch.cuda.synchronize()
+
     compile_fx_inner = import_module(
         f"{config.inductor_import}.compile_fx"
     ).compile_fx_inner
-
-    import_module(f"{config.inductor_import}.config").triton.autotune = False
 
     try:
         result = fx_g(*args)
@@ -291,10 +343,14 @@ def inductor_fails(fx_g, args, check_str=None):
         assert not any([isinstance(x, (tuple, list)) for x in result])
     except Exception:
         return False
+    result = None
+
+    sync()
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
         compile_mod(args)
+        sync()
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
@@ -321,7 +377,7 @@ def helper_for_dump_minify(contents):
             fd.write(contents)
     except OSError as e:
         log.exception(e)
-        raise NotImplementedError("Could not write to {minified_repro_path}")
+        raise NotImplementedError("Could not write to {minified_repro_path}") from e
 
 
 def dump_to_minify(gm, args, compiler_name: str):
@@ -329,6 +385,8 @@ def dump_to_minify(gm, args, compiler_name: str):
 
     contents = textwrap.dedent(
         f"""
+isolate_fails_code_str = None
+
 {generate_compiler_repro_string(gm, args)}
 
 from functools import partial
@@ -343,12 +401,16 @@ env_variables = {{"CUDA_VISIBLE_DEVICES": "{favored_device}"}}
 minifier(
     mod,
     args,
-    module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}"),
+    module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}", patch_code=isolate_fails_code_str),
     dump_state=partial(dump_compiler_graph_state, compiler_name="{compiler_name}"),
 )
         """
     )
     return helper_for_dump_minify(contents)
+
+
+class AccuracyError(Exception):
+    pass
 
 
 def wrap_compiler_debug(compiler_fn, compiler_name: str):
@@ -410,7 +472,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                         copy_tensor_attrs,
                         f"{compiler_name}_accuracy",
                     )
-                    raise ValueError("Bad accuracy detected")
+                    raise AccuracyError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
                     return inner_compiled_fn(real_inputs)
@@ -435,7 +497,8 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                             copy_tensor_attrs,
                             compiler_name,
                         )
-                    raise e
+                    log.error("CompilerError")
+                    raise
 
         if config.repro_after == "aot":
             compiled_fn = deferred_for_real_inputs
@@ -452,7 +515,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
     """
-    from functorch._src.aot_autograd import make_boxed_func
+    from torch._functorch.aot_autograd import make_boxed_func
 
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
@@ -468,10 +531,16 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
         gm.zero_grad(True)
 
     # TorchInductor returned callable expects lists. So, boxing the call.
-    if not hasattr(gm, "_boxed_call") and hasattr(gm, "named_parameters"):
-        orig_named_parameters = gm.named_parameters
+    orig_named_parameters = getattr(gm, "named_parameters", None)
+    orig_named_buffers = getattr(gm, "named_buffers", None)
+    if not hasattr(gm, "_boxed_call") and (
+        orig_named_parameters is not None or orig_named_buffers is not None
+    ):
         gm = make_boxed_func(gm)
-        gm.named_parameters = orig_named_parameters
+        if orig_named_parameters is not None:
+            gm.named_parameters = orig_named_parameters
+        if orig_named_buffers is not None:
+            gm.named_buffers = orig_named_buffers
 
     out = gm(args)
     if only_fwd:
@@ -479,14 +548,27 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     if requires_bwd_pass(out):
         loss = reduce_to_scalar_loss(out)
         loss.backward()
-    return collect_results(gm, out, None, [])
+    return collect_results(gm, out, None, args)
 
 
 def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
     """
     Check two models have same accuracy.
     """
+    from .eval_frame import OptimizedModule
+    from .testing import (
+        named_buffers_for_optimized_module,
+        named_parameters_for_optimized_module,
+    )
     from .utils import same
+
+    if isinstance(gm, OptimizedModule):
+        gm.named_parameters = named_parameters_for_optimized_module(gm)
+        gm.named_buffers = named_buffers_for_optimized_module(gm)
+
+    if isinstance(opt_gm, OptimizedModule):
+        opt_gm.named_parameters = named_parameters_for_optimized_module(opt_gm)
+        opt_gm.named_buffers = named_buffers_for_optimized_module(opt_gm)
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 
@@ -499,7 +581,19 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         log.warning("Could not generate fp64 outputs")
         fp64_ref = None
 
-    res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
+    try:
+        res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
+    except Exception as e:
+        # This means that the the minified graph is bad/exposes a different problem.
+        # As we are checking accuracy here, lets log the exception and return True.
+        log.warning(
+            (
+                "While minifying the program in accuracy minification mode,"
+                "ran into a runtime exception which is likely an unrelated issue."
+                " Skipping this graph."
+            )
+        )
+        return True
 
     passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
     return passing
@@ -544,9 +638,14 @@ with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
             f"""
 mod.eval()
 opt_mod.eval()
+
+class AccuracyError(Exception):
+    pass
+
 with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
     assert same_two_models(mod, mod, args), "Eager itself failed"
-    assert same_two_models(mod, opt_mod, args), "Dynamo failed"
+    if not same_two_models(mod, opt_mod, args):
+        raise AccuracyError("Dynamo failed")
     """
         )
 
@@ -561,12 +660,16 @@ from {config.dynamo_import}.testing import rand_strided
 from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.debug_utils import same_two_models
 
+{generate_config_string()}
+
+{TEST_REPLACEABLE_COMMENT}
+
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
 args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
 
 {model_str}
 
-mod = Repro().cuda()
+mod = Repro()
 opt_mod = {config.dynamo_import}.optimize("{compiler_name}")(mod)
 
 {run_code}
@@ -666,11 +769,27 @@ def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
 
 
 def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
-    compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+    try:
+        compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+    except Exception as e:
+        # This means that the the minified graph is bad/exposes a different problem.
+        # As we are checking accuracy here, lets log the exception and return False.
+        log.warning(
+            (
+                "While minifying the program in accuracy minification mode,"
+                "ran into a runtime exception which is likely an unrelated issue."
+                " Skipping this graph"
+            )
+        )
+        return False
+
     return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
 
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
+
+# Please see NOTE: [Real Tensors in Accuracy Evaluation]
+MINIFIER_SPAWNED = False
 
 
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
@@ -705,6 +824,21 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
     if config.repro_level == 4:
         minifier_backend = "dynamo_accuracy_minifier_backend"
 
+    custom_compiler_error = (
+        textwrap.dedent(
+            """\
+        raise RuntimeError(
+            'Compiler name is None - this likely means that a custom compiler '
+            'was called by torchdynamo. Please remove this error, import your '
+            'custom compiler function, and replace the compiler_name="None" '
+            'line below to compiler_name=<my_imported_custom_function>'
+        )
+        """
+        )
+        if compiler_name is None
+        else ""
+    )
+
     contents = textwrap.dedent(
         f"""
 import os
@@ -718,14 +852,20 @@ from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.optimizations.backends import BACKENDS
 from {config.dynamo_import}.testing import rand_strided
 
+{generate_config_string()}
+
+{TEST_REPLACEABLE_COMMENT}
+
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
 args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
 
 {model_str}
-mod = Repro().cuda()
+mod = Repro()
 
 # Setup debug minifier compiler
+torch._dynamo.debug_utils.MINIFIER_SPAWNED = True
 compiler_fn = BACKENDS["{minifier_backend}"]
+{custom_compiler_error}
 dynamo_minifier_backend = functools.partial(
     compiler_fn,
     compiler_name="{compiler_name}",
@@ -759,7 +899,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
-                compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs, **kwargs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
@@ -769,14 +909,16 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                         example_inputs,
                         compiler_name,
                     )
-                    exc = ValueError("Bad accuracy detected.")
+                    exc = AccuracyError("Bad accuracy detected.")
                     exc.minifier_path = os.path.join(
                         minifier_dir(), "minifier_launcher.py"
                     )
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                    compiled_gm = compiler_fn(
+                        copy.deepcopy(gm), example_inputs, **kwargs
+                    )
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(

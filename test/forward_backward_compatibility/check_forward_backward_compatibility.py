@@ -280,18 +280,20 @@ ALLOW_LIST = [
     ("aten::unsafe_split_with_sizes.out", datetime.date(2022, 9, 1)),
     ("aten::vsplit.array", datetime.date(2022, 9, 1)),
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
-    ("c10d::allreduce_", datetime.date(2022, 10, 1)),
+    ("c10d::_allgather_base_", datetime.date(2022, 12, 30)),
+    ("c10d::_reduce_scatter_base_", datetime.date(2022, 12, 30)),
+    ("c10d::alltoall_", datetime.date(2022, 12, 30)),
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
     ("aten::_flash_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
     ("aten::_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
     # Distributed c10d ops are all going to be updated
-    ("c10d::.*", datetime.date(2022, 10, 31)),
-    ("c10d::allgather_", datetime.date(2022, 10, 1)),
+    ("c10d::.*", datetime.date(2022, 12, 31)),
     ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_tensor", datetime.date(2022, 10, 15)),
     ("aten::_nested_tensor_layer_norm", datetime.date(2022, 10, 15)),
     ("aten::_torch_cuda_cu_linker_symbol_op", datetime.date(2022, 11, 1)),
+    ("aten::_test_inductor_realize", datetime.date(2023, 1, 1)),
 
     ("aten::upsample_linear1d_backward", datetime.date(2022, 12, 15)),
     ("aten::upsample_bicubic2d_backward", datetime.date(2022, 12, 15)),
@@ -317,6 +319,10 @@ ALLOW_LIST = [
     ("aten::_upsample_nearest_exact1d_backward", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d_backward", datetime.date(2022, 12, 15)),
+    ("aten::_flash_scaled_dot_product_attention", datetime.date(2022, 12, 15)),
+    ("aten::_scaled_dot_product_attention_forward", datetime.date(2022, 12, 15)),
+    ("aten::_efficient_attention_backward", datetime.date(2022, 12, 15)),
+    ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
 ]
 
 ALLOW_LIST_COMPILED = [

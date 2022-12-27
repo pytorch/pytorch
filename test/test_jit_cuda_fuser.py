@@ -144,7 +144,7 @@ class TestCudaFuser(JitTestCase):
         disabled_ops = ("aten::batch_norm",
                         "aten::_batch_norm_impl_index",
                         "aten::_batch_norm_impl_index_backward",
-                        "aten::native_batch_norm_backward")
+                        "aten::native_batch_norm_backward",)
         for op in disabled_ops:
             disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
             if disabled_flag:

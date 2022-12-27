@@ -6,6 +6,7 @@ import torch._prims_common as utils
 from torch import Tensor
 from torch._decomp import _add_op_to_registry, global_decomposition_table, meta_table
 from torch._ops import OpOverload
+from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
@@ -14,6 +15,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    make_contiguous_strides_for,
 )
 
 from torch._prims_common.wrappers import out_wrapper
@@ -88,6 +90,13 @@ def meta_randint(
 def meta_randint_low(
     low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
+@register_meta(aten.rand.default)
+def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=None):
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -177,13 +186,30 @@ def meta_angle_out(self, out):
     return out.copy_(torch.angle(self))
 
 
-def squareCheckInputs(self, f_name):
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def squareCheckInputs(self: Tensor, f_name: str):
     assert (
         self.dim() >= 2
     ), f"{f_name}: The input tensor must have at least 2 dimensions."
     assert self.size(-1) == self.size(
         -2
     ), f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
+
+
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def checkFloatingOrComplex(
+    t: Tensor, f_name: str, allow_low_precision_dtypes: bool = True
+):
+    dtype = t.dtype
+    check(
+        t.is_floating_point() or t.is_complex(),
+        lambda: f"{f_name}, : Expected a floating point or complex tensor as input. Got , {dtype}",
+    )
+    if allow_low_precision_dtypes:
+        check(
+            dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
+            lambda: f"{f_name} : Low precision dtypes not supported. Got {dtype}",
+        )
 
 
 def checkUplo(uplo: str):
@@ -203,6 +229,25 @@ def meta_linalg_eigh(self, uplo="L"):
     values.transpose_(-2, -1)
     vectors = self.new_empty(self.shape[:-1])
     return (values, vectors)
+
+
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
+@register_meta(aten.linalg_cholesky_ex.default)
+def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
+    squareCheckInputs(A, "linalg.cholesky")
+    checkFloatingOrComplex(A, "linalg.cholesky")
+
+    A_shape = A.shape
+    ndim = len(A_shape)
+
+    # L
+    L_strides = make_contiguous_strides_for(A_shape, False)
+    L = A.new_empty(A_shape)
+    L.as_strided_(A_shape, L_strides)
+
+    # infos
+    infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
+    return L, infos
 
 
 # From aten/src/ATen/native/ReflectionPad.cpp
@@ -958,8 +1003,8 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     )
     check(p >= 0, lambda: "cdist only supports non-negative p values")
     check(
-        compute_mode >= 0 and compute_mode <= 2,
-        lambda: f"possible modes: 0, 1, 2, but was: {compute_mode}",
+        compute_mode in (None, 1, 2),
+        lambda: f"possible modes: None, 1, 2, but was: {compute_mode}",
     )
     r1 = x1.size(-2)
     r2 = x2.size(-2)
@@ -1166,6 +1211,13 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
 
+@register_meta([aten.round.default, aten.round.decimals])
+def meta_round(self, **kwargs):
+    return _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
 @register_meta(aten.zero.default)
 def meta_zero(self):
     return self.new_empty(self.shape)
@@ -1349,9 +1401,8 @@ def pool2d_shape_check(
     )
 
 
-@register_meta(aten.max_pool2d_with_indices.default)
-def meta_max_pool2d_with_indices(
-    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+def max_pool2d_checks_and_compute_shape(
+    input, kernel_size, stride, padding, dilation, ceil_mode
 ):
     # Reference: aten/src/ATen/native/DilatedMaxPool2d.cpp
     def unpack(name, val):
@@ -1376,6 +1427,9 @@ def meta_max_pool2d_with_indices(
 
     padH, padW = unpack("padding", padding)
     dilationH, dilationW = unpack("dilation", dilation)
+    nInputPlane = input.size(-3)
+    inputHeight = input.size(-2)
+    inputWidth = input.size(-1)
 
     memory_format = utils.suggest_memory_format(input)
     if memory_format == torch.channels_last:
@@ -1393,11 +1447,6 @@ def meta_max_pool2d_with_indices(
             False,
             lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
         )
-
-    nbatch = input.size(-4) if input.dim() == 4 else 1
-    nInputPlane = input.size(-3)
-    inputHeight = input.size(-2)
-    inputWidth = input.size(-1)
 
     outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
     outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, dilationW, ceil_mode)
@@ -1420,6 +1469,49 @@ def meta_max_pool2d_with_indices(
         memory_format,
     )
 
+    return nInputPlane, outputHeight, outputWidth
+
+
+@register_meta(aten.max_pool2d_with_indices_backward.default)
+def meta_max_pool2d_with_indices_backward(
+    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
+):
+    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+        self, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    check(
+        self.dtype == grad_output.dtype,
+        lambda: "expected dtype {self.dtype} for `gradOutput` but got dtype {grad_output.dtype}",
+    )
+
+    nOutputPlane = nInputPlane
+    ndim = self.ndim
+
+    def _check_dim_size(t):
+        check_dim_size(t, ndim, ndim - 3, nOutputPlane)
+        check_dim_size(t, ndim, ndim - 2, outputHeight)
+        check_dim_size(t, ndim, ndim - 1, outputWidth)
+
+    _check_dim_size(grad_output)
+    _check_dim_size(indices)
+
+    memory_format = utils.suggest_memory_format(self)
+    return torch.empty(
+        self.shape, dtype=self.dtype, device=self.device, memory_format=memory_format
+    )
+
+
+@register_meta(aten.max_pool2d_with_indices.default)
+def meta_max_pool2d_with_indices(
+    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+):
+    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+        input, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    nbatch = input.size(-4) if input.dim() == 4 else 1
+    memory_format = utils.suggest_memory_format(input)
     if input.dim() == 3:
         size = [nInputPlane, outputHeight, outputWidth]
     else:
@@ -1434,6 +1526,25 @@ def meta_max_pool2d_with_indices(
     )
 
 
+@register_meta(aten.grid_sampler_2d_backward.default)
+def grid_sampler_2d_backward_meta(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    output_mask,
+):
+    input_requires_grad = output_mask[0]
+    if input_requires_grad:
+        grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
+    else:
+        grad_input = None
+    grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
+    return (grad_input, grad_grid)
+
+
 @register_meta([aten.full.default])
 def full(size, fill_value, *args, **kwargs):
     return torch.empty(size, *args, **kwargs)
@@ -1446,12 +1557,49 @@ def full(size, fill_value, *args, **kwargs):
         aten.randn_like.default,
         aten.rand_like.default,
         aten.full_like.default,
-        aten.zeros_like.default,
         aten.ones_like.default,
     ]
 )
 def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
+
+
+# zeros_like is special cased to work for sparse
+@register_meta(aten.zeros_like.default)
+def zeros_like(
+    self, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
+):
+    if layout == torch.sparse_coo:
+        check(
+            memory_format is None,
+            lambda: "memory format option is only supported by strided tensors",
+        )
+
+        res = torch.empty(
+            0,
+            dtype=self.dtype if dtype is None else dtype,
+            layout=layout,
+            device=self.device if device is None else device,
+            pin_memory=pin_memory,
+        )
+
+        if self.is_sparse:
+            res.sparse_resize_and_clear_(
+                self.size(), self.sparse_dim(), self.dense_dim()
+            )
+        else:
+            res.sparse_resize_and_clear_(self.size(), self.dim(), 0)
+
+        res._coalesced_(True)
+        return res
+    return aten.empty_like.default(
+        self,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+    )
 
 
 # hacky: Please remove after math.ceil works with arange
@@ -1670,6 +1818,395 @@ def meta_scatter_add(self, dim, index, src):
     return self.new_empty(self.shape)
 
 
+@register_meta(aten.scatter_add_)
+def meta_scatter_add_(self, dim, index, src):
+    scatter_meta_impl(self, dim, index, src, "add")
+    return self
+
+
+@register_meta(
+    [
+        aten.scatter.src,
+        aten.scatter.value,
+        aten.scatter.reduce,
+        aten.scatter.value_reduce,
+    ]
+)
+@out_wrapper()
+def meta_scatter(self, dim, index, src_or_value, reduce=None):
+    src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
+    scatter_meta_impl(self, dim, index, src, reduce)
+    return self.new_empty(self.shape)
+
+
+@register_meta(
+    [
+        aten.scatter_.src,
+        aten.scatter_.value,
+        aten.scatter_.reduce,
+        aten.scatter_.value_reduce,
+    ]
+)
+def meta_scatter_(self, dim, index, src_or_value, reduce=None):
+    src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
+    scatter_meta_impl(self, dim, index, src, reduce)
+    return self
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention,
+    ]
+)
+def meta__scaled_dot_product_flash(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float = 0.0,
+    return_softmax: bool = False,
+    is_causal: bool = False,
+):
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    max_seqlen_batch_q = query.size(2)
+    head_dim = query.size(3)
+
+    max_seqlen_batch_k = key.size(2)
+
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    Nnz_q = batch_size * max_seqlen_batch_q
+
+    output = torch.empty(
+        (Nnz_q, num_heads, head_dim), dtype=query.dtype, device=query.device
+    )
+    ouput = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
+        1, 2
+    )
+    max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
+    logsumexp = torch.empty(
+        (batch_size, num_heads, max_seqlen_q),
+        dtype=torch.float,
+        device=query.device,
+    )
+    is_sm80 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+    is_sm75 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5)
+    head_size_rounded = 64 if head_dim <= 64 else 128
+    blocksize_c = (
+        128
+        if (head_size_rounded == 128 and (dropout_p != 0.0 or not is_sm80))
+        or (is_sm75 and head_size_rounded == 64 and dropout_p != 0.0)
+        else 256
+    )
+    max_seqlen_k = math.ceil(max_seqlen_batch_k / blocksize_c) * blocksize_c
+    if max_seqlen_k <= 128:
+        max_seqlen_k = 128
+    elif max_seqlen_k <= 256:
+        max_seqlen_k = 256
+
+    softmax = torch.empty(
+        (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
+        dtype=query.dtype,
+        device=query.device,
+    )
+    return ouput, logsumexp, softmax
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_efficient_attention,
+    ]
+)
+def meta__scaled_dot_product_efficient(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    compute_log_sumexp: bool,
+    is_causal: bool = False,
+):
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    B = query.size(0)
+    M = query.size(1)
+    N = key.size(1)
+    num_heads = query.size(-2)
+    K = query.size(-1)
+    Kv = value.size(-1)
+
+    res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
+
+    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    logsum_exp = torch.empty(
+        (B, num_heads, logsumexp_dim),
+        dtype=torch.float,
+        device=query.device,
+    )
+
+    res = res.transpose(1, 2)
+
+    return res, logsum_exp
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_efficient_attention_backward,
+    ]
+)
+def meta__scaled_dot_product_efficient_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    is_causal: bool = False,
+    chunk_grad_outputs=False,
+):
+    grad_out = grad_out.transpose(1, 2)
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    B = query.size(0)
+    M = query.size(1)
+    N = key.size(1)
+    nH = query.size(2)
+    K = query.size(3)
+
+    grad_kv_needs_init = is_causal and N > M
+
+    if chunk_grad_outputs:
+        chunk = torch.empty((B, M, 3, nH, K), dtype=query.dtype, device=query.device)
+        grad_q = chunk.select(2, 0)
+        grad_k = chunk.select(2, 1)
+        grad_v = chunk.select(2, 2)
+    else:
+        grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
+        grad_k = (
+            torch.zeros(key.shape, dtype=key.dtype, device=key.device)
+            if grad_kv_needs_init
+            else torch.empty(key.shape, dtype=key.dtype, device=key.device)
+        )
+        grad_v = (
+            torch.zeros(value.shape, dtype=value.dtype, device=value.device)
+            if grad_kv_needs_init
+            else torch.empty(value.shape, dtype=value.dtype, device=value.device)
+        )
+    return grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2)
+
+
+@register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
+@out_wrapper()
+def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
+    scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
+    return self.new_empty(self.shape)
+
+
+@register_meta(aten.scatter_reduce_.two)
+def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
+    scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
+    return self
+
+
+@register_meta([aten.sort.default, aten.sort.stable])
+def meta_sort(self, stable=None, dim=-1, descending=False):
+    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+
+
+def rnn_cell_checkSizes(
+    input_gates, hidden_gates, input_bias, hidden_bias, factor, prev_hidden
+):
+    check(input_gates.ndim == 2, lambda: f"{input_gates.ndim} != 2")
+    check(
+        input_gates.shape == hidden_gates.shape,
+        lambda: f"{input_gates.shape} != {hidden_gates.shape}",
+    )
+    gates_size = input_gates.size(1)
+    if input_bias is not None:
+        check(input_bias.ndim == 1, lambda: f"{input_bias.ndim} != 1")
+        check(
+            input_bias.numel() == gates_size,
+            lambda: f"{input_bias.numel()} != {gates_size}",
+        )
+        check(
+            input_bias.shape == hidden_bias.shape,
+            lambda: f"{input_bias.shape} != {hidden_bias.shape}",
+        )
+    check(prev_hidden.ndim == 2, lambda: f"{prev_hidden.ndim} != 2")
+    expected_prev_hidden_numel = input_gates.size(0) * gates_size // factor
+    check(
+        prev_hidden.numel() == expected_prev_hidden_numel,
+        lambda: f"{prev_hidden.numel()} != {input_gates.size(0)} * {gates_size} // {factor} (aka {expected_prev_hidden_numel})",
+    )
+    check(
+        all(
+            x.device == input_gates.device
+            for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
+        ),
+        lambda: "expected all inputs to be same device",
+    )
+
+
+@register_meta(aten._thnn_fused_lstm_cell.default)
+def _thnn_fused_lstm_cell_meta(
+    input_gates, hidden_gates, cx, input_bias=None, hidden_bias=None
+):
+    rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, 4, cx)
+    workspace = torch.empty_like(input_gates, memory_format=torch.contiguous_format)
+    hy = torch.empty_like(cx, memory_format=torch.contiguous_format)
+    cy = torch.empty_like(cx, memory_format=torch.contiguous_format)
+    return (hy, cy, workspace)
+
+
+@register_meta(aten._cudnn_rnn.default)
+def _cudnn_rnn(
+    input,
+    weight,
+    weight_stride0,
+    weight_buf,
+    hx,
+    cx,
+    mode,
+    hidden_size,
+    proj_size,
+    num_layers,
+    batch_first,
+    dropout,
+    train,
+    bidirectional,
+    batch_sizes,
+    dropout_state,
+):
+
+    is_input_packed = len(batch_sizes) != 0
+    if is_input_packed:
+        seq_length = len(batch_sizes)
+        mini_batch = batch_sizes[0]
+        batch_sizes_sum = input.shape[0]
+    else:
+        seq_length = input.shape[1] if batch_first else input.shape[0]
+        mini_batch = input.shape[0] if batch_first else input.shape[1]
+        batch_sizes_sum = -1
+
+    num_directions = 2 if bidirectional else 1
+    out_size = proj_size if proj_size != 0 else hidden_size
+    if is_input_packed:
+        out_shape = [batch_sizes_sum, out_size * num_directions]
+    else:
+        out_shape = (
+            [mini_batch, seq_length, out_size * num_directions]
+            if batch_first
+            else [seq_length, mini_batch, out_size * num_directions]
+        )
+    output = input.new_empty(out_shape)
+
+    cell_shape = [num_layers * num_directions, mini_batch, hidden_size]
+    cy = cx.new_empty(0 if cx is None else cell_shape)
+
+    hy = hx.new_empty([num_layers * num_directions, mini_batch, out_size])
+
+    # TODO: Query cudnnGetRNNTrainingReserveSize (expose to python)
+    reserve_shape = 0 if train else 0
+    reserve = input.new_empty(reserve_shape, dtype=torch.uint8)
+
+    return output, hy, cy, reserve, weight_buf
+
+
+def zero_numel_check_dims(self, dim, fn_name):
+    if self.ndim == 0:
+        check(
+            dim == 0 or dim == -1,
+            lambda: f"{fn_name}: Expected reduction dim -1 or 0 for scalar but got {dim}",
+            IndexError,
+        )
+    else:
+        check(
+            self.size(dim) != 0,
+            lambda: f"{fn_name}: Expected reduction dim {dim} to have non-zero size.",
+            IndexError,
+        )
+
+
+# From aten/src/ATen/native/ReduceOps.cpp
+def check_argmax_argmin(name, self, dim):
+    if dim is not None:
+        dim = maybe_wrap_dim(dim, self.dim())
+        zero_numel_check_dims(self, dim, name)
+    else:
+        check(
+            self.numel() != 0,
+            lambda: f"{name}: Expected reduction dim to be specified for input.numel() == 0.",
+        )
+
+
+@register_meta([aten.argmax.default, aten.argmin.default])
+def argmax_argmin_meta(self, dim=None, keepdim=False):
+    check_argmax_argmin("argmax", self, dim)
+    dims = utils.reduction_dims(self.shape, (dim,) if dim is not None else None)
+    shape = _compute_reduction_shape(self, dims, keepdim)
+    return self.new_empty(shape, dtype=torch.int64)
+
+
+@register_meta(aten.scalar_tensor.default)
+def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
+    return torch.empty(
+        (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
+@register_meta(aten.topk.default)
+def topk_meta(self, k, dim=-1, largest=True, sorted=True):
+    # From aten/src/ATen/native/Sorting.cpp
+    dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
+    check(
+        k >= 0 and k <= (self.size(dim) if self.dim() > 0 else 1),
+        lambda: "selected index k out of range",
+    )
+    sliceSize = 1 if self.dim() == 0 else self.size(dim)
+    check(k >= 0 and k <= sliceSize, lambda: "k not in range for dimension")
+
+    topKSize = list(self.shape)
+    if len(topKSize) > 0:
+        topKSize[dim] = k
+    return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
+
+
+legacy_contiguous_memory_format = torch.contiguous_format
+
+
+# From aten/src/ATen/native/cuda/RNN.cu
+def checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace):
+    defined_grad = grad_hy if grad_hy is not None else grad_cy
+    check(defined_grad.dim() == 2, lambda: "")
+    exp_size = defined_grad.size()
+    if grad_hy is not None:
+        check(grad_hy.size() == exp_size, lambda: "")
+    if grad_cy is not None:
+        check(grad_cy.size() == exp_size, lambda: "")
+    check(cx.size() == exp_size, lambda: "")
+    check(cy.size() == exp_size, lambda: "")
+    check(workspace.dim() == 2, lambda: "")
+    check(workspace.numel() == exp_size[0] * exp_size[1] * 4, lambda: "")
+
+
+# From aten/src/ATen/native/cuda/RNN.cu
+@register_meta(aten._thnn_fused_lstm_cell_backward_impl.default)
+def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has_bias):
+    if grad_hy is None and grad_cy is None:
+        return None, None, None
+    checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace)
+    grad_gates = torch.empty_like(
+        workspace, memory_format=legacy_contiguous_memory_format
+    )
+    grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
+    grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
+    return grad_gates, grad_cx, grad_bias
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
@@ -1702,11 +2239,14 @@ def activate_meta():
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
+            if op_overload in global_decomposition_table["meta"]:
+                raise RuntimeError(
+                    f"{op_overload} is a CompositeImplicitAutograd op, we shouldn't "
+                    "register meta function for it. Instead, we should let the decomposition run and write "
+                    "meta kernels for the base operators."
+                )
             pass
-        elif any(
-            a.alias_info is not None and not a.alias_info.is_write
-            for a in op_overload._schema.arguments
-        ):
+        elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
             # We shouldn't do this, because the output will report as not having aliased storages.
             # All view ops have meta kernels in C++ today, so we should use those instead.
@@ -1718,6 +2258,7 @@ def activate_meta():
             "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
             "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
             "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
+            "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32  # noqa: B950
         }:
             pass
         else:

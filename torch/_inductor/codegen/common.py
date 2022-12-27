@@ -2,19 +2,24 @@ import collections
 import contextlib
 import itertools
 import logging
-import math
 import re
-import textwrap
 import typing
 from collections import namedtuple
-from io import StringIO
 from itertools import chain
 
 import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
-from ..utils import free_symbol_startswith, sympy_dot, sympy_subs, sympy_symbol, unique
+from ..utils import (
+    DeferredLineBase,
+    free_symbol_startswith,
+    IndentedBuffer,
+    sympy_dot,
+    sympy_subs,
+    sympy_symbol,
+    unique,
+)
 from ..virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -34,7 +39,8 @@ class ExprPrinter(Printer):
     @staticmethod
     def paren(string):
         if (
-            re.match(r"^[a-z0-9_.]+$", string, re.I)
+            isinstance(string, CSEVariable)
+            or re.match(r"^[a-z0-9_.]+$", string, re.I)
             or re.match(r"^\([^)]*\)$", string, re.I)
             or string == ""
         ):
@@ -47,7 +53,12 @@ class ExprPrinter(Printer):
         base = self._print(base)
         assert exp.is_integer
         exp = int(exp)
-        return "*".join([self.paren(base)] * exp)
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        elif exp < 0:
+            return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+        else:  # exp == 0
+            return "1"
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -89,7 +100,9 @@ class OpOverrides:
 
     @staticmethod
     def sign(x):
-        return ops.where(f"{x} == 0", "0", ops.where(f"{x} < 0", "-1", "1"))
+        left = ops.where(ops.lt("0", x), "1", "0")
+        right = ops.where(ops.lt(x, "0"), "1", "0")
+        return ops.sub(left, right)
 
     @staticmethod
     def bitwise_not(x):
@@ -117,86 +130,12 @@ class OpOverrides:
         return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
 
 
-class IndentedBuffer:
-    tabwidth = 4
-
-    def __init__(self, initial_indent=0):
-        self._lines = []
-        self._indent = initial_indent
-
-    def getvalue(
-        self,
-    ):
-        buf = StringIO()
-        for line in self._lines:
-            if isinstance(line, DeferredLine):
-                line = line()
-                if line is None:
-                    continue
-            assert isinstance(line, str)
-            buf.write(line)
-            buf.write("\n")
-        return buf.getvalue()
-
-    def clear(self):
-        self._lines.clear()
-
-    def __bool__(self):
-        return bool(self._lines)
-
-    def prefix(self):
-        return " " * (self._indent * self.tabwidth)
-
-    def writeline(self, line):
-        if isinstance(line, DeferredLine):
-            self._lines.append(line.with_prefix(self.prefix()))
-        elif line.strip():
-            self._lines.append(f"{self.prefix()}{line}")
-        else:
-            self._lines.append("")
-
-    def writelines(self, lines):
-        for line in lines:
-            self.writeline(line)
-
-    def indent(self, offset=1):
-        @contextlib.contextmanager
-        def ctx():
-            self._indent += offset
-            yield
-            self._indent -= offset
-
-        return ctx()
-
-    def splice(self, other_code, strip=False):
-        if isinstance(other_code, IndentedBuffer):
-            dedent = float("inf")
-            for line in other_code._lines:
-                if line:
-                    dedent = min(dedent, len(line) - len(line.lstrip()))
-            if math.isinf(dedent):
-                dedent = 0
-            for line in other_code._lines:
-                IndentedBuffer.writeline(self, line[dedent:])
-        else:
-            other_code = textwrap.dedent(other_code)
-            if strip:
-                other_code = other_code.lstrip()
-            if not other_code:
-                return
-            other_code = other_code.rstrip()
-            for line in other_code.split("\n"):
-                self.writeline(line)
-
-
-class DeferredLine:
+class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
     def __init__(self, name, line):
-        if not line.strip():
-            line = ""
+        super().__init__(line)
         self.name = name
-        self.line = line
 
     def __call__(self):
         if (
@@ -206,20 +145,8 @@ class DeferredLine:
             return self.line
         return None
 
-    def with_prefix(self, prefix):
-        return DeferredLine(self.name, f"{prefix}{self.line}")
-
-    def lstrip(self):
-        return DeferredLine(self.name, self.line.lstrip())
-
-    def __getitem__(self, index):
-        return DeferredLine(self.name, self.line[index])
-
-    def __bool__(self):
-        return bool(self.line)
-
-    def __len__(self):
-        return len(self.line)
+    def _new_line(self, line):
+        return DeferredLine(self.name, line)
 
 
 class DeferredIndentedBuffer(IndentedBuffer):
@@ -283,6 +210,8 @@ class KernelArgs:
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
+        if name in self.inplace_buffers:
+            return self.inplace_buffers[name].inner_name
         if name.startswith("seed"):
             return self._lookup("seed", self.input_buffers, name)
         return self._lookup("in_ptr", self.input_buffers, name)
@@ -290,6 +219,8 @@ class KernelArgs:
     def output(self, name):
         name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
+        if name in self.inplace_buffers:
+            return self.inplace_buffers[name].inner_name
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name, output_name):
@@ -317,6 +248,12 @@ class KernelArgs:
             self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
 
+    def wrap_ptr_arg(self, buf, dtype):
+        return f"c_void_p({buf}.data_ptr())"
+
+    def wrap_size_arg(self, size):
+        return f"c_long({size})"
+
     def cpp_argdefs(self):
         from .cpp import DTYPE_TO_CPP, INDEX_TYPE
 
@@ -331,28 +268,36 @@ class KernelArgs:
 
         call_args = []
         arg_defs = []
+        arg_types = []
         for inplaced in unique(self.inplace_buffers.values()):
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
-            arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
-            call_args.append(f"c_void_p({outer}.data_ptr())")
+            cpp_dtype = DTYPE_TO_CPP[dtype]
+            arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
+            call_args.append(self.wrap_ptr_arg(outer, dtype))
+            arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.input_buffers.items():
             if outer in self.inplace_buffers:
                 continue
             dtype = buffer_types[outer]
-            arg_defs.append(f"const {DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
-            call_args.append(f"c_void_p({outer}.data_ptr())")
+            cpp_dtype = DTYPE_TO_CPP[dtype]
+            arg_defs.append(f"const {cpp_dtype}* __restrict__ {inner}")
+            call_args.append(self.wrap_ptr_arg(outer, dtype))
+            arg_types.append(f"const {cpp_dtype}*")
         for outer, inner in self.output_buffers.items():
             if outer in self.inplace_buffers or inner == "REMOVED":
                 continue
             dtype = buffer_types[outer]
-            arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
-            call_args.append(f"c_void_p({outer}.data_ptr())")
+            cpp_dtype = DTYPE_TO_CPP[dtype]
+            arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
+            call_args.append(self.wrap_ptr_arg(outer, dtype))
+            arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
             arg_defs.append(f"const {INDEX_TYPE} {inner}")
-            call_args.append(f"c_long({outer})")
-        return arg_defs, call_args
+            call_args.append(self.wrap_size_arg(outer))
+            arg_types.append(f"const {INDEX_TYPE}")
+        return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
         arg_defs = []
@@ -392,6 +337,45 @@ class KernelArgs:
                 if other in self.output_buffers:
                     yield self.output_buffers[other], inplaced.inner_name
 
+    def is_removed(self, name):
+        def _is_removed(name, buffers):
+            return name not in buffers or buffers[name] == "REMOVED"
+
+        return _is_removed(name, self.output_buffers) and _is_removed(
+            name, self.inplace_buffers
+        )
+
+
+class CSEVariable:
+    """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
+    The backends can inherit from this class and overload the "create_cse_var" Kernel to do that.
+    The "update_on_args" method gives you a hook for annotations, see example of TritonCSEVariable in triton.py."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __str__(self):
+        return self.name
+
+    def __hash__(self) -> int:
+        return hash(self.name)
+
+    def __eq__(self, other) -> bool:
+        return type(other) == type(self) and other.name == self.name
+
+    def update_on_args(self, args, kwargs):
+        pass
+
+
+class CppWrapperKernelArgs(KernelArgs):
+    def wrap_ptr_arg(self, buf, dtype):
+        from .cpp import DTYPE_TO_CPP
+
+        return f"({DTYPE_TO_CPP[dtype]}*)({buf}.data_ptr())"
+
+    def wrap_size_arg(self, size):
+        return f"{size}"
+
 
 class CSE:
     """Common subexpression elimination"""
@@ -413,6 +397,7 @@ class CSE:
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
         self.invalidated_stores = set()
+        self.varname_map = {}
 
     def invalidate(self, keep_vars: typing.Set[str]):
         for name, tmp in list(self.store_cache.items()):
@@ -430,9 +415,11 @@ class CSE:
             self.store_cache,
         )
 
-    def generate(self, buffer: IndentedBuffer, expr: str, write=True):
-        assert isinstance(expr, str), expr
-        if expr.startswith(self.name_prefix) and re.match(r"^[a-z0-9]+$", expr):
+    def generate(
+        self, buffer: IndentedBuffer, expr: typing.Union[str, CSEVariable], write=True
+    ) -> CSEVariable:
+        assert isinstance(expr, (str, CSEVariable)), type(expr)
+        if isinstance(expr, CSEVariable):
             return expr
         if expr not in self.cache:
             var = self.newvar()
@@ -442,8 +429,11 @@ class CSE:
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
         return self.cache[expr]
 
-    def newvar(self):
-        return f"{self.name_prefix}{next(self.iter_buffer_ids)}"
+    def newvar(self) -> CSEVariable:
+        var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
+        var = V.kernel.create_cse_var(var_name)
+        self.varname_map[var_name] = var
+        return var
 
 
 class CodeGen:
@@ -524,12 +514,16 @@ class Kernel(CodeGen):
 
     def __enter__(self):
         class CSEProxy:
+            self.name = "CSEProxy"
+
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
-                    return self.cse.generate(
+                    csevar = self.cse.generate(
                         self.compute, getattr(parent_handler, name)(*args, **kwargs)
                     )
+                    csevar.update_on_args(args, kwargs)
+                    return csevar
 
                 return inner
 
@@ -586,3 +580,6 @@ class Kernel(CodeGen):
             x: self.args.size(x) for x in sorted_symbols if x.name.startswith("s")
         }
         return sympy_subs(index, replacements)
+
+    def create_cse_var(self, *args, **kwargs):
+        return CSEVariable(*args, **kwargs)

@@ -121,7 +121,8 @@ namespace meta {
 
 TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
 (const Tensor& self, const int64_t size, const bool out_int32) {
-  TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector");
+  TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector, but got ",
+              self.dim(), " dimensional tensor.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
@@ -134,8 +135,10 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
  const bool out_int32,
  const bool transpose) {
   TORCH_CHECK(
-      crow_indices.dim() == 1, "crow_indices is supposed to be a vector");
-  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
+    crow_indices.dim() == 1, "crow_indices is supposed to be a vector, but got ",
+    crow_indices.dim(), " dimensional tensor.");
+  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector, but got ",
+              col_indices.dim(), " dimensional tensor.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
   set_output_raw_strided(0, {2, col_indices.numel()}, {}, options, {});
@@ -541,6 +544,13 @@ Tensor& addmm_out_sparse_compressed_cpu(
   }
 
   if (result.numel() == 0) {
+    // If result gets resized and is sparse compressed,
+    // it's compressed_indices tensor will contain junk values
+    // so the whole tensor is not a valid compressed tensor.
+    // To combat that, result needs to get zeroed out.
+    if (at::sparse_csr::is_sparse_compressed(result)) {
+      result.zero_();
+    }
     return result;
   }
 
@@ -640,22 +650,15 @@ Tensor& _sparse_csr_mm_out(
     const Tensor& mat1,
     const Tensor& mat2,
     Tensor& result) {
-  Tensor zero;
-  if (result.is_sparse_csr()) {
-    // TODO: replace with at::zeros when it's implemented for sparse csr
-    zero = at::empty({mat1.size(0), mat2.size(1)}, mat2.options());
-  } else {
-    zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
-  }
+  auto zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
   return at::addmm_out(result, zero, mat1, mat2, 0.0, 1.0);
 }
 
 Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr()) {
     // Return sparse
-    // TODO: replace with at::zeros when it's implemented for sparse csr
     return at::addmm(
-        at::empty({mat1.size(0), mat2.size(1)}, mat2.options()),
+        at::zeros({mat1.size(0), mat2.size(1)}, mat2.options()),
         mat1,
         mat2,
         0.0,

@@ -1,13 +1,12 @@
 import copy
-import itertools
 import logging
-import operator
 import random
 import weakref
 
 import torch
 import torch.nn as nn
 from torch import _prims
+from torch._dynamo.utils import fake_mode_from_tensors
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -15,9 +14,12 @@ from torch.fx.experimental.optimization import (
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
-from torch.nn.modules.utils import _pair
-from torch.nn.utils.fusion import fuse_conv_bn_eval
+from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from torch.overrides import TorchFunctionMode
+
+from . import config
+
+from .mkldnn import mkldnn_fuse_fx
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +28,10 @@ class AutogradMonkeypatch(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if not kwargs:
             kwargs = {}
-        if func is replacements:
+        if func in replacements and not (
+            config.fallback_random
+            and replacements[func] in replacements_using_triton_random
+        ):
             return replacements[func](*args, **kwargs)
         return func(*args, **kwargs)
 
@@ -38,6 +43,11 @@ def replace_fx(gm: torch.fx.GraphModule):
     # Sometimes patch_functions() misses things already in the graph
     for node in reversed(list(gm.graph.nodes)):
         if node.op == "call_function" and node.target in replacements:
+            if (
+                config.fallback_random
+                and replacements[node.target] in replacements_using_triton_random
+            ):
+                continue
             with gm.graph.inserting_before(node):
                 node.replace_all_uses_with(
                     gm.graph.call_function(
@@ -49,290 +59,106 @@ def replace_fx(gm: torch.fx.GraphModule):
     return gm
 
 
-class UnaryAttr(object):
-    def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
-        self.op_name = op_name
-        self.scalars_attr = scalars_attr if scalars_attr else []
-        self.algorithm_attr = algorithm_attr if algorithm_attr else ""
-        super(UnaryAttr, self).__init__()
+def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
+    is_cpu = all(
+        example_input.device == torch.device("cpu") for example_input in example_inputs
+    )
 
-    def __call__(self, unary_module: nn.Module):
-        assert all(hasattr(unary_module, item) for item in self.scalars_attr)
-        scalars = [getattr(unary_module, item) for item in self.scalars_attr]
+    fake_mode = fake_mode_from_tensors(example_inputs)
 
-        algorithm = ""
-        if self.algorithm_attr:
-            assert hasattr(unary_module, self.algorithm_attr)
-            algorithm = getattr(unary_module, self.algorithm_attr)
+    gm = sink_cat_after_pointwise(gm)
+    if config.permute_fusion and not is_cpu:
+        # For linear permute fusion, we need to check input info to identify
+        # and perform proper permutation/transpose
+        ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
+        gm = linear_permute_fusion(gm)
+        gm = permute_linear_fusion(gm)
+        gm = permute_matmul_fusion(gm)
 
-        return self.op_name, scalars, algorithm
+    # make sure the autograd is disabled.
+    if torch.is_grad_enabled():
+        return gm
+    if not is_cpu:
+        return gm
+    gm = remove_identity(gm)
+    gm = fuse_conv_bn(gm)
+    # do mkldnn fusion(conv(linear)+unary(binary)
+    gm = mkldnn_fuse_fx(gm, example_inputs)
+    return gm
 
 
-class ConvUnary2d(nn.Conv2d):
-    def __init__(
-        self,
-        conv: nn.Module,
-        unary: nn.Module,
+# check the pattern: (nn.module, F.function) matched.
+def matches_module_function_pattern(pattern, node, modules):
+    if len(node.args) == 0:
+        return False
+    if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
+        node, torch.fx.Node
     ):
-        super(ConvUnary2d, self).__init__(
-            conv.in_channels,
-            conv.out_channels,
-            conv.kernel_size,
-            conv.stride,
-            conv.padding,
-            conv.dilation,
-            conv.groups,
-            conv.bias is not None,
-            conv.padding_mode,
-            conv.weight.device,
-            conv.weight.dtype,
-        )
-        self._update_module_params(conv, unary)
-
-    def _update_module_params(self, conv, unary):
-        self.__dict__ = copy.deepcopy(conv.__dict__)
-        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
-            unary
-        )
-
-    def _conv_forward(self, input, weight, bias):
-        if self.padding_mode != "zeros":
-            return torch.ops.mkldnn._convolution_pointwise(
-                F.pad(
-                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
-                ),
-                weight,
-                bias,
-                _pair(0),
-                self.stride,
-                self.dilation,
-                self.groups,
-                self.attr,
-                self.scalars,
-                self.algorithm,
-            )
-        return torch.ops.mkldnn._convolution_pointwise(
-            input,
-            weight,
-            bias,
-            self.padding,
-            self.stride,
-            self.dilation,
-            self.groups,
-            self.attr,
-            self.scalars,
-            self.algorithm,
-        )
-
-    def forward(self, input):
-        return self._conv_forward(input, self.weight, self.bias)
-
-
-class ConvBinary2d(nn.Conv2d):
-    def __init__(
-        self,
-        conv: nn.Module,
-        binary_op_name: str,
-    ):
-        super(ConvBinary2d, self).__init__(
-            conv.in_channels,
-            conv.out_channels,
-            conv.kernel_size,
-            conv.stride,
-            conv.padding,
-            conv.dilation,
-            conv.groups,
-            conv.bias is not None,
-            conv.padding_mode,
-            conv.weight.device,
-            conv.weight.dtype,
-        )
-        self._update_module_params(conv, binary_op_name)
-
-    def _update_module_params(self, conv, binary_op_name):
-        self.__dict__ = copy.deepcopy(conv.__dict__)
-        self.attr = binary_op_name
-
-    def _conv_forward(self, input, other, weight, bias):
-        if self.padding_mode != "zeros":
-            return torch.ops.mkldnn._convolution_pointwise(
-                F.pad(
-                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
-                ),
-                other,
-                weight,
-                bias,
-                _pair(0),
-                self.stride,
-                self.dilation,
-                self.groups,
-                self.attr,
-            )
-        return torch.ops.mkldnn._convolution_pointwise(
-            input,
-            other,
-            weight,
-            bias,
-            self.padding,
-            self.stride,
-            self.dilation,
-            self.groups,
-            self.attr,
-        )
-
-    def forward(self, input, other):
-        return self._conv_forward(input, other, self.weight, self.bias)
-
-
-class LinearUnary(nn.Linear):
-    def __init__(
-        self,
-        linear: nn.Module,
-        unary: nn.Module,
-    ):
-        super(LinearUnary, self).__init__(
-            linear.in_features,
-            linear.out_features,
-            linear.bias is not None,
-            linear.weight.device,
-            linear.weight.dtype,
-        )
-        self._update_module_params(linear, unary)
-
-    def _update_module_params(self, linear, unary):
-        self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
-            unary
-        )
-
-    def forward(self, input):
-        y = torch.ops.mkldnn._linear_pointwise(
-            input, self.weight, self.bias, self.attr, self.scalars, self.algorithm
-        )
-        return y
-
-
-class LinearBinary(nn.Linear):
-    def __init__(self, linear: nn.Module, binary_op_name: str):
-        super(LinearBinary, self).__init__(
-            linear.in_features,
-            linear.out_features,
-            linear.bias is not None,
-            linear.weight.device,
-            linear.weight.dtype,
-        )
-        self._update_module_params(linear, binary_op_name)
-
-    def _update_module_params(self, linear, binary_op_name):
-        self.__dict__ = copy.deepcopy(linear.__dict__)
-
-        self.attr = binary_op_name
-
-    def forward(self, input, other):
-        y = torch.ops.mkldnn._linear_pointwise(
-            input, other, self.weight, self.bias, self.attr
-        )
-        return y
-
-
-def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module):
-    assert not (conv.training), "Fusion only for eval!"
-    return ConvUnary2d(
-        conv,
-        unary,
-    )
-
-
-def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str):
-    assert not (conv.training), "Fusion only for eval!"
-    return ConvBinary2d(
-        conv,
-        binary_op_name,
-    )
-
-
-def is_bfloat16_module(m):
-    weight_is_bf16 = m.weight.dtype == torch.bfloat16
-    bias_is_bf16 = m.bias is None or m.bias.dtype == torch.bfloat16
-    return weight_is_bf16 and bias_is_bf16
-
-
-def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module):
-    assert not (linear.training), "Fusion only for eval!"
-    return LinearUnary(
-        linear,
-        unary,
-    )
-
-
-def fused_linear_binary_eval(linear: nn.Module, attr: str):
-    assert not (linear.training), "Fusion only for eval!"
-    linear_binary = LinearBinary(
-        linear,
-        attr,
-    )
-    return linear_binary
-
-
-def check_node_kind(current_node, modules, node_kind):
-    if not isinstance(current_node, torch.fx.Node):
         return False
-    if current_node.op != "call_module":
+    # the first node is call_module
+    if node.args[0].op != "call_module":
         return False
-    if not isinstance(current_node.target, str):
+    if not isinstance(node.args[0].target, str):
         return False
-    if current_node.target not in modules:
+    if node.args[0].target not in modules:
         return False
-    if type(modules[current_node.target]) is not node_kind:
+    if type(modules[node.args[0].target]) is not pattern[0]:
+        return False
+    # the second node is call_function
+    if node.op != "call_function":
+        return False
+    if node.target != pattern[1]:
+        return False
+    # make sure node.args[0] output is only used by current node.
+    if len(node.args[0].users) > 1:
         return False
     return True
 
 
-def check_node_is_binary(node):
-    return (
-        (node.op == "call_function" and node.target in [torch.add, torch.sub])
-        or (
-            node.op == "call_function"
-            and node.target
-            in [operator.add, operator.iadd, operator.sub, operator.isub]
-        )
-        or (node.op == "call_method" and node.target in ["add", "add_", "sub", "sub_"])
-    )
+def fetch_attr(target: str, mod):
+    target_atoms = target.split(".")
+    attr_itr = mod
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}"
+            )
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
 
 
-def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
-    # make sure the autograd is disabled.
-    if torch.is_grad_enabled():
-        return gm
-    if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
-        return gm
-    is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
-    )
-    if not is_cpu:
-        return gm
-    gm = fuse_conv_bn(gm)
-    # For binary fusion, we need to check inputs info to make sure
-    # the binary inputs have same tensor info(device, dtype, and layout).
-    ShapeProp(gm).propagate(*example_inputs)
-    gm = fuse_unary(gm)
-    gm = fuse_binary(gm)
+def remove_identity(gm: torch.fx.GraphModule):
+    """
+    Removes all identity layers from the module.
+    """
 
-    return gm
+    class IdentityRemover(torch.fx.Transformer):
+        def call_module(self, target, args, kwargs):
+            if isinstance(self.submodules[target], nn.Identity):
+                assert len(args) == 1
+                return args[0]
+            else:
+                return super().call_module(target, args, kwargs)
+
+    return IdentityRemover(gm).transform()
 
 
 def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
     """
     Fuses Convolution/BN layers for inference purposes.
     """
-    patterns = [
+    modules_patterns = [
         (torch.nn.Conv1d, torch.nn.BatchNorm1d),
         (torch.nn.Conv2d, torch.nn.BatchNorm2d),
         (torch.nn.Conv3d, torch.nn.BatchNorm3d),
     ]
+    module_function_patterns = [
+        (torch.nn.Conv1d, F.batch_norm),
+        (torch.nn.Conv2d, F.batch_norm),
+        (torch.nn.Conv3d, F.batch_norm),
+    ]
     modules = dict(gm.named_modules())
-
-    for pattern in patterns:
+    for pattern in modules_patterns:
         for node in gm.graph.nodes:
             if matches_module_pattern(pattern, node, modules):
                 if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
@@ -349,41 +175,46 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
                 gm.graph.lint()
-    gm.recompile()
-    return gm
-
-
-def fuse_unary(gm: torch.fx.GraphModule):
-    modules = dict(gm.named_modules())
-
-    for (unary_module, _), (computation_module, fuse_func,) in itertools.product(
-        unary_modules_map.items(), computation_op_unary_op_fusion_map.items()
-    ):
-        pattern = (computation_module, unary_module)
+    for pattern in module_function_patterns:
         for node in gm.graph.nodes:
-            if matches_module_pattern(pattern, node, modules):
-                if (
-                    len(node.args[0].users) > 1
-                ):  # Output of computation_node is used by other nodes
+            if matches_module_function_pattern(pattern, node, modules):
+                # TODO: support kwargs.
+                if len(node.args) != 8:
                     continue
-                computation_node = modules[node.args[0].target]
-                unary_node = modules[node.target]
-                eval_mode = all(not n.training for n in [computation_node, unary_node])
-                if not eval_mode:
+                conv = modules[node.args[0].target]
+                bn_training = node.args[5]
+                bn_eps = node.args[7]
+                if conv.training or bn_training:
                     continue
-
-                # only fuse for linear when the dtype is bf16
-                if type(computation_node) in [nn.Linear] and not is_bfloat16_module(
-                    computation_node
-                ):
+                if type(bn_eps) is not float:
                     continue
-                fused_module = fuse_func(computation_node, unary_node)
-                replace_node_module(node.args[0], modules, fused_module)
-
+                bn_args_is_constant = all(
+                    n.op == "get_attr" and len(n.users) == 1 for n in node.args[1:5]
+                )
+                if not bn_args_is_constant:
+                    continue
+                bn_running_mean = fetch_attr(node.args[1].target, gm)
+                bn_running_var = fetch_attr(node.args[2].target, gm)
+                bn_weight = fetch_attr(node.args[3].target, gm)
+                bn_bias = fetch_attr(node.args[4].target, gm)
+                if bn_running_mean is None or bn_running_var is None:
+                    continue
+                fused_conv = copy.deepcopy(conv)
+                fused_conv.weight, fused_conv.bias = fuse_conv_bn_weights(
+                    fused_conv.weight,
+                    fused_conv.bias,
+                    bn_running_mean,
+                    bn_running_var,
+                    bn_eps,
+                    bn_weight,
+                    bn_bias,
+                )
+                replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
                 gm.graph.lint()
     gm.recompile()
+
     return gm
 
 
@@ -396,69 +227,252 @@ def _philox_rand_like(input, seed, offset):
     return torch.rand_like(input)
 
 
-def replace_and_fuse_for_binary(
-    computation_node, node, fuse_func, attr, modules, index_node, index_pointwise
-):
-    fused_module = fuse_func(computation_node, attr)
-    replace_node_module(node.args[index_node], modules, fused_module)
-    node.args[index_node].args = node.args[index_node].args + (
-        node.args[index_pointwise],
-    )
-    node.replace_all_uses_with(node.args[index_node])
+class NormalizedLinearNode:
+    def __init__(self, node: torch.fx.Node) -> None:
+        assert node.op == "call_function"
+        assert node.target in [torch.nn.functional.linear]
+        self.node: torch.fx.Node = node
+
+    def get_input(self) -> torch.fx.Node:
+        if len(self.node.args) > 0:
+            return self.node.args[0]
+        else:
+            return self.node.kwargs["input"]
+
+    def get_weight(self) -> torch.fx.Node:
+        if len(self.node.args) > 1:
+            return self.node.args[1]
+        else:
+            return self.node.kwargs["weight"]
+
+    def get_bias(self) -> torch.fx.Node:
+        if len(self.node.args) > 2:
+            return self.node.args[2]
+        else:
+            return self.node.kwargs["bias"]
 
 
-def fuse_binary(gm: torch.fx.GraphModule):
-    modules = dict(gm.named_modules())
-    for node in gm.graph.nodes:
-        if check_node_is_binary(node) and (
-            len(node.kwargs) != 2 or node.kwargs["alpha"] == 1.0
-        ):
-            for node_kind, fuse_func in computation_op_binary_op_fusion_map.items():
-                if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
-                    node.args[1], torch.fx.Node
-                ):
-                    continue
-                tensor0_meta = node.args[0].meta.get("tensor_meta")
-                tensor1_meta = node.args[1].meta.get("tensor_meta")
-                if not tensor0_meta or not tensor1_meta:
-                    continue
-                if (
-                    tensor0_meta.shape != tensor1_meta.shape
-                    or tensor0_meta.stride != tensor1_meta.stride
-                    or tensor0_meta.dtype != tensor1_meta.dtype
-                ):
-                    continue
-                attr = binary_attr[node.target]
-                index_list = supported_index_list[attr]
-                for index_dict in index_list:
-                    index_node = index_dict["index_computation"]
-                    index_pointwise = index_dict["index_pointwise"]
-                    if check_node_kind(node.args[index_node], modules, node_kind):
-                        if len(node.args[index_node].users) > 1:
-                            continue
-                        computation_node = modules[node.args[index_node].target]
-                        # only fuse for linear when the dtype is bf16
-                        if type(computation_node) in [
-                            nn.Linear
-                        ] and not is_bfloat16_module(computation_node):
-                            continue
-                        replace_and_fuse_for_binary(
-                            computation_node,
-                            node,
-                            fuse_func,
-                            attr if attr != "iadd" else "add",
-                            modules,
-                            index_node,
-                            index_pointwise,
+class NormalizedMatmulNode:
+    def __init__(self, node: torch.fx.Node) -> None:
+        assert node.op == "call_function"
+        assert node.target in [torch.bmm, torch.matmul]
+        self.node: torch.fx.Node = node
+
+    def get_input(self) -> torch.fx.Node:
+        if len(self.node.args) > 0:
+            return self.node.args[0]
+        else:
+            return self.node.kwargs["input"]
+
+    def get_other(self) -> torch.fx.Node:
+        if len(self.node.args) > 1:
+            return self.node.args[1]
+        else:
+            return self.node.kwargs["other"]
+
+
+def check_permute(node: torch.fx.Node):
+    ranks = len(node.meta["tensor_meta"].shape)
+    if len(node.args) > 3:
+        permutation = [node.args[i] % ranks for i in range(1, ranks + 1)]
+    elif (
+        "permutation" in node.kwargs
+        and node.kwargs["permutation"] is not None
+        and len(node.kwargs["permutation"]) > 2
+    ):
+        permutation = [i % ranks for i in node.kwargs["permutation"]]
+    else:
+        return False
+    allowed_permutation = list(range(ranks))
+    allowed_permutation[-1] = ranks - 2
+    allowed_permutation[-2] = ranks - 1
+    return permutation == allowed_permutation
+
+
+def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    def one_user(node):
+        users = list(node.users)
+        return users[0] if len(users) == 1 else None
+
+    def is_view(node):
+        view = {"view"}
+        return node.op == "call_method" and node.target in view
+
+    def is_pointwise_unary(node):
+        pointwise = {torch.relu, torch.tanh, "relu", "tanh"}
+        return node.op in {"call_function", "call_method"} and node.target in pointwise
+
+    g = module.graph
+    for node in g.nodes:
+        if node.op != "call_function" or node.target != torch.cat:
+            continue
+
+        cat_or_view = node
+        while True:
+            user = one_user(cat_or_view)
+            if not user or not is_view(user):
+                break
+            cat_or_view = user
+
+        if user and is_pointwise_unary(user):
+            with g.inserting_before(node):
+                new_args = (
+                    [
+                        g.create_node(
+                            user.op, user.target, args=(arg,), kwargs=user.kwargs
                         )
-                        # Make sure the fused node is post node of node's inputs nodes.
-                        node.append(node.args[index_node])
-                        gm.graph.erase_node(node)
-                        gm.graph.lint()
-                        break
+                        for arg in node.args[0]
+                    ],
+                )
+                node.args = new_args
+                user.replace_all_uses_with(cat_or_view)
+                g.erase_node(user)
+    g.lint()
+    module.recompile()
+    return module
 
-    gm.recompile()
-    return gm
+
+def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    for node in module.graph.nodes:
+        if (
+            node.op == "call_method"
+            and node.target == "permute"
+            and check_permute(node)
+        ):
+            if len(node.args) > 0:
+                input_node = node.args[0]
+            else:
+                input_node = node.kwargs["input"]
+            if (
+                input_node.op == "call_function"
+                and input_node.target == torch.nn.functional.linear
+            ):
+                normalized = NormalizedLinearNode(input_node)
+                input = normalized.get_input()
+                weight = normalized.get_weight()
+                bias = normalized.get_bias()
+                with module.graph.inserting_before(node):
+                    fused_node = module.graph.call_function(
+                        linear_transpose, args=(input, weight, bias)
+                    )
+                    node.replace_all_uses_with(fused_node)
+                    module.graph.erase_node(node)
+                    module.graph.erase_node(input_node)
+
+    module.graph.lint()
+    module.recompile()
+    return module
+
+
+# Y1 = X * W^T + bias
+# Y2 = Y1.permute(0, 2, 1)
+# ---->
+# Y2 = (W * X^T + bias.unsqueeze(-1))^T
+def linear_transpose(
+    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+) -> torch.Tensor:
+    return torch.matmul(weight, input.transpose(-1, -2)) + bias.unsqueeze(-1)
+
+
+def permute_linear_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    for node in module.graph.nodes:
+        if node.op == "call_function" and node.target == torch.nn.functional.linear:
+            if len(node.args) > 0:
+                input_node = node.args[0]
+            else:
+                input_node = node.kwargs["input"]
+            if (
+                input_node.op == "call_method"
+                and input_node.target == "permute"
+                and check_permute(input_node)
+            ):
+                normalized = NormalizedLinearNode(node)
+                if len(input_node.args) > 0:
+                    input = input_node.args[0]
+                else:
+                    input = input_node.kwargs["input"]
+                weight = normalized.get_weight()
+                bias = normalized.get_bias()
+                with module.graph.inserting_before(node):
+                    fused_node = module.graph.call_function(
+                        transpose_linear, args=(input, weight, bias)
+                    )
+                    node.replace_all_uses_with(fused_node)
+                    module.graph.erase_node(node)
+                    module.graph.erase_node(input_node)
+
+    module.graph.lint()
+    module.recompile()
+    return module
+
+
+def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    for node in module.graph.nodes:
+        if node.op == "call_function" and (
+            node.target == torch.bmm or node.target == torch.matmul
+        ):
+            normalized = NormalizedMatmulNode(node)
+            input_A_node = normalized.get_input()
+            input_B_node = normalized.get_other()
+            input_A = input_A_node
+            input_B = input_B_node
+            Atrans = Btrans = False
+            if (
+                input_A_node.op == "call_method"
+                and input_A_node.target == "permute"
+                and check_permute(input_A_node)
+            ):
+                Atrans = True
+                if len(input_A_node.args) > 0:
+                    input_A = input_A_node.args[0]
+                else:
+                    input_A = input_A_node.kwargs["input"]
+
+            if (
+                input_B_node.op == "call_method"
+                and input_B_node.target == "permute"
+                and check_permute(input_B_node)
+            ):
+                Btrans = True
+                if len(input_B_node.args) > 0:
+                    input_B = input_B_node.args[0]
+                else:
+                    input_B = input_B_node.kwargs["input"]
+
+            if Atrans or Btrans:
+                with module.graph.inserting_before(node):
+                    fused_node = module.graph.call_function(
+                        transpose_matmul,
+                        args=(input_A, input_B, Atrans, Btrans),
+                    )
+                node.replace_all_uses_with(fused_node)
+                module.graph.erase_node(node)
+                if Atrans:
+                    module.graph.erase_node(input_A_node)
+                if Btrans:
+                    module.graph.erase_node(input_B_node)
+
+    module.graph.lint()
+    module.recompile()
+    return module
+
+
+# X1 = X.permute(0, 2, 1)
+# Y1 = X1 * W1^T + bias1
+# ---->
+# Y2 = X1.transpose(-1, -2) * W1^T + bias1
+def transpose_linear(
+    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+) -> torch.Tensor:
+    return torch.matmul(input.transpose(-1, -2), weight.t()) + bias
+
+
+def transpose_matmul(A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: bool):
+    if Atrans:
+        A = A.transpose(-1, -2)
+    if Btrans:
+        B = B.transpose(-1, -2)
+    return torch.matmul(A, B)
 
 
 philox_rand_like = _prims._make_prim(
@@ -550,7 +564,7 @@ class LowmemDropout(torch.autograd.Function):
 
 
 @torch.fx.wrap
-def lowmem_dropout(input, p, training=True, inplace=False):
+def lowmem_dropout(input, p=0.5, training=True, inplace=False):
     if isinstance(input, torch.fx.Proxy):
         # double check we don't FX trace this
         return input.tracer.create_proxy(
@@ -578,53 +592,6 @@ def rand_like(x, **kwargs):
 
 
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
-
-
-computation_op_unary_op_fusion_map = {
-    nn.Conv2d: fused_conv_unary_eval,
-    nn.Linear: fused_linear_unary_eval,
-}
-
-
-unary_modules_map = {
-    nn.ReLU: UnaryAttr("relu"),
-    nn.Sigmoid: UnaryAttr("sigmoid"),
-    nn.Tanh: UnaryAttr("tanh"),
-    nn.Hardswish: UnaryAttr("hardswish"),
-    nn.LeakyReLU: UnaryAttr("leaky_relu", scalars_attr=["negative_slope"]),
-    nn.Hardtanh: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
-    nn.GELU: UnaryAttr("gelu", algorithm_attr="approximate"),
-}
-
-
-binary_attr = {
-    torch.add: "add",  # node.op == "call_function"
-    "add": "add",  # node.op == "call_method"
-    "add_": "iadd",  # node.op == "call_method"
-    operator.add: "add",  # node.op == "call_function"
-    operator.iadd: "iadd",  # node.op == "call_function"
-    torch.sub: "sub",  # node.op == "call_function"
-    "sub": "sub",  # node.op == "call_method"
-    "sub_": "sub",  # node.op == "call_method"
-    operator.sub: "sub",  # node.op == "call_function"
-    operator.isub: "sub",  # node.op == "call_function"
-}
-
-
-computation_op_binary_op_fusion_map = {
-    nn.Conv2d: fused_conv_binary_eval,
-    nn.Linear: fused_linear_binary_eval,
-}
-
-
-# For add: we support conv/linear + other and other + conv
-# For sub/add_/sub_, we only support conv/linear - other
-# or conv/linear +(-)= other
-supported_index_list = {
-    "add": [
-        {"index_computation": 0, "index_pointwise": 1},
-        {"index_computation": 1, "index_pointwise": 0},
-    ],
-    "iadd": [{"index_computation": 0, "index_pointwise": 1}],
-    "sub": [{"index_computation": 0, "index_pointwise": 1}],
-}
+# Keep track of any replacement functions that use triton random,
+# so they can be avoided when fallback_random is set
+replacements_using_triton_random = {lowmem_dropout, rand_like}

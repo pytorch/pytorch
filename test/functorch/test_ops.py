@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_ARM64, parametrize, TEST_WITH_ASAN
+    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like, IS_WINDOWS
 import torch
 from torch import Tensor
 import functools
@@ -34,14 +34,20 @@ from common_utils import (
     check_vmap_fallback,
     is_batch_norm_training,
     is_valid_inplace_sample_input,
+    loop,
     loop2,
+    expectedFailureIf
 )
+from torch.testing._internal.autograd_function_db import (
+    autograd_function_db
+)
+from torch.autograd.function import _set_autograd_function_extension_enabled
 
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
-from functorch._src.eager_transforms import _as_tuple, jvp
+from torch._functorch.eager_transforms import _as_tuple, jvp
 
 aten = torch.ops.aten
 
@@ -219,13 +225,22 @@ def get_vjp_fn_and_args_with_cotangents(f, sample, cotangents):
 # sample (*args, *cotangents)
 def get_vjpfull_variant(f, sample):
     fn, primals = normalize_op_input_output(f, sample)
+    return _get_vjpfull_variant(fn, primals)
+
+
+def get_vjpfull_variant2(f, args, kwargs):
+    fn, primals = normalize_op_input_output2(f, args, kwargs)
+    return _get_vjpfull_variant(fn, primals)
+
+
+def _get_vjpfull_variant(fn, primals):
     result = fn(*primals)
     cotangents = _as_tuple(
         tree_map(lambda x: torch.randn_like(x, requires_grad=True), result))
     num_primals = len(primals)
     args = (*primals, *cotangents)
 
-    @functools.wraps(f)
+    @functools.wraps(fn)
     def wrapped(*args):
         primals = args[:num_primals]
         cotangents = args[num_primals:]
@@ -236,6 +251,7 @@ def get_vjpfull_variant(f, sample):
         return vjp_fn(cotangents)
 
     return wrapped, args
+
 
 
 def get_jvp_variant(f, sample):
@@ -291,6 +307,7 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
+    xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
 }
 
 aliasing_ops = {
@@ -338,18 +355,38 @@ aliasing_ops_list_return = {
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 class TestOperators(TestCase):
+    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
+
+        # Non-contiguous Bugs
+        #
+        # AssertionError: Tensor-likes are not close!
+        xfail('_softmax_backward_data', device_type='cpu'),
+        xfail('as_strided'),
+        xfail('as_strided', 'partial_views'),
+
+        # RuntimeError: !self.requires_grad() || self.is_contiguous()
+        xfail('as_strided_scatter'),
+
+        # RuntimeError: Tensor must have a last dimension with stride 1
+        xfail('view_as_complex'),
+        decorate('nn.functional._scaled_dot_product_attention',
+                 decorator=expectedFailureIf(not IS_WINDOWS), device_type='cuda'),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('svd_lowrank',
+             {torch.float32: tol(atol=3e-05, rtol=3e-05)}, device_type='cuda'),
+        tol1('linalg.tensorsolve',
+             {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
     ))
     def test_grad(self, device, dtype, op):
         if op.name in vjp_fail:
@@ -370,6 +407,10 @@ class TestOperators(TestCase):
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
 
+            noncontig_sample = sample.noncontiguous()
+            noncontig_args = [noncontig_sample.input] + list(noncontig_sample.args)
+            noncontig_kwargs = noncontig_sample.kwargs
+
             diff_argnums = tuple(i for i, arg in enumerate(args) if diff_arg(arg))
             assert len(diff_argnums) > 0
             diff_args = tuple(args[i] for i in diff_argnums)
@@ -386,11 +427,14 @@ class TestOperators(TestCase):
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)
+            result_noncontig = grad(wrapped_fn, diff_argnums)(*noncontig_args, **noncontig_kwargs)
             expected = _autograd_grad(_as_tuple(wrapped_fn(*args, **kwargs)), diff_args)
 
             self.assertEqual(result, expected)
+            self.assertEqual(result_noncontig, expected)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @_set_autograd_function_extension_enabled()
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
@@ -400,17 +444,38 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
-        xfail("native_batch_norm"),
+        xfail("native_batch_norm"),          # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
+        xfail("_native_batch_norm_legit"),    # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
 
-        xfail('nn.functional.rrelu')  # in-place test errors out with no formula implemented
+        xfail('nn.functional._scaled_dot_product_attention', device_type='cuda'),
+
+        xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+
+        # --- Non-Contiguous Failures! ---
+        # This is expected to fail as the operator
+        # expects last dim to have stride=1
+        xfail('view_as_complex'),
+        # BUG
+        # AssertionError: Tensor-likes are not close!
+        xfail('as_strided'),
+        xfail('as_strided', 'partial_views'),
+        decorate('linalg.det', 'singular',
+                 decorator=expectedFailureIf(IS_MACOS and IS_X86)),
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-06)}, device_type='cuda'),
+        tol1('linalg.tensorsolve',
+             {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
         tol1('nn.functional.batch_norm',
              {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+        tol1('nn.functional.conv2d',
+             {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+        tol1('pca_lowrank',
+             {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
     ))
     def test_jvp(self, device, dtype, op):
         # TODO: get rid of vjp_decomp when we add decomposition support to
@@ -434,27 +499,37 @@ class TestOperators(TestCase):
         inplace_variant = op.inplace_variant if op.supports_inplace_autograd else None
 
         for sample in samples:
-            args = (sample.input,) + sample.args
-            kwargs = sample.kwargs
             if outplace_variant:
-                self.jvp_opinfo_test(outplace_variant, args, kwargs,
+                self.jvp_opinfo_test(outplace_variant, sample,
                                      sample.output_process_fn_grad,
                                      clone_inputs=False,
                                      fixme_ref_jvp_local=fixme_ref_jvp_local)
             if is_valid_inplace_sample_input(sample, op, inplace_variant):
-                self.jvp_opinfo_test(inplace_variant, args, kwargs,
+                self.jvp_opinfo_test(inplace_variant, sample,
                                      sample.output_process_fn_grad,
                                      clone_inputs=True,
                                      fixme_ref_jvp_local=fixme_ref_jvp_local)
 
-    def jvp_opinfo_test(self, fn, args, kwargs, output_process_fn,
+
+    def jvp_opinfo_test(self, fn, sample, output_process_fn,
                         clone_inputs, fixme_ref_jvp_local):
         # NB: we used requires_grad=True to determine where the primals are,
         # but don't need that information otherwise
-        fn, primals = normalize_op_input_output2(
+        args = (sample.input,) + sample.args
+        kwargs = sample.kwargs
+        contig_fn, primals = normalize_op_input_output2(
             fn, args, kwargs, output_process_fn, requires_grad=True)
         orig_primals = tree_map(lambda x: x.detach(), primals)
         orig_tangents = tree_map(lambda x: torch.randn_like(x), primals)
+
+        noncontig_sample = sample.noncontiguous()
+        noncontig_args = (noncontig_sample.input,) + noncontig_sample.args
+        noncontig_kwargs = sample.kwargs
+        noncontig_fn, primals = normalize_op_input_output2(
+            fn, noncontig_args, noncontig_kwargs,
+            output_process_fn, requires_grad=True)
+        noncontig_primals = tree_map(lambda x: x.detach(), primals)
+        noncontig_tangents = tree_map(lambda x: noncontiguous_like(x), orig_tangents)
 
         def maybe_clone_inputs():
             if clone_inputs:
@@ -465,22 +540,55 @@ class TestOperators(TestCase):
 
         primals, tangents = maybe_clone_inputs()
         expected_primal_outs, expected_tangent_outs = \
-            fixme_ref_jvp_local(fn, primals, tangents)
+            fixme_ref_jvp_local(contig_fn, primals, tangents)
 
         primals, tangents = maybe_clone_inputs()
-        primal_outs, tangent_outs = jvp(fn, primals, tangents)
+        primal_outs, tangent_outs = jvp(contig_fn, primals, tangents)
+
+        noncontig_primal_outs, noncontig_tangent_outs = jvp(noncontig_fn,
+                                                            noncontig_primals,
+                                                            noncontig_tangents)
 
         self.assertEqual(primal_outs, expected_primal_outs)
         self.assertEqual(tangent_outs, expected_tangent_outs)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+        self.assertEqual(noncontig_primal_outs, expected_primal_outs)
+        self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
+
+    @_set_autograd_function_extension_enabled()
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
+
+        # ---- Non-Contiguous Failures ----
+        # This is expected to fail as the operator
+        # expects last dim to have stride=1
+        xfail('view_as_complex'),
+        # RuntimeError: query: last dimension must be contiguous
+        # NOTE: This passes on Windows!
+        decorate('nn.functional._scaled_dot_product_attention',
+                 decorator=unittest.skipIf(not IS_WINDOWS, "expects contiguous inputs")),
+        # BUG
+        # AssertionError: Tensor-likes are not close!
+        xfail('as_strided'),
+        xfail('as_strided_scatter'),
+        xfail('_softmax_backward_data', device_type='cpu'),
+        xfail('as_strided', 'partial_views'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+        tol1('__rmatmul__',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('matmul',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol2('linalg.pinv', 'hermitian',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('linalg.tensorsolve',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('svd_lowrank',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
     ))
     def test_vjp(self, device, dtype, op):
@@ -498,14 +606,22 @@ class TestOperators(TestCase):
                 result = fn(*primals)
                 cotangents = tree_map(lambda x: torch.randn_like(x), result)
 
+                noncontig_fn, noncontig_primals = normalize_op_input_output(_op, sample.noncontiguous())
+                noncontig_cotangents = tree_map(lambda x: noncontiguous_like(x), cotangents)
+
                 out, vjp_fn = vjp(fn, *primals)
                 self.assertEqual(out, result)
                 result_vjps = vjp_fn(cotangents)
+
+                out_noncontig, vjp_fn = vjp(noncontig_fn, *noncontig_primals)
+                self.assertEqual(out_noncontig, result)
+                noncontig_result_vjps = vjp_fn(noncontig_cotangents)
 
                 _, vjp_fn = ref_vjp(fn, *primals)
                 expected_vjps = vjp_fn(cotangents)
 
                 self.assertEqual(result_vjps, expected_vjps)
+                self.assertEqual(noncontig_result_vjps, expected_vjps)
 
         _test(op)
         for a_op in op.aliases:
@@ -515,13 +631,15 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             _test(f, inplace=True)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @_set_autograd_function_extension_enabled()
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
         skip('nn.functional.max_unpool2d'),  # silent incorrectness; Flaky
         xfail('nn.functional.ctc_loss'),  # Not Implemented
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
+        skip('nn.functional._scaled_dot_product_attention', device_type='cuda'),
         # AssertionError: Tensor-likes are not close!
         # Mismatched elements: 1 / 15 (6.7%)
         # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
@@ -579,6 +697,7 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             test(fn, inplace=True)
 
+    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapvjpvjp', vjp_fail.union({
         skip("atleast_1d"),  # Takes too long
@@ -586,6 +705,7 @@ class TestOperators(TestCase):
         skip("atleast_3d"),  # Takes too long
         skip("ormqr"),  # Takes too long
         xfail("as_strided"),  # incorrect output
+        xfail("as_strided", "partial_views"),  # incorrect output
         xfail("as_strided_scatter"),  # incorrect output
         skip("bernoulli"),  # calls random op
         xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -595,6 +715,7 @@ class TestOperators(TestCase):
         xfail("double"),  # rank 4 tensor for channels_last
         xfail("float"),  # rank 4 tensor for channels_last
         xfail("half"),  # rank 4 tensor for channels_last
+        xfail("NumpyCubeNotComposableAutogradFunction"),  # Not composable autograd.Function
         # It looks like you're either (1) calling .item() on a Tensor or
         # (2) attempting to use a Tensor in some data-dependent control flow or
         # (3) encountering this error in PyTorch internals.
@@ -612,10 +733,11 @@ class TestOperators(TestCase):
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op
+        skip("nn.functional.alpha_dropout"),  # calls random op
         skip("nn.functional.feature_alpha_dropout", "with_train"),  # calls random op
         skip("nn.functional.fractional_max_pool2d"),  # calls random op
         skip("nn.functional.fractional_max_pool3d"),  # calls random op
-        skip('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         # It looks like you're either (1) calling .item() on a Tensor or
         # (2) attempting to use a Tensor in some data-dependent control flow or
         # (3) encountering this error in PyTorch internals.
@@ -653,8 +775,10 @@ class TestOperators(TestCase):
         # view doesn't work on sparse
         xfail("to_sparse"),
         xfail("native_batch_norm"),
+        xfail("_native_batch_norm_legit"),
+        xfail('nn.functional.prelu'),
     }))
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapvjpvjp', (
         tol1('linalg.svd',
@@ -664,6 +788,9 @@ class TestOperators(TestCase):
         tol1('svd',
              {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
     ))
+    @skipOps('TestOperators', 'test_vmapvjpvjp', {
+        xfail('as_strided', 'partial_views'),
+    })
     def test_vmapvjpvjp(self, device, dtype, op):
         # Since, we test `vjpvjp` independently,
         # for this test, we just verify that vmap
@@ -719,6 +846,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.dropout2d'),  # randomness
         skip('nn.functional.dropout3d', ''),  # randomness
+        skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
@@ -730,12 +858,15 @@ class TestOperators(TestCase):
         xfail('svd_lowrank', ''),  # randomness
         xfail('to_sparse', ''),  # non-dense output
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('as_strided', 'partial_views'),
+        xfail("NumpyCubeNotComposableAutogradFunction"),  # Not composable autograd.Function
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         skip("native_batch_norm"),
+        skip("_native_batch_norm_legit"),
         xfail('__getitem__', ''),  # dynamic error
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
@@ -764,11 +895,13 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm', ''),
         xfail('as_strided_scatter', ''),  # calls as_strided
         xfail('index_reduce', ''),  # .item() call
+        xfail('nn.functional.prelu'),
         # ---------------------------------------------------------------------
     })
 
+    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapvjp', (
         tol1('linalg.svd',
@@ -778,7 +911,9 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
     ))
-    @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
+    @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail.union({
+        xfail('as_strided', 'partial_views'),
+    }))
     def test_vmapvjp(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
@@ -808,6 +943,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout2d', ''),
         skip('nn.functional.dropout3d', ''),
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
+        skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),
         skip('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
@@ -821,10 +957,9 @@ class TestOperators(TestCase):
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
-        decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "Fails on M1")),
-        decorate('linalg.det', 'singular', decorator=unittest.skipIf(IS_MACOS, "Fails on x86 MacOS CI")),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
+        xfail('as_strided', 'partial_views'),  # Tensor-likes are not close!
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
         xfail('tensor_split'),  # data_ptr composite compliance
@@ -850,11 +985,16 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
+        xfail("_native_batch_norm_legit"),
+
+        xfail('nn.functional.prelu'),
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
         # ----------------------------------------------------------------------
     }
 
+    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapjvpall', (
         tol1('nn.functional.conv_transpose3d',
@@ -862,7 +1002,9 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}),
     ))
-    @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail)
+    @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail.union({
+        decorate('linalg.det', 'singular', decorator=expectedFailureIf(IS_MACOS and IS_X86)),
+    }))
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
     # because that coresponds to "batched forward-mode AD" testing in PyTorch core
@@ -889,7 +1031,8 @@ class TestOperators(TestCase):
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @_set_autograd_function_extension_enabled()
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('cdouble'),  # RuntimeError: required rank 4 tensor to use channels_last format
@@ -899,6 +1042,7 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('complex'),
+        xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
         xfail('index_fill'),
@@ -964,7 +1108,8 @@ class TestOperators(TestCase):
                     pass
         check_vmap_fallback(self, test, op, dry_run=False)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @_set_autograd_function_extension_enabled()
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
@@ -974,6 +1119,7 @@ class TestOperators(TestCase):
         xfail('cummax'),
         xfail('cummin'),
         xfail('cumprod'),
+        xfail('fill'),
         xfail('nansum'),
         xfail('nanmean'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
@@ -1052,6 +1198,8 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
+        xfail("_native_batch_norm_legit"),
+        xfail("native_dropout_backward"),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1081,7 +1229,8 @@ class TestOperators(TestCase):
 
         check_vmap_fallback(self, test, op, dry_run=False)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @_set_autograd_function_extension_enabled()
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvmap', vjp_fail.union({
         skip('bernoulli', ''),  # vjpvmap testing can't handle randomness
         skip('normal', ''),  # vjpvmap testing can't handle randomness
@@ -1089,9 +1238,12 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
+        skip('nn.functional._scaled_dot_product_attention', device_type='cuda'),
+        skip('nn.functional.alpha_dropout'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         skip('to_sparse', ''),  # non-dense output
         skip('ormqr', ''),  # takes too long
+        xfail("NumpyCubeNotComposableAutogradFunction"),  # Not composable autograd.Function
 
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
@@ -1109,7 +1261,6 @@ class TestOperators(TestCase):
         xfail('svd_lowrank', ''),
         xfail('pca_lowrank', ''),
         xfail('clamp'),
-        xfail('cross'),  # The defaults of this op are *very* weird. No wonder it doesn't work
         # something weird happening with channels_last
         xfail('bfloat16'),
         xfail('double'),
@@ -1121,6 +1272,9 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
+        xfail("_native_batch_norm_legit"),
+        xfail('as_strided', 'partial_views'),
+        xfail('nn.functional.prelu'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1188,7 +1342,8 @@ class TestOperators(TestCase):
         else:
             self.assertEqual(jacobian_jvp, jacobian_vjp)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @_set_autograd_function_extension_enabled()
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
         xfail('to_sparse', ''),  # NYI
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
@@ -1199,9 +1354,11 @@ class TestOperators(TestCase):
         xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
+        xfail('grid_sampler_2d', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('symeig', ''),  # NYI: forward AD for symeig
@@ -1210,12 +1367,17 @@ class TestOperators(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
         xfail('nn.functional.ctc_loss', ''),  # NYI: forward-AD for _ctc_loss
         xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
+        skip('nn.functional._scaled_dot_product_attention', device_type='cuda'),
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
         xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
+        xfail('native_dropout_backward'),  # NYI
+        xfail('CubeGenVmapAutogradFunction'),  # NYI
+        xfail('SortGenVmapAutogradFunction'),  # NYI
+
     }))
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
         tol1('masked.prod',
@@ -1283,6 +1445,7 @@ class TestOperators(TestCase):
             expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
             self.assertEqual(result, expected)
 
+    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapjvpvjp', vjp_fail.union({
         # Following operatos take too long, hence skipped
@@ -1297,8 +1460,12 @@ class TestOperators(TestCase):
         skip('native_layer_norm'),
         skip('ormqr'),
 
+        # Not actually a problem
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
+
         # Potential bugs/errors
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
+        xfail('as_strided', 'partial_views'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
         xfail('bernoulli'),  # calls random op
         xfail('bfloat16'),  # required rank 4 tensor to use channels_last format
@@ -1328,13 +1495,15 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout2d'),  # calls random op
         xfail('nn.functional.dropout3d'),  # calls random op
         xfail('nn.functional.dropout'),  # calls random op
-        skip('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('nn.functional.embedding_bag'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.alpha_dropout'),  # calls randomn op
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # calls random op
         xfail('nn.functional.fractional_max_pool2d'),  # calls random op
         xfail('nn.functional.fractional_max_pool3d'),  # calls random op
         xfail('nn.functional.gaussian_nll_loss'),  # data depenedant flow
         xfail('nn.functional.grid_sample'),  # Forward AD not implemented and no decomposition
+        xfail('grid_sampler_2d'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.hardsigmoid'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.hinge_embedding_loss'),  # vmap: inplace into a regular tensor
         xfail('nn.functional.huber_loss'),  # Forward AD not implemented and no decomposition
@@ -1372,8 +1541,14 @@ class TestOperators(TestCase):
         # input while the running_mean or running_var, which will be updated in
         # place, were not batched.
         xfail("native_batch_norm"),
+        xfail("_native_batch_norm_legit"),
+        xfail('native_dropout_backward'),
+        xfail('nn.functional.prelu'),
+
+        xfail('CubeGenVmapAutogradFunction'),  # NYI
+        xfail('SortGenVmapAutogradFunction'),  # NYI
     }))
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapjvpvjp', (
         tol1('linalg.svd',
@@ -1587,8 +1762,9 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input, weight, bias))
 
+    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         xfail('linalg.eig'),  # all close?
         # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
@@ -1611,6 +1787,7 @@ class TestOperators(TestCase):
         skip('linalg.multi_dot', '', device_type='cpu'),
         skip('sparse.sampled_addmm', ''),
         skip('native_layer_norm', '', device_type='cpu'),
+        xfail('nn.functional.prelu'),
     })
     @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (
         tol1('linalg.householder_product',
@@ -1747,6 +1924,127 @@ class TestOperators(TestCase):
                 assert grad_op == "vjp"
                 with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
                     vjp(f, torch.randn_like(without_grad))
+
+    @_set_autograd_function_extension_enabled()
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
+    # NOTE: [three-transform testing]
+    # We only test the autograd_function_db tests here.
+    #
+    # Usually testing the composition of two transforms is sufficient to convince
+    # ourselves that an operator is correctly implemented. For the following cases,
+    # we want to be extra sure, so we send those through some three-transform tests:
+    # - autograd.Function. The mechanism is via PyDispatcher/PyOperator, not the
+    #   regular PyTorch dispatcher, so it's good to exercise more caution.
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_vmapvjpvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+    })
+    def test_vmapvjpvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, in_dims)
+                inner_mapped_op = functools.partial(loop, op, in_dims, 0, B)
+
+                inner_vmapped_fn, primals = normalize_op_input_output2(
+                    inner_vmapped_op, batched_args, kwargs, sample.output_process_fn_grad)
+                inner_mapped_fn, _ = normalize_op_input_output2(
+                    inner_mapped_op, batched_args, kwargs, sample.output_process_fn_grad)
+                result = inner_mapped_fn(*primals)
+                cotangents = tree_map(lambda x: torch.rand_like(x), result)
+
+                def apply_vjp(fn):
+                    def inner(primals, cotangents):
+                        _, vjp_fn = vjp(fn, *primals)
+                        return vjp_fn(cotangents)
+                    return inner
+
+                vjpvmap_fn = apply_vjp(inner_vmapped_fn)
+                vjpmap_fn = apply_vjp(inner_mapped_fn)
+                batched_args = (primals, cotangents)
+                generator = generate_vmap_inputs(batched_args, {})
+
+                for batched_args, in_dims, _ in generator:
+                    # strategy: compare vmap(vjp(vmap(op)) vs map(vjp(map(op))
+                    vmapvjpvmap_fn = vmap(vjpvmap_fn, in_dims)
+                    mapvjpmap_fn = functools.partial(loop, vjpmap_fn, in_dims, 0, B)
+
+                    result = vmapvjpvmap_fn(*batched_args)
+                    expected = mapvjpmap_fn(*batched_args)
+                    self.assertEqual(result, expected)
+
+    # See NOTE: [three-transform testing]
+    @_set_autograd_function_extension_enabled()
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_vjpvmapvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+    })
+    def test_vjpvmapvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, inner_in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, inner_in_dims)
+                inner_mapped_op = functools.partial(loop, op, inner_in_dims, 0, B)
+                generator = generate_vmap_inputs(batched_args, kwargs)
+                for batched_args, in_dims, kwargs in generator:
+                    # strategy: compare vjp(vmap(vmap(op)) vs vjp(map(map(op))
+                    vmapped_op = vmap(inner_vmapped_op, in_dims)
+                    mapped_op = functools.partial(loop, inner_mapped_op, in_dims, 0, B)
+
+                    vmapped_fn, primals = normalize_op_input_output2(
+                        vmapped_op, batched_args, kwargs, sample.output_process_fn_grad)
+                    mapped_fn, _ = normalize_op_input_output2(
+                        mapped_op, batched_args, kwargs, sample.output_process_fn_grad)
+
+                    result = mapped_fn(*primals)
+                    cotangents = tree_map(lambda x: torch.rand_like(x), result)
+
+                    _, vjp_fn = vjp(mapped_fn, *primals)
+                    expected_vjps = vjp_fn(cotangents)
+
+                    print(inner_in_dims, in_dims)
+                    _, vjp_fn = vjp(vmapped_fn, *primals)
+                    result_vjps = vjp_fn(cotangents)
+
+                    self.assertEqual(result_vjps, expected_vjps)
+
+    # See NOTE: [three-transform testing]
+    @_set_autograd_function_extension_enabled()
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_vjpvjpvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+    })
+    def test_vjpvjpvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, in_dims)
+                inner_mapped_op = functools.partial(loop, op, in_dims, 0, B)
+
+                vjpmap_fn, args = get_vjpfull_variant2(inner_mapped_op, batched_args, kwargs)
+                vjpvmap_fn, _ = get_vjpfull_variant2(inner_vmapped_op, batched_args, kwargs)
+
+                vjpvjpvmap_fn, new_args = get_vjpfull_variant2(vjpvmap_fn, args, {})
+                vjpvjpmap_fn, _ = get_vjpfull_variant2(vjpmap_fn, args, {})
+
+                expected = vjpvjpmap_fn(*new_args)
+                result = vjpvjpvmap_fn(*new_args)
+                self.assertEqual(result, expected)
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
