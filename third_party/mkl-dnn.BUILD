@@ -1,9 +1,9 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@pytorch//third_party:substitution.bzl", "template_rule")
 
-_DNNL_RUNTIME_OMP = {
-    "#cmakedefine DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_${DNNL_CPU_THREADING_RUNTIME}": "#define DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_OMP",
-    "#cmakedefine DNNL_CPU_RUNTIME DNNL_RUNTIME_${DNNL_CPU_RUNTIME}": "#define DNNL_CPU_RUNTIME DNNL_RUNTIME_OMP",
+_DNNL_RUNTIME_TBB = {
+    "#cmakedefine DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_${DNNL_CPU_THREADING_RUNTIME}": "#define DNNL_CPU_THREADING_RUNTIME DNNL_RUNTIME_TBB",
+    "#cmakedefine DNNL_CPU_RUNTIME DNNL_RUNTIME_${DNNL_CPU_RUNTIME}": "#define DNNL_CPU_RUNTIME DNNL_RUNTIME_TBB",
     "#cmakedefine DNNL_GPU_RUNTIME DNNL_RUNTIME_${DNNL_GPU_RUNTIME}": "#define DNNL_GPU_RUNTIME DNNL_RUNTIME_NONE",
     "#cmakedefine DNNL_USE_RT_OBJECTS_IN_PRIMITIVE_CACHE": "/* undef DNNL_USE_RT_OBJECTS_IN_PRIMITIVE_CACHE */",
     "#cmakedefine DNNL_WITH_SYCL": "/* #undef DNNL_WITH_SYCL */",
@@ -64,7 +64,7 @@ template_rule(
     name = "third_party/oneDNN/include_dnnl_config",
     src = "third_party/oneDNN/include/oneapi/dnnl/dnnl_config.h.in",
     out = "third_party/oneDNN/include/oneapi/dnnl/dnnl_config.h",
-    substitutions = _DNNL_RUNTIME_OMP,
+    substitutions = _DNNL_RUNTIME_TBB,
 )
 
 cc_library(
