@@ -1,4 +1,4 @@
-load("@rules_cuda//cuda:defs.bzl", "cuda_library")
+load("@cruise_ws//cruise/build/rules/cuda:def.bzl", "cruise_cuda_kernel")
 
 NVCC_COPTS = [
     "--expt-relaxed-constexpr",
@@ -38,5 +38,11 @@ NVCC_COPTS = [
     "-Wno-missing-field-initializers",
 ]
 
-def cu_library(name, srcs, copts = [], **kwargs):
-    cuda_library(name, srcs = srcs, copts = NVCC_COPTS + copts, **kwargs)
+def cu_library(**kwargs):
+    if "alwayslink" in kwargs:
+        kwargs.pop("alwayslink")
+    if "visibility" in kwargs:
+        kwargs.pop("visibility")
+    if "cuda_toolchain" not in kwargs:
+        kwargs["cuda_toolchain"] = "nvcc_clang"
+    cruise_cuda_kernel(**kwargs)
