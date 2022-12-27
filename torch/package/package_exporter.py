@@ -891,22 +891,25 @@ class PackageExporter:
 
     def _persistent_id(self, obj):
         if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
+
+            storage: Storage
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
                 untyped_storage = obj._untyped_storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
+                storage = cast(Storage, untyped_storage)
                 storage_numel = obj.size()
 
             elif isinstance(obj, torch.UntypedStorage):
                 untyped_storage = obj
+                storage = cast(Storage, untyped_storage)
                 storage_type = normalize_storage_type(type(storage))
                 storage_numel = storage.nbytes()
             else:
                 raise RuntimeError(f"storage type not recognized: {type(obj)}")
 
-            storage: Storage = cast(Storage, untyped_storage)
             location = location_tag(storage)
 
             # serialize storage if not already written
