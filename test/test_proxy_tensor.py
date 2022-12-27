@@ -931,7 +931,6 @@ def forward(self, a_1):
     return div""")
 
         r = str(make_fx(f, tracing_mode="symbolic", decomposition_table=decomposition_table)(torch.empty(4)).code).strip()
-        print('DEBUG:', r)
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0)
