@@ -181,9 +181,8 @@ TORCH_API void set_name(const Variable&, const std::string& name);
 
 TORCH_API void add_hook(
     const at::TensorBase&,
-    std::shared_ptr<FunctionPreHook> hook);
-TORCH_API int64_t _get_hooks_version(const at::TensorBase&);
-TORCH_API const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(
+    std::unique_ptr<FunctionPreHook> hook);
+TORCH_API std::vector<std::unique_ptr<FunctionPreHook>>& hooks(
     const Variable&);
 TORCH_API void clear_hooks(const at::TensorBase&);
 
@@ -217,13 +216,19 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // must be protected by mutex_
   std::shared_ptr<ForwardGrad> fw_grad_;
 
-  std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
+  // The hooks_ field is actually reused by both python and cpp logic
+  // For both cases, we have a data structure, cpp_hooks_list_ (cpp)
+  // or dict (python) which is the canonical copy.
+  // Then, for both cases, we always register a single hook to
+  // hooks_ which wraps all the hooks in the list/dict.
+  // And, again in both cases, if the grad_fn exists on that tensor
+  // we will additionally register a single hook to the grad_fn.
+  //
+  // Note that the cpp and python use cases aren't actually aware of
+  // each other, so using both is not defined behavior.
+  std::vector<std::unique_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list_;
   std::shared_ptr<hooks_list> retains_grad_hooks_list_;
-
-  // Accumulate grad's prehook function needs to know when it needs
-  // to refresh its list of hooks
-  int64_t hooks_version_;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
@@ -290,7 +295,6 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     retains_grad_ = false;
     is_view_ = false;
     output_nr_ = gradient_edge.input_nr;
-    hooks_version_ = 0;
 
     // set_requires_grad also checks error conditions.
     if (requires_grad) {

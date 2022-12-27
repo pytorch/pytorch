@@ -218,30 +218,24 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
 }
 
 void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
-  std::unique_ptr<FunctionPreHook> hook_ptr{};
+  const auto& fn = self.grad_fn();
   if (is_retains_grad_hook) {
     std::shared_ptr<hooks_list>& list = materialize_autograd_meta(self)->retains_grad_hooks_list_;
     // NOLINTNEXTLINE(modernize-make-shared)
     list.reset(new hooks_list());
-    std::unique_ptr<FunctionPreHook> hook_ptr_{new CppFunctionTensorPreHook(list, self.output_nr())};
-    hook_ptr = std::move(hook_ptr_);
-    clear_hooks(self);
-    add_hook(self, std::make_shared<CppFunctionTensorPreHook>(list, 0));
+    std::unique_ptr<FunctionPreHook> hook_ptr{new CppFunctionTensorPreHook(list, self.output_nr())};
+    TORCH_INTERNAL_ASSERT(fn, "Expect grad_fn to be defined for retains_grad");
+    fn->add_retains_grad_hook(std::move(hook_ptr));
   } else {
     std::shared_ptr<hooks_list>& list = materialize_autograd_meta(self)->cpp_hooks_list_;
     // NOLINTNEXTLINE(modernize-make-shared)
     list.reset(new hooks_list());
-    std::unique_ptr<FunctionPreHook> hook_ptr_{new CppFunctionTensorPreHook(list, self.output_nr())};
-    hook_ptr = std::move(hook_ptr_);
+    std::unique_ptr<FunctionPreHook> hook_ptr{new CppFunctionTensorPreHook(list, self.output_nr())};
+    // NB: we could potentially only update hooks_ if !fn, but it shouldn't matter
+    //     and this was the way before, so we keep it like this for now.
     clear_hooks(self);
-    add_hook(self, std::make_shared<CppFunctionTensorPreHook>(list, 0));
-  }
-
-  const auto& fn = self.grad_fn();
-  if (fn) {
-    if (is_retains_grad_hook) {
-      fn->add_retains_grad_hook(std::move(hook_ptr));
-    } else {
+    add_hook(self, std::make_unique<CppFunctionTensorPreHook>(list, 0));
+    if (fn) {
       fn->add_tensor_pre_hook(std::move(hook_ptr));
     }
   }
@@ -354,36 +348,21 @@ const c10::VariableVersion& version_counter(const Variable& self) {
 
 void add_hook(
     const at::TensorBase& self,
-    std::shared_ptr<FunctionPreHook> hook) {
-  auto meta = materialize_autograd_meta(self);
-  meta->hooks_version_++;
+    std::unique_ptr<FunctionPreHook> hook) {
+  AutogradMeta* meta = materialize_autograd_meta(self);
+  TORCH_INTERNAL_ASSERT(meta->hooks_.size() == 0);
   meta->hooks_.push_back(std::move(hook));
 }
 
-namespace {
-std::vector<std::shared_ptr<FunctionPreHook>> empty_singleton;
-}
-
-// TODO: Return an ArrayRef instead (and delete the singleton while you're at
-// it
-const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(
+std::vector<std::unique_ptr<FunctionPreHook>>& hooks(
     const Variable& self) {
-  if (get_autograd_meta(self)) {
-    return get_autograd_meta(self)->hooks_;
-  } else {
-    return empty_singleton;
-  }
+  TORCH_INTERNAL_ASSERT(get_autograd_meta(self));
+  return get_autograd_meta(self)->hooks_;
 }
 
 void clear_hooks(const at::TensorBase& self) {
   // This is a little goofy, but usually this should be a no oop
-  auto meta = materialize_autograd_meta(self);
-  meta->hooks_version_++;
-  meta->hooks_.clear();
-}
-
-int64_t _get_hooks_version(const at::TensorBase& self) {
-  return materialize_autograd_meta(self)->hooks_version_;
+  materialize_autograd_meta(self)->hooks_.clear();
 }
 
 void set_name(const Variable& self, const std::string& name) {
