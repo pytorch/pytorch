@@ -249,7 +249,12 @@ def _rebuild_sparse_tensor(layout, data):
     }:
         compressed_indices, plain_indices, values, size = data
         result = torch.sparse_compressed_tensor(
-            compressed_indices, plain_indices, values, size, layout=layout, check_invariants=False
+            compressed_indices,
+            plain_indices,
+            values,
+            size,
+            layout=layout,
+            check_invariants=False,
         )
         _sparse_tensors_to_validate.append(result)
         return result
