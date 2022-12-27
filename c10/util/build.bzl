@@ -3,7 +3,6 @@ def define_targets(rules):
         name = "TypeCast",
         srcs = ["TypeCast.cpp"],
         hdrs = ["TypeCast.h"],
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
@@ -32,7 +31,6 @@ def define_targets(rules):
         # This library uses flags and registration. Do not let the
         # linker remove them.
         alwayslink = True,
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
@@ -51,7 +49,6 @@ def define_targets(rules):
         name = "typeid",
         srcs = ["typeid.cpp"],
         hdrs = ["typeid.h"],
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [

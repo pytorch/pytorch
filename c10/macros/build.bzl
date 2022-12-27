@@ -9,7 +9,6 @@ def define_targets(rules):
             # public header in this file.
             "Export.h",
         ],
-        linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
     )
