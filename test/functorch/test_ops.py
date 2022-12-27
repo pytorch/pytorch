@@ -460,6 +460,7 @@ class TestOperators(TestCase):
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
+        xfail('as_strided_scatter'),
         decorate('linalg.det', 'singular',
                  decorator=expectedFailureIf(IS_MACOS and IS_X86)),
     }))
@@ -965,6 +966,8 @@ class TestOperators(TestCase):
         xfail('tensor_split'),  # data_ptr composite compliance
         xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip('as_strided'),  # Test runner cannot handle this
+        # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
+        xfail('as_strided_scatter'),
         xfail('nn.functional.gaussian_nll_loss'),  # .item or data-dependent control flow
         xfail('scatter'),  # forward-mode AD does not support at::scatter
         xfail('nanquantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
@@ -1042,6 +1045,7 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('complex'),
+        xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
         xfail('index_fill'),
@@ -1118,6 +1122,7 @@ class TestOperators(TestCase):
         xfail('cummax'),
         xfail('cummin'),
         xfail('cumprod'),
+        xfail('fill'),
         xfail('nansum'),
         xfail('nanmean'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
@@ -1357,7 +1362,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
-        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('symeig', ''),  # NYI: forward AD for symeig
@@ -1484,7 +1488,6 @@ class TestOperators(TestCase):
         xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_5'),  # vmap: inplace into a regular tensor
         xfail('nanquantile'),  # Batching rule not implemented for aten::equal
-        xfail('NumpySortAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90067
         # RuntimeError: Batch norm got a batched tensor as input while the
         # running_mean or running_var, which will be updated in place,
         # were not batched.
