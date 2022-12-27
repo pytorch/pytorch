@@ -202,8 +202,8 @@ def main() -> None:
     if options.gen_lazy_ts_backend:
         aten_path = os.path.dirname(os.path.dirname(options.native_functions_path))
         ts_backend_yaml = os.path.join(aten_path, "native/ts_native_functions.yaml")
-        ts_native_functions = "torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
-        ts_node_base = "torch/csrc/lazy/ts_backend/ts_node.h"
+        ts_native_functions = "external/pytorch/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
+        ts_node_base = "external/pytorch/torch/csrc/lazy/ts_backend/ts_node.h"
         install_dir = options.install_dir or os.fspath(options.gen_dir / "torch/csrc")
         lazy_install_dir = os.path.join(install_dir, "lazy/generated")
         os.makedirs(lazy_install_dir, exist_ok=True)
