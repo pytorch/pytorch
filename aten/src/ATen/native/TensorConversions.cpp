@@ -593,7 +593,7 @@ Tensor sparse_compressed_to_dense(
 
     if (batch_ndim == 0) {
       // Pad shape so we can treat non-batched like batched, we will
-      // squeeze out the phantom batch dim at the end
+      // squeeze out the phantom batch dim at the end.
       compressed_indices.unsqueeze_(0);
       plain_indices.unsqueeze_(0);
       values.unsqueeze_(0);
@@ -607,8 +607,11 @@ Tensor sparse_compressed_to_dense(
       dense = dense.flatten(0, batch_ndim - 1);
     }
 
-    // At this point everything the batch dim was inserted, existed
-    // already or was flattened from multiple batch dims
+    // At this point there is only one batch dim, existed already or
+    // was flattened from multiple batch dims.  Now, reshape the
+    // resulting dense matrix so that this single batch dim is joined
+    // with sparse dims into a single dim, so that the remaining dims
+    // are only block dims eventually, and then dense dims.
     auto n_batch = values.size(0);
     int64_t nrows, ncols;
     auto dense_reshaped_sizes = dense.sizes().vec();
@@ -627,8 +630,13 @@ Tensor sparse_compressed_to_dense(
     dense_reshaped_sizes[0] = n_batch * nrows * ncols;
     dense = dense.reshape(dense_reshaped_sizes);
 
-    int64_t nnz_per_batch = values.size(1);
+    // Calculate batch, row and column indices for non-zeros in the
+    // sparse matrix, and use these to calculate correspoding indices
+    // into the dense matrix reshaped as above.  Then, update dense
+    // matrix by adding sparse matrix values into elements with
+    // indices calculated this way.
     auto options = compressed_indices.options();
+    auto nnz_per_batch = values.size(1);
     auto batch_indices = at::arange(0, n_batch, options).repeat_interleave(nnz_per_batch);
     auto ncompressed = compressed_rows ? nrows : ncols;
     auto compressed_indices_over_all_batches =
@@ -650,9 +658,9 @@ Tensor sparse_compressed_to_dense(
     auto offsets = col_indices + row_indices * ncols + batch_indices * nrows * ncols;
     dense.index_add_(0, offsets, values.flatten(0, 1));
 
-    // un-tile the result, NOTE: The final reshape uses the original
+    // Un-tile the result.  The final reshape uses the original
     // self.sizes() which will squeeze out the extra batch dim if we
-    // put one in
+    // put one in.
     if (!block_sparse) {
       return dense.reshape(self.sizes());
     } else {
@@ -866,9 +874,9 @@ std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
 
 template<Layout target_layout>
 static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> n_dense_dim_opt) {
-    static_assert(target_layout == Layout::SparseCsr || target_layout == Layout::SparseCsc
-                  || target_layout == Layout::SparseBsr || target_layout == Layout::SparseBsc,
-                  "invalid layout template parameter for dense_to_sparse_compressed");
+  static_assert(target_layout == Layout::SparseCsr || target_layout == Layout::SparseCsc
+                || target_layout == Layout::SparseBsr || target_layout == Layout::SparseBsc,
+                "invalid layout template parameter for dense_to_sparse_compressed");
 
   constexpr auto compressed_rows_layout = target_layout == Layout::SparseCsr || target_layout == Layout::SparseBsr;
   constexpr auto blocked_layout = target_layout == Layout::SparseBsr || target_layout == Layout::SparseBsc;
@@ -900,6 +908,10 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksi
         blocksize[1]);
   }
 
+  // Reshape values so that the block dims are explicitly added, and
+  // calculate a mask tensor that has only batch and sparse dims, and
+  // value true whenever sparse matrix has a non-zero element over
+  // corresponding block and dense dims, and false otherwise.
   auto n_batch_dim = self.dim() - 2 - n_dense_dim;
   auto is_batched = n_batch_dim > 0;
   auto values = blocked_layout ? _batch_tile_tensor(self, blocksize, n_dense_dim) :  self;
@@ -911,10 +923,16 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksi
   }
 
   if (is_batched) {
+    // Prepare for the conversion, in particular join the batch dims
+    // and the compressed dim into the single dim.
     dense_to_sparse_compressed_prepare_check_mask_values_batched(
         target_layout, values, not_zero_mask, n_batch_dim);
   }
 
+  // Calculate sparse matrix row and col indices and then, depending
+  // on the target layout, corresponding compressed and sparse
+  // indices.  Use the mask tensor calculate above to generate sparse
+  // matrix values tensor.
   Tensor row_indices;
   Tensor col_indices;
   Tensor compressed_indices;
@@ -940,10 +958,12 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksi
   Tensor& plain_indices = compressed_rows_layout ? col_indices : row_indices;
 
   if (is_batched) {
+   // Restore the batch dims and compressed dim.
     reshape_2d_sparse_compressed_members_to_nd_batched(
         self.sizes(), n_batch_dim, compressed_indices, plain_indices, values);
   }
 
+  // Create compressed sparse matrix with the target layout.
   return at::native::_sparse_compressed_tensor_unsafe(
         compressed_indices,
         plain_indices,

@@ -111,7 +111,7 @@ class Interpreter:
         Returns:
             Any: The value returned from executing the Module
         """
-        self.env = initial_env if initial_env else {}
+        self.env = initial_env if initial_env is not None else {}
 
         # Positional function args are consumed left-to-right by
         # `placeholder` nodes. Use an iterator to keep track of

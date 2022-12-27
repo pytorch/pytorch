@@ -5286,6 +5286,15 @@ See :func:`torch.tanh`
 )
 
 add_docstr_all(
+    "softmax",
+    r"""
+softmax(dim) -> Tensor
+
+Alias for :func:`torch.nn.functional.softmax`.
+""",
+)
+
+add_docstr_all(
     "tanh_",
     r"""
 tanh_() -> Tensor
@@ -5374,10 +5383,13 @@ Example::
            values=tensor([[ 9,  0, 10]]),
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
 
-.. method:: to_sparse(*, layout=None, blocksize=None) -> Tensor
+.. method:: to_sparse(*, layout=None, blocksize=None, n_dense_dim=None) -> Tensor
    :noindex:
 
-Returns a sparse tensor with the specified layout and blocksize.
+Returns a sparse tensor with the specified layout and blocksize.  If
+the :attr:`self` is strided, and the layout specified is one of
+compressed layouts, the the number of dense dimensions could be
+specified, and a hybrid sparse tensor will be created.
 
 .. note:: If the :attr:`self` layout and blocksize parameters match
           with the specified layout and blocksize, return
@@ -5398,6 +5410,11 @@ Args:
       RuntimeError exception.  A block size must be a tuple of length
       two such that its items evenly divide the two sparse dimensions.
 
+    n_dense_dim (int, optional): Number of dense dimensions of the
+      resulting CSR, CSC, BSR or BSC tensor.  This argument should be
+      used only if :attr:`self` is a strided tensor, and must be a
+      value between 0 and dimension of :attr:`self` tensor minus two.
+
 Example::
 
     >>> x = torch.tensor([[1, 0], [0, 0], [2, 3]])
@@ -5415,15 +5432,34 @@ Example::
     RuntimeError: Tensor size(-2) 3 needs to be divisible by blocksize[0] 2
     >>> x.to_sparse(layout=torch.sparse_csr, blocksize=(3, 1))
     RuntimeError: to_sparse for Strided to SparseCsr conversion does not use specified blocksize
+
+    >>> x = torch.tensor([[[1], [0]], [[0], [0]], [[2], [3]]])
+    >>> x.to_sparse(layout=torch.sparse_csr, n_dense_dim=1)
+    tensor(crow_indices=tensor([0, 1, 1, 3]),
+           col_indices=tensor([0, 0, 1]),
+           values=tensor([[1],
+                          [2],
+                          [3]]), size=(3, 2, 1), nnz=3, layout=torch.sparse_csr)
+
 """,
 )
 
 add_docstr_all(
     "to_sparse_csr",
     r"""
-to_sparse_csr() -> Tensor
+to_sparse_csr(n_dense_dim=None) -> Tensor
 
-Convert a tensor to compressed row storage format (CSR). Only works with 2D tensors.
+Convert a tensor to compressed row storage format (CSR).  Except for
+strided tensors, only works with 2D tensors.  If the :attr:`self` is
+strided, then the number of dense dimensions could be specified, and a
+hybrid CSR tensor will be created.
+
+Args:
+
+    n_dense_dim (int, optional): Number of dense dimensions of the
+      resulting CSR tensor.  This argument should be used only if
+      :attr:`self` is a strided tensor, and must be a value between 0
+      and dimension of :attr:`self` tensor minus two.
 
 Example::
 
@@ -5431,6 +5467,18 @@ Example::
     >>> sparse = dense.to_sparse_csr()
     >>> sparse._nnz()
     25
+
+    >>> dense = torch.zeros(3, 3, 1, 1)
+    >>> dense[0, 0] = dense[1, 2] = dense[2, 1] = 0
+    >>> dense.to_sparse_csr(n_dense_dim=2)
+    tensor(crow_indices=tensor([0, 1, 2, 3]),
+           col_indices=tensor([0, 2, 1]),
+           values=tensor([[[1.]],
+
+                          [[1.]],
+
+                          [[1.]]]), size=(3, 3, 1, 1), nnz=3,
+           layout=torch.sparse_csr)
 
 """,
 )
@@ -5440,7 +5488,17 @@ add_docstr_all(
     r"""
 to_sparse_csc() -> Tensor
 
-Convert a tensor to compressed column storage (CSC) format. Only works with 2D tensors.
+Convert a tensor to compressed column storage (CSC) format.  Except
+for strided tensors, only works with 2D tensors.  If the :attr:`self`
+is strided, then the number of dense dimensions could be specified,
+and a hybrid CSC tensor will be created.
+
+Args:
+
+    n_dense_dim (int, optional): Number of dense dimensions of the
+      resulting CSC tensor.  This argument should be used only if
+      :attr:`self` is a strided tensor, and must be a value between 0
+      and dimension of :attr:`self` tensor minus two.
 
 Example::
 
@@ -5449,15 +5507,42 @@ Example::
     >>> sparse._nnz()
     25
 
+    >>> dense = torch.zeros(3, 3, 1, 1)
+    >>> dense[0, 0] = dense[1, 2] = dense[2, 1] = 0
+    >>> dense.to_sparse_csc(n_dense_dim=2)
+    tensor(ccol_indices=tensor([0, 1, 2, 3]),
+           row_indices=tensor([0, 2, 1]),
+           values=tensor([[[1.]],
+
+                          [[1.]],
+
+                          [[1.]]]), size=(3, 3, 1, 1), nnz=3,
+           layout=torch.sparse_csc)
+
 """,
 )
 
 add_docstr_all(
     "to_sparse_bsr",
     r"""
-to_sparse_bsr(blocksize) -> Tensor
+to_sparse_bsr(blocksize, n_dense_dim) -> Tensor
 
-Convert a CSR tensor to a block sparse row (BSR) storage format of given blocksize.
+Convert a tensor to a block sparse row (BSR) storage format of given
+blocksize.  If the :attr:`self` is strided, then the number of dense
+dimensions could be specified, and a hybrid BSR tensor will be
+created.
+
+Args:
+
+    blocksize (list, tuple, :class:`torch.Size`, optional): Block size
+      of the resulting BSR tensor. A block size must be a tuple of
+      length two such that its items evenly divide the two sparse
+      dimensions.
+
+    n_dense_dim (int, optional): Number of dense dimensions of the
+      resulting BSR tensor.  This argument should be used only if
+      :attr:`self` is a strided tensor, and must be a value between 0
+      and dimension of :attr:`self` tensor minus two.
 
 Example::
 
@@ -5467,15 +5552,50 @@ Example::
     >>> sparse_bsr.col_indices()
     tensor([0, 1, 0, 1])
 
+    >>> dense = torch.zeros(4, 3, 1)
+    >>> dense[0:2, 0] = dense[0:2, 2] = dense[2:4, 1] = 1
+    >>> dense.to_sparse_bsr((2, 1), 1)
+    tensor(crow_indices=tensor([0, 2, 3]),
+           col_indices=tensor([0, 2, 1]),
+           values=tensor([[[[1.]],
+
+                           [[1.]]],
+
+
+                          [[[1.]],
+
+                           [[1.]]],
+
+
+                          [[[1.]],
+
+                           [[1.]]]]), size=(4, 3, 1), nnz=3,
+           layout=torch.sparse_bsr)
+
 """,
 )
 
 add_docstr_all(
     "to_sparse_bsc",
     r"""
-to_sparse_bsc(blocksize) -> Tensor
+to_sparse_bsc(blocksize, n_dense_dim) -> Tensor
 
-Convert a CSR tensor to a block sparse column (BSC) storage format of given blocksize.
+Convert a tensor to a block sparse column (BSC) storage format of
+given blocksize.  If the :attr:`self` is strided, then the number of
+dense dimensions could be specified, and a hybrid BSC tensor will be
+created.
+
+Args:
+
+    blocksize (list, tuple, :class:`torch.Size`, optional): Block size
+      of the resulting BSC tensor. A block size must be a tuple of
+      length two such that its items evenly divide the two sparse
+      dimensions.
+
+    n_dense_dim (int, optional): Number of dense dimensions of the
+      resulting BSC tensor.  This argument should be used only if
+      :attr:`self` is a strided tensor, and must be a value between 0
+      and dimension of :attr:`self` tensor minus two.
 
 Example::
 
@@ -5484,6 +5604,26 @@ Example::
     >>> sparse_bsc = sparse.to_sparse_bsc((5, 5))
     >>> sparse_bsc.row_indices()
     tensor([0, 1, 0, 1])
+
+    >>> dense = torch.zeros(4, 3, 1)
+    >>> dense[0:2, 0] = dense[0:2, 2] = dense[2:4, 1] = 1
+    >>> dense.to_sparse_bsc((2, 1), 1)
+    tensor(ccol_indices=tensor([0, 1, 2, 3]),
+           row_indices=tensor([0, 1, 0]),
+           values=tensor([[[[1.]],
+
+                           [[1.]]],
+
+
+                          [[[1.]],
+
+                           [[1.]]],
+
+
+                          [[[1.]],
+
+                           [[1.]]]]), size=(4, 3, 1), nnz=3,
+           layout=torch.sparse_bsc)
 
 """,
 )
