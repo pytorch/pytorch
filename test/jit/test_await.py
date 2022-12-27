@@ -51,6 +51,23 @@ class TestAwait(JitTestCase):
         script_out = sm(inp)
         self.assertTrue(torch.allclose(script_out, out))
 
+    def test_nowait_implicit(self):
+        @torch.jit.script
+        def delayed(y: Tensor) -> Await[Tensor]:
+            return y * 2
+
+        @torch.jit.script
+        def fn(x: Tensor) -> Tensor:
+            aw = delayed(x)
+            return torch.jit.awaitable_wait(aw) * 3
+
+        inp = torch.zeros(2)
+
+        sm = torch.jit.script(fn)
+        out = fn(inp)
+        script_out = sm(inp)
+        self.assertTrue(torch.allclose(script_out, out))
+
     def test_nowait_class(self):
         class C(object):
             def __init__(self, a: Tensor, b: Tensor):
