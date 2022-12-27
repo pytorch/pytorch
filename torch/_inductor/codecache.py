@@ -414,14 +414,12 @@ class CppCodeCache:
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
                 return cdll.LoadLibrary(path)
             if "failed to map segment from shared object" in str(e):
-                print(
-                    "The /tmp folder appears to be mounted with noexec while TorchInductor needs "
-                    "an executable directory as for jitted binaries. Pls either remount /tmp with"
-                    " exec option or set another executable directory with TORCHINDUCTOR_CACHE_DIR"
-                    " environment variable.",
-                    file=sys.stderr,
-                )
-                raise SystemExit(1)
+                raise OSError(
+                    f"{e}.  The most common reason this may occur is if the /tmp folder "
+                    "is mounted with noexec (e.g., by default Docker mounts tmp file systems "
+                    "as noexec).  Please remount /tmp with exec enabled, or set another "
+                    "temporary directory with TORCHINDUCTOR_CACHE_DIR environment variable."
+                ) from e
             raise
 
     @classmethod
