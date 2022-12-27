@@ -652,7 +652,7 @@ class TestOptim(TestCase):
         device = "cuda"
         for optimizer_constructor, params in optimizer_pairs_with_flags:
             res, state = [], []
-            for foreach in (False, True):
+            for enabled in (False, True):
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device
                 ).reshape(3, 2)
@@ -665,10 +665,11 @@ class TestOptim(TestCase):
                     torch.nn.Sigmoid(),
                 )
                 model.to(dtype=torch.float64, device=device)
-                params_with_foreach = deepcopy(params)
-                params_with_foreach["foreach"] = foreach
+                params_with_flags = deepcopy(params)
+                params_with_flags[flag] = enabled
+
                 optimizer = optimizer_constructor(
-                    model.parameters(), **params_with_foreach
+                    model.parameters(), **params_with_flags
                 )
 
                 for _ in range(kIterations):
@@ -709,10 +710,10 @@ class TestOptim(TestCase):
 
     def test_multi_tensor_optimizers(self):
         optimizer_pairs_with_flags = [
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=True)),
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=False)),
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=True, fused=False)),
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=False, fused=False)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=True, fused=False)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=False, fused=False)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
