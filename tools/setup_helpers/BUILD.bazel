@@ -1,4 +1,6 @@
-py_binary(
+load("@//tools:cruise_rules.bzl", "cruise_py_binary")
+
+cruise_py_binary(
     name = "generate_code",
     srcs = ["generate_code.py"],
     deps = [
@@ -8,7 +10,7 @@ py_binary(
     visibility = ["//:__pkg__"],
 )
 
-py_binary(
+cruise_py_binary(
     name = "gen_version_header",
     srcs = ["gen_version_header.py"],
     visibility = ["//:__pkg__"],
