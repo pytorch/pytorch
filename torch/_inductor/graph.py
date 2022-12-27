@@ -76,6 +76,8 @@ class GraphLowering(torch.fx.Interpreter):
         """
         Primarily used to weights
         """
+        if ex.is_nested:
+            return None, None
         size = [sympy.Integer(i) for i in ex.size()]
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride

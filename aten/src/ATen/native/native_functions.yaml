@@ -4994,7 +4994,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: detach
-    NestedTensorCPU, NestedTensorCUDA: detach
+    NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: detach
 
 # Like `detach()`, but modifies this `Variable` in-place. This method may
 # only be called on non-view `Variable`s. You can use `is_view()` to check
@@ -5705,6 +5705,12 @@
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: _nested_tensor_offsets
 
+
+- func: _nested_tensor_offsets_tensor(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_tensor_offsets_tensor
+
 # _nested_from_padded is not usable from Python, so
 # _nested_from_padded_and_nested_example is available for testing.
 - func: _nested_from_padded_and_nested_example(Tensor padded, Tensor nt_example) -> Tensor
@@ -5718,7 +5724,7 @@
   variants: function
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: _nested_view_from_buffer
+    CPU, CUDA, Meta: _nested_view_from_buffer
 
 - func: _nested_view_from_buffer_copy(Tensor self, Tensor nested_size, Tensor nested_strides, int[] offsets) -> Tensor
   variants: function
@@ -6732,7 +6738,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMeta: values_sparse
     SparseCsrCPU, SparseCsrCUDA: values_sparse_csr
-    NestedTensorCPU, NestedTensorCUDA: values_nested
+    NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: values_nested
   device_check: NoCheck
   device_guard: False
 
@@ -6786,7 +6792,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind
-    CompositeImplicitAutogradNestedTensor: NestedTensor_unbind
+    CompositeImplicitAutogradNestedTensor, NestedTensorMeta: NestedTensor_unbind
 
 - func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor(a)[]
   variants: function, method

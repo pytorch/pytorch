@@ -321,7 +321,7 @@ def make_pointwise(
         else:
             assert alpha is None
         loaders = [x.make_loader() for x in inputs]
-        ranges = inputs[0].get_size()
+        ranges = inputs[0].get_size() if not inputs[0].is_nested else None
         dtype = override_return_dtype or inputs[0].get_dtype()
         is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
 

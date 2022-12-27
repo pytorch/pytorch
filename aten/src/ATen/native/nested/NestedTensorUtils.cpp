@@ -30,6 +30,10 @@ std::vector<int64_t> _nested_tensor_offsets(const at::Tensor& self){
   return get_nested_tensor_impl(self) -> get_storage_offsets();
 }
 
+at::Tensor _nested_tensor_offsets_tensor(const at::Tensor& self){
+  return at::tensor(get_nested_tensor_impl(self) -> get_storage_offsets());
+}
+
 // Helper functions for getting information about a nested tensor's shape.
 std::vector<int64_t> NestedTensor_get_max_size_from_size_tensor(
     const Tensor& sizes) {

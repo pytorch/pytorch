@@ -1237,6 +1237,10 @@ def meta_fill(self, val):
 def meta_relu_(self):
     return self
 
+@register_meta(aten.relu.default)
+def meta_relu(self):
+    return self
+
 
 @register_meta(aten.index_put.default)
 def meta_index_put(self, indices, values, accumulate=False):
