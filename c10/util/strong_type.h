@@ -21,7 +21,7 @@
 #include <utility>
 
 #if __cplusplus >= 201703L
-#define STRONG_NODISCARD [[nodiscard]]
+#define STRONG_NODISCARD
 #else
 #define STRONG_NODISCARD
 #endif
