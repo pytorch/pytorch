@@ -297,7 +297,7 @@ __all__ = [
 
 Tensor = torch.Tensor
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
-aten = torch.ops.aten
+aten = torch._ops.ops.aten
 
 
 def _broadcast_shapes(*_shapes):
@@ -3699,7 +3699,7 @@ def diagonal_scatter(
     dim1: int = 0,
     dim2: int = 1,
 ) -> TensorLikeType:
-    out = input.clone()
+    out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
     check(
         diag.shape == src.shape,
