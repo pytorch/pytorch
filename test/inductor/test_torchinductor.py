@@ -5140,7 +5140,6 @@ if HAS_CPU:
                 real_out = fn(value)
                 compiled_out = opt_fn(value)
                 assert same(real_out, compiled_out, equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count < 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
