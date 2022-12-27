@@ -623,6 +623,7 @@ Tensor class reference
     Tensor.size
     Tensor.slogdet
     Tensor.slice_scatter
+    Tensor.softmax
     Tensor.sort
     Tensor.split
     Tensor.sparse_mask
