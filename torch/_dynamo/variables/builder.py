@@ -8,11 +8,10 @@ import numbers
 import operator
 import re
 import types
-from abc import ABCMeta
 from typing import Any, Optional, Union
 
 import numpy as np
-from functorch.experimental.ops import PyOperator
+from torch._ops import PyOperator
 
 import torch
 
@@ -77,6 +76,7 @@ from .lists import (
 )
 from .misc import (
     AutogradFunctionVariable,
+    ComptimeVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -227,6 +227,8 @@ class VariableBuilder:
         return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
+        from ..comptime import comptime
+
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
@@ -414,6 +416,8 @@ class VariableBuilder:
                 InspectSignatureVariable.create,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif value is comptime:
+            return ComptimeVariable()
         elif value is dataclasses.fields:
             return LambdaVariable(
                 _dataclasses_fields_lambda,
@@ -439,12 +443,6 @@ class VariableBuilder:
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
             return SkipFilesVariable(
-                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
-        elif istype(value, (type, ABCMeta)):
-            # TODO(whc) the following seems preferable but breaks some tests, debug
-            # elif inspect.isclass(value):
-            return UserDefinedClassVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif value in tensor_dunder_fns:
@@ -503,6 +501,12 @@ class VariableBuilder:
             return TorchVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif issubclass(type(value), type):
+            # TODO(whc) the following seems preferable but breaks some tests, debug
+            # elif inspect.isclass(value):
+            return UserDefinedClassVariable(
+                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         else:
             result = UserDefinedObjectVariable(
@@ -753,11 +757,6 @@ def wrap_fx_proxy_cls(
         tx.output.guards.update(options["guards"])
 
     assert "example_value" not in proxy.node.meta
-    if not config.dynamic_propagation:
-        # TODO: This probably doesn't handle subclass correctly
-        if isinstance(example_value, torch.Tensor):
-            options.update(target_cls.specialize(example_value))
-        return target_cls(proxy, **options)
 
     initial_example_value = example_value
 
