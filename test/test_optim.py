@@ -3170,7 +3170,7 @@ class TestLRScheduler(TestCase):
 
     def test_cycle_lr_scale_fn_restored_from_state_dict(self):
         adam_opt = optim.Adam(self.net.parameters())
-        
+
         # Case 1: Built-in mode
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, mode="triangular2")
         restored_scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
@@ -3178,13 +3178,15 @@ class TestLRScheduler(TestCase):
         assert restored_scheduler.mode == scheduler.mode == "triangular2"
         assert restored_scheduler._scale_fn_ref is not None and scheduler._scale_fn_ref is not None
         assert restored_scheduler._scale_fn_custom is scheduler._scale_fn_custom is None
-        
+
         # Case 2: Custom `scale_fn`
-        scale_fn = lambda _: 0.5
+        def scale_fn(_):
+            return 0.5
+
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
         restored_scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
         restored_scheduler.load_state_dict(scheduler.state_dict())
-        assert scheduler._scale_fn_custom is scale_fn 
+        assert scheduler._scale_fn_custom is scale_fn
         assert restored_scheduler._scale_fn_custom is scale_fn
 
     def test_onecycle_lr_invalid_anneal_strategy(self):
