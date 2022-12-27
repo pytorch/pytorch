@@ -180,3 +180,39 @@ class TestAwait(JitTestCase):
         script_out = sm(inp)
         self.assertTrue(torch.allclose(script_out, out))
         self.assertGraphContainsExactly(sm.graph, kind='aten::awaitable_wait', num_kind_nodes=1)
+
+
+    def test_await_getattr_implicit_convertion(self):
+        class C(object):
+            def __init__(self, a: Tensor, b: Tensor):
+                self._a = a
+                self._b = b
+            def b(self):
+                return self._b
+
+
+        make_global(C)
+        # Can not stay in the class as Jit does not support Recursive annotations
+        # (self in wait_impl can not be annotated as C as C is not defined by this time)
+        def C_wait_impl(self: C) -> C:
+                return C(self._a * 2, self._b * 3)
+
+        def fn_arg_C(x: C) -> Tensor:
+          return x._a + x._b
+
+        @torch.jit.script
+        def fn(x: Tensor):
+            aw: Await[C] = torch.jit.awaitable(C_wait_impl, C(x, x))
+            _a = torch.eye(2)
+            ai = aw._a
+            awb = aw.b()
+            c = C(2*x, 2*x)
+            return _a + ai + x + c._a + c.b()
+
+        inp = torch.zeros(2)
+
+        sm = torch.jit.script(fn)
+        out = fn(inp)
+        script_out = sm(inp)
+        self.assertTrue(torch.allclose(script_out, out))
+        self.assertGraphContainsExactly(sm.graph, kind='aten::awaitable_wait', num_kind_nodes=2)
