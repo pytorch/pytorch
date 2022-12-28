@@ -239,13 +239,9 @@ size_t ReadyQueue::size() const {
 }
 
 auto ReadyQueue::waitForWork() -> void {
-  {
-    // Lock mutex for accesses to heap_
-    std::unique_lock<std::mutex> lock(mutex_);
-    not_empty_.wait(lock, [this] { return !heap_.empty(); });
-  }
-  // For the next wait
-  not_empty_.notify_one();
+  // Lock mutex for accesses to heap_
+  std::unique_lock<std::mutex> lock(mutex_);
+  not_empty_.wait(lock, [this] { return !heap_.empty(); });
 }
 
 auto ReadyQueue::pop() -> NodeTask {
