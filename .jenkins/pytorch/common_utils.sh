@@ -119,12 +119,13 @@ function install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive --quiet https://github.com/pytorch/xla.git
+    git clone --recursive --quiet -b udpate_libtpu_1218 https://github.com/pytorch/xla.git
     pushd xla
     # pin the xla hash so that we don't get broken by changes to xla
-    git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
-    git submodule sync
-    git submodule update --init --recursive
+    # TODO: uncomment after testing is done.
+    #git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
+    #git submodule sync
+    #git submodule update --init --recursive
     popd
   fi
 }
