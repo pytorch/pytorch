@@ -3550,8 +3550,8 @@ Tensor linalg_eig_backward(
   const auto diag_VhgV = VhgV.diagonal(0, -2, -1);
 
   if (V.is_complex() && !at::isTensorSubclassLike(diag_VhgV)) {
-    // Check invariance of the loss function wrt the transformation 
-    // V -> V * e^{i\phi} for an arbitrary phi \in \RR^n
+    // Check invariance of the loss function wrt the transformation
+    // V -> V * e^{i\phi} for an arbitrary phi in RR^n
     const auto imdiag_VhgV = at::imag(diag_VhgV);
     TORCH_CHECK(
         at::allclose(
