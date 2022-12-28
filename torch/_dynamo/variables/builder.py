@@ -11,12 +11,12 @@ import types
 from typing import Any, Optional, Union
 
 import numpy as np
-from torch._ops import PyOperator
 
 import torch
 
 from torch import SymInt
 from torch._guards import GuardSource
+from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
