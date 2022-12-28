@@ -680,19 +680,10 @@ static void qprelu_out_kernel(Tensor& out,
   int64_t input_ndim = qx.dim();
   TORCH_CHECK(input_ndim > 0, "qprelu: zero-dim input tensor is not allowed.");
 
-  // Weight should be a 1d or scalar tensor
-  // Reshape it to an nd tensor that broadcasts with input
-  // All elements go into the channel dimension
-  DimVector sizes(input_ndim, 1);
-  if (input_ndim > 1) {
-    sizes[1] = qw.numel();
-  }
-  auto qw_nd = qw.reshape(sizes);
-
   auto iter = TensorIteratorConfig()
     .add_output(out)
     .add_input(qx)
-    .add_input(qw_nd)
+    .add_input(qw)
     .build();
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qprelu", [&] {

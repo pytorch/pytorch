@@ -2571,6 +2571,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: floor_divide
+    MPS: floor_divide_mps
     SparseCPU, SparseCUDA: floor_divide_sparse
 
 - func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -2578,12 +2579,14 @@
   variants: method
   dispatch:
     CPU, CUDA: floor_divide_
+    MPS: floor_divide_mps_
     SparseCPU, SparseCUDA: floor_divide_sparse_
 
 - func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: floor_divide_out
+    MPS: floor_divide_out_mps
     SparseCPU, SparseCUDA: floor_divide_out_sparse_zerodim
 
 - func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
@@ -4656,7 +4659,6 @@
   dispatch:
     MkldnnCPU: mkldnn_prelu
     MPS: prelu_mps
-    QuantizedCPU: prelu_quantized_cpu
     CompositeImplicitAutograd: prelu
   autogen: prelu.out
 
@@ -4664,6 +4666,7 @@
   variants: function
   dispatch:
     CPU, CUDA: _prelu_kernel
+    QuantizedCPU: _prelu_kernel_quantized_cpu
 
 # TODO Port MkldnnCPU to implement _prelu_kernel_backward rather than this kernel
 - func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
@@ -9445,7 +9448,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta: unfold
+    CPU, CUDA, Meta, MPS: unfold
     QuantizedCPU, QuantizedCUDA: unfold
 
 - func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor

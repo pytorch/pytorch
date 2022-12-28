@@ -1843,12 +1843,6 @@ def _fill_np(a, value):
     a.fill(value)
     return a
 
-def _fill_aten(a, value):
-    t = a * False
-    with torch.no_grad():
-        t.fill_(value)
-    return t
-
 def _fill_sample_kwargs(device, dtype, input):
     if dtype is torch.bool:
         value = True
@@ -10830,6 +10824,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Fails in most cases, passes on LAZY for some reason'), 'TestCommon', 'test_variant_consistency_eager'),  # noqa: B950
                DecorateInfo(unittest.skip('Fails on cuda + rocm'), 'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
                # AssertionError: Tensor-likes are not close! (new_empty_strided.default)
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),)),
@@ -15300,10 +15295,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_squeeze),
     UnaryUfuncInfo(
         'fill',
-        op=_fill_aten,
         ref=_fill_np,
         method_variant=None,
-        inplace_variant=torch.Tensor.fill_,
         sample_kwargs=_fill_sample_kwargs,
         sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs={'value': True}),
         supports_forward_ad=True,
@@ -18440,6 +18433,8 @@ python_ref_db = [
         "_refs.as_strided_scatter",
         torch_opinfo_name="as_strided_scatter",
         supports_nvfuser=False,
+        # returns a view of an intermediate tensor (as_strided)
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",
@@ -18513,6 +18508,8 @@ python_ref_db = [
         torch_opinfo_name="diagonal_scatter",
         supports_out=True,
         supports_nvfuser=False,
+        # returns a view of an intermediate tensor (as_strided)
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.diag_embed",
