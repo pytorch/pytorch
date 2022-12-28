@@ -172,7 +172,7 @@ class bad_optional_access : public std::logic_error {
 
 template <class T>
 union storage_t {
-  unsigned char dummy_;
+  unsigned char dummy_{};
   T value_;
 
 #if __cplusplus >= 202002L

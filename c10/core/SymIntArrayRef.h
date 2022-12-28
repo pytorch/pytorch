@@ -19,7 +19,7 @@ inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
 
 inline c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
     c10::SymIntArrayRef ar) {
-  for (c10::SymInt sci : ar) {
+  for (const c10::SymInt& sci : ar) {
     if (sci.is_symbolic()) {
       return c10::nullopt;
     }
@@ -32,7 +32,7 @@ inline at::IntArrayRef asIntArrayRefSlow(
     c10::SymIntArrayRef ar,
     const char* file,
     int64_t line) {
-  for (c10::SymInt sci : ar) {
+  for (const c10::SymInt& sci : ar) {
     TORCH_CHECK(
         !sci.is_symbolic(),
         file,
