@@ -20,7 +20,7 @@ struct C10_API Storage {
       bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
-            size_bytes,
+            std::move(size_bytes),
             allocator,
             resizable)) {}
 
