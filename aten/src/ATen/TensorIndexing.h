@@ -195,8 +195,8 @@ struct TORCH_API TensorIndex final {
   }
 
  private:
-  int64_t integer_;
-  bool boolean_;
+  int64_t integer_ = 0;
+  bool boolean_ = false;
   Slice slice_;
   Tensor tensor_;
   TensorIndexType type_;
