@@ -1,13 +1,18 @@
 #include <type_traits>
+#include <c10/core/DeviceType.h>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/cpu/vec/vec256/vec256.h>
 #include <ATen/native/transformers/attention.h>
-
+#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <type_traits>
+#include <utility>
+#include <c10/core/SymIntArrayRef.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -19,6 +24,9 @@
 namespace at {
 
 namespace native {
+
+DEFINE_DISPATCH(_fused_sdp_choice_stub);
+REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_stub);
 
 namespace {
 
@@ -232,7 +240,7 @@ Tensor qkv_projection(
           q_kv_weight_s.size());
       auto q = gemm_nt(query, q_kv_weight_s[0]);
       auto kv = gemm_nt(key, q_kv_weight_s[1]);
-      qkv = at::cat({q, kv}, 2);
+      qkv = at::cat({std::move(q), std::move(kv)}, 2);
     }
   } else {
     auto q_k_v_weight_s = at::native::chunk(qkv_weight, 3, 0);
@@ -244,7 +252,7 @@ Tensor qkv_projection(
     auto q = gemm_nt(query, q_k_v_weight_s[0]);
     auto k = gemm_nt(key, q_k_v_weight_s[1]);
     auto v = gemm_nt(value, q_k_v_weight_s[2]);
-    qkv = at::cat({q, k, v}, 2);
+    qkv = at::cat({std::move(q), std::move(k), std::move(v)}, 2);
   }
 
   return qkv;
@@ -648,6 +656,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
   return std::make_tuple(std::move(proj), std::move(qkt), std::move(k), std::move(v));
 }
 
+int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
+  return static_cast<int64_t>(sdp::SDPBackend::math);
+}
+
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
 // greater than 0.0 is specified.
@@ -677,15 +690,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 //     L: Target sequence length
 //     E: Embedding dimension
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
-        const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
-        if (query_.requires_grad() || key.requires_grad() || value.requires_grad()){
-          return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
-        }
-        return at::_scaled_dot_product_attention_forward(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
-}
-
-std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_math(
     const Tensor& query_,
     const Tensor& key,
     const Tensor& value,
@@ -693,14 +697,58 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_math(
     double dropout_p,
     bool need_attn_weights,
     bool is_causal) {
-  return at::_scaled_dot_product_attention_math(
-      query_,
-      key,
-      value,
-      attn_mask_,
-      dropout_p,
-      need_attn_weights,
-      is_causal);
+  // TODO: The second return is the attention weights if the math kernel is
+  // used. The fused kernels do not return this Tensor so for the fused kernels
+  // The second return SHOULD always be an empty Tensor, unless need_attn_weights
+  // is true (in which case the fused kernels would not be called). This blows up
+  // op_info tests.
+  int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
+  if (query_.device().type() == DeviceType::CUDA){
+    choice_int = _fused_sdp_choice_stub(query_.device().type(),
+      query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+  }
+  sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
+  switch (backend) {
+    case sdp::SDPBackend::flash_attention: {
+      auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
+          query_, key, value, dropout_p, need_attn_weights, is_causal);
+      return std::make_tuple(
+          std::move(std::get<0>(out_lse_softmax)),
+          std::move(std::get<2>(out_lse_softmax)));
+    }
+    case sdp::SDPBackend::efficient_attention: {
+      bool compute_logsumexp =
+          (query_.requires_grad() || key.requires_grad() ||
+           value.requires_grad());
+      auto out_and_lse = at::_scaled_dot_product_efficient_attention(
+          query_, key, value, compute_logsumexp, is_causal);
+      // We need to make an empty tensor in the shape of attention weights
+      // for the sake of meta tensors.
+      if (query_.is_nested()) {
+        // TODO: Need to fix when we have empty for nested tensors.
+        return out_and_lse;
+      }
+      return std::make_tuple(
+          std::move(std::get<0>(out_and_lse)),
+          at::empty_symint(
+              c10::SymIntArrayRef{query_.sym_size(0), query_.sym_size(1), query_.sym_size(2), key.sym_size(2)},
+              query_.options()));
+    }
+    case sdp::SDPBackend::math:
+      return at::_scaled_dot_product_attention_math(
+          query_,
+          key,
+          value,
+          attn_mask_,
+          dropout_p,
+          need_attn_weights,
+          is_causal);
+    default:
+      TORCH_CHECK(
+          false,
+          "No viable backend for scaled_dot_product_attention was found.");
+      return std::make_tuple(Tensor(), Tensor());
+  }
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
@@ -714,10 +762,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
   }
     auto attn_mask = attn_mask_;
     // Naive, composite implementation defined here.
-    const auto embed_size = query_.size(-1);
 
     // Scale q,k before matmul for stability see https://tinyurl.com/sudb9s96 for math
-    const double scaling_factor = ::sqrt(::sqrt(static_cast<double>(embed_size)));
+    const auto embed_size = SymFloat(query_.sym_size(-1));
+    const auto scaling_factor = embed_size.sqrt().sqrt();
     const auto query = query_ / scaling_factor;
     if (is_causal) {
         TORCH_CHECK(!attn_mask.has_value(),
@@ -726,8 +774,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
                 "_scaled_dot_product_attention: Nested tensors for query / key are not supported when is_causal=True");
 
         // Replace attn_mask with causal mask; lower triangular elements take part in attention.
-        const auto L = query.size(-2), S = key.size(-2);
-        attn_mask = at::ones({L, S}, query.options().dtype(at::kBool)).tril();
+        const auto L = query.sym_size(-2), S = key.sym_size(-2);
+        attn_mask = at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
     }
     if (attn_mask.has_value()) {
         TORCH_CHECK(!query.is_nested() && !key.is_nested(),
@@ -750,6 +798,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
       attn = at::dropout(attn, dropout_p, true);
     }
     const auto output = at::matmul(attn, value);
+    // If you don't need it then you don't get it.
+    // TODO: Need to fix when we have empty for nested tensors.
+    attn = need_attn_weights || query_.is_nested()
+        ? attn
+        : at::empty_symint(
+              c10::SymIntArrayRef{query_.sym_size(0), query_.sym_size(1), query_.sym_size(2), key.sym_size(2)},
+              query_.options());
     return std::make_tuple(output, attn);
 }
 

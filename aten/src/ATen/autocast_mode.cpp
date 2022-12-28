@@ -389,6 +389,8 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(gru_cell, lower_precision_fp)
   KERNEL(rnn_tanh_cell, lower_precision_fp)
   KERNEL(rnn_relu_cell, lower_precision_fp)
+  KERNEL(_scaled_dot_product_flash_attention, lower_precision_fp)
+  KERNEL(_scaled_dot_product_attention, lower_precision_fp)
 
   // fp32
   KERNEL(acos, fp32)
@@ -450,6 +452,9 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL2(cumprod, dimname, fp32_set_opt_dtype)
   KERNEL(cumsum, fp32_set_opt_dtype)
   KERNEL2(cumsum, dimname, fp32_set_opt_dtype)
+  KERNEL(linalg_vector_norm, fp32_set_opt_dtype)
+  KERNEL(linalg_matrix_norm, fp32_set_opt_dtype)
+  KERNEL2(linalg_matrix_norm, str_ord, fp32_set_opt_dtype)
   // commenting these out because they accept an explicit (not-optional) dtype, and we shouldn't try to flip that even
   // when autocasting.
   // KERNEL2(norm, ScalarOpt_dtype, fp32_set_opt_dtype)
@@ -576,8 +581,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(fft_irfftn, fp32)
   KERNEL_CPU(fft_hfft, fp32)
   KERNEL_CPU(fft_ihfft, fp32)
-  KERNEL_CPU(linalg_matrix_norm, fp32)
-  KERNEL_CPU2(linalg_matrix_norm, str_ord, fp32)
   KERNEL_CPU(linalg_cond, fp32)
   KERNEL_CPU2(linalg_cond, p_str, fp32)
   KERNEL_CPU(linalg_matrix_rank, fp32)

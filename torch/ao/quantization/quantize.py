@@ -20,21 +20,23 @@ from torch.ao.quantization.quantization_mappings import (
 from .utils import get_qparam_dict, has_no_children_ignoring_parametrizations
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.ao.quantization.qconfig import (
-    add_module_to_qconfig_obs_ctr,
+    _add_module_to_qconfig_obs_ctr,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
-    activation_is_memoryless)
+    _activation_is_memoryless)
 from torch.nn.utils.parametrize import type_before_parametrizations
+from torch.ao.quantization.observer import _is_activation_post_process
+
+# TODO remove this once BC is no longer required to avoid a SEV
+from torch.ao.quantization.observer import (   # noqa: F401
+    _is_activation_post_process as is_activation_post_process
+)
 
 __all__ = [
     "get_default_custom_config_dict",
-    "is_activation_post_process",
     "propagate_qconfig_",
-    "register_activation_post_process_hook",
-    "add_observer_",
-    "get_unique_devices_",
     "add_quant_dequant",
     "prepare",
     "quantize",
@@ -43,7 +45,6 @@ __all__ = [
     "quantize_qat",
     "convert",
     "swap_module",
-    "get_observer_dict",
 ]
 
 _DEFAULT_CUSTOM_CONFIG_DICT = {
@@ -61,11 +62,6 @@ def get_default_custom_config_dict():
     r"""Defines the default custom config dict.
     """
     return _DEFAULT_CUSTOM_CONFIG_DICT
-
-def is_activation_post_process(module):
-    return (isinstance(module, torch.ao.quantization.ObserverBase) or
-            isinstance(module, torch.ao.quantization.FakeQuantizeBase))
-
 
 def _propagate_qconfig_helper(module, qconfig_dict,
                               qconfig_parent=None, prefix='', prepare_custom_config_dict=None):
@@ -91,9 +87,9 @@ def _propagate_qconfig_helper(module, qconfig_dict,
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
-    torch.ao.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
+    torch.ao.quantization.qconfig._assert_valid_qconfig(module_qconfig, module)
 
-    qconfig_with_device_check = add_module_to_qconfig_obs_ctr(module_qconfig, module)
+    qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(module_qconfig, module)
     module.qconfig = qconfig_with_device_check
 
     for name, child in module.named_children():
@@ -139,18 +135,20 @@ def _observer_forward_pre_hook(self, input):
     """
     return self.activation_post_process(input[0])
 
-def register_activation_post_process_hook(module, pre_hook=False):
+def _register_activation_post_process_hook(module, pre_hook=False):
     assert hasattr(module, 'activation_post_process'), \
         'Expect activation_post_process attribute already attached to the module'
     if pre_hook:
-        handle = module.register_forward_pre_hook(_observer_forward_pre_hook)
-        module._forward_pre_hooks.move_to_end(handle.id, last=False)
+        handle = module.register_forward_pre_hook(
+            _observer_forward_pre_hook, prepend=True
+        )
     else:
-        handle = module.register_forward_hook(_observer_forward_hook)
-        module._forward_hooks.move_to_end(handle.id, last=False)
+        handle = module.register_forward_hook(
+            _observer_forward_hook, prepend=True
+        )
 
 
-def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
+def _add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -174,9 +172,9 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
 
     # respect device affinity when adding observers
     if device is None:
-        devices = get_unique_devices_(module)
+        devices = _get_unique_devices_(module)
         assert len(devices) <= 1, (
-            "add_observer_ only works with cpu or single-device CUDA modules, "
+            "_add_observer_ only works with cpu or single-device CUDA modules, "
             "but got devices {}".format(devices)
         )
         device = next(iter(devices)) if len(devices) > 0 else None
@@ -201,7 +199,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
                 m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
             # All post forward hooks are preserved and will be executed after the observer before convert
-            register_activation_post_process_hook(m, pre_hook=activation_is_memoryless(m.qconfig))
+            _register_activation_post_process_hook(m, pre_hook=_activation_is_memoryless(m.qconfig))
 
     for name, child in module.named_children():
         # TODO remove Dropout special after codebase stable
@@ -228,7 +226,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             if custom_module_class_mapping[type_before_parametrizations(child)] not in no_observer_set():
                 insert_activation_post_process(observed_child)
         else:
-            add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
+            _add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
@@ -236,7 +234,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
        and type_before_parametrizations(module) in qconfig_propagation_list:
         insert_activation_post_process(module)
 
-def get_unique_devices_(module):
+def _get_unique_devices_(module):
     return {p.device for p in module.parameters()} | \
         {p.device for p in module.buffers()}
 
@@ -313,7 +311,7 @@ def prepare(model, inplace=False, allow_list=None,
                       "passed correct configuration through `qconfig_dict` or "
                       "by assigning the `.qconfig` attribute directly on submodules")
 
-    add_observer_(
+    _add_observer_(
         model, qconfig_propagation_list, observer_non_leaf_module_list,
         custom_module_class_mapping=custom_module_class_mapping)
     return model
@@ -322,7 +320,7 @@ def _remove_activation_post_process(module):
     # TODO: maybe we should change activation_post_process to _activation_post_process
     # to prevent it from being used by user
     if hasattr(module, 'activation_post_process') and \
-       is_activation_post_process(module.activation_post_process):
+       _is_activation_post_process(module.activation_post_process):
         delattr(module, 'activation_post_process')
 
     # remove activation_post_proceess pre and post hooks
@@ -637,7 +635,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
                     new_mod.register_forward_hook(hook_fn)
 
             # respect device affinity when swapping modules
-            devices = get_unique_devices_(mod)
+            devices = _get_unique_devices_(mod)
             assert len(devices) <= 1, (
                 "swap_module only works with cpu or single-device CUDA modules, "
                 "but got devices {}".format(devices)
@@ -647,7 +645,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
                 new_mod.to(device)
     return new_mod
 
-def get_observer_dict(mod, target_dict, prefix=""):
+def _get_observer_dict(mod, target_dict, prefix=""):
     r"""Traverse the modules and save all observers into dict.
     This is mainly used for quantization accuracy debug
     Args:
@@ -662,4 +660,4 @@ def get_observer_dict(mod, target_dict, prefix=""):
         target_dict[get_prefix(prefix) + 'activation_post_process'] = mod.activation_post_process
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
-        get_observer_dict(child, target_dict, module_prefix)
+        _get_observer_dict(child, target_dict, module_prefix)

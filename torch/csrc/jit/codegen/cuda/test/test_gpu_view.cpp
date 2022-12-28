@@ -1271,6 +1271,9 @@ TEST_F(NVFuserTest, FusionViewVectorize_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionExpandFlatten_CUDA) {
+#ifdef FBCODE_CAFFE2
+  GTEST_SKIP() << "Fails accuracy on V100 32gb";
+#endif
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 

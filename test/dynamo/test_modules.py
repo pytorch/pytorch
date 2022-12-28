@@ -479,6 +479,11 @@ class SuperModule(BasicModule):
         return x + 10.0
 
 
+class SuperModule2(BasicModule):
+    def forward(self, x):
+        return BasicModule.forward(self, x)
+
+
 class ComplicatedSuperParent(torch.nn.Module):
     @classmethod
     def custom_add(cls, x):
@@ -524,6 +529,23 @@ class EnumValues(torch.nn.ModuleDict):
         features = [init_features]
         for idx, layer in enumerate(self.values()):
             new_features = layer(features)
+            features.append(new_features)
+        return torch.cat(features, 1)
+
+
+class AccessByKeys(torch.nn.ModuleDict):
+    def __init__(
+        self,
+        num_layers: int = 3,
+    ) -> None:
+        super().__init__()
+        for i in range(num_layers):
+            self.add_module("denselayer%d" % (i + 1), _Block())
+
+    def forward(self, init_features):
+        features = [init_features]
+        for k in self.keys():
+            new_features = self[k](features)
             features.append(new_features)
         return torch.cat(features, 1)
 
@@ -595,6 +617,57 @@ class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
         return self.activation(self.linear(self.initializer + x)) * self.scale
 
 
+class ModuleForwardHasGraphBreak(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = BasicModule()
+        self.layer2 = BasicModule()
+        self.layer3 = torch.nn.Sequential(BasicModule(), BasicModule())
+        self.layer4 = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+            ]
+        )
+        self.layer5 = torch.nn.ModuleDict(
+            {
+                "0": torch.nn.Linear(10, 10),
+            }
+        )
+        self.scale = torch.randn(1, 10)
+
+    def forward(self, x):
+        """
+        This is used to test if the results of functions like `named_parameters`
+        can be reconstructed correctly after graph break.
+
+        https://github.com/pytorch/torchdynamo/issues/1931
+        """
+        x = self.layer1(x)
+        params1 = dict(self.named_parameters())
+        params2 = list(self.parameters())
+        buffers1 = dict(self.named_buffers())
+        buffers2 = list(self.buffers())
+        modules1 = dict(self.named_modules())
+        modules2 = list(self.modules())
+        torch._dynamo.graph_break()
+        y = modules2
+        y = modules1
+        y = buffers2
+        y = buffers1
+        y = params2
+        y = params1
+        x = (
+            self.layer2(x)
+            + y["layer3.1.linear1.weight"]
+            + y["layer4.2.weight"]
+            + y["layer5.0.weight"]
+        )
+        return x * self.scale
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -632,6 +705,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_modulelist = make_test(ModuleList())
     test_moduledict = make_test(ModuleDict())
     test_super1 = make_test(SuperModule())
+    test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
     test_densenet = make_test(DenseNetBlocks())
@@ -640,11 +714,20 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_parameters3 = make_test(ParametersModule3(), expected_ops=5)
     test_hasattr = make_test(HasAttrModule())
     test_enumvalues = make_test(EnumValues())
+    test_access_by_keys = make_test(AccessByKeys())
     test_module_class_method = make_test(ModuleClassMethodCall())
     test_module_property = make_test(ModuleProperty())
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
+
+    def test_module_forward_has_graph_break(self):
+        m = ModuleForwardHasGraphBreak()
+        x = torch.rand([10, 10])
+        ref = m(x)
+        opt_m = torch._dynamo.optimize("eager")(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()
@@ -720,16 +803,19 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
 
-        x = torch.randn(1).as_subclass(TensorProxy)
-        cnt = torch._dynamo.testing.CompileCounter()
-        out1 = foo(x)
-        opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
-        out2 = opt_foo(x)
+        try:
 
-        self.assertEqual(cnt.op_count, 4)
-        self.assertTrue(torch._dynamo.testing.same(out1, out2))
+            x = torch.randn(1).as_subclass(TensorProxy)
+            cnt = torch._dynamo.testing.CompileCounter()
+            out1 = foo(x)
+            opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+            out2 = opt_foo(x)
 
-        torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+            self.assertEqual(cnt.op_count, 4)
+            self.assertTrue(torch._dynamo.testing.same(out1, out2))
+
+        finally:
+            torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
 
     def test_torch_function_with_closure(self):
         def run():
@@ -756,17 +842,18 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
             torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
 
-            x = torch.randn(1).as_subclass(TensorProxy)
-            x = torch.randn(1)
-            cnt = torch._dynamo.testing.CompileCounter()
-            out1 = foo(x)
-            opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
-            out2 = opt_foo(x)
+            try:
+                x = torch.randn(1).as_subclass(TensorProxy)
+                x = torch.randn(1)
+                cnt = torch._dynamo.testing.CompileCounter()
+                out1 = foo(x)
+                opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+                out2 = opt_foo(x)
 
-            self.assertEqual(cnt.op_count, 4)
-            self.assertTrue(torch._dynamo.testing.same(out1, out2))
-
-            torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+                self.assertEqual(cnt.op_count, 4)
+                self.assertTrue(torch._dynamo.testing.same(out1, out2))
+            finally:
+                torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
 
         run()
 
@@ -902,6 +989,141 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         real = mod(rx)
         graph, _ = torch._dynamo.export(mod, rx)
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
+
+
+class MockModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.relu = torch.nn.ReLU()
+        self.linear = torch.nn.Linear(10, 10)
+        self.register_buffer("buf0", torch.randn(10, 10))
+
+    def forward(self, x):
+        return self.relu(self.linear(x) + self.buf0)
+
+
+class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
+    def test_nn_module(self):
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
+
+        x = torch.randn(10, 10)
+        self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_to(self):
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        x = torch.randn(10, 10)
+        self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Ensure that there is no recompilation
+        opt_mod(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        opt_mod = opt_mod.to(device="cpu").to(dtype=torch.float64)
+        self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
+        x = torch.randn(10, 10).to(dtype=torch.float64)
+        opt_mod(x)
+        # Ensure that there is a recompilation
+        self.assertEqual(cnt.frame_count, 2)
+
+        # Ensure that there is no recompilation
+        opt_mod(x)
+        self.assertEqual(cnt.frame_count, 2)
+
+        torch._dynamo.reset()
+        opt_mod(x)
+        self.assertEqual(cnt.frame_count, 3)
+
+    def test_attr(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.register_buffer("buf0", torch.randn(10, 10))
+
+            def forward(self, x):
+                return self.r(torch.sin(x)) + self.buf0
+
+        mod = MockModule()
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+
+        # Check parameteres and buffers
+        for (p1, p2) in zip(mod.parameters(), opt_mod.parameters()):
+            self.assertTrue(id(p1) == id(p2))
+
+    def test_recursion(self):
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+
+        for _ in range(5):
+            opt_mod = torch._dynamo.optimize(cnt)(opt_mod)
+        opt_mod(torch.randn(10, 10))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_composition(self):
+        class InnerModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(torch.sin(x))
+
+        opt_inner_mod = InnerModule()
+
+        class OuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = opt_inner_mod
+
+            def forward(self, x):
+                return self.mod(torch.cos(x))
+
+        outer_mod = OuterModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_outer_mod = torch._dynamo.optimize(cnt)(outer_mod)
+
+        x = torch.randn(4)
+        self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
+        self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_composition_with_opt_mod(self):
+        class InnerModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(torch.sin(x))
+
+        inner_mod = InnerModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_inner_mod = torch._dynamo.optimize(cnt)(inner_mod)
+
+        class OuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = opt_inner_mod
+
+            def forward(self, x):
+                return self.mod(torch.cos(x))
+
+        outer_mod = OuterModule()
+        opt_outer_mod = torch._dynamo.optimize(cnt)(outer_mod)
+
+        x = torch.randn(4)
+        self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
+        self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
+        # There will be a graph break for the inner mod being OptimizedModule
+        self.assertEqual(cnt.frame_count, 2)
 
 
 if __name__ == "__main__":

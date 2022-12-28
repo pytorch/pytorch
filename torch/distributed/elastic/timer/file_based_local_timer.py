@@ -10,6 +10,7 @@ import logging
 import os
 import select
 import signal
+import sys
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Set, Tuple
@@ -17,6 +18,8 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
 
 __all__ = ["FileTimerClient", "FileTimerRequest", "FileTimerServer"]
+
+log = logging.getLogger(__name__)
 
 class FileTimerRequest(TimerRequest):
     """
@@ -78,7 +81,8 @@ class FileTimerClient(TimerClient):
         signal: signal, the signal to use to kill the process. Using a
                         negative or zero signal will not kill the process.
     """
-    def __init__(self, file_path: str, signal=signal.SIGKILL) -> None:
+    def __init__(self, file_path: str, signal=(signal.SIGKILL if sys.platform != "win32" else
+                                               signal.CTRL_C_EVENT)) -> None:  # type: ignore[attr-defined]
         super().__init__()
         self._file_path = file_path
         self.signal = signal
@@ -173,25 +177,25 @@ class FileTimerServer:
 
 
     def start(self) -> None:
-        logging.info(
+        log.info(
             f"Starting {type(self).__name__}..."
             f" max_interval={self._max_interval},"
             f" daemon={self._daemon}"
         )
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=self._daemon)
-        logging.info("Starting watchdog thread...")
+        log.info("Starting watchdog thread...")
         self._watchdog_thread.start()
         self._log_event("watchdog started", None)
 
     def stop(self) -> None:
-        logging.info(f"Stopping {type(self).__name__}")
+        log.info(f"Stopping {type(self).__name__}")
         self._stop_signaled = True
         if self._watchdog_thread:
-            logging.info("Stopping watchdog thread...")
+            log.info("Stopping watchdog thread...")
             self._watchdog_thread.join(self._max_interval)
             self._watchdog_thread = None
         else:
-            logging.info("No watchdog thread running, doing nothing")
+            log.info("No watchdog thread running, doing nothing")
         if os.path.exists(self._file_path):
             os.remove(self._file_path)
         self._log_event("watchdog stopped", None)
@@ -199,11 +203,11 @@ class FileTimerServer:
     def run_once(self) -> None:
         self._run_once = True
         if self._watchdog_thread:
-            logging.info("Stopping watchdog thread...")
+            log.info("Stopping watchdog thread...")
             self._watchdog_thread.join()
             self._watchdog_thread = None
         else:
-            logging.info("No watchdog thread running, doing nothing")
+            log.info("No watchdog thread running, doing nothing")
         if os.path.exists(self._file_path):
             os.remove(self._file_path)
 
@@ -221,7 +225,7 @@ class FileTimerServer:
                     if run_once:
                         break
                 except Exception as e:
-                    logging.error("Error running watchdog", exc_info=e)
+                    log.error("Error running watchdog", exc_info=e)
 
     def _run_watchdog(self, fd: io.TextIOWrapper) -> None:
         timer_requests = self._get_requests(fd, self._max_interval)
@@ -229,7 +233,7 @@ class FileTimerServer:
         now = time.time()
         reaped_worker_pids = set()
         for worker_pid, expired_timers in self.get_expired_timers(now).items():
-            logging.info(f"Reaping worker_pid=[{worker_pid}]." f" Expired timers: {self._get_scopes(expired_timers)}")
+            log.info(f"Reaping worker_pid=[{worker_pid}]." f" Expired timers: {self._get_scopes(expired_timers)}")
             reaped_worker_pids.add(worker_pid)
             # In case we have multiple expired timers, we find the first timer
             # with a valid signal (>0) in the expiration time order.
@@ -243,13 +247,13 @@ class FileTimerServer:
                     expired_timer = timer
                     break
             if signal <= 0:
-                logging.info(f"No signal specified with worker=[{worker_pid}]. Do not reap it.")
+                log.info(f"No signal specified with worker=[{worker_pid}]. Do not reap it.")
                 continue
             if self._reap_worker(worker_pid, signal):
-                logging.info(f"Successfully reaped worker=[{worker_pid}] with signal={signal}")
+                log.info(f"Successfully reaped worker=[{worker_pid}] with signal={signal}")
                 self._log_event("kill worker process", expired_timer)
             else:
-                logging.error(f"Error reaping worker=[{worker_pid}]. Will retry on next watchdog.")
+                log.error(f"Error reaping worker=[{worker_pid}]. Will retry on next watchdog.")
         self.clear_timers(reaped_worker_pids)
 
     def _get_scopes(self, timer_requests: List[FileTimerRequest]) -> List[str]:
@@ -321,8 +325,8 @@ class FileTimerServer:
             os.kill(worker_pid, signal)
             return True
         except ProcessLookupError:
-            logging.info(f"Process with pid={worker_pid} does not exist. Skipping")
+            log.info(f"Process with pid={worker_pid} does not exist. Skipping")
             return True
         except Exception as e:
-            logging.error(f"Error terminating pid={worker_pid}", exc_info=e)
+            log.error(f"Error terminating pid={worker_pid}", exc_info=e)
         return False

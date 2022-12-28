@@ -13,10 +13,10 @@ architectures:
 from typing import Dict, List, Tuple, Optional
 
 
-CUDA_ARCHES = ["11.6", "11.7"]
+CUDA_ARCHES = ["11.6", "11.7", "11.8"]
 
 
-ROCM_ARCHES = ["5.1.1", "5.2"]
+ROCM_ARCHES = ["5.2", "5.3"]
 
 
 def arch_type(arch_version: str) -> str:
@@ -90,8 +90,13 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
     arches = ["cpu"]
     python_versions = FULL_PYTHON_VERSIONS
-    if os == "linux" or os == "windows":
+    if os == "linux":
         arches += CUDA_ARCHES
+    elif os == "windows":
+        arches += CUDA_ARCHES
+        # skip 11.8 builds for Windows
+        if "11.8" in arches:
+            arches.remove("11.8")
     elif os == "macos-arm64":
         python_versions = list_without(python_versions, ["3.7"])
     for python_version in python_versions:
@@ -127,6 +132,9 @@ def generate_libtorch_matrix(os: str, abi_version: str,
             arches += ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
+            # skip 11.8 builds for Windows
+            if "11.8" in arches:
+                arches.remove("11.8")
 
     if libtorch_variants is None:
         libtorch_variants = [
@@ -195,6 +203,9 @@ def generate_wheels_matrix(os: str,
             arches += CUDA_ARCHES + ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
+            # skip 11.8 builds for Windows
+            if "11.8" in arches:
+                arches.remove("11.8")
 
     ret: List[Dict[str, str]] = []
     for python_version in python_versions:
@@ -219,9 +230,9 @@ def generate_wheels_matrix(os: str,
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements":
-                        "nvidia-cuda-runtime-cu11;"
-                        "nvidia-cudnn-cu11==8.5.0.96;"
-                        "nvidia-cublas-cu11==11.10.3.66",
+                        "nvidia-cuda-runtime-cu11; platform_system == 'Linux' | "
+                        "nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | "
+                        "nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'",
                         "build_name":
                         f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-with-pypi-cudnn"
                         .replace(

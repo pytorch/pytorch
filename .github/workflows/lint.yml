@@ -10,6 +10,8 @@ on:
       - landchecks/*
   workflow_dispatch:
 
+# The names of steps that actually test the code should be suffixed with `(nonretryable)`.
+# When any other step fails, it's job will be retried once by retryBot.
 jobs:
   lintrunner:
     runs-on: ubuntu-18.04
@@ -46,7 +48,7 @@ jobs:
             --tags-path aten/src/ATen/native/tags.yaml \
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
-      - name: Run lintrunner on all files
+      - name: Run lintrunner on all files (nonretryable)
         run: |
           set +e
           if ! lintrunner --force-color --all-files --tee-json=lint.json; then

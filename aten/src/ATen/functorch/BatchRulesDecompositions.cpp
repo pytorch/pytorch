@@ -25,7 +25,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   OP_DECOMPOSE(feature_dropout_);
 }
 
-TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(__and__, Scalar);
   OP_DECOMPOSE2(__and__, Tensor);
   OP_DECOMPOSE2(__iand__, Tensor);
@@ -41,11 +41,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(_batch_norm_impl_index);
   OP_DECOMPOSE(absolute);
   OP_DECOMPOSE(arctan2);
+  OP_DECOMPOSE(argsort);
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);
   OP_DECOMPOSE(adaptive_avg_pool1d);
   m.impl("adaptive_avg_pool2d", native::adaptive_avg_pool2d_symint);
-  OP_DECOMPOSE(adaptive_avg_pool3d);
+  m.impl("adaptive_avg_pool3d", native::adaptive_avg_pool3d_symint);
   OP_DECOMPOSE(adjoint);
   OP_DECOMPOSE(arccos);
   OP_DECOMPOSE(arccosh);
@@ -63,18 +64,21 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(bitwise_or, Scalar);
   OP_DECOMPOSE2(bitwise_xor, Scalar);
   OP_DECOMPOSE(broadcast_tensors);
-  OP_DECOMPOSE(broadcast_to);
+  m.impl("broadcast_to", native::broadcast_to_symint);
   OP_DECOMPOSE(cartesian_prod);
   OP_DECOMPOSE(cdist);
+  OP_DECOMPOSE(chunk);
   OP_DECOMPOSE(clip);
   OP_DECOMPOSE2(clip, Tensor );
   OP_DECOMPOSE(concat);
   OP_DECOMPOSE(conj_physical);
+  OP_DECOMPOSE(contiguous);
   OP_DECOMPOSE(combinations);
   OP_DECOMPOSE(corrcoef);
   OP_DECOMPOSE(cosine_embedding_loss);
   OP_DECOMPOSE(cosine_similarity);
   OP_DECOMPOSE(cov);
+  OP_DECOMPOSE(cross);
   m.impl("cross_entropy_loss", native::cross_entropy_loss_symint);
   OP_DECOMPOSE2(cumulative_trapezoid, x);
   OP_DECOMPOSE2(cumulative_trapezoid, dx);
@@ -82,6 +86,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(dsplit, array);
   OP_DECOMPOSE(det);
   OP_DECOMPOSE(diff);
+  OP_DECOMPOSE(diag);
   OP_DECOMPOSE(dstack);
   OP_DECOMPOSE(einsum);
   m.impl("embedding_backward", native::embedding_backward_symint);
@@ -109,6 +114,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(flipud);
   OP_DECOMPOSE2(float_power, Tensor_Tensor);
   OP_DECOMPOSE2(float_power, Tensor_Scalar);
+  OP_DECOMPOSE2(floor_divide, Scalar);
   OP_DECOMPOSE(ger);
   OP_DECOMPOSE2(gradient, scalarint);
   OP_DECOMPOSE2(gradient, scalararray);
@@ -132,7 +138,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(instance_norm);
   OP_DECOMPOSE(kron);
   OP_DECOMPOSE(l1_loss);
-  OP_DECOMPOSE(layer_norm);
+  m.impl("layer_norm", native::layer_norm_symint);
   OP_DECOMPOSE2(ldexp, Tensor);
   OP_DECOMPOSE2(less_equal, Tensor );
   OP_DECOMPOSE2(less, Tensor );
@@ -184,7 +190,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(positive);
   OP_DECOMPOSE(qr);
   OP_DECOMPOSE(ravel);
-  OP_DECOMPOSE2(repeat_interleave, self_int);
+  m.impl("repeat_interleave.self_int", native::repeat_interleave_symint);
   OP_DECOMPOSE2(repeat_interleave, self_Tensor);
   m.impl("reshape", native::reshape_symint);
   OP_DECOMPOSE(resolve_conj);
@@ -200,6 +206,22 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(special_multigammaln);
   OP_DECOMPOSE(special_polygamma);
   OP_DECOMPOSE(special_softmax);
+  OP_DECOMPOSE(special_digamma);
+  OP_DECOMPOSE(special_erf);
+  OP_DECOMPOSE(special_erfc);
+  OP_DECOMPOSE(special_erfinv);
+  OP_DECOMPOSE(special_exp2);
+  OP_DECOMPOSE(special_expm1);
+  OP_DECOMPOSE(special_expit);
+  OP_DECOMPOSE(special_gammaln);
+  OP_DECOMPOSE(special_i0);
+  OP_DECOMPOSE(special_log1p);
+  OP_DECOMPOSE(special_ndtr);
+  OP_DECOMPOSE(special_psi);
+  OP_DECOMPOSE(special_round);
+  OP_DECOMPOSE(special_sinc);
+
+
   m.impl("split.sizes", native::split_symint);
   OP_DECOMPOSE(square);
   OP_DECOMPOSE(numpy_T);
@@ -253,7 +275,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(conv2d, padding);
   OP_DECOMPOSE2(conv3d, padding);
   OP_DECOMPOSE(_convolution_mode);
-  OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(diagonal_copy);

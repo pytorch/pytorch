@@ -144,7 +144,7 @@ class ViewTransform : public Transform {
   }
 
   // Debugging utility to convert the transformation into a string.
-  virtual std::string toString() const = 0;
+  virtual std::string toString() const override = 0;
 
  protected:
   ViewTransform(const int64_t& index) : Transform(index) {}
@@ -725,7 +725,7 @@ AnalyzeViewResult analyzeView(
   FUSER_PERF_SCOPE("analyzeView");
   TORCH_INTERNAL_ASSERT(
       original_sizes.size() > 0,
-      "Empty original size not supported for view operatioon.");
+      "Empty original size not supported for view operation.");
 
   TORCH_INTERNAL_ASSERT(
       TensorDomain::noReductions(original_view_tv->getMaybeRFactorDomain())

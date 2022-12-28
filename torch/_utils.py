@@ -1,3 +1,4 @@
+import copyreg
 import sys
 import traceback
 import warnings
@@ -147,11 +148,29 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
     return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
 
+def get_tensor_metadata(tensor):
+    # Tensor's Metadata for serializing.
+    # Currently, this only returns a dict[string, bool] specifing whether
+    # `conj` or `neg` bit is set.
+    assert isinstance(tensor, torch.Tensor)
+    return torch._C._get_tensor_metadata(tensor)  # type: ignore[attr-defined]
+
+
+def set_tensor_metadata(tensor, metadata):
+    # See `get_tensor_metadata` above
+    assert isinstance(metadata, dict)
+    assert isinstance(tensor, torch.Tensor)
+    torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
+
+
 def _rebuild_tensor_v2(
-    storage, storage_offset, size, stride, requires_grad, backward_hooks
+    storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None
 ):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
+    if metadata:
+        set_tensor_metadata(tensor, metadata)
+
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
@@ -174,15 +193,30 @@ _sparse_tensors_to_validate: List["torch.Tensor"] = []
 def _validate_loaded_sparse_tensors():
     try:
         for t in _sparse_tensors_to_validate:
-            if t.is_sparse:
+            if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
                     t._indices(), t._values(), t.size()
                 )
-            elif t.is_sparse_csr:
+            elif t.layout in {
+                torch.sparse_csr,
+                torch.sparse_csc,
+                torch.sparse_bsr,
+                torch.sparse_bsc,
+            }:
                 # TODO: Validation currently involves an expensive traversal
                 # on CPU, which may include a device transfer.
-                torch._validate_sparse_csr_tensor_args(
-                    t.crow_indices(), t.col_indices(), t.values(), t.size()
+                if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                    compressed_indices, plain_indices = (
+                        t.crow_indices(),
+                        t.col_indices(),
+                    )
+                else:
+                    compressed_indices, plain_indices = (
+                        t.ccol_indices(),
+                        t.row_indices(),
+                    )
+                torch._validate_sparse_compressed_tensor_args(
+                    compressed_indices, plain_indices, t.values(), t.size(), t.layout
                 )
             else:
                 raise NotImplementedError(
@@ -207,14 +241,15 @@ def _rebuild_sparse_tensor(layout, data):
         _sparse_tensors_to_validate.append(result)
         return result
 
-    raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
-
-
-def _rebuild_sparse_csr_tensor(layout, data):
-    if layout == torch.sparse_csr:
-        crow_indices, col_indices, values, size = data
-        result = torch._sparse_csr_tensor_unsafe(
-            crow_indices, col_indices, values, size
+    elif layout in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }:
+        compressed_indices, plain_indices, values, size = data
+        result = torch._sparse_compressed_tensor_unsafe(
+            compressed_indices, plain_indices, values, size, layout=layout
         )
         _sparse_tensors_to_validate.append(result)
         return result
@@ -315,6 +350,64 @@ def _rebuild_parameter(data, requires_grad, backward_hooks):
     param._backward_hooks = backward_hooks
 
     return param
+
+
+# TODO(kshitij12345): Support serializing nn.Parameter with Python Attributes.
+# NOTE: We are just defining it here now for future use.
+def _rebuild_parameter_with_state(data, requires_grad, backward_hooks, state):
+    param = torch.nn.Parameter(data, requires_grad)
+    # NB: This line exists only for backwards compatibility; the
+    # general expectation is that backward_hooks is an empty
+    # OrderedDict.  See Note [Don't serialize hooks]
+    param._backward_hooks = backward_hooks
+
+    # Restore state on Parameter like python attr.
+    param = _set_obj_state(param, state)
+    return param
+
+
+def _get_obj_state(obj):
+    # Get the state of the python subclass
+    # This loosely mimicks the function on the object class but since Tensor do not inherit
+    # from it, we cannot call that function directly
+    # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
+    getstate_fn = getattr(obj, "__getstate__", None)
+    if getstate_fn:
+        state = getstate_fn()
+    else:
+        slots_to_save = copyreg._slotnames(obj.__class__)  # type: ignore[attr-defined]
+        if slots_to_save:
+            state = (
+                obj.__dict__,
+                {
+                    name: getattr(obj, name)
+                    for name in slots_to_save
+                    if hasattr(obj, name)
+                },
+            )
+        else:
+            state = obj.__dict__
+
+    return state
+
+
+def _set_obj_state(obj, state):
+    if isinstance(state, tuple):
+        if not len(state) == 2:
+            raise RuntimeError(f"Invalid serialized state: {state}")
+        dict_state = state[0]
+        slots_state = state[1]
+    else:
+        dict_state = state
+        slots_state = None
+
+    for k, v in dict_state.items():
+        setattr(obj, k, v)
+
+    if slots_state:
+        for k, v in slots_state.items():
+            setattr(obj, k, v)
+    return obj
 
 
 def _import_dotted_name(name):
@@ -679,3 +772,8 @@ def classproperty(func):
     if not isinstance(func, (classmethod, staticmethod)):
         func = classmethod(func)
     return _ClassPropertyDescriptor(func)
+
+
+# Whether we are compiling with torch.compile or not
+def is_compiling():
+    return False

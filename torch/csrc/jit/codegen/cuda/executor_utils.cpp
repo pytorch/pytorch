@@ -157,7 +157,7 @@ bool validateKernelArgTensor(
   }
 
   if (!is_cpu_scalar(arg) && !arg.is_cuda()) {
-    msg << "Argumnet is a CPU tensor which is not supported in fusions.\n";
+    msg << "Argument is a CPU tensor which is not supported in fusions.\n";
     return false;
   }
 
@@ -828,7 +828,7 @@ void bindInputForExprEvaluation(
         if (root_domain[dim]->hasExpandedExtent()) {
           TORCH_INTERNAL_ASSERT(
               tensor_arg_stride == 0,
-              "Execting an expanded dimension on dimension ",
+              "Expecting an expanded dimension on dimension ",
               dim,
               " but found stride ",
               tensor_arg_stride);
@@ -992,7 +992,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   });
 
 #ifdef USE_ROCM
-  std::vector<const char*> args = {"--std=c++14"};
+  std::vector<const char*> args = {"--std=c++17"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
 #endif
@@ -1019,7 +1019,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       std::to_string(minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
+      "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
   const bool disable_fma = isOptionDisabled(DisableOption::Fma);

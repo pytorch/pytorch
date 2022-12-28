@@ -132,6 +132,8 @@ class RendezvousParameters:
             The minimum number of nodes to admit to the rendezvous.
         max_nodes:
             The maximum number of nodes to admit to the rendezvous.
+        local_addr:
+            The address of the local node.
         **kwargs:
             Additional parameters for the specified backend.
     """
@@ -143,6 +145,7 @@ class RendezvousParameters:
         run_id: str,
         min_nodes: int,
         max_nodes: int,
+        local_addr: Optional[str] = None,
         **kwargs,
     ):
         if not backend:
@@ -164,6 +167,7 @@ class RendezvousParameters:
         self.min_nodes = min_nodes
         self.max_nodes = max_nodes
         self.config = kwargs
+        self.local_addr = local_addr
 
     def get(self, key: str, default: Any = None) -> Any:
         """Returns the value for ``key`` if ``key`` exists, else ``default``."""
@@ -195,11 +199,11 @@ class RendezvousParameters:
             return value
         try:
             return int(value)
-        except ValueError:
+        except ValueError as e:
             raise ValueError(
                 f"The rendezvous configuration option '{key}' does not represent a valid integer "
                 "value."
-            )
+            ) from e
 
 
 RendezvousHandlerCreator = Callable[[RendezvousParameters], RendezvousHandler]
@@ -244,11 +248,11 @@ class RendezvousHandlerRegistry:
         """Creates a new :py:class:`RendezvousHandler`."""
         try:
             creator = self._registry[params.backend]
-        except KeyError:
+        except KeyError as e:
             raise ValueError(
                 f"The rendezvous backend '{params.backend}' is not registered. Did you forget "
                 f"to call `{self.register.__name__}`?"
-            )
+            ) from e
 
         handler = creator(params)
 
