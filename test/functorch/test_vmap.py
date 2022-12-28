@@ -3828,6 +3828,17 @@ class TestVmapOperatorsOpInfo(TestCase):
         x[x > 0] = float('nan')
         test(self, op, (x,), in_dims=(0))
 
+    def test_sum_scalar(self, device):
+        x = torch.tensor([10.], device=device)
+        y = vmap(torch.sum)(x)
+        self.assertEqual(y, x)
+
+        y = vmap(lambda x: x.sum(0))(x)
+        self.assertEqual(y, x)
+
+        y = vmap(lambda x: x.sum(-1))(x)
+        self.assertEqual(y, x)
+
     def test_isinf(self, device):
         test = functools.partial(_vmap_test, check_propagates_grad=False)
 
