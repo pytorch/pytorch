@@ -269,9 +269,14 @@ void _validate_compressed_sparse_indices_kernel(
         at::arange(batch_count, cidx.options()).view(batch_dims).unsqueeze_(-1);
 
     const auto idx_ndims = idx.dim();
-
-    Tensor idx_sizes_ = at::tensor(idx.sizes(), idx.options().dtype(kLong));
-    Tensor idx_strides_ = at::tensor(idx.strides(), idx.options().dtype(kLong));
+    const auto cpu_options = idx.options().dtype(kLong).device(kCPU);
+    Tensor idx_sizes_and_strides_cpu = at::empty({2, idx_ndims}, cpu_options);
+    idx_sizes_and_strides_cpu.select(0, 0).copy_(
+        at::tensor(idx.sizes(), cpu_options));
+    idx_sizes_and_strides_cpu.select(0, 1).copy_(
+        at::tensor(idx.strides(), cpu_options));
+    const Tensor idx_sizes_and_strides =
+        idx_sizes_and_strides_cpu.to(idx.device());
 
     auto iter = TensorIteratorConfig()
                     .set_check_mem_overlap(false)
@@ -286,11 +291,11 @@ void _validate_compressed_sparse_indices_kernel(
     AT_DISPATCH_INDEX_TYPES(
         idx.scalar_type(),
         NAME,
-        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes_, &idx_strides_]() {
+        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes_and_strides]() {
           const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
-          const int64_t* RESTRICT idx_sizes = idx_sizes_.data_ptr<int64_t>();
-          const int64_t* RESTRICT idx_strides =
-              idx_strides_.data_ptr<int64_t>();
+          const int64_t* RESTRICT idx_sizes =
+              idx_sizes_and_strides.data_ptr<int64_t>();
+          const int64_t* RESTRICT idx_strides = idx_sizes + idx_ndims;
           const auto zero = index_t{0};
           KernelLauncher::launch(
               iter,
