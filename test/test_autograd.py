@@ -552,7 +552,7 @@ class TestAutograd(TestCase):
                 return x ** 2
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
+            def setup_context(ctx, inputs, output):
                 x, = inputs
                 ctx.save_for_backward(x)
 
@@ -576,9 +576,9 @@ class TestAutograd(TestCase):
                 return x ** 2, two_x
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
+            def setup_context(ctx, inputs, output):
                 x, = inputs
-                _, two_x = outputs
+                _, two_x = output
                 ctx.two_x = two_x
 
             @staticmethod
@@ -599,7 +599,7 @@ class TestAutograd(TestCase):
                 return x.reshape(shape) * scale_forward
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
+            def setup_context(ctx, inputs, output):
                 x, shape, scale_forward, scale_backward = inputs
                 ctx.scale_backward = scale_backward
                 ctx.x_shape = x.shape
