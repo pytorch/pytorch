@@ -5708,7 +5708,7 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
     gA_ = left ? -gB_.matmul(X_.mH()) : -X_.mH().matmul(gB_);
   }
   return std::make_tuple(
-      A_requires_grad ? matrix_to_vector(gA_) : Tensor{},
+      A_requires_grad ? gA_ : Tensor{},
       B_requires_grad ? matrix_to_vector(gB_) : Tensor{});
 }
 
