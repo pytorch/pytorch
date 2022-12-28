@@ -1766,13 +1766,13 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
   Tensor values;
   Tensor indices = at::_convert_indices_from_csr_to_coo(compressed_indices, plain_indices,
                                                         false, (layout == kSparseCsc || layout == kSparseBsc));
-  bool coalesced = true;
+  // Only CSR is trivially coalesced
+  bool coalesced = layout == kSparseCsr || self.numel() == 0 || self._nnz() == 1;
   AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "sparse_compressed_to_sparse",
     [&] { values = self.values(); },
     [&] {
       auto size = DimVector(self.sizes().slice(0, 2));
       auto blocksize = DimVector(self.values().sizes().slice(1, 2));
-      auto nnz = indices.size(1);
 
       const auto max_blocksize = std::max(blocksize[0], blocksize[1]);
       const auto max_blocksize_arange = at::arange(max_blocksize, indices.options());
@@ -1799,7 +1799,9 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
         .flatten(-2, -1);
 
       values = self.values().flatten(0, 2);
-      coalesced = nnz == 1;
+
+      // Not spanning across several rows produces coalesced results.
+      coalesced |= (blocksize[0] == 1);
     });
   return at::native::_sparse_coo_tensor_unsafe(indices, values, self.sizes())._coalesced_(coalesced);
 }
