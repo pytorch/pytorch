@@ -613,8 +613,8 @@ def forward(self, primals_1):
     t_1 = torch.ops.aten.t.default(clone);  clone = None
     select_scatter = torch.ops.aten.select_scatter.default(t_1, mul, 0, 0);  t_1 = mul = None
     t_2 = torch.ops.aten.t.default(select_scatter);  select_scatter = None
-    t_3 = torch.ops.aten.t.default(t_2);  t_2 = None
-    return [t_3, 3, 3, 1, 3, 0]""")
+    t_4 = torch.ops.aten.t.default(t_2);  t_2 = None
+    return [t_4, 3, 3, 1, 3, 0]""")
 
     def test_view_and_inplace_view(self):
         def f(a, b):
@@ -683,11 +683,12 @@ def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    t_1 = torch.ops.aten.t.default(as_strided_5);  as_strided_5 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    as_strided_6 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    t_1 = torch.ops.aten.t.default(as_strided_6);  as_strided_6 = None
     mul_1 = torch.ops.aten.mul.Tensor(t_1, 3);  t_1 = None
-    return [mul, mul_1, 4, 1, 0]""")
+    return [as_strided_3, mul_1, 4, 1, 0]""")
 
     def test_input_mutation_aliases_other_input(self):
         def f(a, b):
@@ -712,10 +713,11 @@ def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2);  as_strided_scatter = None
-    add_1 = torch.ops.aten.add.Tensor(add, as_strided_4);  as_strided_4 = None
-    return [add, add_1]""")
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2);  as_strided_scatter = None
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_5 = None
+    return [as_strided_2, add_1]""")
 
     def test_input_mutation_aliases_other_input2(self):
         def f(a, b):
@@ -736,10 +738,11 @@ def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0);  as_strided_scatter = None
-    add_1 = torch.ops.aten.add.Tensor(add, as_strided_4);  as_strided_4 = None
-    return [add, add_1]""")
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0);  as_strided_scatter = None
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_5 = None
+    return [as_strided_2, add_1]""")
 
     def test_input_mutation_aliases_and_output_alias(self):
         def f(a, b):
@@ -758,9 +761,11 @@ def forward(self, primals_1):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0);  clone = None
+    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    return [add, 4, 1, 0]""")
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    return [as_strided_2, 4, 1, 0]""")
 
     def test_input_aliased_with_mutation_output_alias(self):
         def f(a, b, c):
@@ -783,10 +788,12 @@ def forward(self, primals_1):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0);  clone = None
+    as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    return [mul, add, 4, 1, 0]""")
+    return [as_strided_2, add, 4, 1, 0]""")
 
     def test_input_metadata_mutation_aliases(self):
         def f(a, b):
@@ -829,11 +836,12 @@ def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided, 2);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
-    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    add = torch.ops.aten.add.Tensor(as_strided_2, 1);  as_strided_2 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    add = torch.ops.aten.add.Tensor(as_strided_3, 1);  as_strided_3 = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    return [mul, add, add_1]""")
+    return [as_strided_2, add, add_1]""")
 
     def test_input_mutation_aliases_bases_out_of_order(self):
         # This tests our calling convention: if b and d are aliased, then the outer calling convention
@@ -864,12 +872,13 @@ def forward(self, primals_1, primals_2, primals_3):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    t_1 = torch.ops.aten.t.default(as_strided_4);  as_strided_4 = None
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    t_1 = torch.ops.aten.t.default(as_strided_5);  as_strided_5 = None
     add_2 = torch.ops.aten.add.Tensor(add_1, t_1);  add_1 = t_1 = None
-    return [add, add_2, 4, 1, 0, 4, 1, 0]""")
+    return [as_strided_2, add_2, 4, 1, 0, 4, 1, 0]""")
 
     # Mondo test that tests a combination of:
     # input is mutated, that aliases another input (so we make a synthetic base)
@@ -913,10 +922,11 @@ def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    add = torch.ops.aten.add.Tensor(as_strided_4, mul);  as_strided_4 = None
-    return [mul, add, 2, 2, 1, 2, 0, 2, 2, 2, 1, 0]""")
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    add = torch.ops.aten.add.Tensor(as_strided_5, as_strided_2);  as_strided_5 = None
+    return [as_strided_2, add, 2, 2, 1, 2, 0, 2, 2, 2, 1, 0]""")
 
     def test_no_grad_input_output(self):
         def f(a, b):
@@ -2037,7 +2047,6 @@ symbolic_aot_autograd_failures = {
     xfail('logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
     xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
     xfail('logdet', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
     xfail('lu_unpack', ''),  # aten.lu_unpack.default - couldn't find symbolic meta function/decomposition
@@ -2047,7 +2056,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('masked_fill', ''),  # could not find kernel
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposi...
-    xfail('masked.logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
@@ -2077,7 +2085,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'bicubic'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'nearest'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.max_pool2d', ''),  # aten.max_pool2d_with_indices_backward.default - couldn't find s...
@@ -2100,7 +2107,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
     xfail('nn.functional.unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.upsample_nearest', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('norm', 'nuc'),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
     xfail('normal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides

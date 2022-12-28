@@ -6,6 +6,7 @@ from functools import reduce, cmp_to_key
 import operator
 import weakref
 import torch
+from torch import sym_float, sym_int
 
 # nvFuser imports are conditional on being compiled with CUDA
 if hasattr(torch._C, "_nvfuser"):
@@ -829,8 +830,6 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     Computes the corresponding Python type constructor for the
     given dtype.
     """
-    from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
-
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
@@ -1645,7 +1644,7 @@ def get_aten_op(fn: Callable, name: str):
         module = module[1:]
         module = module.replace(".", "_")
         module = module + "_"
-    return getattr(torch.ops.aten, f"{module}{name}")
+    return getattr(torch._ops.ops.aten, f"{module}{name}")
 
 
 def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
@@ -1658,3 +1657,22 @@ def device_or_default(device: Optional[torch.device]) -> torch.device:
 
 def layout_or_default(layout: Optional[torch.layout]) -> torch.layout:
     return layout if layout is not None else torch.strided
+
+
+def clone_preserve_strides(x):
+    needed_size = compute_required_storage_length(
+        x.size(), x.stride(), x.storage_offset()
+    )
+    # Our eager implementations for *_scatter ops are all primitives w.r.t autograd,
+    # so these as_strided() calls are not seen by autograd.
+    # We need to mimic this behavior in our ref/prim implementations.
+    # TODO: a better way to handle this would be with a new op, "_unsafe_as_strided"
+    # We should revisit this when we add a compositional as_strided op,
+    # and also as part of https://github.com/pytorch/pytorch/issues/90507
+    try:
+        old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
+        torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, True)
+        buffer = torch.as_strided(x, (needed_size,), (1,), 0).clone()
+        return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+    finally:
+        torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, old)

@@ -170,7 +170,6 @@ class Backend(object):
     NCCL = "nccl"
     UCC = "ucc"
     MPI = "mpi"
-    TCP = "tcp"
 
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
@@ -183,13 +182,7 @@ class Backend(object):
             raise ValueError("Backend name must be a string, but got: {}".format(name))
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
-        if value == Backend.TCP:
-            raise ValueError(
-                "TCP backend has been deprecated. Please use "
-                "Gloo or MPI backend for collective operations "
-                "on CPU tensors."
-            )
-        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
+        if value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
             value = name.lower()
         return value
 
@@ -1971,7 +1964,7 @@ def all_gather_object(object_list, obj, group=None):
     Args:
         object_list (list[Any]): Output list. It should be correctly sized as the
             size of the group for this collective and will contain the output.
-        object (Any): Pickable Python object to be broadcast from current process.
+        obj (Any): Pickable Python object to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
 

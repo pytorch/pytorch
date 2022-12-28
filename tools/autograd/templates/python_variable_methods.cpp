@@ -963,7 +963,7 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "_storage");
+    return handle_torch_function(self, "untyped_storage");
   }
   auto& self_ = THPVariable_Unpack(self);
   return createPyObject(self_.storage());
@@ -1280,7 +1280,7 @@ PyMethodDef variable_methods[] = {
   {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, NULL},
   {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"_storage", THPVariable_storage, METH_NOARGS, NULL},
+  {"untyped_storage", THPVariable_storage, METH_NOARGS, NULL},
   {"storage_offset", THPVariable_storage_offset, METH_NOARGS, NULL},
   {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, NULL},
   {"to", castPyCFunctionWithKeywords(THPVariable_to), METH_VARARGS | METH_KEYWORDS, NULL},
