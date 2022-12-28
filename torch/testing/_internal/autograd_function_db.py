@@ -62,12 +62,18 @@ class CubeGenVmap(torch.autograd.Function):
     @staticmethod
     def setup_context(ctx, inputs, outputs):
         ctx.save_for_backward(inputs[0], outputs[1])
+        ctx.save_for_forward(inputs[0], outputs[1])
 
     @staticmethod
     def backward(ctx, grad_output, grad_saved):
         input, dinput = ctx.saved_tensors
         result = grad_output * dinput + 6 * dinput
         return result
+
+    @staticmethod
+    def jvp(ctx, input_tangent):
+        input, dinput = ctx.saved_tensors
+        return MulGenVmap.apply(input_tangent, dinput), 6 * NumpyMul.apply(input_tangent, input)
 
 
 def sample_inputs_numpy_cube(opinfo, device, dtype, requires_grad, **kwargs):
@@ -245,7 +251,7 @@ class SortGenVmap(torch.autograd.Function):
         ind = torch.argsort(x, dim=dim)
         ind_inv = torch.argsort(ind, axis=dim)
         result = torch.take_along_dim(x, ind, dim=dim)
-        return x, ind, ind_inv
+        return result, ind, ind_inv
 
     @staticmethod
     def setup_context(ctx, inputs, outputs):
@@ -338,6 +344,11 @@ class TakeGenVmap(torch.autograd.Function):
         ind, ind_inv = ctx.saved_tensors
         result = TakeGenVmap.apply(grad_output, ind_inv, ind, ctx.dim)
         return result, None, None, None
+
+    @staticmethod
+    def jvp(ctx, x_tangent, ind_tangent, ind_inv_tangent, _):
+        ind, ind_inv = ctx.saved_tensors
+        return TakeGenVmap.apply(x_tangent, ind, ind_inv, ctx.dim)
 
 class Select(torch.autograd.Function):
     @staticmethod
@@ -504,8 +515,8 @@ autograd_function_db = [
     OpInfo(
         'CubeGenVmapAutogradFunction',
         op=CubeGenVmap.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_cube,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
@@ -522,8 +533,8 @@ autograd_function_db = [
     OpInfo(
         'SortGenVmapAutogradFunction',
         op=SortGenVmap.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_sort,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
