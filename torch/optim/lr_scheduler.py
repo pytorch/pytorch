@@ -1322,8 +1322,8 @@ class CyclicLR(LRScheduler):
         return lrs
 
     def state_dict(self):
-        # We are dropping the `_scale_fn_ref` attribute because it is a `weakref.WeakMethod` and can't be pickled
         state = super().state_dict()
+        # We are dropping the `_scale_fn_ref` attribute because it is a `weakref.WeakMethod` and can't be pickled
         state.pop("_scale_fn_ref")
         return state
 
