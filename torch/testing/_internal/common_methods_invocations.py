@@ -16063,10 +16063,9 @@ op_db: List[OpInfo] = [
            skips=(
                # MPS has some mild accuracy issues for float16. We divide the tolerances by 10
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0.01)}),
+                   toleranceOverride({torch.float16: tol(atol=1e-4, rtol=0.01)}),
                    'TestConsistency',
                    'test_output_match',
-                   dtypes=(torch.float16,)
 
                ),
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
