@@ -7,6 +7,7 @@
 #include <numeric>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace c10 {
 
@@ -183,11 +184,11 @@ void warn(const Warning& warning) {
 Warning::Warning(
     warning_variant_t type,
     const SourceLocation& source_location,
-    const std::string& msg,
+    std::string msg,
     const bool verbatim)
     : type_(type),
       source_location_(source_location),
-      msg_(msg),
+      msg_(std::move(msg)),
       verbatim_(verbatim) {}
 
 Warning::Warning(
@@ -195,7 +196,7 @@ Warning::Warning(
     SourceLocation source_location,
     detail::CompileTimeEmptyString msg,
     const bool verbatim)
-    : Warning(type, std::move(source_location), "", verbatim) {}
+    : Warning(type, source_location, "", verbatim) {}
 
 Warning::Warning(
     warning_variant_t type,
@@ -203,7 +204,7 @@ Warning::Warning(
     const char* msg,
     const bool verbatim)
     : type_(type),
-      source_location_(std::move(source_location)),
+      source_location_(source_location),
       msg_(std::string(msg)),
       verbatim_(verbatim) {}
 
