@@ -117,8 +117,8 @@ pytorch_qnnp_compute_requantization_params(
   params.sse2.remainder_threshold[3] = (int32_t)remainder_threshold;
   params.sse2.shift[0] = (uint64_t)(uint32_t)shift;
   params.sse2.shift[1] = (uint64_t)(uint32_t)shift;
-  for (uint32_t i = 0; i < 8; i++) {
-    params.sse2.zero_point[i] = (int16_t)(uint16_t)zero_point;
+  for (short & i : params.sse2.zero_point) {
+    i = (int16_t)(uint16_t)zero_point;
   }
   for (uint32_t i = 0; i < 16; i++) {
     params.sse2.max[i] = max;
@@ -158,12 +158,12 @@ pytorch_qnnp_compute_conv_quantization_params(
   union pytorch_qnnp_conv_quantization_params params;
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   params.sse2.kernel_zero_points = kernel_zero_points;
-  for (uint32_t i = 0; i < 8; i++) {
-    params.sse2.input_zero_point[i] = (int16_t)(uint16_t)input_zero_point;
+  for (short & i : params.sse2.input_zero_point) {
+    i = (int16_t)(uint16_t)input_zero_point;
   }
   params.sse2.requantization_scales = requantization_scales;
-  for (uint32_t i = 0; i < 8; i++) {
-    params.sse2.output_zero_point[i] = (int16_t)(uint16_t)output_zero_point;
+  for (short & i : params.sse2.output_zero_point) {
+    i = (int16_t)(uint16_t)output_zero_point;
   }
   for (uint32_t i = 0; i < 16; i++) {
     params.sse2.output_max[i] = output_max;
@@ -217,8 +217,8 @@ pytorch_qnnp_compute_avgpool_quantization_params(
   params.sse2.scale[1] = scale;
   params.sse2.scale[2] = scale;
   params.sse2.scale[3] = scale;
-  for (uint32_t i = 0; i < 8; i++) {
-    params.sse2.output_zero_point[i] = (int16_t)(uint16_t)output_zero_point;
+  for (short & i : params.sse2.output_zero_point) {
+    i = (int16_t)(uint16_t)output_zero_point;
   }
   for (uint32_t i = 0; i < 16; i++) {
     params.sse2.output_max[i] = output_max;
@@ -337,11 +337,11 @@ pytorch_qnnp_compute_add_quantization_params(
   const int32_t zero_point_product = (int32_t) -
       (a_multiplier * (uint32_t)a_zero_point +
        b_multiplier * (uint32_t)b_zero_point);
-  for (uint32_t i = 0; i < 4; i++) {
-    params.sse2.zero_point_product[i] = zero_point_product;
+  for (int & i : params.sse2.zero_point_product) {
+    i = zero_point_product;
   }
-  for (uint32_t i = 0; i < 8; i++) {
-    params.sse2.y_zero_point[i] = (int16_t)(uint16_t)output_zero_point;
+  for (short & i : params.sse2.y_zero_point) {
+    i = (int16_t)(uint16_t)output_zero_point;
   }
   for (uint32_t i = 0; i < 8; i++) {
     params.sse2.a_multiplier_lo[i] = (uint16_t)(uint32_t)a_multiplier;
