@@ -11529,16 +11529,6 @@ Example::
 )
 
 add_docstr(
-    # torch.softmax doc str. Point this to torch.nn.functional.softmax
-    torch.softmax,
-    r"""
-softmax(input, dim, *, dtype=None) -> Tensor
-
-Alias for :func:`torch.nn.functional.softmax`.
-""",
-)
-
-add_docstr(
     torch.topk,
     r"""
 topk(input, k, dim=None, largest=True, sorted=True, *, out=None) -> (Tensor, LongTensor)
