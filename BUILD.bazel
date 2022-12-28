@@ -1799,6 +1799,7 @@ cruise_py_library(
         pip3_dep("setuptools"),
         pip3_dep("six"),
         pip3_dep("typing_extensions"),
+        pip3_dep("sympy"),
         "//torchgen",
     ],
     data = [
