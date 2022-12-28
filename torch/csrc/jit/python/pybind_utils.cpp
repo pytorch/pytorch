@@ -535,9 +535,9 @@ py::object toPyObject(IValue ivalue) {
       return py::cast(autograd::Variable(std::move(tensor)));
     }
   } else if (ivalue.isStorage()) {
-    return py::cast(ivalue.toStorage());
+    return py::cast(std::move(ivalue).toStorage());
   } else if (ivalue.isGenerator()) {
-    return py::cast(ivalue.toGenerator());
+    return py::cast(std::move(ivalue).toGenerator());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
@@ -656,9 +656,9 @@ py::object toPyObject(IValue ivalue) {
     TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isSymInt()) {
-    return py::cast(ivalue.toSymInt());
+    return py::cast(std::move(ivalue).toSymInt());
   } else if (ivalue.isSymFloat()) {
-    return py::cast(ivalue.toSymFloat());
+    return py::cast(std::move(ivalue).toSymFloat());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
@@ -678,7 +678,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     stack = createStackForSchema(
         op->schema(), std::move(args), kwargs, c10::nullopt);
 
-    return std::make_pair(op, stack);
+    return std::make_pair(std::move(op), std::move(stack));
   } else {
     std::vector<schema_match_error> errors;
     std::shared_ptr<Operator> found_op = nullptr;
@@ -700,7 +700,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
       throw std::runtime_error(ss.str());
     }
 
-    return std::make_pair(found_op, stack);
+    return std::make_pair(std::move(found_op), std::move(stack));
   }
 }
 
