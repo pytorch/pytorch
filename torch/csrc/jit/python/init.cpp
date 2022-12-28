@@ -1919,19 +1919,19 @@ void initJITBindings(PyObject* module) {
       args_tup[i - 1] = args[i];
     }
 
-    // Run specified function to infer result type
-    auto result = toTypeInferredIValue(f(*args_tup, **kwargs));
-    // retval->markCompleted(std::move(result));
+    TypePtr resultType;
+      // Run specified function to infer result type
+      auto result = toTypeInferredIValue(f(*args_tup, **kwargs));
+      resultType = result.type();
 
-    auto fg = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(f));
+      auto fg = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(f));
 
-    std::function<IValue()> ivf = [fg(std::move(fg))]() {
-      py::object py_obj = fg->func_();
-      return toTypeInferredIValue(py_obj.release());
-    };
+      std::function<IValue()> ivf = [fg(std::move(fg))]() {
+        py::object py_obj = fg->func_();
+        return toTypeInferredIValue(py_obj.release());
+      };
     auto retval =
-        c10::make_intrusive<c10::ivalue::Await>(result.type(), std::move(ivf));
-
+        c10::make_intrusive<c10::ivalue::Await>(resultType, std::move(ivf));
     return std::make_shared<PythonAwaitWrapper>(retval);
   });
   m.def("awaitable_nowait", [](py::handle input) {
