@@ -2060,7 +2060,6 @@ class TestOperators(TestCase):
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_jvpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
     })
     def test_jvpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -2089,7 +2088,6 @@ class TestOperators(TestCase):
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_jvpvmapvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
     })
     def test_jvpvmapvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -2124,7 +2122,6 @@ class TestOperators(TestCase):
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_vmapjvpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
     })
     def test_vmapjvpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -2160,7 +2157,6 @@ class TestOperators(TestCase):
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_jvpjvpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
     })
     def test_jvpjvpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -2190,7 +2186,6 @@ class TestOperators(TestCase):
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps('TestOperators', 'test_jvpvjpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
-        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
     })
     def test_jvpvjpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
