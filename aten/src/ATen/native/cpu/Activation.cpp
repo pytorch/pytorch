@@ -1210,10 +1210,10 @@ void prelu_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
       iter,
       [](scalar_t input, scalar_t weight) {
-        return (input >= scalar_t(0)) ? input : weight * input;
+        return (input > scalar_t(0)) ? input : weight * input;
       },
       [](Vec input, Vec weight) {
-        return Vec::blendv(weight * input, input, input >= Vec(0));
+        return Vec::blendv(weight * input, input, input > Vec(0));
       });
   });
 }
@@ -1222,7 +1222,7 @@ void prelu_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "prelu_backward_cpu", [&]() {
     cpu_kernel_multiple_outputs(iter,
       [](scalar_t input, scalar_t weight, scalar_t grad) -> std::tuple<scalar_t, scalar_t> {
-        auto mask = input >= scalar_t{0};
+        auto mask = input > scalar_t{0};
         auto grad_input = mask ? grad : weight * grad;
         auto grad_weight = mask ? scalar_t{0} : input * grad;
         return {grad_input, grad_weight};

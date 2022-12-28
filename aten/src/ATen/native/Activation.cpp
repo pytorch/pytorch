@@ -78,6 +78,7 @@
 #include <ATen/ops/zeros_like.h>
 
 #include <utility>
+#include <vector>
 #endif
 
 namespace at {
@@ -681,13 +682,14 @@ TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, 
 
 Tensor prelu(const Tensor& self, const Tensor& weight_) {
   TORCH_INTERNAL_ASSERT(weight_.defined());
+  auto self_dim = self.dim();
   TORCH_CHECK(self.scalar_type() == weight_.scalar_type(),
               "prelu: Type promoting not supported. Got ",
               self.scalar_type(), " and ", weight_.scalar_type());
   if (weight_.sym_numel() != 1) {
-    TORCH_CHECK(self.dim() > 0, "Not allow zero-dim input tensor.");
+    TORCH_CHECK(self_dim > 0, "Not allow zero-dim input tensor.");
 
-    auto channel_size = self.dim() > 1 ? self.sym_size(1) : 1; // channel_size default to 1
+    auto channel_size = self_dim > 1 ? self.sym_size(1) : 1; // channel_size default to 1
     TORCH_CHECK(channel_size == weight_.sym_numel(),
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_.numel(),
       " and channel size = ", channel_size, ".");
@@ -696,14 +698,16 @@ Tensor prelu(const Tensor& self, const Tensor& weight_) {
   TORCH_CHECK(
     weight_.dim() <= 1,
     "prelu: Expected `weight` to be a scalar or 1D tensor, but got: ndim = ", weight_.dim());
-  // Adjust weight to broadcast over self
-  auto weight = weight_.dim() == 0 ? weight_.unsqueeze(0) : weight_;
-  if (self.dim() > 0) {
-    for (C10_UNUSED const auto _ : c10::irange(self.dim() - 2)) {
-      weight = weight.unsqueeze(-1);
+  // Adjust weight to broadcast over self and have weight.ndim == self.ndim
+  auto weight = weight_;
+  if (self_dim != weight.dim()) {
+    SymDimVector dim_w(self_dim, 1);
+    if (self_dim > 1) {
+      dim_w[1] = weight_.sym_numel();
     }
-  } else {
-    weight = weight.squeeze(0);
+    // This will always be a view in CPU/CUDA, but some backends
+    // like MKLDNN do not support views
+    weight = weight.reshape_symint(dim_w);
   }
   return at::_prelu_kernel(self, weight);
 }
@@ -721,7 +725,7 @@ Tensor _prelu_kernel(const Tensor& self, const Tensor& weight) {
   return result;
 }
 
-std::tuple<Tensor, Tensor> _prelu_kernel_backward(const Tensor& self, const Tensor& weight, const Tensor& grad_out) {
+std::tuple<Tensor, Tensor> _prelu_kernel_backward(const Tensor& grad_out, const Tensor& self, const Tensor& weight) {
   Tensor grad_self = at::empty({0}, self.options());
   Tensor grad_weight = at::empty({0}, weight.options());
   auto iter = TensorIteratorConfig()

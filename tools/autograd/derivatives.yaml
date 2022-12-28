@@ -1987,22 +1987,11 @@
   self: _masked_softmax_backward(grad, result, mask, dim)
   mask: non_differentiable
 
-# This is still used by MKLDNN and MPS
-- name: prelu(Tensor self, Tensor weight) -> Tensor
-  self, weight: "grad.defined() ? prelu_backward(grad, self, weight) : std::tuple<Tensor, Tensor>()"
-  result: prelu_jvp(self_p, self_t, weight_p, weight_t)
-
-# This is still used by MKLDNN and MPS
-- name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
-  grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
-  result0: prelu_backward_self_jvp(self_p, weight_p, weight_t, grad_output_p, grad_output_t)
-  result1: prelu_backward_weight_jvp(weight_p, self_p, self_t, grad_output_p, grad_output_t)
-
 - name: _prelu_kernel(Tensor self, Tensor weight) -> Tensor
-  self, weight: "grad.defined() ? _prelu_kernel_backward(self, weight, grad) : std::tuple<Tensor, Tensor>()"
+  self, weight: "grad.defined() ? _prelu_kernel_backward(grad, self, weight) : std::tuple<Tensor, Tensor>()"
   result: at::where(self_p >= 0, self_t, weight_p * self_t + weight_t * self_p)
 
-- name: _prelu_kernel_backward(Tensor self, Tensor weight, Tensor grad_output) -> (Tensor, Tensor)
+- name: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   grad_output: "grads[0].defined() ?
                 (grads[1].defined() ? at::where(self >= 0, grads[0], grads[0] * weight + grads[1] * self)
                                     : at::where(self >= 0, grads[0], grads[0] * weight))
