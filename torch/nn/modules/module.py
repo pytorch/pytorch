@@ -2344,7 +2344,7 @@ class Module:
                 "The parameters are copied (in a differentiable manner) from the original module. "
                 "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
                 "If you need gradients in your forward method, consider using autograd.grad instead.")
-        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))  # type: ignore[var-annotated]
         for p in self.parameters():
             if p.grad is not None:
                 if set_to_none:
