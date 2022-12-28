@@ -782,11 +782,6 @@ class TritonKernel(Kernel):
         if self._load_mask:
             mask_vars.add(self._load_mask)
 
-        if mask_vars == {"xmask"} and index == 0 and self.range_trees[0].numel == 1:
-            # This causes a triton error:
-            # https://github.com/openai/triton/issues/633
-            mask_vars = set()
-
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
         return index_str, mask_vars, mask_str
 
