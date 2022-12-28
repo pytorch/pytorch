@@ -284,7 +284,9 @@ def _prelu_kernel(self: Tensor, weight: Tensor) -> Tensor:
 
 @register_decomposition(aten._prelu_kernel_backward)
 def _prelu_kernel_backward(
-    grad_output: Tensor, self: Tensor, weight: Tensor,
+    grad_output: Tensor,
+    self: Tensor,
+    weight: Tensor,
 ) -> Tuple[Tensor, Tensor]:
     input_grad = torch.where(self > 0, grad_output, weight * grad_output)
     weight_grad = torch.where(self > 0, 0.0, self * grad_output)
