@@ -759,7 +759,7 @@ class TritonKernel(Kernel):
 
         have_dense = True
         have_loop_vars = False
-        dense_mask_vars = set()
+#        dense_mask_vars = set()
 
         for tree in self.range_trees:
             if tree.prefix == "r" and not self.inside_reduction:
@@ -767,16 +767,17 @@ class TritonKernel(Kernel):
             if index_vars.intersection(tree.var_list):
                 have_loop_vars = True
                 have_dense = False
-            dense_mask_vars.add(f"{tree.prefix}mask")
+#            dense_mask_vars.add(f"{tree.prefix}mask")
 
         if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
             if isinstance(index, sympy.Integer):
                 return index_str, set(), "None"
             else:
-                mask_vars = dense_mask_vars
+                pass
+                #mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
-            mask_vars = dense_mask_vars
+#            mask_vars = dense_mask_vars
             index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
 
         if self._load_mask:
