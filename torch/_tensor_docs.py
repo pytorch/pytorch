@@ -5286,15 +5286,6 @@ See :func:`torch.tanh`
 )
 
 add_docstr_all(
-    "softmax",
-    r"""
-softmax(dim) -> Tensor
-
-Alias for :func:`torch.nn.functional.softmax`.
-""",
-)
-
-add_docstr_all(
     "tanh_",
     r"""
 tanh_() -> Tensor
