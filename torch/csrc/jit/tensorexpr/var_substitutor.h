@@ -1,6 +1,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -25,7 +26,7 @@ class VarSubMutator : public IRMutator {
       if (!key_var) {
         throw malformed_input("missing key in VarSubMutator");
       }
-      var_mapping_[key_var] = value;
+      var_mapping_[std::move(key_var)] = std::move(value);
     }
   }
 
@@ -45,7 +46,7 @@ class VarSubMutator : public IRMutator {
     for (const auto& v : var->reduce_args()) {
       ExprPtr e = v->accept_mutator(this);
       if (VarPtr new_var = to<Var>(e)) {
-        new_inner.push_back(new_var);
+        new_inner.push_back(std::move(new_var));
       } else {
         VarFinder varFinder;
         e->accept(&varFinder);
