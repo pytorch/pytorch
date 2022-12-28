@@ -633,15 +633,15 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
   c10::intrusive_ptr<TensorImpl> r;
   const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
   // TODO: do we have to exclude after Python dispatch key set?
-  if (mode_stack_len > 0 &&
+  if (
+      key_set_.has(DispatchKey::Python) &&
+      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+    r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
+  } else if (mode_stack_len > 0 &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
     const auto& cur_torch_dispatch_mode_state =
         c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
     r = cur_torch_dispatch_mode_state->pyinterpreter()->detach(this);
-  } else if (
-      key_set_.has(DispatchKey::Python) &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
   }
   if (r) {
     r->set_version_counter(std::forward<VariableVersion>(version_counter));

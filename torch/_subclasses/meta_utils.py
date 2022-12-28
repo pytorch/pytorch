@@ -503,6 +503,8 @@ class MetaConverter:
             # tensors into their trace / some subclasses don't correctly
             # support meta.  Trying to YOLO this is more trouble than it's
             # worth.
+            if hasattr(t, "to_meta_tensor"):
+                return t.to_meta_tensor(meta_callback=lambda d: self.meta_tensor(d, shape_env=shape_env, callback=callback, sname=sname))
             self.miss += 1
             return NotImplemented
         else:

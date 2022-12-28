@@ -51,14 +51,6 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   c10::impl::ExcludeDispatchKeyGuard guard(after_Python_keyset);
 
 
-  // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
-  const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
-  if (mode_stack_len > 0) {
-    const auto& cur_torch_dispatch_mode_state = c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
-    cur_torch_dispatch_mode_state->pyinterpreter()->dispatch(op, stack);
-    return;
-  }
-
   // Otherwise, find a PyInterpreter on a Tensor
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
@@ -88,6 +80,14 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
         }
       }
     }
+  }
+
+  // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
+  const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
+  if (mode_stack_len > 0) {
+    const auto& cur_torch_dispatch_mode_state = c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+    cur_torch_dispatch_mode_state->pyinterpreter()->dispatch(op, stack);
+    return;
   }
   TORCH_INTERNAL_ASSERT(0, "Hit Python dispatch key but no arguments had PyInterpreter (no tensor args?)");
 }
