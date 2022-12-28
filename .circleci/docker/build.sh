@@ -1,5 +1,6 @@
 #!/bin/bash
 
+#test change
 set -ex
 
 image="$1"
