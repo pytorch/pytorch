@@ -218,9 +218,15 @@ class Tensor(torch._C._TensorBase):
 
     def storage(self):
         r"""
-        storage() -> torch.Storage
+        storage() -> torch.TypedStorage
 
-        Returns the underlying storage.
+        Returns the underlying :class:`TypedStorage`.
+
+        .. warning::
+
+            :class:`TypedStorage` is deprecated. It will be removed in the future, and
+            :class:`UntypedStorage` will be the only storage class. To access the
+            :class:`UntypedStorage` directly, use :attr:`Tensor.untyped_storage()`.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
@@ -230,11 +236,9 @@ class Tensor(torch._C._TensorBase):
 
     # For internal use only, to avoid raising deprecation warning
     def _typed_storage(self):
-        _storage = self._storage()
-        if isinstance(_storage, torch.TypedStorage):
-            _storage = _storage._untyped_storage
+        untyped_storage = self.untyped_storage()
         return torch.TypedStorage(
-            wrap_storage=_storage, dtype=self.dtype, _internal=True
+            wrap_storage=untyped_storage, dtype=self.dtype, _internal=True
         )
 
     def _reduce_ex_internal(self, proto):

@@ -665,7 +665,7 @@ def gen_pyi(
             "map2_": [
                 "def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ..."
             ],
-            "storage": ["def _storage(self) -> Storage: ..."],
+            "storage": ["def untyped_storage(self) -> Storage: ..."],
             "storage_type": ["def storage_type(self) -> Storage: ..."],
             "type": [
                 "def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...",

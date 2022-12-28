@@ -149,7 +149,7 @@ class MetaConverter:
         if swr not in self.storage_memo:
             self.storage_memo[swr] = callback(
                 lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
-            )._storage()
+            ).untyped_storage()
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
@@ -374,7 +374,7 @@ class MetaConverter:
                                 # format here
                                 r = r.clone(memory_format=torch.preserve_format)
 
-                    s = t._storage()
+                    s = t.untyped_storage()
                     swr = StorageWeakRef(s)
                     if (
                         swr not in self.storage_memo
@@ -382,7 +382,7 @@ class MetaConverter:
                         and r.storage_offset() == storage_offset
                     ):
                         # You're normal and happy, install the fresh storage into the memo
-                        self.storage_memo[swr] = r._storage()
+                        self.storage_memo[swr] = r.untyped_storage()
                     else:
                         # You're in crazy town; somehow you gave us a tensor
                         # that wasn't a view, but had nonzero storage offset,

@@ -131,8 +131,8 @@ at::Storage createStorageGetType(
 
   if (is_typed_storage) {
     // NOTE: `PyObject_GetAttrString` increments the refcounts to `dtype` and
-    // `_storage`, so we must decrement them. The refcounts will still stay
-    // nonzero since the `TypedStorage` maintains a reference.
+    // `_untyped_storage`, so we must decrement them. The refcounts will still
+    // stay nonzero since the `TypedStorage` maintains a reference.
     PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
     TORCH_INTERNAL_ASSERT(dtype_obj);
     Py_DECREF(dtype_obj);

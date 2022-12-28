@@ -211,7 +211,7 @@ class LinearMixedPrecision(nn.Module):
                     # Shard is never allocated if param_dtype mixed precision is not
                     # enabled.
                     if mp_config.param_dtype is not None:
-                        cls.assertEqual(0, param._mp_shard._storage().size())
+                        cls.assertEqual(0, param._mp_shard.untyped_storage().size())
                     else:
                         cls.assertFalse(hasattr(param, "_mp_shard"))
                 elif param_is_sharded:
@@ -274,7 +274,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         fsdp_units = FSDP.fsdp_modules(fsdp_model)
         for fsdp in fsdp_units:
             for param in fsdp.params:
-                self.assertEqual(0, param._mp_shard._storage().size())
+                self.assertEqual(0, param._mp_shard.untyped_storage().size())
 
     def _reduce_scatter_validate_mp(
         self, orig_reduce_scatter, mp_config, *args, **kwargs
