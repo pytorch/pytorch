@@ -33,6 +33,13 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 void warn_numpy_not_writeable() {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
+
+// No-op stubs.
+void validate_numpy_for_dlpack_deleter_bug() {}
+
+bool is_numpy_dlpack_deleter_bugged() {
+  return false;
+}
 } // namespace utils
 } // namespace torch
 #else
@@ -455,6 +462,68 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
         Py_DECREF(obj);
       },
       at::device(kCUDA).dtype(dtype));
+}
+
+// Mutated only once (during module init); behaves as an immutable variable
+// thereafter.
+bool numpy_with_dlpack_deleter_bug_installed = false;
+
+// NumPy implemented support for Dlpack capsules in version 1.22.0. However, the
+// initial implementation did not correctly handle the invocation of
+// `DLManagedTensor::deleter` in a no-GIL context. Until PyTorch 1.13.0, we
+// were implicitly holding the GIL when the deleter was invoked, but this
+// incurred a significant performance overhead when mem-unmapping large tensors.
+// Starting with PyTorch 1.13.0, we release the GIL in `THPVariable_clear` just
+// before deallocation, but this triggers the aforementioned bug in NumPy.
+//
+// The NumPy bug should be fixed in version 1.24.0, but all releases
+// between 1.22.0 and 1.23.5 result in internal assertion failures that
+// consequently lead to segfaults. To work around this, we need to selectively
+// disable the optimization whenever we detect a buggy NumPy installation.
+// We would ideally restrict the "fix" just to Dlpack-backed tensors that stem
+// from NumPy, but given that it is difficult to confidently detect the
+// provenance of such tensors, we have to resort to a more general approach.
+//
+// References:
+//  https://github.com/pytorch/pytorch/issues/88082
+//  https://github.com/pytorch/pytorch/issues/77139
+//  https://github.com/numpy/numpy/issues/22507
+void validate_numpy_for_dlpack_deleter_bug() {
+  // Ensure that we don't call this more than once per session.
+  static bool validated = false;
+  TORCH_INTERNAL_ASSERT(validated == false);
+  validated = true;
+
+  THPObjectPtr numpy_module(PyImport_ImportModule("numpy"));
+  if (!numpy_module) {
+    PyErr_Clear();
+    return;
+  }
+
+  THPObjectPtr version_attr(
+      PyObject_GetAttrString(numpy_module.get(), "__version__"));
+  if (!version_attr) {
+    PyErr_Clear();
+    return;
+  }
+
+  Py_ssize_t version_utf8_size = 0;
+  const char* version_utf8 =
+      PyUnicode_AsUTF8AndSize(version_attr.get(), &version_utf8_size);
+  if (!version_utf8_size) {
+    PyErr_Clear();
+    return;
+  }
+  std::string version(version_utf8, version_utf8_size);
+  if (version_utf8_size < 4)
+    return;
+  std::string truncated_version(version.substr(0, 4));
+  numpy_with_dlpack_deleter_bug_installed =
+      truncated_version == "1.22" || truncated_version == "1.23";
+}
+
+bool is_numpy_dlpack_deleter_bugged() {
+  return numpy_with_dlpack_deleter_bug_installed;
 }
 } // namespace utils
 } // namespace torch
