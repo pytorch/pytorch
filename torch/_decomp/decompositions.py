@@ -2050,7 +2050,7 @@ def update_hidden_for_packed_reverse(
 
 
 def one_layer_rnn_data(
-    inp, hidden, params, has_biases, nonlinearity, batch_sizes, reverse=False
+    inp, hidden, params, has_biases, hidden_fn, batch_sizes, reverse=False
 ):
     ih_weight = params[0]
     hh_weight = params[1]
@@ -2083,7 +2083,7 @@ def one_layer_rnn_data(
                 (cur_hidden, hidden.narrow(0, last_batch_size, i - last_batch_size)), 0
             )
 
-        cur_hidden = nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + inp)
+        cur_hidden = hidden_fn(inp, cur_hidden, hh_weight, hh_bias)
         last_batch_size = i
         step_output.append(cur_hidden)
 
@@ -2098,7 +2098,13 @@ def one_layer_rnn_data(
     return out, hidden_out
 
 
-def one_layer_rnn(inp, hidden, params, has_biases, nonlinearity, reverse=False):
+def rnn_helper(nonlinearity):
+    def inner(i, cur_hidden, hh_weight, hh_bias):
+        return nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + i)
+    return inner
+
+
+def one_layer_rnn(inp, hidden, params, has_biases, hidden_fn, reverse=False):
     ih_weight = params[0]
     hh_weight = params[1]
     ih_bias = params[2] if has_biases else None
@@ -2109,7 +2115,7 @@ def one_layer_rnn(inp, hidden, params, has_biases, nonlinearity, reverse=False):
     cur_hidden = hidden
     step_output = []
     for i in precomputed_input:
-        cur_hidden = nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + i)
+        cur_hidden = hidden_fn(i, cur_hidden, hh_weight, hh_bias)
         step_output.append(cur_hidden)
 
     if reverse:
@@ -2186,7 +2192,7 @@ def rnn_tanh_input(
         train,
         bidirectional,
         batch_first,
-        partial(one_layer_rnn, nonlinearity=torch.tanh),
+        partial(one_layer_rnn, hidden_fn=rnn_helper(torch.tanh)),
     )
     return out, torch.stack(final_hiddens, 0)
 
@@ -2216,7 +2222,7 @@ def rnn_relu_input(
         train,
         bidirectional,
         batch_first,
-        partial(one_layer_rnn, nonlinearity=torch.relu),
+        partial(one_layer_rnn, hidden_fn=rnn_helper(torch.relu)),
     )
     return out, torch.stack(final_hiddens, 0)
 
@@ -2246,7 +2252,7 @@ def rnn_relu_data(
         train,
         bidirectional,
         False,
-        partial(one_layer_rnn_data, batch_sizes=batch_sizes, nonlinearity=torch.relu),
+        partial(one_layer_rnn_data, batch_sizes=batch_sizes, hidden_fn=rnn_helper(torch.relu)),
     )
     return out, torch.stack(final_hiddens, 0)
 
@@ -2276,7 +2282,7 @@ def rnn_tanh_data(
         train,
         bidirectional,
         False,
-        partial(one_layer_rnn_data, batch_sizes=batch_sizes, nonlinearity=torch.tanh),
+        partial(one_layer_rnn_data, batch_sizes=batch_sizes, hidden_fn=rnn_helper(torch.tanh)),
     )
     return out, torch.stack(final_hiddens, 0)
 
@@ -2443,6 +2449,73 @@ def lstm_data_impl(
     )
     final_hiddens = list(zip(*final_hiddens))
     return out, torch.stack(final_hiddens[0], 0), torch.stack(final_hiddens[1], 0)
+
+
+def gru_helper(inp, cur_hidden, hh_weight, hh_bias):
+    chunked_igates = inp.chunk(3, 1)
+    chunked_hgates = F.linear(cur_hidden, hh_weight, hh_bias).chunk(3, 1)
+    reset_gate = (chunked_hgates[0] + chunked_igates[0]).sigmoid()
+    input_gate = (chunked_hgates[1] + chunked_igates[1]).sigmoid()
+    new_gate = (chunked_igates[2] + (chunked_hgates[2] * reset_gate)).tanh()
+    return (cur_hidden - new_gate) * input_gate + new_gate
+
+
+@aten.gru.data.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.gru.data.py_impl(DispatchKey.Autograd)
+def gru_impl_data(
+    data,
+    batch_sizes,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+):
+    params = gather_params(params, has_biases, False)
+    out, final_hiddens = _rnn_helper(
+        data,
+        hx.unbind(0),
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        False,
+        partial(one_layer_rnn_data, batch_sizes=batch_sizes, hidden_fn=gru_helper),
+    )
+    return out, torch.stack(final_hiddens, 0)
+
+@aten.gru.input.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.gru.input.py_impl(DispatchKey.Autograd)
+def gru_impl(
+    input,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+):
+    params = gather_params(params, has_biases, False)
+    out, final_hiddens = _rnn_helper(
+        input,
+        hx.unbind(0),
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        batch_first,
+        partial(one_layer_rnn, hidden_fn=gru_helper),
+    )
+    return out, torch.stack(final_hiddens, 0)
+
 
 
 @register_decomposition(aten.upsample_bilinear2d.vec)
