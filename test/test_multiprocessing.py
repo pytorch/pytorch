@@ -23,6 +23,7 @@ load_tests = load_tests
 
 TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
+MAX_WAITING_TIME_IN_SECONDS = 5
 TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.platform != 'darwin' and \
     sys.platform != 'win32'
@@ -219,10 +220,19 @@ class leak_checker(object):
     def has_shm_files(self, wait=True):
         if not HAS_SHM_FILES:
             return False
+
         result = self._has_shm_files()
-        if result and mp.get_sharing_strategy() == 'file_system' and wait:
-            time.sleep(0.5)
-            return self._has_shm_files()
+        if not result or mp.get_sharing_strategy() != 'file_system' or not wait:
+            return result
+
+        total_waiting_time = 0
+        waiting_time = 0.5
+
+        while total_waiting_time <= MAX_WAITING_TIME_IN_SECONDS and result:
+            time.sleep(waiting_time)
+            total_waiting_time += waiting_time
+            result = self._has_shm_files()
+
         return result
 
     def _has_shm_files(self):
