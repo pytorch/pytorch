@@ -3523,8 +3523,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
         xfail('histogram'),
-        xfail('nansum'),
-        xfail('nanmean'),
         xfail('scatter_reduce', 'sum'),
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'amax'),
@@ -3553,7 +3551,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('all'),
         xfail('any'),
         xfail('count_nonzero'),
-        xfail('nanmean'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('resize_'),
@@ -3826,6 +3823,17 @@ class TestVmapOperatorsOpInfo(TestCase):
         x = torch.randn(B, N, C, H, W)
         x[x > 0] = float('nan')
         test(self, op, (x,), in_dims=(0))
+
+    def test_sum_scalar(self, device):
+        x = torch.tensor([10.], device=device)
+        y = vmap(torch.sum)(x)
+        self.assertEqual(y, x)
+
+        y = vmap(lambda x: x.sum(0))(x)
+        self.assertEqual(y, x)
+
+        y = vmap(lambda x: x.sum(-1))(x)
+        self.assertEqual(y, x)
 
     def test_isinf(self, device):
         test = functools.partial(_vmap_test, check_propagates_grad=False)

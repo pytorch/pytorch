@@ -6,6 +6,7 @@ from functools import reduce, cmp_to_key
 import operator
 import weakref
 import torch
+from torch import sym_float, sym_int
 
 # nvFuser imports are conditional on being compiled with CUDA
 if hasattr(torch._C, "_nvfuser"):
@@ -829,8 +830,6 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     Computes the corresponding Python type constructor for the
     given dtype.
     """
-    from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
-
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
