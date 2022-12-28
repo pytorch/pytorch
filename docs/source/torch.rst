@@ -379,7 +379,6 @@ Pointwise Ops
     sin
     sinc
     sinh
-    softmax
     sqrt
     square
     sub
