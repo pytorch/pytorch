@@ -2047,7 +2047,6 @@ symbolic_aot_autograd_failures = {
     xfail('logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
     xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
     xfail('logdet', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
     xfail('lu_unpack', ''),  # aten.lu_unpack.default - couldn't find symbolic meta function/decomposition
@@ -2057,7 +2056,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('masked_fill', ''),  # could not find kernel
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposi...
-    xfail('masked.logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
