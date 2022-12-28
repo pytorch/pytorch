@@ -1934,6 +1934,31 @@ class TestJac(TestCase):
                              _preallocate_and_copy=_preallocate_and_copy), chunk_size=chunk_size))(x)
         self.assertEqual(actual, expected)
 
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
+        # With chunk_size=1, we shouldn't `vmap` and hence not be limited
+        # by it's constraints.
+
+        x = torch.randn(3, device=device)
+        idx_1 = torch.tensor([0, ], device=device)
+        idx_2 = torch.tensor([0, 1], device=device)
+        chunk_size = 1
+
+        def f(x, idx):
+            # `take` doesn't work with vmap
+            # as it returns an output with dynamic shape.
+            return torch.take(x, idx)
+
+        for fn, idx in ((f, idx_1), (f, idx_2)):
+            jacfn = jacrev(fn, chunk_size=chunk_size, _preallocate_and_copy=_preallocate_and_copy)
+            actual = jacfn(x, idx)
+            expected = torch.autograd.functional.jacobian(partial(fn, idx=idx), x, vectorize=False)
+            self.assertEqual(actual, expected)
+
+            msg = r"vmap: .* is not possible because there exists a Tensor"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
+
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
