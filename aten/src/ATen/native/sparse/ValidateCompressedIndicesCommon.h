@@ -257,13 +257,6 @@ void _validate_compressed_sparse_indices_kernel(
 
   // Invariants 5.1, 5.2, 5.3, 5.6
   {
-    // MAX_DIMS is copied from aten/src/ATen/cuda/detail/OffsetCalculator.cuh
-#if defined(USE_ROCM)
-    constexpr int MAX_DIMS = 16;
-#else
-    constexpr int MAX_DIMS = 25;
-#endif
-
     const auto cidx_first = cidx.slice(-1, 0, 1);
     const auto cidx_last = cidx.slice(-1, cdim, cdim + 1);
 
@@ -276,11 +269,9 @@ void _validate_compressed_sparse_indices_kernel(
         at::arange(batch_count, cidx.options()).view(batch_dims).unsqueeze_(-1);
 
     const auto idx_ndims = idx.dim();
-    std::array<int64_t, MAX_DIMS> idx_sizes, idx_strides;
-    for (int i = 0; i < idx_ndims; i++) {
-      idx_sizes[i] = idx.size(i);
-      idx_strides[i] = idx.stride(i);
-    }
+
+    Tensor idx_sizes_ = at::tensor(idx.sizes(), idx.options().dtype(kLong));
+    Tensor idx_strides_ = at::tensor(idx.strides(), idx.options().dtype(kLong));
 
     auto iter = TensorIteratorConfig()
                     .set_check_mem_overlap(false)
@@ -295,8 +286,11 @@ void _validate_compressed_sparse_indices_kernel(
     AT_DISPATCH_INDEX_TYPES(
         idx.scalar_type(),
         NAME,
-        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes, &idx_strides]() {
+        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes_, &idx_strides_]() {
           const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
+          const int64_t* RESTRICT idx_sizes = idx_sizes_.data_ptr<int64_t>();
+          const int64_t* RESTRICT idx_strides =
+              idx_strides_.data_ptr<int64_t>();
           const auto zero = index_t{0};
           KernelLauncher::launch(
               iter,
@@ -322,8 +316,9 @@ void _validate_compressed_sparse_indices_kernel(
                 // assuming idx contiguity per batch:
                 int64_t tmp = batch_idx * idx_sizes[idx_ndims - 1];
                 for (int i = idx_ndims - 1; i >= 0; i--) {
-                  idx_offset += (tmp % idx_sizes[i]) * idx_strides[i];
-                  tmp /= idx_sizes[i];
+                  int64_t div = tmp / idx_sizes[i];
+                  idx_offset += (tmp - div * idx_sizes[i]) * idx_strides[i];
+                  tmp = div;
                 }
                 const auto* RESTRICT ptr_idx_batch = ptr_idx + idx_offset;
                 _check_idx_sorted_distinct_vals_slices_with_cidx<
