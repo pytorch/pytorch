@@ -1135,6 +1135,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
     std::vector<c10::Stream> streams;
+    streams.reserve(devices_.size());
     for (const c10::Device& device : devices_) {
       streams.push_back(impl_.getStreamFromGlobalPool(device));
     }

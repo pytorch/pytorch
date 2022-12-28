@@ -42,7 +42,7 @@ class VarSubMutator : public IRMutator {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<VarPtr> new_inner;
 
-    for (auto v : var->reduce_args()) {
+    for (const auto& v : var->reduce_args()) {
       ExprPtr e = v->accept_mutator(this);
       if (VarPtr new_var = to<Var>(e)) {
         new_inner.push_back(new_var);
