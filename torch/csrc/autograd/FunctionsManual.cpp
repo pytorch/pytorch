@@ -791,8 +791,8 @@ Tensor logsumexp_backward(
     IntArrayRef dim,
     bool keepdim) {
   if (!keepdim && self.dim() != 0) {
-    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
-    result = unsqueeze_multiple(result, dim, self.sizes().size());
+    grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
+    result = unsqueeze_multiple(result, dim, self.sym_sizes().size());
   }
   return grad * (self - result).exp();
 }
