@@ -243,65 +243,6 @@ def _get_logger_for_subgraph(
     logger_mod_orig.enabled = False
     return logger_mod_orig
 
-def _add_logger_to_subgraph_wrapper(
-    model: GraphModule,
-    subgraph_idx: int,
-    subgraph_candidate_idx: int,
-    qconfig_str: str,
-    logger_cls: Callable,
-    ref_output_node: Node,
-    fqn: Optional[str],
-) -> None:
-    """
-    Given a model which consists of a subgraph and nothing else, adds a logger
-    to the end of this model. The logger takes `ref_output_node` as the reference
-    output, and does the comparison during calibration time.
-    """
-    first_node, last_node, first_non_ph_node = None, None, None
-    for idx, node in enumerate(model.graph.nodes):  # type: ignore[union-attr, arg-type]
-        if idx == 0:
-            first_node = node
-        elif idx == len(model.graph.nodes) - 1:  # type: ignore[union-attr, arg-type]
-            # last node is the output, so we want the first
-            # arg of the output
-            last_node = node.args[0]
-        if first_non_ph_node is None and node.op != 'placeholder':
-            first_non_ph_node = node
-    assert first_node is not None and last_node is not None and \
-        first_non_ph_node is not None
-    logger_mod = _get_logger_for_subgraph(
-        model, first_non_ph_node, last_node, subgraph_idx,  # type: ignore[arg-type]
-        subgraph_candidate_idx, qconfig_str, logger_cls, fqn)
-    attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
-    assert not hasattr(model, attr_name)
-    setattr(model, attr_name, logger_mod)
-
-    # add a new placeholder to the original subgraph module
-    # to represent the reference input
-    # before:
-    #
-    #   x0 -> mod -> x1
-    #
-    # after:
-    #
-    #   x0 -> mod -> x1
-    #         /
-    #   x0_ref
-
-    ph_name = 'SHADOW_PH_NAME'
-    # verify a node with this name does not exist
-    assert len([n for n in model.graph.nodes if n.name == ph_name]) == 0, \
-        'graph already contains node with name {ph_name}'
-
-    new_ph = None
-    with model.graph.inserting_before(first_node):
-        new_ph = model.graph.placeholder(ph_name)
-
-    with model.graph.inserting_after(last_node):
-        new_node = model.graph.call_module(
-            attr_name, args=(last_node, new_ph), kwargs={})
-    model.recompile()
-
 def create_submodule_from_subgraph(
     model: torch.nn.Module,
     first_node: Node,
@@ -500,6 +441,7 @@ def handle_subgraph_candidate(
     fqn: Optional[str],
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
     example_inputs: Any,
+    last_added_shadow_node_list: List[Optional[Node]],
     custom_prepare_fn: Optional[Callable] = None,
     custom_prepare_kwargs: Dict[str, Any] = None,
 ) -> None:
@@ -531,6 +473,7 @@ def handle_subgraph_candidate(
         setattr(mt, attr_name, logger_mod_orig)
         with mt.graph.inserting_after(last_node):
             new_node = mt.graph.call_module(attr_name, args=(last_node,), kwargs={})
+            last_added_shadow_node_list[0] = new_node
 
     else:
         # idx > 0 means we have a candidate qconfig to try, so we need
@@ -556,22 +499,10 @@ def handle_subgraph_candidate(
         orig_mod_copy_wrapped = create_submodule_from_subgraph(
             mt, first_node, last_node)
 
-        # add a logger to the end of this submodule
-        # get first and last nodes of the submodule
-        _add_logger_to_subgraph_wrapper(
-            orig_mod_copy_wrapped, subgraph_idx, subgraph_candidate_idx,
-            str(qconfig), OutputComparisonLogger, last_node, fqn)
-
-        # We need to set the loggers as non traceable to have them survive
-        # prepare_fx and convert_fx calls.
-        prepare_custom_config = PrepareCustomConfig()\
-            .set_non_traceable_module_classes([OutputLogger, OutputComparisonLogger])
-
         # add a call to prepare_fx on the wrapper module
         if custom_prepare_fn is None:
             orig_mod_copy_wrapped = torch.ao.quantization.quantize_fx.prepare_fx(
-                orig_mod_copy_wrapped, qconfig_mapping, example_inputs=example_inputs,
-                prepare_custom_config=prepare_custom_config)
+                orig_mod_copy_wrapped, qconfig_mapping, example_inputs=example_inputs)
         else:
             if custom_prepare_kwargs is None:
                 custom_prepare_kwargs = {}
@@ -579,7 +510,6 @@ def handle_subgraph_candidate(
                 assert kwarg_name not in custom_prepare_kwargs, f"cannot specify {kwarg_name} in custom_prepare_kwargs"
             prepare_kwargs: Dict[str, Any] = {
                 "example_inputs": example_inputs,
-                "prepare_custom_config": prepare_custom_config,
                 "qconfig_mapping": qconfig_mapping
             }
             prepare_kwargs.update(custom_prepare_kwargs)
@@ -593,16 +523,14 @@ def handle_subgraph_candidate(
         setattr(mt, attr_name, orig_mod_copy_wrapped)
 
         # add a call to the wrapper module from the parent graph
-        with mt.graph.inserting_after(last_node):
+        insert_after_node = last_added_shadow_node_list[0]
+        with mt.graph.inserting_after(insert_after_node):
             # TODO(future PR): handle fusion patterns where non-first nodes
             # need inputs
 
             # pass in all node args and kwargs
 
-            # the first argument is always the reference output of the last
-            # node of this subgraph
-            new_args = [last_node]
-
+            new_args = []
             for arg in first_node.args:
                 if isinstance(arg, Node):
                     new_args.append(arg)
@@ -624,6 +552,20 @@ def handle_subgraph_candidate(
 
             new_node = mt.graph.call_module(
                 attr_name, args=new_args, kwargs=new_kwargs)
+
+        # add a logger to parent graph to observe the shadow wrapper
+        logger_mod_orig = _get_logger_for_subgraph(
+            mt, first_node, last_node, subgraph_idx, subgraph_candidate_idx,
+            str(qconfig), OutputComparisonLogger, fqn)
+
+        attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
+        assert not hasattr(mt, attr_name)
+        setattr(mt, attr_name, logger_mod_orig)
+        with mt.graph.inserting_after(new_node):
+            logger = mt.graph.call_module(attr_name, args=(new_node, last_node), kwargs={})
+            last_added_shadow_node_list[0] = logger
+
+    mt.recompile()
 
 def handle_subgraph(
     mt: GraphModule,
@@ -705,11 +647,21 @@ def handle_subgraph(
 
     fqn = _maybe_get_fqn(first_node, mt)
 
+    # We want the results to contain the subgraphs in natural order,
+    # and the graph to also contain shadow wrappers and shadow loggers
+    # in natural order.
+    # If we just iterate in reverse, the graph will be in natural
+    # order but the eventual results will be in reverse order.
+    # So, we keep track of the last shadow logger we added and
+    # always insert after it.
+    last_added_shadow_node_list = [None]
     for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
+
         handle_subgraph_candidate(
             mt, subgraph_idx, subgraph_candidate_idx, first_node,
             last_node, fqn, list_of_node_name_to_qconfig,
-            example_inputs, custom_prepare_fn, custom_prepare_kwargs)
+            example_inputs, last_added_shadow_node_list, custom_prepare_fn,
+            custom_prepare_kwargs)
 
 # TODO(future PR): redesign this to make it easier to consume outputs
 def group_results_by_subgraph(results: NSResultsType) -> Any:

@@ -768,29 +768,26 @@ def prepare_n_shadows_model(
 
     .. code::
 
-      args_kwargs_m -> op_m -> output_m
-           |                        |
-           |---------------------------> mod_with_op_m_transformed_with_qconfig_n
+           |---------> op_m_n -> log_m_n
+           |                     /
+      args_kwargs_m ---------> op_m -> log_m_0
 
-    Where mod_with_op_m_transformed_with_qconfig_n is a submodule, and its
-    inner graph looks like
+    Where op_m_n is op_m wrapped in a submodule and transformed with
+    qconfig_n, and its inner graph looks like
 
     .. code::
 
-      args_m -------- op_m_prepared_with_qconfig_n -> output_m_n -> comparison_logger
-                  /                                                    /
-      kwargs_m ---                                                    /
-                                                                     /
-      output_m ------------------------------------------------------
+      args_m -------- op_m_prepared_with_qconfig_n -> out_m_n
+                  /
+      kwargs_m ---
 
     This is useful for testing different quantization of multiple layers in
     a single pass through the model.
 
     High level TODOs for future PRs:
-    1. add deduplication for qconfigs per subgraph
-    2. figure out a better way to name the output structure
-    3. return a results data structure instead of printing it out
-    4. add examples to docblocks
+    *. figure out a better way to name the output structure
+    *. return a results data structure instead of printing it out
+    *. add examples to docblocks
     """
 
     if custom_tracer is None:
@@ -844,7 +841,6 @@ def prepare_n_shadows_model(
             custom_prepare_fn, custom_prepare_kwargs
         )
 
-    mt.recompile()
     return mt
 
 # TODO(future PR): consider aligning API signature with other similar quantization
