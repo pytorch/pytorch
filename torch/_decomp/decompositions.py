@@ -919,7 +919,7 @@ def col2im(
         [shape[0], shape[1] // prod(kernel_size)] + output_padded_size
     )
     idx = (None, None, indices_row, indices_col)
-    output = aten.index_put(output, idx, input, accumulate=True)
+    output = torch.ops.aten.index_put(output, idx, input, accumulate=True)
     output = F.pad(output, (-padding_w, -padding_w, -padding_h, -padding_h))
 
     if not batched_input:
@@ -1443,7 +1443,7 @@ def native_batch_norm(
 # currently only used by aot autograd/functionalization and no one else, really).
 # In two weeks or so, we should remove this decomposition and phase out the current native_batch_norm
 # to be _native_batch_norm_legit and have the right schema (stating that there are input mutations).
-@aten.native_batch_norm.default.py_impl(DispatchKey.Autograd)
+@torch.ops.aten.native_batch_norm.default.py_impl(DispatchKey.Autograd)
 def native_batch_norm_decomposition(
     input: Tensor,
     weight: Optional[Tensor],
@@ -1564,7 +1564,7 @@ def _to_copy(
         x = torch._prims.convert_element_type(x, dtype)
     if memory_format is not None:  # no ref/prim for memory format
         out = torch.empty_like(x, memory_format=memory_format)
-        out = aten.copy.default(out, x)
+        out = torch.ops.aten.copy.default(out, x)
         return out  # type: ignore[call-overload]
     return x
 
@@ -1603,7 +1603,7 @@ def nop_decomposition(x):
 
 # Also register to the Autograd dispatch key, so this decomp can run above autograd.
 # native_batch_norm needs to decompose into other ops before autograd.
-@aten.cudnn_batch_norm.default.py_impl(DispatchKey.Autograd)
+@torch.ops.aten.cudnn_batch_norm.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.cudnn_batch_norm)
 def cudnn_batch_norm(
     input: Tensor,
@@ -1896,7 +1896,7 @@ def index_add_(
         )
         tensor = tensor * alpha
     idx = (None,) * dim + (index,)
-    aten.index_put_(x, idx, tensor, accumulate=True)
+    torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
     return x
 
 
@@ -2008,9 +2008,9 @@ def get_scale_value(scales, idx):
     return scales[idx]
 
 
-@register_decomposition(aten.upsample_bilinear2d.vec)
-@aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
+@register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
+@torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
 def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale_h = get_scale_value(scale_factors, 0)
@@ -2021,8 +2021,8 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
 
 
-@register_decomposition(aten.upsample_bilinear2d.default)
-@aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
+@register_decomposition(torch.ops.aten.upsample_bilinear2d.default)
+@torch.ops.aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_bilinear2d(
     input: Tensor,
@@ -2456,7 +2456,7 @@ def should_fold(tensor1: torch.Tensor, dim_tensor2: int) -> bool:
         return False
 
 
-@aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def matmul(tensor1, tensor2):
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()

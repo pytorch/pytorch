@@ -609,7 +609,6 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
 
     def __init__(self, inner, var_ranges: VarRanges):
         super().__init__(inner)
-        self.name = "SimplifyIndexing"
         self._simplify: Callable[
             [Expr], Expr
         ] = lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)

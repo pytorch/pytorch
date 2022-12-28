@@ -602,7 +602,8 @@ Tensor std_var_common_impl_mps(
     }
   }
 
-  const auto correction_value = correction.has_value() ? correction.value() : 1;
+  bool use_correction = correction.has_value();
+  const auto correction_value = use_correction ? correction.value() : false;
   int64_t correction_n = 1;
 
   native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
@@ -741,14 +742,14 @@ Tensor std_var_common_impl_mps(
      return output_t;
   }
 
-  double bessel_correction = static_cast<double>(correction_n) / static_cast<double>(correction_n - correction_value);
+  double bessel_correction = ((double) correction_n) / ((double) (correction_n-1));
 
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
     string op_key = (stdVarType == STANDARD_DEVIATION) ? "std_mps" : "var_mps";
     NSString* ns_key = [[axes valueForKey:@"description"] componentsJoinedByString:@","];
-    string bessel_corrected = "correction_value=" + to_string(correction_value);
+    string bessel_corrected = (use_correction && correction_value) ? "unbiased " : "biased ";
     string use_dim_info = (use_dim) ? "use_dim=1:" + to_string(dim_value.size()) : "use_dim=0";
     string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
     string key = op_key + use_dim_info + ":" + keepdim_info + ":" + string([ns_key UTF8String]) + ":" + native_mps::getTensorsStringKey(input_t) + ":" + bessel_corrected;
@@ -770,7 +771,7 @@ Tensor std_var_common_impl_mps(
                                                                      name:nil];
           MPSGraphTensor *outputTensor;
 
-          if (correction_value)
+          if (use_correction && correction_value)
           {
               MPSGraphTensor *besselTensor= [mpsGraph constantWithScalar:bessel_correction
                                                     dataType:MPSDataTypeFloat32];

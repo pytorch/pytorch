@@ -202,12 +202,12 @@ class FunctionCtx(object):
         self.non_differentiable = args
 
     def set_materialize_grads(self, value: bool):
-        r"""Sets whether to materialize grad tensors. Default is ``True``.
+        r"""Sets whether to materialize output grad tensors. Default is ``True``.
 
         **This should be called only from inside the** :func:`forward` **method**
 
-        If ``True``, undefined grad tensors will be expanded to tensors full of zeros
-        prior to calling the :func:`backward` and :func:`jvp` methods.
+        If ``True``, undefined output grad tensors will be expanded to tensors full
+        of zeros prior to calling the :func:`backward` method.
 
         Example::
             >>> class SimpleFunc(Function):

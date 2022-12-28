@@ -392,8 +392,7 @@ static void _wrap_outputs(
     for (const auto i : c10::irange(num_inputs)) {
       PyObject* input = nullptr;
       if (self->is_variable_input[i]) {
-        if (grad_inputs[variable_idx].defined() || !self->materialize_grads ||
-            !isDifferentiableType(inputs[variable_idx].scalar_type())) {
+        if (grad_inputs[variable_idx].defined() || !self->materialize_grads) {
           input = THPVariable_Wrap(grad_inputs[variable_idx]);
         } else {
           input = THPVariable_Wrap(at::zeros_like(inputs[variable_idx]));
