@@ -1,8 +1,8 @@
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 
-#include <errno.h>
-#include <stdint.h>
 #include <unistd.h>
+#include <cerrno>
+#include <cstdint>
 
 #include <chrono>
 #include <cstdio>
