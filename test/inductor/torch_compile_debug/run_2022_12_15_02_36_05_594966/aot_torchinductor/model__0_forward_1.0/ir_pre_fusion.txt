@@ -1,0 +1,19 @@
+buf0: SchedulerNode(ComputedBuffer)
+buf0.writes = [MemoryDep(name='buf0', index=0, size=())]
+buf0.unmet_dependencies = []
+buf0.met_dependencies = [MemoryDep(name='primals_1', index=0, size=())]
+buf0.group.device = cpu
+buf0.group.iteration = ((), ())
+buf0.sizes = ([], [])
+class buf0_loop_body:
+    var_ranges = {}
+    index0 = 0
+    def body(self, ops):
+        get_index = self.get_index('index0')
+        load = ops.load('primals_1', get_index)
+        to_dtype = ops.to_dtype(load, torch.float16)
+        get_index_1 = self.get_index('index0')
+        store = ops.store('buf0', get_index_1, to_dtype, None)
+        return store
+
+
