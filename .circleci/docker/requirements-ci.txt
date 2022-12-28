@@ -1,4 +1,5 @@
 # Python dependencies required for unit tests
+# bump this number to manually rebuild: 1
 
 #awscli==1.6 #this breaks some platforms
 #Description: AWS command line interface
