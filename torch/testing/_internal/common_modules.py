@@ -1004,12 +1004,28 @@ def module_inputs_torch_nn_LSTM(module_info, device, dtype, requires_grad, train
             )
         )
 
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**cons_args),
+                forward_input=FunctionInput(pack_padded_sequence(make_input((5, 2, 2)), torch.tensor([5, 3]))),
+                reference_fn=partial(no_batch_dim_reference_lstm, batch_first=b_f),
+            )
+        )
+
         h_out = proj_size if proj_size > 0 else hidden_size
         hx = (make_input((4 if bidir else 2, h_out)), make_input((4 if bidir else 2, hidden_size)))
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(**cons_args_hidden),
                 forward_input=FunctionInput(make_input((3, 2)), hx),
+                reference_fn=partial(no_batch_dim_reference_lstm, batch_first=b_f),
+            )
+        )
+
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**cons_args),
+                forward_input=FunctionInput(pack_padded_sequence(make_input((5, 2, 2)), torch.tensor([5, 3]))),
                 reference_fn=partial(no_batch_dim_reference_lstm, batch_first=b_f),
             )
         )
