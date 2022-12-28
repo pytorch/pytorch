@@ -38,7 +38,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
           device(std::move(device)),
           unique_id(GetNextTensorId()) {}
     // TODO(alanwaketan): Remove this ctor. This is a
-    // temporary ctor to ease XLA LTC migration.
+    // temporary ctor to ease XLA LTC migration. It depends on
+    // XLA's Functionalization integration.
     Data(BackendDevice device)
         : device(std::move(device)), unique_id(GetNextTensorId()) {}
 
@@ -65,9 +66,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   // have to check both lazy_tensor_ptr && *lazy_tensor_ptr, so everywhere that
   // used to rely on a LazyTensor obj with a null Data can now rely on a null
   // LazyTensorPtr instead.
-  // TODO(alanwaketan): This is a temporarily change to make XLA LTC migration
-  // easier. Restore it back to delete.
-  LazyTensor() = default;
+  LazyTensor() = delete;
 
   virtual ~LazyTensor() = default;
 
