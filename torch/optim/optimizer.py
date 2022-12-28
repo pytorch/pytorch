@@ -339,8 +339,10 @@ class Optimizer(object):
             if isinstance(value, torch.Tensor):
                 # Floating-point types are a bit special here. They are the only ones
                 # that are assumed to always match the type of params.
-                # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
-                if (key != "step"):
+                # Make sure singleton tensors (e.g. state['step']) are not casted
+                # See https://github.com/pytorch/pytorch/issues/74424
+                is_singleton: bool = value.dim() == 0
+                if not is_singleton:
                     if param.is_floating_point():
                         value = value.to(param.dtype)
                     value = value.to(param.device)
