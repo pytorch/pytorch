@@ -3524,8 +3524,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('_native_batch_norm_legit'),
         xfail('histogram'),
         xfail('index_fill'),
-        xfail('nansum'),
-        xfail('nanmean'),
         xfail('scatter_reduce', 'sum'),
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'amax'),
@@ -3554,7 +3552,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('all'),
         xfail('any'),
         xfail('count_nonzero'),
-        xfail('nanmean'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('resize_'),
