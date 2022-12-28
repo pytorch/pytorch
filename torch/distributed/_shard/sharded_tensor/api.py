@@ -476,9 +476,10 @@ class ShardedTensor(ShardedTensorBase):
             data = torch.empty(max_rank_size, device=self._get_preferred_device())
 
             for shard in local_shards:
-                src = shard.tensor.flatten()
-                shard_offset = shard_placement[shard.metadata][1]
-                data[shard_offset: shard_offset + src.numel()].copy_(src)
+                if shard.tensor.numel() > 0:
+                    src = shard.tensor.flatten()
+                    shard_offset = shard_placement[shard.metadata][1]
+                    data[shard_offset: shard_offset + src.numel()].copy_(src)
 
         dist.gather(
             tensor=data,
