@@ -80,7 +80,6 @@ class WorkerSpec:
     monitor_interval: float = 30.0
     master_port: Optional[int] = None
     master_addr: Optional[str] = None
-    local_addr: Optional[str] = None
     redirects: Union[Std, Dict[int, Std]] = Std.NONE
     tee: Union[Std, Dict[int, Std]] = Std.NONE
 
@@ -505,10 +504,7 @@ class SimpleElasticAgent(ElasticAgent):
 
     @staticmethod
     def _set_master_addr_port(
-        store: Store,
-        master_addr: Optional[str],
-        master_port: Optional[int],
-        local_addr: Optional[str],
+        store: Store, master_addr: Optional[str], master_port: Optional[int]
     ):
         if master_port is None:
             sock = _get_socket_with_port()
@@ -516,11 +512,7 @@ class SimpleElasticAgent(ElasticAgent):
                 master_port = sock.getsockname()[1]
 
         if master_addr is None:
-            # If user specified the address for the local node, use it as the master addr if not exist
-            if local_addr:
-                master_addr = local_addr
-            else:
-                master_addr = _get_fq_hostname()
+            master_addr = _get_fq_hostname()
 
         store.set("MASTER_ADDR", master_addr.encode(encoding="UTF-8"))
         store.set("MASTER_PORT", str(master_port).encode(encoding="UTF-8"))
@@ -553,13 +545,7 @@ class SimpleElasticAgent(ElasticAgent):
         worker_group.group_world_size = group_world_size
 
         if group_rank == 0:
-            self._set_master_addr_port(
-                store,
-                spec.master_addr,
-                spec.master_port,
-                spec.local_addr,
-            )
-
+            self._set_master_addr_port(store, spec.master_addr, spec.master_port)
         master_addr, master_port = self._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
 

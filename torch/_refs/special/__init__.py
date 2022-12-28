@@ -42,7 +42,6 @@ __all__ = [
     "xlog1py",
     "zeta",
 ]
-aten = torch.ops.aten
 
 
 @_make_elementwise_unary_reference(
@@ -59,7 +58,7 @@ def bessel_j1(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_j1(a)
 
 
-@register_decomposition(aten.special_entr)
+@register_decomposition(torch.ops.aten.special_entr)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -73,7 +72,7 @@ def entr(a: TensorLikeType) -> TensorLikeType:
     )
 
 
-@register_decomposition(aten.special_erfcx)
+@register_decomposition(torch.ops.aten.special_erfcx)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -108,7 +107,7 @@ def i1e(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i1e(a)
 
 
-@register_decomposition(aten.special_log_ndtr)
+@register_decomposition(torch.ops.aten.special_log_ndtr)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -125,7 +124,7 @@ def log_ndtr(a: TensorLikeType) -> TensorLikeType:
     )
 
 
-@register_decomposition(aten.logit)
+@register_decomposition(torch.ops.aten.logit)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self",),
@@ -140,7 +139,7 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 
-@register_decomposition(aten.special_xlog1py)
+@register_decomposition(torch.ops.aten.special_xlog1py)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
@@ -165,7 +164,7 @@ def xlog1py(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, Numbe
     return torch.where(torch.isnan(b), float("nan"), rhs)
 
 
-@register_decomposition(aten.mvlgamma)
+@register_decomposition(torch.ops.aten.mvlgamma)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -177,7 +176,7 @@ def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
     return torch.sum(torch.lgamma(a.unsqueeze(-1) + b), dim=-1) + c
 
 
-@register_decomposition(aten.special_ndtr)
+@register_decomposition(torch.ops.aten.special_ndtr)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -190,7 +189,7 @@ def ndtr(a: TensorLikeType) -> TensorLikeType:
     return (1 + torch.erf(a_sqrt_2)) * 0.5
 
 
-@register_decomposition(aten.special_ndtri)
+@register_decomposition(torch.ops.aten.special_ndtri)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),

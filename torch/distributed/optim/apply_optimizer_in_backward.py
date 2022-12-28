@@ -73,10 +73,7 @@ def _apply_optimizer_in_backward(
 
             param.grad = None
 
-        handle = param._acc_grad.register_hook(optimizer_hook)  # type: ignore[attr-defined]
-        if not hasattr(param, '_optimizer_hook_handles'):
-            param._optimizer_hook_handles = []  # type: ignore[attr-defined]
-        param._optimizer_hook_handles.append(handle)  # type: ignore[attr-defined]
+        param._acc_grad.register_hook(optimizer_hook)  # type: ignore[attr-defined]
 
     for param in params:
         _apply_optimizer_in_backward_to_param(param)

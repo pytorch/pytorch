@@ -58,7 +58,6 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
-aten = torch.ops.aten
 
 
 def _dropout_helper(
@@ -81,7 +80,7 @@ def _dropout_helper(
     )
 
 
-@register_decomposition(aten.alpha_dropout)
+@register_decomposition(torch.ops.aten.alpha_dropout)
 def alpha_dropout(
     self: TensorLikeType, p: float = 0.5, training: bool = False, inplace: bool = False
 ) -> TensorLikeType:
@@ -141,7 +140,7 @@ def inplace_wrapper(fn):
 
 # celu is implemented specially because it has an alpha argument
 # celu is very similar to elu
-@register_decomposition(aten.celu)
+@register_decomposition(torch.ops.aten.celu)
 @inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -175,7 +174,7 @@ def celu(
     return torch.where(a > 0, a, rhs)
 
 
-@register_decomposition(aten.dropout)
+@register_decomposition(torch.ops.aten.dropout)
 @inplace_wrapper
 @out_wrapper()
 def dropout(
@@ -205,7 +204,7 @@ def dropout(
     return a * dropout_mask * scale
 
 
-@register_decomposition(aten.elu)
+@register_decomposition(torch.ops.aten.elu)
 @inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -243,7 +242,7 @@ def elu(
     return torch.where(a > 0, scale * a, (alpha * scale) * torch.expm1(a * input_scale))
 
 
-@register_decomposition(aten.relu)
+@register_decomposition(torch.ops.aten.relu)
 @inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -314,7 +313,7 @@ def layer_norm(
     return torch.native_layer_norm(input, normalized_shape, weight, bias, eps)[0]
 
 
-@register_decomposition(aten.leaky_relu)
+@register_decomposition(torch.ops.aten.leaky_relu)
 @inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -338,7 +337,7 @@ def leaky_relu(
     return torch.where(torch.gt(a, 0), a, torch.mul(a, negative_slope))
 
 
-@register_decomposition(aten.mish)
+@register_decomposition(torch.ops.aten.mish)
 @inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -355,7 +354,7 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return a * torch.tanh(torch.nn.functional.softplus(a))
 
 
-@register_decomposition(aten.selu)
+@register_decomposition(torch.ops.aten.selu)
 @inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -409,7 +408,7 @@ def softmin(
 
 
 # softplus is implemented specially because it has beta and threshold arguments
-@register_decomposition(aten.softplus)
+@register_decomposition(torch.ops.aten.softplus)
 @inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -447,7 +446,7 @@ def softplus(
     return torch.where(scaled_input > threshold, a, rhs)
 
 
-@register_decomposition(aten.hardshrink)
+@register_decomposition(torch.ops.aten.hardshrink)
 @out_wrapper()
 def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
@@ -457,7 +456,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     return refs.where(refs.logical_and(a >= -lambd, a <= lambd), 0, a)
 
 
-@register_decomposition(aten.softshrink)
+@register_decomposition(torch.ops.aten.softshrink)
 @out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # Formula for reference,
@@ -561,7 +560,7 @@ def log_softmax(
     return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
-@register_decomposition(aten.margin_ranking_loss)
+@register_decomposition(torch.ops.aten.margin_ranking_loss)
 def margin_ranking_loss(
     input1: TensorLikeType,
     input2: TensorLikeType,
@@ -606,7 +605,7 @@ def mse_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
-@register_decomposition(aten.hinge_embedding_loss)
+@register_decomposition(torch.ops.aten.hinge_embedding_loss)
 def hinge_embedding_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -702,7 +701,7 @@ def _nll_loss_nd(
         return torch.sum(loss) / torch.sum(current_weight)
 
 
-@register_decomposition(aten.nll_loss)
+@register_decomposition(torch.ops.aten.nll_loss)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("input",),
@@ -781,7 +780,7 @@ def nll_loss(
 # https://github.com/pytorch/pytorch/issues/83931
 # TODO: Could be rewritten to support complex:
 # https://github.com/pytorch/pytorch/pull/85041
-@register_decomposition(aten.huber_loss)
+@register_decomposition(torch.ops.aten.huber_loss)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("input", "target"),
@@ -825,7 +824,7 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
     return refs.sub(a, refs.tanh(a))
 
 
-@register_decomposition(aten.threshold)
+@register_decomposition(torch.ops.aten.threshold)
 @inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -926,7 +925,7 @@ def _triplet_margin_with_distance_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
-@register_decomposition(aten.hardtanh)
+@register_decomposition(torch.ops.aten.hardtanh)
 @inplace_wrapper
 @out_wrapper()
 @elementwise_unary_scalar_wrapper
@@ -959,7 +958,7 @@ def hardtanh(
     return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
 
 
-@register_decomposition(aten.gelu)
+@register_decomposition(torch.ops.aten.gelu)
 @out_wrapper()
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
@@ -1028,7 +1027,7 @@ def poisson_nll_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
-@register_decomposition(aten.prelu)
+@register_decomposition(torch.ops.aten.prelu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "weight"),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1070,7 +1069,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     return refs.where(a > 0, a, a * weight)
 
 
-@register_decomposition(aten.relu6)
+@register_decomposition(torch.ops.aten.relu6)
 @inplace_wrapper
 @out_wrapper()
 def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
@@ -1086,7 +1085,7 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return refs.nn.functional.hardtanh(a, 0, 6)
 
 
-@register_decomposition(aten.glu)
+@register_decomposition(torch.ops.aten.glu)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -1103,7 +1102,7 @@ def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
     return b * torch.sigmoid(c)
 
 
-@register_decomposition(aten.pairwise_distance)
+@register_decomposition(torch.ops.aten.pairwise_distance)
 @out_wrapper()
 def pairwise_distance(
     x1: TensorLikeType,
@@ -1115,7 +1114,7 @@ def pairwise_distance(
     return torch.linalg.vector_norm(x1 - x2 + eps, ord=p, dim=-1, keepdim=keepdim)
 
 
-@register_decomposition(aten.pdist)
+@register_decomposition(torch.ops.aten.pdist)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),

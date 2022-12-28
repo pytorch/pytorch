@@ -213,20 +213,20 @@ class _NodeDesc:
     """Describes a node in the rendezvous.
 
     Attributes:
-        addr:
-            The FQDN of the node or user specified local node address.
+        fqdn:
+            The FQDN of the node.
         pid:
             The id of the process in which the rendezvous handler runs.
         local_id:
             A process-wide unique id.
     """
 
-    addr: str
+    fqdn: str
     pid: int
     local_id: int
 
     def __repr__(self) -> str:
-        return f"{self.addr}_{self.pid}_{self.local_id}"
+        return f"{self.fqdn}_{self.pid}_{self.local_id}"
 
 
 class _NodeDescGenerator:
@@ -245,7 +245,7 @@ class _NodeDescGenerator:
         # An integer that is incremented with each call to generate().
         self._local_id = 0
 
-    def generate(self, local_addr: Optional[str] = None) -> _NodeDesc:
+    def generate(self) -> _NodeDesc:
         # This method can be called by multiple threads concurrently; therefore,
         # we must increment the integer atomically.
         with self._lock:
@@ -253,7 +253,7 @@ class _NodeDescGenerator:
 
             self._local_id += 1
 
-        return _NodeDesc(local_addr or socket.getfqdn(), os.getpid(), local_id)
+        return _NodeDesc(socket.getfqdn(), os.getpid(), local_id)
 
 
 class _RendezvousState:
@@ -587,7 +587,7 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
             run_id=self._settings.run_id,
             message=message,
             node_state=node_state,
-            hostname=self._node.addr,
+            hostname=self._node.fqdn,
             pid=self._node.pid,
             local_id=self._node.local_id,
         )
@@ -898,7 +898,6 @@ class DynamicRendezvousHandler(RendezvousHandler):
         backend: RendezvousBackend,
         min_nodes: int,
         max_nodes: int,
-        local_addr: Optional[str] = None,
         timeout: Optional[RendezvousTimeout] = None,
     ):
         """Creates a new :py:class:`DynamicRendezvousHandler`.
@@ -914,13 +913,11 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 The minimum number of nodes to admit to the rendezvous.
             max_nodes:
                 The maximum number of nodes to admit to the rendezvous.
-            local_addr:
-                The local node adress.
             timeout:
                 The timeout configuration of the rendezvous.
         """
         # We associate each handler instance with a unique node descriptor.
-        node = cls._node_desc_generator.generate(local_addr)
+        node = cls._node_desc_generator.generate()
 
         settings = RendezvousSettings(
             run_id,
@@ -986,7 +983,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
             run_id=self._settings.run_id,
             message=message,
             node_state=node_state,
-            hostname=self._this_node.addr,
+            hostname=self._this_node.fqdn,
             pid=self._this_node.pid,
             local_id=self._this_node.local_id,
             rank=rank,
@@ -1241,7 +1238,6 @@ def create_handler(
             backend,
             params.min_nodes,
             params.max_nodes,
-            params.local_addr,
             timeout,
         )
     except Exception as e:

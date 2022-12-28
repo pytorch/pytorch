@@ -748,13 +748,6 @@ test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
 
-test_executorch() {
-  # Test torchgen generated code for Executorch.
-  echo "Testing Executorch op registration"
-  "$BUILD_BIN_DIR"/test_edge_op_registration
-  assert_git_not_dirty
-}
-
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -882,5 +875,4 @@ else
   test_custom_backend
   test_torch_function_benchmark
   test_benchmarks
-  test_executorch
 fi
