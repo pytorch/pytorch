@@ -203,10 +203,7 @@ class TORCH_API TensorBase {
     impl_.reset();
   }
 
-  TensorBase& operator=(const TensorBase& x) & {
-    impl_ = x.impl_;
-    return *this;
-  };
+  TensorBase& operator=(const TensorBase& x) & = default;
   TensorBase& operator=(TensorBase&& x) & {
     impl_ = std::move(x.impl_);
     return *this;

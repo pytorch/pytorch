@@ -22,7 +22,7 @@ enum class C10_API_ENUM DebugInfoKind : uint8_t {
 
 class C10_API DebugInfoBase {
  public:
-  DebugInfoBase() {}
+  DebugInfoBase() = default;
   virtual ~DebugInfoBase() = default;
 };
 

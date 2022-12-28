@@ -8,7 +8,7 @@ struct C10_API Storage {
  public:
   struct use_byte_size_t {};
 
-  Storage() {}
+  Storage() = default;
   Storage(c10::intrusive_ptr<StorageImpl> ptr)
       : storage_impl_(std::move(ptr)) {}
 
