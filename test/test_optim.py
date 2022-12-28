@@ -3163,9 +3163,9 @@ class TestLRScheduler(TestCase):
     def test_cycle_lr_state_dict_picklable(self):
         adam_opt = optim.Adam(self.net.parameters())
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
-        assert isinstance(scheduler._scale_fn_ref, weakref.WeakMethod)
+        self.assertIsInstance(scheduler._scale_fn_ref, weakref.WeakMethod)
         state = scheduler.state_dict()
-        assert "_scale_fn_ref" not in state
+        self.assertNotIn("_scale_fn_ref", state)
         pickle.dumps(state)
 
     def test_cycle_lr_scale_fn_restored_from_state_dict(self):
@@ -3175,9 +3175,10 @@ class TestLRScheduler(TestCase):
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, mode="triangular2")
         restored_scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
         restored_scheduler.load_state_dict(scheduler.state_dict())
-        assert restored_scheduler.mode == scheduler.mode == "triangular2"
-        assert restored_scheduler._scale_fn_ref is not None and scheduler._scale_fn_ref is not None
-        assert restored_scheduler._scale_fn_custom is scheduler._scale_fn_custom is None
+        self.assertTrue(restored_scheduler.mode == scheduler.mode == "triangular2")
+        self.assertIsNotNone(restored_scheduler._scale_fn_ref) and self.assertIsNotNone(scheduler._scale_fn_ref)
+        self.assertIs(restored_scheduler._scale_fn_custom, None)
+        self.assertIs(scheduler._scale_fn_custom, None)
 
         # Case 2: Custom `scale_fn`
         def scale_fn(_):
@@ -3186,8 +3187,8 @@ class TestLRScheduler(TestCase):
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
         restored_scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
         restored_scheduler.load_state_dict(scheduler.state_dict())
-        assert scheduler._scale_fn_custom is scale_fn
-        assert restored_scheduler._scale_fn_custom is scale_fn
+        self.assertIs(scheduler._scale_fn_custom, scale_fn)
+        self.assertIs(restored_scheduler._scale_fn_custom, scale_fn)
 
     def test_onecycle_lr_invalid_anneal_strategy(self):
         with self.assertRaises(ValueError):
