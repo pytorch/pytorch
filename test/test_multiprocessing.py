@@ -15,7 +15,7 @@ import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
-                                                  load_tests, slowTest, TEST_WITH_TSAN)
+                                                  load_tests, slowTest, TEST_WITH_TSAN, TEST_WITH_TORCHDYNAMO)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -352,19 +352,27 @@ class TestMultiprocessing(TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN,
                      "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326")
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
+                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
     def test_fs_sharing(self):
         with fs_sharing():
             self._test_sharing(repeat=TEST_REPEATS)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
+                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
+                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
     def test_fs_pool(self):
         with fs_sharing():
             self._test_pool(repeat=TEST_REPEATS)
 
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
+                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
     def test_fs(self):
         def queue_put():
             x = torch.DoubleStorage(4)
