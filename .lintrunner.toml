@@ -59,6 +59,7 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'c10/util/strong_type.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
+    'torch/csrc/utils/pythoncapi_compat.h',
 ]
 init_command = [
     'python3',
@@ -135,7 +136,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.21.6',
+    'numpy==1.23.1',
     'expecttest==0.1.3',
     'mypy==0.960',
     'types-requests==2.27.25',
@@ -210,7 +211,6 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
-    'c10/core/*.cpp',
     'c10/core/**/*.cpp',
     'torch/csrc/fx/**/*.cpp',
     'torch/csrc/generic/**/*.cpp',
@@ -414,6 +414,7 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'aten/src/ATen/native/vulkan/glsl/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
+    'torch/csrc/utils/pythoncapi_compat.h',
 ]
 command = [
     'python3',
