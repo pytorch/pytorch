@@ -3764,10 +3764,13 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                               shape(S, rank, False), None, mode, align_corners)
             yield SampleInput(make_arg(shape(D, rank)),
                               shape(L, rank, False), None, mode, align_corners)
-            yield SampleInput(make_arg(shape(D, rank)),
-                              None, 1.7, mode, align_corners)
-            yield SampleInput(make_arg(shape(D, rank)),
-                              None, 0.6, mode, align_corners)
+            for recompute_scale_factor in [False, True]:
+                yield SampleInput(make_arg(shape(D, rank)),
+                                  None, 1.7, mode, align_corners,
+                                  recompute_scale_factor=recompute_scale_factor)
+                yield SampleInput(make_arg(shape(D, rank)),
+                                  None, 0.6, mode, align_corners,
+                                  recompute_scale_factor=recompute_scale_factor)
 
 def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
     N, C = 2, 3
