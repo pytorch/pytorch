@@ -852,11 +852,7 @@ Tensor linalg_det_jvp(
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& grad,
     const Tensor& A,
-    const Tensor& B,
-    const c10::optional<double> rcond,
-    const c10::optional<c10::string_view> driver,
-    const std::array<bool, 2>& grad_input_mask);
-
+    const Tensor& B_);
 Tensor linalg_lu_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
