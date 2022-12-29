@@ -103,7 +103,8 @@ class MixedPrecision:
 
     Attributes:
         param_dtype (torch.dtype): This specifies the dtype for model
-            parameters, inputs (when ``cast_forward_inputs`` is set to
+            parameters, inputs (when ``cast_forward_inputs`` or
+            ``cast_root_forward_inputs``is set to
             ``True``), and therefore the dtype for computation.
             However, outside the forward and backward passes, parameters are in
             full precision. Model checkpointing always happens in full
@@ -121,6 +122,10 @@ class MixedPrecision:
             (Default: ``False``)
         cast_forward_inputs (bool): Cast floating point tensors in the forward
             arguments and keyword arguments to ``param_dtype``.
+            (Default: ``False``)
+        cast_root_forward_inputs (bool): Cast floating point tensors in the forward
+            arguments and keyword arguments to ``param_dtype`` for the root FSDP instance.
+            It takes precedence over ``cast_forward_inputs`` for the root FSDP instance.
             (Default: ``True``)
 
     .. note:: This API is experimental and subject to change.
@@ -151,13 +156,34 @@ class MixedPrecision:
         not use an ``auto_wrap_policy``, then the user must take care to not
         use mixed precision for FSDP instances containing ``BatchNorm``
         modules.
+
+    .. note:: ``cast_root_forward_inputs`` is set as True and ``cast_forward_inputs`` is set
+        as False in default for every FSDP isntance. For root FSDP instance,
+        ``cast_root_forward_inputs`` takes precedence over ``cast_forward_inputs``,
+        for non-root FSDP instance, ``cast_root_forward_inputs`` is ignored.
+        This is usually sufficient for the case where every FSDP instance
+        has the same ``MixedPrecision`` configuration, and only need to cast inputs at the
+        beginning of executing the model's forward pass.
+
+    .. note:: For submodules with different ``MixedPrecision`` configurations, it is
+        recommended to use ``cast_forward_inputs`` to configure casting inputs or not
+        for its FSDP instance. For root FSDP instance, make sure its wrapped submodules
+        are first ones to be executed, e.g. for the case
+        FSDP(FSDP(model.c2, MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)),
+        model.c1, MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True)),
+        model.c1 should be the first one executed, so that its inputs could be casted
+        as expected inside the root FSDP instance.see examples in unit tests
+        ``test_submodules_with_different_precisions`` and
+        ``test_submodules_with_different_precisions_error``.
     """
 
     param_dtype: Optional[torch.dtype] = None
     reduce_dtype: Optional[torch.dtype] = None
     buffer_dtype: Optional[torch.dtype] = None
     keep_low_precision_grads: bool = False
-    cast_forward_inputs: bool = True
+    cast_forward_inputs: bool = False
+    cast_root_forward_inputs: bool = True
+
 
 
 @dataclass
