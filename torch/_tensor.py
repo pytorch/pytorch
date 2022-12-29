@@ -97,7 +97,8 @@ class Tensor(torch._C._TensorBase):
             # Update the test in test_serialization if you remove 'meta' from here
             if (
                 self.is_sparse
-                or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "hpu"]
+                or self.device.type
+                in ["lazy", "xla", "mps", "ort", "meta", "hpu", "ipu"]
                 or (
                     not torch._C._has_storage(self)
                     and self.device.type == "privateuseone"
@@ -217,23 +218,27 @@ class Tensor(torch._C._TensorBase):
 
     def storage(self):
         r"""
-        storage() -> torch.Storage
+        storage() -> torch.TypedStorage
 
-        Returns the underlying storage.
+        Returns the underlying :class:`TypedStorage`.
+
+        .. warning::
+
+            :class:`TypedStorage` is deprecated. It will be removed in the future, and
+            :class:`UntypedStorage` will be the only storage class. To access the
+            :class:`UntypedStorage` directly, use :attr:`Tensor.untyped_storage()`.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        torch.storage._warn_typed_storage_removal()
+        torch.storage._warn_typed_storage_removal(stacklevel=2)
         return self._typed_storage()
 
     # For internal use only, to avoid raising deprecation warning
     def _typed_storage(self):
-        _storage = self._storage()
-        if isinstance(_storage, torch.TypedStorage):
-            _storage = _storage._untyped_storage
+        untyped_storage = self.untyped_storage()
         return torch.TypedStorage(
-            wrap_storage=_storage, dtype=self.dtype, _internal=True
+            wrap_storage=untyped_storage, dtype=self.dtype, _internal=True
         )
 
     def _reduce_ex_internal(self, proto):
@@ -331,22 +336,32 @@ class Tensor(torch._C._TensorBase):
                     "sparse tensor __reduce_ex__ for layout `%s`" % (self.layout)
                 )
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
-        elif self.is_sparse_csr:
-            if self.layout == torch.sparse_csr:
-                args_sparse_csr = (
-                    self.layout,
-                    (
-                        self.crow_indices(),
-                        self.col_indices(),
-                        self.values(),
-                        self.size(),
-                    ),
+        elif self.layout in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }:
+            if self.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                compressed_indices, plain_indices = (
+                    self.crow_indices(),
+                    self.col_indices(),
                 )
             else:
-                raise NotImplementedError(
-                    "sparse csr tensor __reduce_ex__ for layout `%s`" % (self.layout)
+                compressed_indices, plain_indices = (
+                    self.ccol_indices(),
+                    self.row_indices(),
                 )
-            return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
+            args_sparse_compressed = (
+                self.layout,
+                (
+                    compressed_indices,
+                    plain_indices,
+                    self.values(),
+                    self.size(),
+                ),
+            )
+            return (torch._utils._rebuild_sparse_tensor, args_sparse_compressed)
         elif (
             self.data_ptr() == 0
             and type(self) is not torch.Tensor
@@ -614,7 +629,13 @@ class Tensor(torch._C._TensorBase):
         else:
             return self.flip(0)
 
-    def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
+    def norm(
+        self,
+        p: Optional[Union[float, str]] = "fro",
+        dim=None,
+        keepdim=False,
+        dtype=None,
+    ):
         r"""See :func:`torch.norm`"""
         if has_torch_function_unary(self):
             return handle_torch_function(

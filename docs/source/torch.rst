@@ -379,6 +379,7 @@ Pointwise Ops
     sin
     sinc
     sinh
+    softmax
     sqrt
     square
     sub
@@ -612,6 +613,16 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
+    sym_float
+    sym_int
+
+Optimizations
+-------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    compile
 
 Operator Tags
 ------------------------------------

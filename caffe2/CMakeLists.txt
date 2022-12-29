@@ -492,6 +492,7 @@ if(BUILD_LITE_INTERPRETER)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 else()
   append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
+  list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   if(BUILD_LAZY_TS_BACKEND)
     append_filelist("lazy_tensor_ts_sources" LIBTORCH_CMAKE_SRCS)
   endif()
@@ -564,6 +565,7 @@ if(NOT INTERN_DISABLE_MOBILE_INTERP)
      ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp
      ${TORCH_SRC_DIR}/csrc/jit/mobile/train/sequential.cpp
      ${TORCH_SRC_DIR}/csrc/jit/mobile/upgrader_mobile.cpp
+     ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer.cpp
      )
   list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   list(APPEND TORCH_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
@@ -599,7 +601,6 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/jit/serialization/export_bytecode.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer_jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
     ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
     ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
@@ -1125,6 +1126,12 @@ install(FILES
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 if(BUILD_TEST)
+  if(BUILD_EXECUTORCH)
+    add_subdirectory(
+            ${TORCH_ROOT}/test/edge
+            ${CMAKE_BINARY_DIR}/test_edge_op_registration
+    )
+  endif()
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime

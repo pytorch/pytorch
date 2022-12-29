@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import Optional, List, Sequence, Tuple, cast
+from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 import torch.distributed.distributed_c10d as c10d
@@ -60,11 +60,7 @@ class Shard(Placement):
         if with_padding or contiguous:
             shard_list = []
             for i, shard in enumerate(tensor_list):
-                if (
-                    with_padding
-                    and idx_start_to_pad != 0
-                    and i >= idx_start_to_pad
-                ):
+                if with_padding and idx_start_to_pad != 0 and i >= idx_start_to_pad:
                     shard = self._pad_tensor(shard)
                 # input tensors are expected to be congtiguous by the collective backend
                 shard = shard.contiguous() if contiguous else shard
@@ -81,9 +77,7 @@ class Shard(Placement):
 
     def _unpad_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
         # unpad tensor by 1 on the shard dim
-        return tensor.narrow(
-            self.dim, start=0, length=tensor.size(self.dim) - 1
-        )
+        return tensor.narrow(self.dim, start=0, length=tensor.size(self.dim) - 1)
 
     def _local_shard_size_on_dim(
         self,
@@ -237,9 +231,7 @@ class _Partial(Placement):
     ) -> torch.Tensor:
         # out-of-place all_reduce to replicate, since the current partial DTensor
         # might get used by other ops as well, so we can't inplace modify it
-        cloned_local = CommTensor(
-            tensor.clone(memory_format=torch.contiguous_format)
-        )
+        cloned_local = CommTensor(tensor.clone(memory_format=torch.contiguous_format))
         mesh.all_reduce(
             cloned_local, c10d.ReduceOp(self.reduce_op), mesh_dim=mesh_dim  # type: ignore[call-arg]
         )
@@ -334,9 +326,7 @@ class DTensorSpec(object):
         Compute the shape of a local shard of the given DTensor on its current
         coordinate of the mesh.
         """
-        assert (
-            self.shape is not None
-        ), "DTensorSpec does not contain global shape."
+        assert self.shape is not None, "DTensorSpec does not contain global shape."
         local_shape = list(self.shape)  # start with global shape
         for idx, placement in enumerate(self.placements):
             mesh_dim_size = self.mesh.size(idx)
@@ -361,9 +351,7 @@ class DTensorSpec(object):
         global rank. This is mostly used by distributed checkpointing to know the
         exact offsets of the local shard.
         """
-        assert (
-            self.shape is not None
-        ), "DTensorSpec does not contain global shape."
+        assert self.shape is not None, "DTensorSpec does not contain global shape."
         local_offsets = [0] * self.ndim
         local_shape = list(self.shape)
 

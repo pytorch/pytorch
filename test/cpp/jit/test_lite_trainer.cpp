@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/mobile/train/optim/sgd.h>
 #include <torch/csrc/jit/mobile/train/random.h>
 #include <torch/csrc/jit/mobile/train/sequential.h>
-#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/data/dataloader.h>
 #include <torch/torch.h>
@@ -175,7 +174,6 @@ TEST(MobileTest, SaveParametersDefaultsToZip) {
 
 TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
   // Save some empty parameters using flatbuffer.
-  register_flatbuffer_all();
   std::map<std::string, at::Tensor> empty_parameters;
   std::stringstream ss_data;
   _save_parameters(empty_parameters, ss_data, /*use_flatbuffer=*/true);
@@ -192,7 +190,6 @@ TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
 
 TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
   // Create some simple parameters to save.
-  register_flatbuffer_all();
   std::map<std::string, at::Tensor> input_params;
   input_params["four_by_ones"] = 4 * torch::ones({});
   input_params["three_by_ones"] = 3 * torch::ones({});
