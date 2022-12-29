@@ -146,17 +146,18 @@ into another system (like C++, CUDA, numpy, triton).
             return result, None, None, None
 
 
-Now, to make it easier to use ``NumpySort`` (and hide away the intermediates we
-returned as outputs) we create a new function that invokes it::
+Now, to make it easier to use ``NumpySort`` (to hide away the intermediates we
+returned as outputs, as well as allow default args and kwargs), we create a new
+function that invokes it::
 
-    def numpy_sort(x, dim):
+    def numpy_sort(x, dim=-1):
         result, _, _ = NumpySort.apply(x, dim)
         return result
 
 And here's a sanity check::
 
     x = torch.randn(2, 3)
-    grad_x = torch.func.grad(lambda x: numpy_sort(x, -1).sum())(x)
+    grad_x = torch.func.grad(lambda x: numpy_sort(x).sum())(x)
     assert torch.allclose(grad_x, torch.ones_like(x))
 
 
@@ -465,12 +466,12 @@ Example::
             # then out_dims is an Optional[int] (instead of being a Tuple).
             return NumpyTake.apply(x, ind, ind_inv, dim + 1), 0
 
-    def numpy_sort(x, dim):
+    def numpy_sort(x, dim=-1):
         result, _, _ = NumpySort.apply(x, dim)
         return result
 
     x = torch.randn(2, 3)
-    result = torch.vmap(numpy_sort, (0, None))(x, 0)
+    result = torch.vmap(numpy_sort)(x)
     assert torch.allclose(result, numpy_sort(result, 1))
 
 
