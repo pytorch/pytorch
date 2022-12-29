@@ -643,17 +643,21 @@ template<>
   struct hash<c10::Argument> {
     size_t operator()(const c10::Argument& arg) const
     {
-      // We don't need to hash default value and alias_info
-      // because they are not useful in distinguishing schema.
       auto hash = std::hash<std::string>{}(arg.name());
       auto type_hash = std::hash<c10::TypePtr>{}(arg.type());
       auto kwarg_only_hash = std::hash<bool>{}(arg.kwarg_only());
       hash = c10::hash_combine(hash, type_hash);
       hash = c10::hash_combine(hash, kwarg_only_hash);
+      if (arg.default_value()) {
+        auto default_value_hash = c10::hash<c10::IValue>{}(arg.default_value().value());
+        hash = c10::hash_combine(hash, default_value_hash);
+      }
       if (arg.N()) {
         auto N_hash = std::hash<int64_t>{}(*arg.N());
         hash = c10::hash_combine(hash, N_hash);
       }
+      // We don't need to hash the alias_info because it
+      // is not useful in distinguishing schema.
       return hash;
     }
   };
