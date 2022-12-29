@@ -1126,6 +1126,12 @@ install(FILES
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 if(BUILD_TEST)
+  if(BUILD_EXECUTORCH)
+    add_subdirectory(
+            ${TORCH_ROOT}/test/edge
+            ${CMAKE_BINARY_DIR}/test_edge_op_registration
+    )
+  endif()
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
