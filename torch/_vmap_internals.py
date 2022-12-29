@@ -9,6 +9,7 @@ from torch.utils._pytree import _broadcast_to_and_flatten, tree_flatten, tree_un
 in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
 
+
 # Checks that all args-to-be-batched have the same batch dim size
 def _validate_and_get_batch_size(
     flat_in_dims: List[Optional[int]], flat_args: List
