@@ -681,7 +681,7 @@ static void qprelu_out_kernel(Tensor& out,
   TORCH_CHECK(input_ndim > 0, "qprelu: zero-dim input tensor is not allowed.");
 
   // This logic is present in at::prelu and repeated here, as this path can be
-  // hit via quantizied::prelu, which is registered under quantized/cpu/qprelu.cpu
+  // hit via quantized::prelu, which is registered under quantized/cpu/qprelu.cpu
   auto qw_nd = qw;
   if (input_ndim != qw_nd.dim()) {
     DimVector dim_w(input_ndim, 1);

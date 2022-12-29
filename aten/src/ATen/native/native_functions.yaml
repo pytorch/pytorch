@@ -4657,7 +4657,6 @@
   autogen: prelu.out
 
 - func: _prelu_kernel(Tensor self, Tensor weight) -> Tensor
-  variants: function
   dispatch:
     CPU, CUDA: _prelu_kernel
     QuantizedCPU: _prelu_kernel_quantized_cpu
