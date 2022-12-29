@@ -392,7 +392,8 @@ static void _wrap_outputs(
     for (const auto i : c10::irange(num_inputs)) {
       PyObject* input = nullptr;
       if (self->is_variable_input[i]) {
-        if (grad_inputs[variable_idx].defined() || !self->materialize_grads) {
+        if (grad_inputs[variable_idx].defined() || !self->materialize_grads ||
+            !isDifferentiableType(inputs[variable_idx].scalar_type())) {
           input = THPVariable_Wrap(grad_inputs[variable_idx]);
         } else {
           input = THPVariable_Wrap(at::zeros_like(inputs[variable_idx]));
@@ -844,16 +845,16 @@ THPObjectPtr make_ctx_input_tuple(
 THPObjectPtr make_ctx_input_output_tuple(
     THPFunction* ctx,
     UnpackedInput& unpacked_input,
-    PyObject* outputs) {
+    PyObject* output) {
   THPObjectPtr result(PyTuple_New(3));
   if (!result)
     return {};
   Py_INCREF(ctx);
   Py_INCREF(unpacked_input.input_tuple.get());
-  Py_INCREF(outputs);
+  Py_INCREF(output);
   PyTuple_SET_ITEM(result.get(), 0, (PyObject*)ctx);
   PyTuple_SET_ITEM(result.get(), 1, unpacked_input.input_tuple.get());
-  PyTuple_SET_ITEM(result.get(), 2, outputs);
+  PyTuple_SET_ITEM(result.get(), 2, output);
   return result;
 }
 
@@ -912,7 +913,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   auto num_args = PyTuple_GET_SIZE(inputs);
 
   // Call forward
-  THPObjectPtr outputs;
+  THPObjectPtr output;
   {
     AutoGradMode grad_mode(false);
     at::AutoFwGradMode fw_grad_mode(false);
@@ -921,13 +922,13 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       return nullptr;
     if (has_separate_setup_context_fn) {
       // call forward followed by setup_context
-      outputs = PyObject_CallObject(forward_fn, unpacked_input.input_tuple);
-      if (!outputs) {
+      output = PyObject_CallObject(forward_fn, unpacked_input.input_tuple);
+      if (!output) {
         return nullptr;
       }
-      // signature is setup_context(ctx, inputs, outputs)
+      // signature is setup_context(ctx, inputs, output)
       auto ctx_input_output_tuple =
-          make_ctx_input_output_tuple(ctx, unpacked_input, outputs);
+          make_ctx_input_output_tuple(ctx, unpacked_input, output);
       if (!ctx_input_output_tuple) {
         return nullptr;
       }
@@ -945,9 +946,9 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       if (!ctx_input_tuple) {
         return nullptr;
       }
-      outputs = PyObject_CallObject(forward_fn, ctx_input_tuple);
+      output = PyObject_CallObject(forward_fn, ctx_input_tuple);
     }
-    if (!outputs)
+    if (!output)
       return nullptr;
   }
 
@@ -957,7 +958,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       ctx,
       unpacked_input,
       inputs,
-      std::move(outputs),
+      std::move(output),
       is_executable,
       node);
   END_HANDLE_TH_ERRORS
