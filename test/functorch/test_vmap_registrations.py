@@ -208,7 +208,6 @@ xfail_not_implemented = {
     "aten::moveaxis.int",
     "aten::movedim.intlist",
     "aten::multilabel_margin_loss",
-    "aten::nanmean",
     "aten::nanmedian.names_dim",
     "aten::nanmedian.names_dim_values",
     "aten::nanquantile",
