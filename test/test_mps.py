@@ -1880,6 +1880,24 @@ class TestLogical(TestCase):
         helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
         helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
 
+    def test_min_max(self):
+        def helper(dtype):
+            for _ in range(10):
+                if dtype == torch.float32 or dtype == torch.float16:
+                    x = torch.randn((30, 15), device='mps', dtype=dtype)
+                else:
+                    x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
+                x_cpu = x.to("cpu")
+
+                y = x.max()
+                y_cpu = x_cpu.max()
+                self.assertEqual(y, y_cpu)
+
+                z = x.min()
+                z_cpu = x_cpu.min()
+                self.assertEqual(z, z_cpu)
+
+        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
 
 class TestSmoothL1Loss(TestCase):
 
@@ -2395,6 +2413,14 @@ class TestNLLLoss(TestCase):
         result_cpu = torch.eq(cpu_x, cpu_y)
 
         self.assertEqual(result_cpu, result_mps.to('cpu'))
+
+    def test_signed_vs_unsigned_comparison(self):
+        cpu_x = torch.tensor((-1, 2, 3), device='cpu', dtype=torch.uint8)
+        mps_x = torch.tensor((-1, 2, 3), device='mps', dtype=torch.uint8)
+        # in the comparison of signed vs. unsigned we should always cast to unsigned
+        self.assertEqual(cpu_x == -1, mps_x == -1)
+        self.assertEqual(cpu_x > -1, mps_x > -1)
+        self.assertEqual(cpu_x < -1, mps_x < -1)
 
     def test_eq_int64(self):
         values1 = [[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]]
@@ -7426,6 +7452,7 @@ class TestConsistency(TestCase):
         'masked.argmin': ['i16', 'i64', 'u8'],
         'masked.log_softmax': ['f32'],
         'masked.logaddexp': ['f32'],
+        'masked.logsumexp': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked.norm': ['f16', 'f32'],
         'masked.normalize': ['f16', 'f32'],
         'masked.softmax': ['f32'],
@@ -7435,7 +7462,7 @@ class TestConsistency(TestCase):
         'abs': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'acos': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'acosh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
+        'add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'addbmm': ['f32'],
         'addcdiv': ['f32'],
         'addcmul': ['f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7450,7 +7477,6 @@ class TestConsistency(TestCase):
         'argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'amax': ['f32'],
         'amix': ['f32'],
-        'logsumexp': ['f32'],
         'mean': ['f32'],
         'sum': ['f32'],
         'asin': ['b8', 'f32', 'i16', 'i32', 'u8'],
@@ -7474,6 +7500,9 @@ class TestConsistency(TestCase):
         'ceil': ['f32', 'int32', 'int64', 'f16'],
         'char': ['b8', 'u8'],
         'chunk': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'clamp': ['f32', 'i16', 'i32', 'i64', 'u8'],
+        'clamp_max': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'clamp_min': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'clone': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'column_stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'combinations': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7529,10 +7558,14 @@ class TestConsistency(TestCase):
         'log1p': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'log2': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'log_softmax': ['f32'],
-        'logaddexp': ['f32'],
-        'logaddexp2': ['f32'],
+        'logaddexp': ['f16', 'f32'],
+        'logaddexp2': ['f16', 'f32'],
+        'logical_and': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_not': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'logical_or': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logspace': ['f32', 'i16', 'i32', 'i64', 'u8'],
+        'logsumexp': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked_fill': ['f16', 'i16', 'i32', 'i64'],
         'masked_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'matmul': ['f32'],
@@ -7547,19 +7580,11 @@ class TestConsistency(TestCase):
         'nn.functional.conv1d': ['f32'],
         'nn.functional.conv2d': ['f32'],
         'nn.functional.conv_transpose1d': ['f32'],
-        'nn.functional.cosine_embedding_loss': ['b8',
-                                                'f32',
-                                                'i16',
-                                                'i32',
-                                                'i64'],
+        'nn.functional.cosine_embedding_loss': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'nn.functional.cosine_similarity': ['f32'],
         'nn.functional.elu': ['f32'],
-        'nn.functional.feature_alpha_dropout': ['b8',
-                                                'f16',
-                                                'f32',
-                                                'i16',
-                                                'i32',
-                                                'i64',
-                                                'u8'],
+        'nn.functional.feature_alpha_dropout': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'nn.functional.embedding': ['f16', 'f32'],
         'nn.functional.gaussian_nll_loss': ['f32'],
         'nn.functional.glu': ['f32'],
         'nn.functional.group_norm': ['f32'],
@@ -7567,7 +7592,7 @@ class TestConsistency(TestCase):
         'nn.functional.hinge_embedding_loss': ['f32'],
         'nn.functional.huber_loss': ['f32'],
         'nn.functional.instance_norm': ['f32'],
-        'nn.functional.kl_div': ['f32'],
+        'nn.functional.kl_div': ['f32', 'i16', 'i32', 'i64'],
         'nn.functional.l1_loss': ['f16', 'f32'],
         'nn.functional.leaky_relu': ['f32'],
         'nn.functional.linear': ['f32'],
@@ -7636,7 +7661,7 @@ class TestConsistency(TestCase):
         'squeeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'std': ['f32'],
-        'sub': ['f32', 'i16', 'i32', 'i64'],
+        'sub': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'sum_to_size': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'svd': ['f32'],
         't': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7650,7 +7675,7 @@ class TestConsistency(TestCase):
         'tril_indices': ['i32', 'i64'],
         'triu': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'triu_indices': ['i32', 'i64'],
-        'true_divide': ['b8', 'f16', 'f32', 'i16', 'u8'],
+        'true_divide': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'trunc': ['f32'],
         'unbind': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unflatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7661,12 +7686,6 @@ class TestConsistency(TestCase):
         'vsplit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'vstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp_max': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp_min': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_and': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_or': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8']
     }
 
@@ -7856,7 +7875,6 @@ class TestConsistency(TestCase):
         'masked.sum': [torch.bool],
 
         # Functions that hard crash
-        'nn.functional.kl_div': [torch.int16, torch.int32, torch.int64],
         'nn.functional.nll_loss': [torch.float32],
         'nn.functional.padreflect': [torch.float32], 'nn.functional.padreplicate': [torch.float32],
         'std': [torch.float16],
@@ -8049,7 +8067,7 @@ class TestConsistency(TestCase):
                 if op.name == "nn.functional.conv2d" and dtype == torch.float32:
                     atol = 1e-4
                     rtol = 3e-5
-                elif op.name == "add" and dtype == torch.float16:
+                elif (op.name == "add" or op.name == "sub") and dtype == torch.float16:
                     atol = 1e-2
                     rtol = 1e-2
                 else:
