@@ -1,6 +1,6 @@
 ir_version: 7
 producer_name: "pytorch"
-producer_version: "1.14.0"
+producer_version: "2.0.0"
 graph {
   node {
     output: "onnx::Pad_1"

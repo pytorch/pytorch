@@ -538,6 +538,11 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::BFloat16);
+  cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
+  if (!at::globalContext().allowBF16ReductionCuBLAS()) {
+    cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
+  }
+  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
   TORCH_CUDABLAS_CHECK(cublasGemmEx(
       handle,
       opa,
@@ -558,6 +563,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       ldc,
       CUDA_R_32F,
       CUBLAS_GEMM_DFALT_TENSOR_OP));
+  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
 #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 
@@ -741,7 +747,7 @@ void gemm_and_bias(
     TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
   }
 
-  TORCH_CUDABLAS_CHECK(cublasLtMatmul(
+  cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
       &alpha_val,
@@ -757,7 +763,33 @@ void gemm_and_bias(
       &heuristicResult.algo,
       workspace.data_ptr(),
       workspaceSize,
-      at::cuda::getCurrentCUDAStream()));
+      at::cuda::getCurrentCUDAStream());
+  TORCH_CHECK(
+      cublasStatus == CUBLAS_STATUS_SUCCESS,
+      "CUDA error: ",
+      at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
+      " when calling cublasLtMatmul with transpose_mat1 ",
+      transpose_mat1,
+      " transpose_mat2 ",
+      transpose_mat2,
+      " m ",
+      m,
+      " n ",
+      n,
+      " k ",
+      k,
+      " mat1_ld ",
+      mat1_ld,
+      " mat2_ld ",
+      mat2_ld,
+      " result_ld ",
+      result_ld,
+      " abcType ",
+      abcType,
+      " computeType ",
+      computeType,
+      " scaleType ",
+      scaleType);
 }
 
 template void gemm_and_bias(

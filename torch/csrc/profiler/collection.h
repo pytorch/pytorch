@@ -30,6 +30,7 @@ namespace impl {
 enum class EventType : uint8_t {
   TorchOp = 0,
   Backend,
+  Vulkan,
   Allocation,
   OutOfMemory,
   PyCall,
@@ -165,6 +166,16 @@ struct ExtraFields<EventType::Backend> {
   jit_modules_t jit_modules_;
 };
 
+template <>
+struct ExtraFields<EventType::Vulkan> {
+  using raw_event_t = std::pair<approx_time_t, vulkan_id_t>;
+  std::string name_;
+  int64_t duration_ns_{0};
+  // While building the event tree, we want to report a vulkan event's duration
+  // as 0 so that its end time doesn't exceed that of its parent cpu op
+  bool in_tree_building_{false};
+};
+
 struct RawAllocation {
   torch::profiler::impl::approx_time_t start_time_;
   void* ptr_;
@@ -176,9 +187,7 @@ struct RawAllocation {
 };
 
 // For performance.
-static_assert(
-    std::is_pod<RawAllocation>::value,
-    "Non-POD member of RawAllocation.");
+static_assert(c10::is_pod_v<RawAllocation>, "Non-POD member of RawAllocation.");
 
 template <>
 struct ExtraFields<EventType::Allocation> : RawAllocation {
@@ -204,7 +213,7 @@ struct ExtraFields<EventType::OutOfMemory> {
 
 // For performance.
 static_assert(
-    std::is_pod<ExtraFields<EventType::OutOfMemory>>::value,
+    c10::is_pod_v<ExtraFields<EventType::OutOfMemory>>,
     "Non-POD member of ExtraFields<EventType::OutOfMemory>.");
 
 struct PyFrameState {
@@ -367,6 +376,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   c10::variant<
       ExtraFields<EventType::TorchOp>,
       ExtraFields<EventType::Backend>,
+      ExtraFields<EventType::Vulkan>,
       ExtraFields<EventType::Allocation>,
       ExtraFields<EventType::OutOfMemory>,
       ExtraFields<EventType::PyCall>,
@@ -464,6 +474,11 @@ class TORCH_API ThreadLocalSubqueue {
   }
 
   template <class... Args>
+  void emplace_vulkan_event(Args&&... args) {
+    vulkan_events_.emplace_back(std::forward<Args>(args)...);
+  }
+
+  template <class... Args>
   void emplace_allocation_event(Args&&... args) {
     allocations_.emplace_back(std::forward<Args>(args)...);
   }
@@ -544,6 +559,10 @@ class TORCH_API ThreadLocalSubqueue {
 
   // reportBackendEventToActiveKinetoProfiler
   AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
+
+  // _reportVulkanEventToProfiler
+  AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>
+      vulkan_events_;
 
   // reportMemoryUsage
   AppendOnlyList<RawAllocation, BlockSize> allocations_;

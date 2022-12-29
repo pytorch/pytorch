@@ -101,7 +101,7 @@ def reshuffle_local_shard(
     the new shard directly based on the resharding spec.
 
     Args:
-        local_tensor (Tensor): Local tensor stored in the current rank.
+        local_shard (Tensor): Local tensor stored in the current rank.
         st_size (torch.Size): The size of the sharded tensor.
         sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The
             specification describing how the tensor is sharded originally.
