@@ -5,6 +5,7 @@ from torch.utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import TorchDispatchMode
 from collections import defaultdict
 import weakref
+import abc
 
 __all__ = [
     "saved_tensors_hooks",
@@ -12,7 +13,39 @@ __all__ = [
     "disable_saved_tensors_hooks",
     "register_multi_grad_hook",
     "allow_mutation_on_saved_tensors",
+    "Node",
 ]
+
+class Node(abc.ABC):
+    @abc.abstractmethod
+    def name(self) -> str:
+        r"""Returns the name of the Node."""
+        ...
+
+    @property
+    @abc.abstractmethod
+    def next_functions(self) -> Tuple[Tuple[Any, int], ...]: ...
+
+    @abc.abstractmethod
+    def metadata(self) -> dict:
+        r"""Returns the metadata of the Node."""
+        ...
+
+    @abc.abstractmethod
+    def register_hook(self, fn: Callable[..., Any]) -> torch.utils.hooks.RemovableHandle:
+        r"""Register a hook to the Node"""
+        ...
+
+    @abc.abstractmethod
+    def register_prehook(self, fn: Callable[..., Any]) -> torch.utils.hooks.RemovableHandle:
+        r"""Register a hook to the Node"""
+        ...
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if C is not None and C is getattr(torch._C._functions, C.__name__, None):
+            return True
+        return NotImplemented
 
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.

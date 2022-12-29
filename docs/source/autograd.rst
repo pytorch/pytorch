@@ -259,8 +259,24 @@ Anomaly detection
 .. autoclass:: set_detect_anomaly
 
 
-Saved tensors default hooks
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Autograd graph
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Autograd exposes methods to allow one to inspect the graph and interpose behavior during
+the backward pass.
+
+Calling the ``.grad_fn()`` method on a Tensor that is the output of a operation returns an
+autograd Node if the graph was being recorded, i.e. grad_mode is enabled and at least one
+of the inputs required gradients.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    torch.autograd.graph.Node.name
+    torch.autograd.graph.Node.metadata
+    torch.autograd.graph.Node.next_functions
+    torch.autograd.graph.Node.register_hook
+    torch.autograd.graph.Node.register_prehook
 
 Some operations need intermediary results to be saved during the forward pass
 in order to execute the backward pass.
