@@ -933,7 +933,7 @@ class PostProcess {
   template <EventType E>
   struct State {
     ska::flat_hash_map<TraceKey, ExtraFields<E>> fields_;
-    std::priority_queue<Exit, std::vector<Exit>, std::greater<Exit>> exits_;
+    std::priority_queue<Exit, std::vector<Exit>, std::greater<>> exits_;
   };
 
   template <EventType E>

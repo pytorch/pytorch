@@ -384,8 +384,8 @@ inline Tensor wrap_tensor_node(
     long sizes_offset = 0;
     for (size_t i = 0; i < tensor_node.degree(); ++i) {
       auto tensor_sizes = tensor_node.children(i).sizes();
-      for (size_t j = 0; j < tensor_sizes.size(); ++j) {
-        nt_sizes.data_ptr<int64_t>()[sizes_offset++] = tensor_sizes[j];
+      for (int64_t tensor_size : tensor_sizes) {
+        nt_sizes.data_ptr<int64_t>()[sizes_offset++] = tensor_size;
       }
     }
     options = nt_buffer.options().merge_in(options_);
