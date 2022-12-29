@@ -17,7 +17,11 @@ using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 
 // RAII guard for "cudaStreamCaptureMode", a thread-local value
 // that controls the error-checking strictness of a capture.
-#if !defined(TORCH_HIP_VERSION)
+
+// TODO: ideally we'd replace this with something like !defined(TORCH_HIP_VERSION)
+// as CUDA <= 10 support was dropped and really this is only a workaround for
+// TORCH_HIP_VERSION not being a sufficient guard to prevent ROCM build breakage.
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 struct C10_CUDA_API CUDAStreamCaptureModeGuard {
   CUDAStreamCaptureModeGuard(cudaStreamCaptureMode desired) {
     strictness_ = desired;
@@ -32,7 +36,7 @@ struct C10_CUDA_API CUDAStreamCaptureModeGuard {
 };
 #endif
 
-#if !defined(TORCH_HIP_VERSION)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 // Protects against enum cudaStreamCaptureStatus implementation changes.
 // Some compilers seem not to like static_assert without the messages.
 static_assert(
@@ -47,7 +51,7 @@ static_assert(
 #endif
 
 enum class CaptureStatus : int {
-#if !defined(TORCH_HIP_VERSION)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   None = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone),
   Active = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive),
   Invalidated = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated)
@@ -61,7 +65,7 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
     case CaptureStatus::None:
       os << "cudaStreamCaptureStatusNone";
       break;
-#if !defined(TORCH_HIP_VERSION)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     case CaptureStatus::Active:
       os << "cudaStreamCaptureStatusActive";
       break;
@@ -78,7 +82,7 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
 
 // Use this version where you're sure a CUDA context exists already.
 inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
-#if !defined(TORCH_HIP_VERSION)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   cudaStreamCaptureStatus is_capturing;
   C10_CUDA_CHECK(
       cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(), &is_capturing));

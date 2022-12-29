@@ -371,12 +371,15 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-#if !defined(TORCH_HIP_VERSION)
+// TODO: ideally we'd replace this with something like !defined(TORCH_HIP_VERSION)
+// as CUDA <= 10 support was dropped and really this is only a workaround for
+// TORCH_HIP_VERSION not being a sufficient guard to prevent ROCM build breakage.
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
 #endif
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-#if !defined(TORCH_HIP_VERSION)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
@@ -1488,7 +1491,7 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-#if !defined(TORCH_HIP_VERSION)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     // captures_underway is a conservative guess that the current stream may be
     // capturing. It's only > 0 if some thread has begun and not yet ended a
     // capture, so it's usually 0, and we can short-circuit
