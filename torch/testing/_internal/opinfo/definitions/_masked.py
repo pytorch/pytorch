@@ -31,7 +31,13 @@ from torch.testing._internal.opinfo.utils import prod_numpy, reference_reduction
 
 # Used for log_softmax, softmax, softmin
 def sample_inputs_softmax_variant(
-    op_info, device, dtype, requires_grad, with_dtype=False, use_zero_dimensions=True, **kwargs
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    with_dtype=False,
+    use_zero_dimensions=True,
+    **kwargs,
 ):
     make_arg = partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
