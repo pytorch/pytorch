@@ -460,7 +460,6 @@ class TestDataLoaderUtils(TestCase):
             dataloader = torch.utils.data.DataLoader(RandomDatasetMock(),
                                                      batch_size=2,
                                                      num_workers=4,
-                                                     multiprocessing_context=torch.multiprocessing.get_context("spawn"),
                                                      shuffle=True)
             return next(iter(dataloader))
 
