@@ -27,7 +27,7 @@ def get_default_value(initial_value, reduction):
     if reduction == "amax":
         return -float("Inf")
     elif reduction == "mean":
-        return float("nan")
+        return 0.0
     elif reduction == "amin":
         return float("Inf")
     elif reduction == "sum":
@@ -319,7 +319,7 @@ class TestSegmentReductions(TestCase):
                 'indptr': [0, 2, 5, 5, 6],
                 'sum': [3, 12, 0, 6],
                 'prod': [2, 60, 1, 6],
-                'mean': [1.5, 4, float('nan'), 6],
+                'mean': [1.5, 4, 0, 6],
                 'amin': [1, 3, float('inf'), 6],
                 'amax': [2, 5, -float('inf'), 6],
             },
@@ -329,7 +329,7 @@ class TestSegmentReductions(TestCase):
                 'indptr': [0, 2, 5, 5, 6],
                 'sum': [[4, 6], [21, 24], [0, 0], [11, 12]],
                 'prod': [[3, 8], [315, 480], [1, 1], [11, 12]],
-                'mean': [[2, 3], [7, 8], [float('nan'), float('nan')], [11, 12]],
+                'mean': [[2, 3], [7, 8], [0, 0], [11, 12]],
                 'amin': [[1, 2], [5, 6], [float('inf'), float('inf')], [11, 12]],
                 'amax': [[3, 4], [9, 10], [-float('inf'), -float('inf')], [11, 12]],
             },
@@ -339,7 +339,7 @@ class TestSegmentReductions(TestCase):
                 'indptr': [[0, 2, 5, 5, 6], [0, 3, 5, 6, 6]],
                 'sum': [[4, 21, 0, 11], [12, 18, 12, 0]],
                 'prod': [[3, 315, 1, 11], [48, 80, 12, 1]],
-                'mean': [[2, 7, float('nan'), 11], [4, 9, 12, float('nan')]],
+                'mean': [[2, 7, 0, 11], [4, 9, 12, 0]],
                 'amin': [[1, 5, float('inf'), 11], [2, 8, 12, float('inf')]],
                 'amax': [[3, 9, -float('inf'), 11], [6, 10, 12, -float('inf')]],
             },
@@ -349,8 +349,8 @@ class TestSegmentReductions(TestCase):
                 'indptr': [[0, 2, 3, 3], [0, 1, 1, 3]],
                 'sum': [[[4, 6], [5, 6], [0, 0]], [[7, 9], [0, 0], [22, 24]]],
                 'prod': [[[3, 8], [5, 6], [1, 1]], [[7, 9], [1, 1], [120, 143]]],
-                'mean': [[[2, 3], [5, 6], [float('nan'), float('nan')]],
-                         [[7, 9], [float('nan'), float('nan')], [11, 12]]],
+                'mean': [[[2, 3], [5, 6], [0, 0]],
+                         [[7, 9], [0, 0], [11, 12]]],
                 'amin': [[[1, 2], [5, 6], [float('inf'), float('inf')]],
                         [[7, 9], [float('inf'), float('inf')], [10, 11]]],
                 'amax': [[[3, 4], [5, 6], [-float('inf'), -float('inf')]],
