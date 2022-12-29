@@ -14,12 +14,12 @@ struct FunctionalityOffsetAndMask {
   FunctionalityOffsetAndMask(uint16_t offset, uint16_t mask)
       : offset(offset), mask(mask) {}
   // This needs to big enough to cover the size of the operator table.
-  uint16_t offset;
+  uint16_t offset{};
   // See Note [No More Than 16 Backends]
   // This mask needs to be big enough to mask all of the backend bits.
   // We probably don't ever want to have more than 16 backend bits, so uint16_t
   // should be enough.
-  uint16_t mask;
+  uint16_t mask{};
 };
 static_assert(
     c10::num_runtime_entries < 65536,
