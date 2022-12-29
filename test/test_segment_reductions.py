@@ -352,9 +352,9 @@ class TestSegmentReductions(TestCase):
                 'mean': [[[2, 3], [5, 6], [0, 0]],
                          [[7, 9], [0, 0], [11, 12]]],
                 'amin': [[[1, 2], [5, 6], [float('inf'), float('inf')]],
-                        [[7, 9], [float('inf'), float('inf')], [10, 11]]],
+                         [[7, 9], [float('inf'), float('inf')], [10, 11]]],
                 'amax': [[[3, 4], [5, 6], [-float('inf'), -float('inf')]],
-                        [[7, 9], [-float('inf'), -float('inf')], [12, 13]]],
+                         [[7, 9], [-float('inf'), -float('inf')], [12, 13]]],
             },
             {
                 'src': [[1, 3], [2, 4]],
