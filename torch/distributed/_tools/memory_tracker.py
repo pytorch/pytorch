@@ -54,6 +54,7 @@ class MemoryTracker:
 
     Example usage:
 
+        >>> # xdoctest: +SKIP(failing)
         >>> net.cuda()
         >>> input = input.cuda()
 

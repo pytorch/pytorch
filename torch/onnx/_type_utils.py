@@ -63,6 +63,8 @@ class JitScalarType(enum.IntEnum):
     Use ``JitScalarType`` to convert from torch and JIT scalar types to ONNX scalar types.
 
     Examples:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
+        >>> # xdoctest: +IGNORE_WANT("win32 has different output")
         >>> JitScalarType.from_value(torch.ones(1, 2)).onnx_type()
         TensorProtoDataType.FLOAT
 

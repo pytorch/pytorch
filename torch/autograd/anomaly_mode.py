@@ -5,6 +5,7 @@ from typing import Any
 
 __all__ = ["detect_anomaly", "set_detect_anomaly"]
 
+
 class detect_anomaly(object):
     r"""Context-manager that enable anomaly detection for the autograd engine.
 
@@ -22,6 +23,7 @@ class detect_anomaly(object):
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ANOMOLY)
         >>> import torch
         >>> from torch import autograd
         >>> class MyFunc(autograd.Function):

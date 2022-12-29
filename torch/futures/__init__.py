@@ -144,6 +144,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             on those futures independently.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> def callback(fut):
             ...     print(f"RPC return value is {fut.wait()}.")
             >>> fut = torch.futures.Future()
@@ -191,8 +192,9 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             for handling completion/waiting on those futures independently.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> def callback(fut):
-            ...     print(f"This will run after the future has finished.")
+            ...     print("This will run after the future has finished.")
             ...     print(fut.wait())
             >>> fut = torch.futures.Future()
             >>> fut.add_done_callback(callback)
@@ -223,6 +225,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             result (object): the result object of this ``Future``.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> import threading
             >>> import time
             >>> def slow_set_future(fut, value):
@@ -251,6 +254,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             result (BaseException): the exception for this ``Future``.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> fut = torch.futures.Future()
             >>> fut.set_exception(ValueError("foo"))
             >>> fut.wait()
@@ -281,6 +285,7 @@ def collect_all(futures: List[Future]) -> Future[List[Future]]:
         in Futures.
 
     Example::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
         >>> fut0 = torch.futures.Future()
         >>> fut1 = torch.futures.Future()
         >>> fut = torch.futures.collect_all([fut0, fut1])

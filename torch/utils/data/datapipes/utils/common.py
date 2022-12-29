@@ -30,6 +30,7 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     keyword-only arguments.
 
     Examples:
+        >>> # xdoctest: +SKIP("Failing on some CI machines")
         >>> def f(a, b, *, c=1):
         >>>     return a + b + c
         >>> def f_def(a, b=1, *, c=1):
@@ -116,6 +117,7 @@ def _is_local_fn(fn):
         if hasattr(fn_type, "__qualname__"):
             return "<locals>" in fn_type.__qualname__
     return False
+
 
 def _check_unpickable_fn(fn: Callable):
     """

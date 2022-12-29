@@ -9,6 +9,7 @@ from .expanded_weights_utils import \
 
 THRESHOLD = 32
 
+
 def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
     if func == F.conv1d:
         return conv1dOpt
@@ -18,12 +19,14 @@ def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
         assert func == F.conv3d
         return conv3dOpt
 
+
 def conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs):
     args = expanded_args_and_kwargs[:len(expanded_args_and_kwargs) - len(kwarg_names)]
     kwargs = expanded_args_and_kwargs[len(expanded_args_and_kwargs) - len(kwarg_names):]
     kwargs = {name: arg for (name, arg) in zip(kwarg_names, kwargs)}
 
     return conv_normalizer(*args, **kwargs)
+
 
 def conv_normalizer(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
     return (input, weight), {'bias': bias, 'stride': stride, 'padding': padding, 'dilation': dilation, 'groups': groups}
@@ -124,6 +127,7 @@ def conv_backward(func, ctx, grad_output):
     set_grad_sample_if_exists(ctx.bias, lambda _: grad_output.reshape(*grad_output.shape[:2], -1).sum(dim=2))
     return tuple(results)
 
+
 def conv_unfold_weight_grad_sample(input, grad_output, weight_shape, kernel_size, stride, padding, dilation, groups, func):
     n = input.shape[0]
     in_channels = input.shape[1]
@@ -157,6 +161,7 @@ def conv_unfold_weight_grad_sample(input, grad_output, weight_shape, kernel_size
     shape = [n] + list(weight_shape)
     weight_grad_sample = weight_grad_sample.view(shape)
     return weight_grad_sample
+
 
 def conv_group_weight_grad_sample(input, grad_output, weight_shape, stride, padding, dilation, batch_size, func):
     I = input.shape[1]
@@ -195,9 +200,9 @@ def unfold3d(
         A tensor of shape ``(B, C * np.product(kernel_size), L)``, where L - output spatial dimensions.
         See :class:`torch.nn.Unfold` for more details
     Example:
-        >>> B, C, D, H, W = 3, 4, 5, 6, 7
-        >>> tensor = torch.arange(1, B*C*D*H*W + 1.).view(B, C, D, H, W)
         >>> # xdoctest: +SKIP
+        >>> B, C, D, H, W = 3, 4, 5, 6, 7
+        >>> tensor = torch.arange(1, B * C * D * H * W + 1.).view(B, C, D, H, W)
         >>> unfold3d(tensor, kernel_size=2, padding=0, stride=1).shape
         torch.Size([3, 32, 120])
     """

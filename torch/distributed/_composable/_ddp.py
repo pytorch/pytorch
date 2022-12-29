@@ -825,6 +825,7 @@ class DistributedDataParallel(Module):
         Example::
             Below is an example of a noop hook that returns the same tensor.
 
+            >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
             >>> def noop(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
             >>>     fut = torch.futures.Future()
             >>>     fut.set_result(bucket.buffer())
@@ -837,6 +838,7 @@ class DistributedDataParallel(Module):
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
             allreduce, and then decoded after allreduce.
 
+            >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
             >>> def encode_and_decode(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
             >>>     encoded_tensor = encode(bucket.buffer()) # encode gradients
             >>>     fut = torch.distributed.all_reduce(encoded_tensor).get_future()

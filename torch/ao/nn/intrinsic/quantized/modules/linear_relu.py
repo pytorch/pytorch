@@ -56,6 +56,7 @@ class LinearLeakyReLU(nnq.Linear):
         Same as torch.nn.quantized.Linear
         + negative_slope
     Examples::
+        >>> # xdoctest: +SKIP
         >>> m = nn.intrinsic.LinearLeakyReLU(20, 30, 0.01)
         >>> input = torch.randn(128, 20)
         >>> output = m(input)

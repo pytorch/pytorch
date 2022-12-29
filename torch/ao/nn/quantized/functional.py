@@ -164,6 +164,7 @@ def conv1d(input, weight, bias,
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(33, 16, 3, dtype=torch.float)
         >>> inputs = torch.randn(20, 16, 50, dtype=torch.float)
@@ -223,6 +224,7 @@ def conv2d(input, weight, bias,
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, dtype=torch.float)
@@ -283,6 +285,7 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, 5, dtype=torch.float)

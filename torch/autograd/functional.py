@@ -7,6 +7,7 @@ __all__ = ["vjp", "jvp", "jacobian", "hessian", "hvp", "vhp"]
 
 # Utility functions
 
+
 def _as_tuple_nocheck(x):
     if isinstance(x, tuple):
         return x
@@ -14,6 +15,7 @@ def _as_tuple_nocheck(x):
         return tuple(x)
     else:
         return x,
+
 
 def _as_tuple(inp, arg_name=None, fn_name=None):
     # Ensures that inp is a tuple of Tensors
@@ -37,6 +39,7 @@ def _as_tuple(inp, arg_name=None, fn_name=None):
 
     return is_inp_tuple, inp
 
+
 def _tuple_postprocess(res, to_unpack):
     # Unpacks a potentially nested tuple of Tensors
     # to_unpack should be a single boolean or a tuple of two booleans.
@@ -53,6 +56,7 @@ def _tuple_postprocess(res, to_unpack):
         if not to_unpack:
             res = res[0]
     return res
+
 
 def _grad_preprocess(inputs, create_graph, need_graph):
     # Preprocess the inputs to make sure they require gradient
@@ -87,6 +91,7 @@ def _grad_postprocess(inputs, create_graph):
             return inputs
     else:
         return tuple(_grad_postprocess(inp, create_graph) for inp in inputs)
+
 
 def _validate_v(v, other, is_other_tuple):
     # This assumes that other is the correct shape, and v should match
@@ -138,6 +143,7 @@ def _check_requires_grad(inputs, input_type, strict):
                                    " The outputs must be computed in a differentiable manner from the input"
                                    " when running in strict mode.".format(i))
 
+
 def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retain_graph=None, is_grads_batched=False):
     # Version of autograd.grad that accepts `None` in outputs and do not compute gradients for them.
     # This has the extra constraint that inputs has to be a tuple
@@ -161,6 +167,7 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retai
         return torch.autograd.grad(new_outputs, inputs, new_grad_outputs, allow_unused=True,
                                    create_graph=create_graph, retain_graph=retain_graph,
                                    is_grads_batched=is_grads_batched)
+
 
 def _fill_in_zeros(grads, refs, strict, create_graph, stage):
     # Used to detect None in the grads and depending on the flags, either replace them
@@ -204,6 +211,7 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
 
     return res
 
+
 # Public API
 
 def vjp(func, inputs, v=None, create_graph=False, strict=False):
@@ -238,8 +246,9 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def exp_reducer(x):
-        ...   return x.exp().sum(dim=1)
+        ...     return x.exp().sum(dim=1)
         >>> inputs = torch.rand(4, 4)
         >>> v = torch.ones(4)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
@@ -258,7 +267,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
                 [1.3225, 1.6652, 1.7753, 2.0152]], grad_fn=<MulBackward0>))
 
         >>> def adder(x, y):
-        ...   return 2 * x + 3 * y
+        ...     return 2 * x + 3 * y
         >>> inputs = (torch.rand(2), torch.rand(2))
         >>> v = torch.ones(2)
         >>> vjp(adder, inputs, v)
@@ -335,8 +344,9 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def exp_reducer(x):
-        ...   return x.exp().sum(dim=1)
+        ...     return x.exp().sum(dim=1)
         >>> inputs = torch.rand(4, 4)
         >>> v = torch.ones(4, 4)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
@@ -349,7 +359,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
          tensor([6.3090, 4.6742, 7.9114, 8.2106], grad_fn=<SqueezeBackward1>))
 
         >>> def adder(x, y):
-        ...   return 2 * x + 3 * y
+        ...     return 2 * x + 3 * y
         >>> inputs = (torch.rand(2), torch.rand(2))
         >>> v = (torch.ones(2), torch.ones(2))
         >>> jvp(adder, inputs, v)
@@ -536,8 +546,9 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def exp_reducer(x):
-        ...   return x.exp().sum(dim=1)
+        ...     return x.exp().sum(dim=1)
         >>> inputs = torch.rand(2, 2)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> jacobian(exp_reducer, inputs)
@@ -553,7 +564,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
                  [2.4369, 2.3799]]], grad_fn=<ViewBackward>)
 
         >>> def exp_adder(x, y):
-        ...   return 2 * x.exp() + 3 * y
+        ...     return 2 * x.exp() + 3 * y
         >>> inputs = (torch.rand(2), torch.rand(2))
         >>> jacobian(exp_adder, inputs)
         (tensor([[2.8052, 0.0000],
@@ -698,6 +709,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
 
         return _tuple_postprocess(jacobian, (is_outputs_tuple, is_inputs_tuple))
 
+
 def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, outer_jacobian_strategy="reverse-mode"):
     r"""Function that computes the Hessian of a given scalar function.
 
@@ -746,8 +758,9 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, out
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def pow_reducer(x):
-        ...   return x.pow(3).sum()
+        ...     return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> hessian(pow_reducer, inputs)
@@ -772,7 +785,7 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, out
 
 
         >>> def pow_adder_reducer(x, y):
-        ...   return (2 * x.pow(2) + 3 * y.pow(2)).sum()
+        ...     return (2 * x.pow(2) + 3 * y.pow(2)).sum()
         >>> inputs = (torch.rand(2), torch.rand(2))
         >>> hessian(pow_adder_reducer, inputs)
         ((tensor([[4., 0.],
@@ -849,8 +862,9 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def pow_reducer(x):
-        ...   return x.pow(3).sum()
+        ...     return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
         >>> v = torch.ones(2, 2)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
@@ -863,7 +877,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
          tensor([[1.0689, 1.2431],
                  [3.0989, 4.4456]], grad_fn=<MulBackward0>))
         >>> def pow_adder_reducer(x, y):
-        ...   return (2 * x.pow(2) + 3 * y.pow(2)).sum()
+        ...     return (2 * x.pow(2) + 3 * y.pow(2)).sum()
         >>> inputs = (torch.rand(2), torch.rand(2))
         >>> v = (torch.zeros(2), torch.ones(2))
         >>> vhp(pow_adder_reducer, inputs, v)
@@ -939,8 +953,9 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
 
     Example:
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def pow_reducer(x):
-        ...   return x.pow(3).sum()
+        ...     return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
         >>> v = torch.ones(2, 2)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
@@ -956,7 +971,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
 
 
         >>> def pow_adder_reducer(x, y):
-        ...   return (2 * x.pow(2) + 3 * y.pow(2)).sum()
+        ...     return (2 * x.pow(2) + 3 * y.pow(2)).sum()
         >>> inputs = (torch.rand(2), torch.rand(2))
         >>> v = (torch.zeros(2), torch.ones(2))
         >>> hvp(pow_adder_reducer, inputs, v)

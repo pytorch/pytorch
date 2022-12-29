@@ -6,6 +6,7 @@ import re
 
 __all__ : List[str] = []
 
+
 class _CodeParser:
     def __init__(self, code_string: str):
         optional_ws = r"\s*"
@@ -36,6 +37,7 @@ class _CodeParser:
         self.function_name = result["function_name"]
         self.function_params = result["function_params"]
         self.function_body = result["function_body"]
+
 
 class _JittedFunction:
     def __init__(self, code_string: str, return_by_ref: bool, num_outputs: int, **kwargs):
@@ -134,6 +136,7 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     """
 
     return _JittedFunction(code_string, return_by_ref=False, num_outputs=1, **kwargs)
+
 
 def _create_multi_output_jit_fn(code_string: str, num_outputs: int, **kwargs) -> Callable:
     """
