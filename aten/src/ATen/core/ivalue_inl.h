@@ -1710,8 +1710,8 @@ template <typename T>
 static T createVectorLikeFromList(const c10::detail::ListImpl* impl) {
   T result;
   result.reserve(impl->list.size());
-  for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
-    result.push_back(impl->list[i].to<typename T::value_type>());
+  for (const auto & i : impl->list) {
+    result.push_back(i.to<typename T::value_type>());
   }
   return result;
 }
