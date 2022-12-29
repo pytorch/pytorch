@@ -1300,7 +1300,7 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
   check_1d(self, "self", "outer");
   check_1d(vec2, "vec2", "outer");
 
-  return self.reshape({self.size(0), 1}) * vec2;
+  return self.reshape_symint({self.sym_size(0), 1}) * vec2;
 }
 
 static void addmm_impl_cpu_(
@@ -2773,10 +2773,6 @@ Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayR
 //                              Frobenius Norm                                //
 //             Just used in torch..norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
-
-Tensor frobenius_norm(const Tensor& self) {
-  return at::norm(self);
-}
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(
