@@ -152,20 +152,9 @@ def _unwrap_batched(
             f'out_dims has structure {tree_flatten(out_dims)[1]} but outputs '
             f'has structure {output_spec}.')
 
-    if isinstance(batched_outputs, torch.Tensor):
-        # Some weird edge case requires us to spell out the following
-        # see test_out_dims_edge_case
-        if isinstance(out_dims, int):
-            flat_out_dims = [out_dims]
-        elif isinstance(out_dims, tuple) and len(out_dims) == 1:
-            flat_out_dims = out_dims
-            out_dims = out_dims[0]
-        else:
-            incompatible_error()
-    else:
-        flat_out_dims = _broadcast_to_and_flatten(out_dims, output_spec)
-        if flat_out_dims is None:
-            incompatible_error()
+    flat_out_dims = _broadcast_to_and_flatten(out_dims, output_spec)
+    if flat_out_dims is None:
+        incompatible_error()
 
     flat_outputs = [
         _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)

@@ -210,6 +210,8 @@ class TestPytree(TestCase):
     def test_broadcast_to_and_flatten(self):
         cases = [
             (1, (), []),
+            (1, 1, [1]),
+            (None, [1], [None]),
 
             # Same (flat) structures
             ((1,), (0,), [1]),
