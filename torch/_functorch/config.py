@@ -12,8 +12,7 @@ import logging
 
 use_functionalize = True
 
-# TODO Benchmark
-use_fake_tensor = False
+use_fake_tensor = True
 
 # Enables optional asserts in hotpath code to check for errors.  If
 # you are seeing weird accuracy problems, try turning this on.

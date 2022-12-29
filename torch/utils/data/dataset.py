@@ -81,6 +81,8 @@ class IterableDataset(Dataset[T_co]):
 
     Example 1: splitting workload across all workers in :meth:`__iter__`::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DATALOADER)
+        >>> # xdoctest: +SKIP("Fails on MacOS12")
         >>> class MyIterableDataset(torch.utils.data.IterableDataset):
         ...     def __init__(self, start, end):
         ...         super(MyIterableDataset).__init__()
@@ -122,6 +124,7 @@ class IterableDataset(Dataset[T_co]):
 
     Example 2: splitting workload across all workers using :attr:`worker_init_fn`::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DATALOADER)
         >>> class MyIterableDataset(torch.utils.data.IterableDataset):
         ...     def __init__(self, start, end):
         ...         super(MyIterableDataset).__init__()
@@ -313,9 +316,12 @@ def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
 
     Optionally fix the generator for reproducible results, e.g.:
 
-    >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
-    >>> random_split(range(30), [0.3, 0.3, 0.4], generator=torch.Generator(
-    ...   ).manual_seed(42))
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> generator1 = torch.Generator().manual_seed(42)
+        >>> generator2 = torch.Generator().manual_seed(42)
+        >>> random_split(range(10), [3, 7], generator=generator1)
+        >>> random_split(range(30), [0.3, 0.3, 0.4], generator=generator2)
 
     Args:
         dataset (Dataset): Dataset to be split

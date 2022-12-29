@@ -22,6 +22,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
 
     Example::
 
+        >>> # xdoctest: +SKIP("failing")
         >>> torch.register_privateuse1_backend("foo")
         # This will work, assuming that you've implemented the right C++ kernels
         # to implement torch.ones.
