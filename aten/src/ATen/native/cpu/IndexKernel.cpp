@@ -457,6 +457,118 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
     });
 }
 
+template <typename scalar_t>
+void cpu_hflip_vec(at::TensorIterator& iter) {
+
+  auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
+
+    // Here ntensors is defined for output and 1 input. But tensor iterator has defined output, input
+    // and restrided_input (see aten/src/ATen/native/TensorTransformations.cpp#L64-L66) but we use only
+    // output and input.
+    static constexpr int ntensors = 2;
+    const int64_t *outer_strides = &strides[3];
+
+    std::array<char*, ntensors> data_arr;
+    std::copy_n(base, ntensors, data_arr.data());
+
+    using Vec = Vectorized<scalar_t>;
+
+    constexpr auto stride = sizeof(scalar_t);
+    TORCH_INTERNAL_ASSERT(stride == -strides[0] && stride == strides[1]);
+
+    for (const auto j C10_UNUSED : c10::irange(size1)) {
+
+      // vectorized loop with negative stride for output
+      char** C10_RESTRICT data_ = data_arr.data();
+      int64_t n = size0;
+
+      char* C10_RESTRICT data[ntensors];
+      for (const auto arg : c10::irange(ntensors)) {
+        data[arg] = data_[arg];
+      }
+
+      int64_t i = 0;
+
+      // data[0] unaligned pre-pass
+      int64_t offset = (j * n + (n - i - Vec::size())) % 32;
+      offset = (offset >= n) ? n : offset;
+      for (; i < offset; i++) {
+        scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
+        *out_ptr = *(scalar_t *)(data[1] + i * stride);
+      }
+      // Empirically found that it is faster to process 3 data items together vs 2 or 4
+      for (; i <= n - 3 * Vec::size(); i += 3 * Vec::size()) {
+        auto out1 = Vec::loadu(data[1] + i * stride);
+        auto out2 = Vec::loadu(data[1] + (i + Vec::size()) * stride);
+        auto out3 = Vec::loadu(data[1] + (i + 2 * Vec::size()) * stride);
+        // flip the vector: 1234 -> 4321
+        out1 = flip(out1);
+        out2 = flip(out2);
+        out3 = flip(out3);
+        out1.store(data[0] - (i + Vec::size() - 1) * stride);
+        out2.store(data[0] - (i + 2 * Vec::size() - 1) * stride);
+        out3.store(data[0] - (i + 3 * Vec::size() - 1) * stride);
+      }
+      if (i < n) {
+        for (; i < n; i++) {
+          scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
+          *out_ptr = *(scalar_t *)(data[1] + i * stride);
+        }
+      }
+
+      // advance:
+      for (const auto arg : c10::irange(ntensors)) {
+        data_arr[arg] += outer_strides[arg];
+      }
+    }
+  };
+
+  int64_t grain_size = at::internal::GRAIN_SIZE;
+  iter.for_each(loop2d, grain_size);
+  iter.cast_outputs();
+}
+
+void cpu_vflip_memcpy(at::TensorIterator& iter) {
+  // This is a vertical flip specialization using memcpy to speed-up the runtime
+
+  auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
+
+    // Here ntensors is defined for output and 1 input. But tensor iterator has defined output, input
+    // and restrided_input (see aten/src/ATen/native/TensorTransformations.cpp#L64-L66) but we use only
+    // output and input.
+    static constexpr int ntensors = 2;
+    const int64_t *outer_strides = &strides[3];
+
+    std::array<char*, ntensors> data_arr;
+    std::copy_n(base, ntensors, data_arr.data());
+
+    TORCH_INTERNAL_ASSERT(strides[0] == strides[1]);
+    const int64_t stride = strides[0];
+
+    for (const auto j C10_UNUSED : c10::irange(size1)) {
+
+      char** C10_RESTRICT data_ = data_arr.data();
+      int64_t n = size0;
+
+      char* C10_RESTRICT data[ntensors];
+      for (const auto arg : c10::irange(ntensors)) {
+        data[arg] = data_[arg];
+      }
+
+      memcpy(data[0], data[1], n * stride);
+
+      // advance:
+      for (const auto arg : c10::irange(data_arr.size())) {
+        data_arr[arg] += outer_strides[arg];
+      }
+    }
+  };
+
+  int64_t grain_size = at::internal::GRAIN_SIZE;
+  iter.for_each(loop2d, grain_size);
+  iter.cast_outputs();
+}
+
 void flip_kernel(TensorIterator& iter, const bool quantized) {
   if (quantized) {
     AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cpu",
@@ -466,6 +578,27 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         });
     });
   } else {
+    auto output_strides = iter.strides(0);
+    auto input_strides = iter.strides(1);
+    if (iter.ndim() > 0 && output_strides[0] == -iter.element_size(0) && input_strides[0] == iter.element_size(1)) {
+      // Special case: horizontal flip with vectorization and input is contiguous
+      // Context: horizontal flip leads to strides[0] < 0 and
+      // thus is_contiguous condition is not satisfied and non-vectorized code path is taken.
+      auto iter_dtype = iter.dtype();
+      // Ignoring half and bfloat16 as cpu_hflip_vec is slower than cpu_kernel_vec
+      if (isIntegralType(iter_dtype, true) || iter_dtype == kDouble || iter_dtype == kFloat) {
+        AT_DISPATCH_ALL_TYPES_AND(kBool,
+            iter_dtype, "hflip_cpu", [&iter] {
+              cpu_hflip_vec<scalar_t>(iter);
+        });
+        return;
+      }
+      // other dtypes (float16, bfloat16, complex) are handled by cpu_kernel_vec (see below)
+    } else if (iter.has_contiguous_first_dim()) {
+      // Special case: vertical flip using memcpy (faster than generic cpu_kernel_vec)
+      return cpu_vflip_memcpy(iter);
+    }
+
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
         [&iter] { cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {

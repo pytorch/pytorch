@@ -190,6 +190,8 @@ joined.
 
 .. autofunction:: is_nccl_available
 
+.. autofunction:: is_gloo_available
+
 .. autofunction:: is_torchelastic_launched
 
 --------------------------------------------------------------------------------
@@ -331,6 +333,12 @@ an opaque group handle that can be given as a ``group`` argument to all collecti
 
 .. autofunction:: new_group
 
+.. autofunction:: get_group_rank
+
+.. autofunction:: get_global_rank
+
+.. autofunction:: get_process_group_ranks
+
 Point-to-point communication
 ----------------------------
 
@@ -436,6 +444,8 @@ Collective functions
 .. autofunction:: reduce_scatter
 
 .. autofunction:: reduce_scatter_tensor
+
+.. autofunction:: all_to_all_single
 
 .. autofunction:: all_to_all
 
@@ -856,3 +866,4 @@ the `NCCL` backend is used and the user attempts to use a GPU that is not availa
 .. py:module:: torch.distributed.pipeline
 .. py:module:: torch.distributed.pipeline.sync
 .. py:module:: torch.distributed.pipeline.sync.skip
+.. py:module:: torch.distributed.tensor

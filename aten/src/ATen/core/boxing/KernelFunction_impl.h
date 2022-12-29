@@ -64,7 +64,7 @@ inline typename remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
 
 template <>
 inline typename remove_symint<c10::SymIntArrayRef>::type unpackSymInt(c10::SymIntArrayRef x) {
-  return c10::asIntArrayRefSlow(x);
+  return C10_AS_INTARRAYREF_SLOW(x);
 }
 
 template <>
@@ -74,7 +74,7 @@ inline typename remove_symint<c10::optional<c10::SymInt>>::type unpackSymInt(c10
 
 template <>
 inline typename remove_symint<at::OptionalSymIntArrayRef>::type unpackSymInt(at::OptionalSymIntArrayRef x) {
-  return x.has_value() ? c10::make_optional(c10::asIntArrayRefSlow(*x)) : c10::nullopt;
+  return x.has_value() ? c10::make_optional(C10_AS_INTARRAYREF_SLOW(*x)) : c10::nullopt;
 }
 
 template<class Return, class... Args>

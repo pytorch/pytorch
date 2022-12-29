@@ -735,4 +735,4 @@ struct hash<c10::OperatorHandle> {
   }
 };
 
-} // hamespace std
+} // namespace std

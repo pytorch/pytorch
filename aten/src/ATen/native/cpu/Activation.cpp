@@ -623,7 +623,25 @@ void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
+  if (iter.dtype() == kBFloat16) {
+    auto min_val = min.to<float>();
+    auto max_val = max.to<float>();
+    cpu_kernel_vec(
+        iter,
+        [=](BFloat16 grad_val, BFloat16 self_val) -> BFloat16 {
+          return (float(self_val) <= min_val || float(self_val) >= max_val) ? BFloat16(0) : grad_val;
+        },
+        [=](Vectorized<BFloat16> grad_val, Vectorized<BFloat16> self_val) -> Vectorized<BFloat16> {
+          Vectorized<float> grad_val0, grad_val1, self_val0, self_val1;
+          std::tie(grad_val0, grad_val1) = convert_bfloat16_float(grad_val);
+          std::tie(self_val0, self_val1) = convert_bfloat16_float(self_val);
+          return convert_float_bfloat16(
+            ((self_val0 > min_val) & (self_val0 < max_val)) & grad_val0,
+            ((self_val1 > min_val) & (self_val1 < max_val)) & grad_val1
+          );
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
     auto min_val = min.to<scalar_t>();
     auto max_val = max.to<scalar_t>();
     cpu_kernel_vec(
@@ -635,6 +653,7 @@ void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Sca
           return ((self_val > min_val) & (self_val < max_val)) & grad_val;
         });
   });
+  }
 }
 
 void hardswish_kernel(TensorIterator& iter) {
@@ -1035,8 +1054,23 @@ void glu_backward_kernel(TensorIterator& iter) {
 }
 
 void silu_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-      kBFloat16, iter.dtype(), "silu_cpu", [&]() {
+  if (iter.dtype() == kBFloat16) {
+      const Vectorized<float> kOneVec(1.0f);
+      cpu_kernel_vec(
+          iter,
+          [](BFloat16 x) -> BFloat16 {
+            return float(x) / (1.0f + std::exp(-float(x)));
+          },
+          [kOneVec](Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
+            Vectorized<float> x_vec0, x_vec1;
+            std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
+            return convert_float_bfloat16(
+              x_vec0 / (kOneVec + x_vec0.neg().exp()),
+              x_vec1 / (kOneVec + x_vec1.neg().exp()));
+          });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      iter.dtype(), "silu_cpu", [&]() {
         const Vectorized<scalar_t> kOneVec(scalar_t(1));
         cpu_kernel_vec(
             iter,
@@ -1047,11 +1081,34 @@ void silu_kernel(TensorIteratorBase& iter) {
               return x_vec / (kOneVec + x_vec.neg().exp());
             });
       });
+    }
 }
 
 void silu_backward_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-      kBFloat16, iter.dtype(), "silu_backward_cpu", [&]() {
+  if (iter.dtype() == kBFloat16) {
+    const Vectorized<float> kOneVec(1.0f);
+    cpu_kernel_vec(
+        iter,
+        [](BFloat16 dy, BFloat16 x) -> BFloat16 {
+          const float sigmoid =
+              1.0f / (1.0f + std::exp(-float(x)));
+          return dy * sigmoid * (1.0f + x * (1.0f - sigmoid));
+        },
+        [kOneVec](Vectorized<BFloat16> dy_vec, Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
+          Vectorized<float> x_vec0, x_vec1, dy_vec0, dy_vec1;
+          std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
+          std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
+          const Vectorized<float> sigmoid0 =
+              kOneVec / (kOneVec + x_vec0.neg().exp());
+          const Vectorized<float> sigmoid1 =
+              kOneVec / (kOneVec + x_vec1.neg().exp());
+          return convert_float_bfloat16(
+            dy_vec0 * sigmoid0 * (kOneVec + x_vec0 * (kOneVec - sigmoid0)),
+            dy_vec1 * sigmoid1 * (kOneVec + x_vec1 * (kOneVec - sigmoid1)));
+        });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      iter.dtype(), "silu_backward_cpu", [&]() {
         const Vectorized<scalar_t> kOneVec(scalar_t(1));
         cpu_kernel_vec(
             iter,
@@ -1066,10 +1123,26 @@ void silu_backward_kernel(TensorIteratorBase& iter) {
               return dy_vec * sigmoid * (kOneVec + x_vec * (kOneVec - sigmoid));
             });
       });
+  }
 }
 
 void mish_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_cpu", [&]() {
+  if (iter.dtype() == kBFloat16) {
+    cpu_kernel_vec(
+        iter,
+        [](BFloat16 x) -> BFloat16{
+          return static_cast<BFloat16>(float(x) * std::tanh(std::log1p(std::exp(float(x)))));
+        },
+        [](Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
+          Vectorized<float> x_vec0, x_vec1;
+          std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
+          return convert_float_bfloat16(
+            x_vec0 * x_vec0.exp().log1p().tanh(),
+            x_vec1 * x_vec1.exp().log1p().tanh()
+          );
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_cpu", [&]() {
         using Vec = Vectorized<scalar_t>;
         cpu_kernel_vec(
             iter,
@@ -1080,10 +1153,36 @@ void mish_kernel(TensorIteratorBase& iter) {
               return x_vec * x_vec.exp().log1p().tanh();
             });
       });
+  }
 }
 
 void mish_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_backward_cpu", [&]() {
+  if (iter.dtype() == kBFloat16) {
+    using Vec = Vectorized<float>;
+    const Vec kOneVec(1.0f);
+    cpu_kernel_vec(
+        iter,
+        [](BFloat16 dy, BFloat16 x) -> BFloat16 {
+          const float sigmoid =
+              1.0f / (1.0f + std::exp(-float(x)));
+          const float tanh_softplus = std::tanh(std::log1p(std::exp(float(x))));
+          return dy * (tanh_softplus + x * sigmoid * (1.0f - tanh_softplus * tanh_softplus));
+        },
+        [kOneVec](Vectorized<BFloat16> dy_vec, Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
+          Vectorized<float> x_vec0, x_vec1, dy_vec0, dy_vec1;
+          std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
+          std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
+          const Vec sigmoid0 = kOneVec / (kOneVec + x_vec0.neg().exp());
+          const Vec sigmoid1 = kOneVec / (kOneVec + x_vec1.neg().exp());
+          const Vec tanh_softplus0 = x_vec0.exp().log1p().tanh();
+          const Vec tanh_softplus1 = x_vec1.exp().log1p().tanh();
+          return convert_float_bfloat16(
+            dy_vec0 * (tanh_softplus0 + x_vec0 * sigmoid0 * (kOneVec - tanh_softplus0 * tanh_softplus0)),
+            dy_vec1 * (tanh_softplus1 + x_vec1 * sigmoid1 * (kOneVec - tanh_softplus1 * tanh_softplus1))
+          );
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "mish_backward_cpu", [&]() {
         using Vec = Vectorized<scalar_t>;
         const Vec kOneVec(scalar_t(1));
         cpu_kernel_vec(
@@ -1100,6 +1199,7 @@ void mish_backward_kernel(TensorIterator& iter) {
               return dy_vec * (tanh_softplus + x_vec * sigmoid * (kOneVec - tanh_softplus * tanh_softplus));
             });
       });
+  }
 }
 
 void prelu_cpu_kernel(TensorIterator& iter) {
