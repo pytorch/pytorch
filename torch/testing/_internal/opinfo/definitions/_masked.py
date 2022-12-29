@@ -882,7 +882,9 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
         ),
-        sample_inputs_func=sample_inputs_masked_softmax,
+        sample_inputs_func=partial(
+            sample_inputs_masked_softmax, use_zero_dimensions=False
+        ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
