@@ -76,9 +76,11 @@ Take the following steps:
 - ``setup_context`` (optional). One can either write a "combined" :meth:`~Function.forward` that
   accepts a ``ctx`` object or (as of PyTorch 2.0) a separate :meth:`~Function.forward` that does
   not accept ``ctx`` and a ``setup_context`` method where the ``ctx`` modification happens.
+  The :meth:`~Function.forward` should have the compute and ``setup_context`` should
+  only be responsible for the ``ctx`` modification (and not have any compute).
   In general the separate :meth:`~Function.forward` and ``setup_context`` is closer to how
   PyTorch native operations work and therefore more composable with various PyTorch subsystems.
-  See :ref:`combining-forward-context` for more details
+  See :ref:`combining-forward-context` for more details.
 - :meth:`~Function.backward` (or :meth:`~Function.vjp`) defines the gradient formula.
   It will be given as many :class:`Tensor` arguments as there were outputs, with each
   of them representing gradient w.r.t. that output. It is important NEVER to modify
@@ -230,7 +232,9 @@ If you need any "intermediate" Tensors computed in :meth:`~Function.forward` to 
 either they must be returned as outputs, or combine ``forward`` and ``setup_context``
 (see :ref:`combining-forward-context`).
 Note that this means if you want gradients to flow through those intermediate values, you
-need to define the gradient formula for them::
+need to define the gradient formula for them (see also
+`the double backward tutorial <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_
+)::
 
     class MyCube(torch.autograd.Function):
         @staticmethod
@@ -292,7 +296,7 @@ can use the ``gradgradcheck`` function from the same package to check higher ord
 .. _combining-forward-context:
 
 Combined or separate :meth:`~Function.forward` and ``setup_context``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 There are two main ways to define :class:`~Function`. Either:
 
@@ -302,7 +306,8 @@ There are two main ways to define :class:`~Function`. Either:
 We recommend the second option (separate :meth:`~Function.forward` and ``setup_context``)
 because that is closer to how PyTorch native operations are implemented and it composes
 with :mod:`torch.func` transforms. However, we plan to support both approaches going forward;
-combining :meth:`~Function.forward` with ``setup_context`` leads to more flexibility.
+combining :meth:`~Function.forward` with ``setup_context`` leads to more flexibility since
+you are able to save intermediates without returning them as output.
 
 Please see the previous section for how to define :class:`~Function` with separate
 :meth:`~Function.forward` and ``setup_context``.

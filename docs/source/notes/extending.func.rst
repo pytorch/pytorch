@@ -257,9 +257,9 @@ To use an :class:`torch.autograd.Function` with :func:`torch.vmap`, you must eit
 Automatically generate a vmap rule
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If your :meth:`~torch.autograd.function.FunctionCtx.save_for_backward` fulfills the following additional constraints, then we
-will be able to generate a vmap rule for it. Otherwise, please manually define a
-vmap staticmethod (see next section).
+If your :class:`torch.autograd.Function` fulfills the following additional constraints, then we
+are able to generate a vmap rule for it. If it doesn't fulfill the constraints or if you
+want custom behavior under vmap, please manually define a vmap staticmethod (see next section).
 
 .. warning::
 
@@ -267,7 +267,7 @@ vmap staticmethod (see next section).
      out gracefully. Violation of the constraints may lead to undefined
      behavior.
 
-- The :meth:`~torch.autograd.function.FunctionCtx.save_for_backward`'s :meth:`~Function.forward`, :meth:`~Function.backward` (if it exists) and :meth:`~Function.jvp`
+- The :class:`torch.autograd.Function`'s :meth:`~Function.forward`, :meth:`~Function.backward` (if it exists) and :meth:`~Function.jvp`
   (if it exists) staticmethods must be transformable via :func:`torch.vmap`. That
   is, they must consist of only PyTorch operations (as opposed to e.g. NumPy or custom
   CUDA kernels).
@@ -309,7 +309,7 @@ Example::
 Defining the vmap staticmethod
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If your :meth:`~torch.autograd.function.FunctionCtx.save_for_backward` calls into another system (like NumPy, C++, CUDA, triton),
+If your :class:`torch.autograd.Function` calls into another system (like NumPy, C++, CUDA, triton),
 then to get it to work with :func:`torch.vmap` or transforms that use it, you'll
 need to manually define a ``vmap`` staticmethod.
 
@@ -320,9 +320,9 @@ to add a ``vmap`` staticmethod to all of your :class:`torch.autograd.Function`:
   So if you're only interested in using :func:`torch.func.jacrev`, only
   the :meth:`~Function.backward` staticmethod needs to be vmappable.
 
-We do recommend adding a ``vmap`` staticmethod to all of your :meth:`~torch.autograd.function.FunctionCtx.save_for_backward`
-though, especially if you are writing a third-party library and you want your
-:meth:`~torch.autograd.function.FunctionCtx.save_for_backward` to work with all combinations of :func:`torch.func` transforms.
+We do recommend ensuring all of your :class:`torch.autograd.Function` have support for
+:func:`torch.vmap` though, especially if you are writing a third-party library and you want your
+:class:`torch.autograd.Function` to work with all combinations of :func:`torch.func` transforms.
 
 Conceptually, the vmap staticmethod is responsible for defining how the :meth:`~Function.forward`
 should behave under :func:`torch.vmap`. That is, it defines how to transform
@@ -342,8 +342,9 @@ Here's how to define the ``vmap`` staticmethod:
   It is ``None`` if the arg is not a Tensor or if the arg is not being vmapped over,
   otherwise, it is an integer specifying what dimension of the Tensor is being vmapped
   over.
-- ``info`` is a collection of additional metadata that may be helpful. For example,
-  ``info.batch_size`` specifies the size of the dimension being vmapped over.
+- ``info`` is a collection of additional metadata that may be helpful:
+  ``info.batch_size`` specifies the size of the dimension being vmapped over, while
+  ``info.randomness`` is the ``randomness`` option that was passed to :func:`torch.vmap`.
 - The return of the vmap staticmethod is a tuple of ``(output, out_dims)``. Similar
   to ``in_dims``, ``out_dims`` should be of the same structure as ``output`` and contain
   one ``out_dim`` per output that specifies if the output has the vmapped
@@ -471,6 +472,23 @@ Example::
     x = torch.randn(2, 3)
     result = torch.vmap(numpy_sort, (0, None))(x, 0)
     assert torch.allclose(result, numpy_sort(result, 1))
+
+
+.. note::
+
+    The vmap staticmethod should aim to preserve the semantics of the
+    entire :class:`~torch.autograd.Function`. That is, (pseudocode) ``grad(vmap(MyFunc))``
+    should be replaceable with a ``grad(map(MyFunc))``.
+
+    If your autograd.Function has any custom behavior in the backward pass, please
+    keep this in mind.
+
+.. note::
+
+    It is a legitimate use case to write a custom vmap staticmethod for a
+    :class:`~torch.autograd.Function` that PyTorch is able to generate a vmap
+    rule for via ``generate_vmap_rule=True``. You may wish to do this if the
+    generated vmap rule doesn't have the semantics you're looking for.
 
 :func:`torch.func.jvp` Support
 ------------------------------

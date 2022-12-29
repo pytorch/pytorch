@@ -48,6 +48,7 @@ class FunctionCtx(object):
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class Func(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x: torch.Tensor, y: torch.Tensor, z: int):
@@ -139,6 +140,7 @@ class FunctionCtx(object):
         modification.
 
         Examples::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class Inplace(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x):
@@ -210,6 +212,7 @@ class FunctionCtx(object):
         prior to calling the :func:`backward` and :func:`jvp` methods.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class SimpleFunc(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x):
@@ -320,8 +323,8 @@ class _SingleLevelFunction(with_metaclass(FunctionMeta, _C._FunctionBase, Functi
             def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
                 pass
 
-
-        - You must also define a setup_context staticmethod to handle setting up the
+        - The forward no longer accepts a ctx argument.
+        - Instead, you must also define a setup_context staticmethod to handle setting up the
           ``ctx`` object.
           ``output`` is the output of the forward, ``inputs`` are a Tuple of inputs
           to the forward.
@@ -406,6 +409,7 @@ class Function(_SingleLevelFunction):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> class Exp(Function):
         >>>     @staticmethod
         >>>     def forward(ctx, i):
