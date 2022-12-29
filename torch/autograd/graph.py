@@ -42,7 +42,7 @@ class Node(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def _register_hook_dict(self) -> None:
+    def _register_hook_dict(self, tensor: torch.Tensor) -> None:
         ...
 
     @abc.abstractmethod
