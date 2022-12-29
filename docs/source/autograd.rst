@@ -264,9 +264,9 @@ Autograd graph
 Autograd exposes methods to allow one to inspect the graph and interpose behavior during
 the backward pass.
 
-Calling the ``.grad_fn()`` method on a Tensor that is the output of a operation returns an
-autograd Node if the graph was being recorded, i.e. grad_mode is enabled and at least one
-of the inputs required gradients.
+The ``grad_fn`` attribute of a :class:`torch.Tensor` holds a  :class:`torch.autograd.graph.Node`
+if the tensor is the output of a operatoin that was recorded by autograd (i.e., grad_mode is
+enabled and at least one of the inputs required gradients), or ``None`` otherwise.
 
 .. autosummary::
     :toctree: generated
@@ -280,7 +280,19 @@ of the inputs required gradients.
 
 Some operations need intermediary results to be saved during the forward pass
 in order to execute the backward pass.
-You can define how these saved tensors should be packed / unpacked using hooks.
+These intermediary results are saved as attributes on the ``grad_fn`` and can be accessed.
+For example::
+
+    >>> a = torch.tensor([0., 0., 0.], requires_grad=True)
+    >>> b = a.exp()
+    >>> print(isinstance(b.grad_fn, torch.autograd.graph.Node))
+    True
+    >>> print(dir(b.grad_fn))
+    ['__call__', '__class__', '__delattr__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattribute__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__str__', '__subclasshook__', '_raw_saved_result', '_register_hook_dict', '_saved_result', 'metadata', 'name', 'next_functions', 'register_hook', 'register_prehook', 'requires_grad']
+    >>> print(torch.allclose(b.grad_fn._saved_result, b))
+    True
+
+You can also define how these saved tensors should be packed / unpacked using hooks.
 A common application is to trade compute for memory by saving those intermediary results
 to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
 notice your model fits on GPU during evaluation, but not training.
