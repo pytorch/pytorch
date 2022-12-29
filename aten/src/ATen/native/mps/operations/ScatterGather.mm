@@ -188,7 +188,7 @@ void scatter_mps_general
     TORCH_CHECK(reduce != "mean", "Scatter reduce mean mode not yet supported in MPS")
 
     MPSDataType src_type = getMPSDataType(src.scalar_type());
-    if (reduce != "set" || self.scalar_type() == ScalarType::Byte) {
+    if (reduce != "set" || src_type == MPSDataTypeUInt8 || src_type == MPSDataTypeBool) {
       src_type = isFloatingType(src.scalar_type()) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
       needsCast = true;
     }
