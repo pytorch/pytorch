@@ -6039,6 +6039,21 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    def test_autograd_node_isinstance(self):
+        a = torch.rand(3, 3, requires_grad=True)
+        b = a.exp()
+        self.assertTrue(isinstance(b.grad_fn, torch.autograd.graph.Node))
+
+        # This is expected, because it's a type
+        self.assertFalse(isinstance(torch._C._functions.AccumulateGrad, torch.autograd.graph.Node))
+        self.assertTrue(isinstance(b.grad_fn.next_functions[0][0], torch.autograd.graph.Node))
+
+        self.assertFalse(isinstance(None, torch.autograd.graph.Node))
+        self.assertFalse(isinstance(1, torch.autograd.graph.Node))
+
+        # isinstance(abc.ABC, abc.ABC) is also False
+        self.assertFalse(isinstance(torch.autograd.graph.Node, torch.autograd.graph.Node))
+
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
