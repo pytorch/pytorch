@@ -56,7 +56,7 @@ TORCH_IMPL_FUNC(gather_out_mps)
     auto dtype = getMPSDataType(self.scalar_type());
     // workaround for UInt8 and Bool issues in MPS backend
     if (dtype ==  MPSDataTypeUInt8 || dtype ==  MPSDataTypeBool) {
-      dtype =  MPSDataTypeInt8;
+      dtype = MPSDataTypeInt8;
     }
     string key = "gather_out_mps" + getTensorsStringKey({self, index, output}) + ":" + std::to_string(dim);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
@@ -69,7 +69,7 @@ TORCH_IMPL_FUNC(gather_out_mps)
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, dtype, getMPSShape(self));
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, dtype, input_shape);
           MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
 
           MPSGraphTensor* getInput = inputTensor;
