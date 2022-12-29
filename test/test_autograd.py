@@ -1392,8 +1392,7 @@ class TestAutograd(TestCase):
         self.assertEqual(input * 18, input.grad)
 
     # NB: See test/cpp/api/autograd.cpp for more tests on the interaction between
-    #     retains_grad and hooks in cpp. There's no point testing in python because
-    #     Python hooks use a completely different mechanism.
+    #     retains_grad and hooks in cpp
     def test_retain_grad_inplace(self):
         a = torch.tensor([1.], requires_grad=True).clone()
         a.retain_grad()
@@ -1403,13 +1402,43 @@ class TestAutograd(TestCase):
 
         a = torch.tensor([1.], requires_grad=True).clone()
         a.retain_grad()
-        # Inplace multiple times is OK, the real test here would be in cpp though
-        # because the index here is always zero, having cpp hooks in addition,
-        # will force us to properly update the index
+        # Inplace multiple times is OK
         a.mul_(2)
         a.mul_(2)
         a.sum().backward()
         self.assertEqual(a.grad, torch.tensor([1.]))
+
+    def test_retains_grad_inplace_multiple_outputs(self):
+        class DoubleMul(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2, x * 3
+
+            @staticmethod
+            def backward(ctx, g1, g2):
+                return g1 * 2 + g2 * 3
+
+        var_mean = partial(torch.var_mean, dim=0)
+
+        for fn in (DoubleMul.apply, var_mean):
+            b = torch.rand(3, 3, requires_grad=True)
+            var, mean = fn(b)
+            var.retain_grad()
+            mean.retain_grad()
+            # node has two retains_grad hooks
+            var.mul_(2)
+            # the retain_grad hook multi-output node refers shoudl now be a nullptr
+            (var + mean).sum().backward()
+            gvar = var.grad
+            gmean = mean.grad
+
+            a = b.detach().requires_grad_(True)
+            var, mean = fn(a)
+            var.mul_(2)
+            out = (var + mean).sum()
+            gvar_expected, gmean_expected = torch.autograd.grad(out, inputs=(var, mean))
+            self.assertTrue(torch.allclose(gvar, gvar_expected))
+            self.assertTrue(torch.allclose(gmean, gmean_expected))
 
     def test_retain_grad_inplace_over_view(self):
         base = torch.tensor([1.], requires_grad=True).clone()
