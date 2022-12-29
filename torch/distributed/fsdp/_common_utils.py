@@ -42,6 +42,9 @@ class _FSDPState(_State):
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
         self._ignored_modules: Set[nn.Module] = set()
+        self._fully_sharded_module_to_handles: Dict[
+            nn.Module, flat_param_file.FlatParamHandle
+        ] = {}
         self.rank: int = -1
         self.world_size: int = -1
         self.sharding_strategy = ShardingStrategy.FULL_SHARD

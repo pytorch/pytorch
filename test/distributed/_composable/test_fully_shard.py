@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import unittest
 import contextlib
 import copy
 import functools
