@@ -2774,10 +2774,6 @@ Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayR
 //             Just used in torch..norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
-Tensor frobenius_norm(const Tensor& self) {
-  return at::norm(self);
-}
-
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(
       dim.size() <= 2,
