@@ -92,7 +92,7 @@ std::shared_ptr<MPSGeneratorImpl> MPSGeneratorImpl::clone() const {
 }
 
 MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
-  auto gen = new MPSGeneratorImpl(this->data_.seed);
+  auto gen = new MPSGeneratorImpl();
   gen->set_current_seed(this->data_.seed);
   return gen;
 }
