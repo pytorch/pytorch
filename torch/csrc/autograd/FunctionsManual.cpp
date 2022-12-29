@@ -791,8 +791,8 @@ Tensor logsumexp_backward(
     IntArrayRef dim,
     bool keepdim) {
   if (!keepdim && self.dim() != 0) {
-    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
-    result = unsqueeze_multiple(result, dim, self.sizes().size());
+    grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
+    result = unsqueeze_multiple(result, dim, self.sym_sizes().size());
   }
   return grad * (self - result).exp();
 }
@@ -3099,7 +3099,7 @@ Tensor prelu_backward_weight_jvp(
     }
   }
   const auto dw = dw_full.sum(reduction_dims);
-  return dw;
+  return dw.view_as(w);
 }
 
 Tensor gelu_double_backward(
@@ -3549,9 +3549,9 @@ Tensor linalg_eig_backward(
   auto VhgV = at::matmul(V.mH(), gV);
   const auto diag_VhgV = VhgV.diagonal(0, -2, -1);
 
-  if (V.is_complex()) {
-    // Check invariance of the loss function wrt the transformation V -> V
-    // e^{i\phi}
+  if (V.is_complex() && !at::isTensorSubclassLike(diag_VhgV)) {
+    // Check invariance of the loss function wrt the transformation
+    // V -> V * e^{i\phi} for an arbitrary phi in RR^n
     const auto imdiag_VhgV = at::imag(diag_VhgV);
     TORCH_CHECK(
         at::allclose(
@@ -6767,6 +6767,22 @@ Tensor take_backward(
     return grad_self.put(indices, grad, true);
   }
   return grad_self.put_(indices, grad, true);
+}
+
+Tensor to_sparse_backward(
+    const Tensor& grad,
+    const c10::Layout self_layout,
+    const c10::OptionalArrayRef<c10::SymInt>& self_blocksize) {
+  // Path for strided and nested
+  if (self_layout == c10::kStrided) {
+    return grad.to_dense();
+  } else {
+    OptionalIntArrayRef blocksize = c10::nullopt;
+    if (self_blocksize.has_value()) {
+      blocksize = c10::asIntArrayRefSlowOpt(*self_blocksize);
+    }
+    return grad.to_sparse(self_layout, blocksize);
+  }
 }
 
 } // namespace details
