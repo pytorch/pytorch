@@ -115,20 +115,6 @@ xfail_not_implemented = {
     "aten::dropout_",
     "aten::embedding_bag",
     "aten::embedding_bag.padding_idx",
-    "aten::embedding_sparse_backward",
-    "aten::fake_quantize_per_channel_affine",
-    "aten::fake_quantize_per_channel_affine_cachemask_backward",
-    "aten::fake_quantize_per_tensor_affine",
-    "aten::fake_quantize_per_tensor_affine.tensor_qparams",
-    "aten::fake_quantize_per_tensor_affine_cachemask_backward",
-    "aten::fbgemm_linear_fp16_weight",
-    "aten::fbgemm_linear_fp16_weight_fp32_activation",
-    "aten::fbgemm_linear_int8_weight",
-    "aten::fbgemm_linear_int8_weight_fp32_activation",
-    "aten::fbgemm_linear_quantize_weight",
-    "aten::fbgemm_pack_gemm_matrix_fp16",
-    "aten::fbgemm_pack_quantized_matrix",
-    "aten::fbgemm_pack_quantized_matrix.KN",
     "aten::feature_alpha_dropout",
     "aten::feature_alpha_dropout_",
     "aten::feature_dropout",
@@ -137,7 +123,6 @@ xfail_not_implemented = {
     "aten::fft_ihfftn",
     "aten::fill_diagonal_",
     "aten::fix_",
-    "aten::flatten.DimnameList",
     "aten::flatten.named_out_dim",
     "aten::flatten.using_ints",
     "aten::flatten.using_names",
@@ -163,20 +148,7 @@ xfail_not_implemented = {
     "aten::histogramdd.TensorList_bins",
     "aten::histogramdd.int_bins",
     "aten::imag",
-    "aten::index_fill.Dimname_Scalar",
-    "aten::index_fill.Dimname_Tensor",
-    "aten::index_fill_.Dimname_Scalar",
-    "aten::index_fill_.Dimname_Tensor",
     "aten::infinitely_differentiable_gelu_backward",
-    "aten::is_conj",
-    "aten::is_distributed",
-    "aten::is_floating_point",
-    "aten::is_inference",
-    "aten::is_leaf",
-    "aten::is_neg",
-    "aten::is_nonzero",
-    "aten::is_signed",
-    "aten::is_vulkan_available",
     "aten::isclose",
     "aten::isfinite",
     "aten::isreal",
@@ -261,10 +233,6 @@ xfail_not_implemented = {
     "aten::qr.Q",
     "aten::quantile",
     "aten::quantile.scalar",
-    "aten::quantized_gru_cell",
-    "aten::quantized_lstm_cell",
-    "aten::quantized_rnn_relu_cell",
-    "aten::quantized_rnn_tanh_cell",
     "aten::real",
     "aten::refine_names",
     "aten::relu6",
@@ -281,8 +249,6 @@ xfail_not_implemented = {
     "aten::rnn_tanh.input",
     "aten::rnn_tanh_cell",
     "aten::rrelu_",
-    "aten::scatter.dimname_src",
-    "aten::scatter.dimname_value",
     "aten::selu",
     "aten::selu_",
     "aten::set_.source_Tensor_storage_offset",
@@ -290,21 +256,6 @@ xfail_not_implemented = {
     "aten::silu_backward",
     "aten::slow_conv3d",
     "aten::smm",
-    "aten::sort.dimname_stable",
-    "aten::sort.dimname_values",
-    "aten::sort.dimname_values_stable",
-    "aten::sparse_bsc_tensor.ccol_row_value",
-    "aten::sparse_bsc_tensor.ccol_row_value_size",
-    "aten::sparse_bsr_tensor.crow_col_value",
-    "aten::sparse_bsr_tensor.crow_col_value_size",
-    "aten::sparse_compressed_tensor.comp_plain_value",
-    "aten::sparse_compressed_tensor.comp_plain_value_size",
-    "aten::sparse_coo_tensor.indices",
-    "aten::sparse_coo_tensor.indices_size",
-    "aten::sparse_csc_tensor.ccol_row_value",
-    "aten::sparse_csc_tensor.ccol_row_value_size",
-    "aten::sparse_csr_tensor.crow_col_value",
-    "aten::sparse_csr_tensor.crow_col_value_size",
     "aten::special_chebyshev_polynomial_t.n_scalar",
     "aten::special_chebyshev_polynomial_t.x_scalar",
     "aten::special_chebyshev_polynomial_u.n_scalar",
@@ -344,7 +295,6 @@ xfail_not_implemented = {
     "aten::subtract.Scalar",
     "aten::subtract_.Scalar",
     "aten::subtract_.Tensor",
-    "aten::sum.dim_DimnameList",
     "aten::svd.U",
     "aten::tensor_split.indices",
     "aten::tensor_split.sections",
@@ -425,9 +375,17 @@ def filter_vmap_implementable(reg):
         return False
     if reg.endswith("_out"):
         return False
-    if reg.endswith(".dimname"):
+    if '.dimname' in reg:
         return False
-    if reg.endswith("_dimname"):
+    if "_dimname" in reg:
+        return False
+    if 'fbgemm' in reg:
+        return False
+    if 'quantize' in reg:
+        return False
+    if 'sparse' in reg:
+        return False
+    if '::is_' in reg:
         return False
     return True
 
@@ -458,8 +416,9 @@ class TestFunctorchDispatcher(TestCase):
     )
     def test_unimplemented_batched_registrations(self, registration):
         assert registration in FuncTorchBatchedDecompositionRegistrations, (
-            f"Please add a registration in BatchedDecompositions.cpp for "
-            f"the CompositeImplicitAutograd registration {registration}"
+            f"Please check that there is an OpInfo that covers the operator {registration} "
+            "and add a registration in BatchedDecompositions.cpp. "
+            "If your operator isn't user facing, please add it to the xfail list"
         )
 
 
