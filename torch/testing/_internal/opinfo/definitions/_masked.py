@@ -31,7 +31,7 @@ from torch.testing._internal.opinfo.utils import prod_numpy, reference_reduction
 
 # Used for log_softmax, softmax, softmin
 def sample_inputs_softmax_variant(
-    op_info, device, dtype, requires_grad, with_dtype=False, **kwargs
+    op_info, device, dtype, requires_grad, with_dtype=False, use_zero_dimensions=True, **kwargs
 ):
     make_arg = partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
@@ -42,7 +42,7 @@ def sample_inputs_softmax_variant(
         ((S, S), (1,)),
         ((S, S), (-1,)),
         ((S, M, S), (2,)),
-        ((S, 0, 0), (-1,)),
+        *([((S, 0, 0), (-1,))] if use_zero_dimensions else []),
     ]
     kwargs = dict(dtype=torch.float64) if with_dtype else None
 
@@ -406,7 +406,7 @@ def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwar
     """Sample inputs for masked normalize."""
     for ord in [2.0, 1, float("inf"), float("-inf"), 0]:
         for sample_input in sample_inputs_softmax_variant(
-            op_info, device, dtype, requires_grad, **kwargs
+            op_info, device, dtype, requires_grad, use_zero_dimensions=False, **kwargs
         ):
             yield SampleInput(
                 sample_input.input.clone().requires_grad_(requires_grad),
