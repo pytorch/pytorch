@@ -443,6 +443,10 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_enable_functionalization": [
+                "def _enable_functionalization(*, reapply_views: _bool = False): ..."
+            ],
+            "_disable_functionalization": ["def _disable_functionalization(): ..."],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
@@ -661,7 +665,7 @@ def gen_pyi(
             "map2_": [
                 "def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ..."
             ],
-            "storage": ["def _storage(self) -> Storage: ..."],
+            "storage": ["def untyped_storage(self) -> Storage: ..."],
             "storage_type": ["def storage_type(self) -> Storage: ..."],
             "type": [
                 "def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...",

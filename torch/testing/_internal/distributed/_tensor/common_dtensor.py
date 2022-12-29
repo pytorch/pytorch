@@ -290,8 +290,8 @@ class DTensorConverter(object):
                 tree_unflatten(new_args, self.flatten_args_spec),
                 tree_unflatten(new_kwargs, self.flatten_kwargs_spec),
             )
-        except StopIteration:
-            raise StopIteration
+        except StopIteration as e:
+            raise StopIteration from e
 
     def to_dist_tensor(
         self, t: torch.Tensor, mesh: DeviceMesh, placements: List[Placement]

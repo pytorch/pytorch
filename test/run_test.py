@@ -3,7 +3,6 @@
 import argparse
 import copy
 from datetime import datetime
-from distutils.util import strtobool
 from distutils.version import LooseVersion
 import functools
 import os
@@ -49,6 +48,12 @@ except ImportError:
     print(
         "Unable to import test_selections from tools/testing. Running without test selection stats..."
     )
+
+
+def strtobool(s):
+    if s.lower() in ["", "0", "false", "off"]:
+        return False
+    return True
 
 
 def discover_tests(
@@ -113,6 +118,7 @@ TESTS = discover_tests(
         "distributed/launcher/bin/test_script_is_torchelastic_launched",
         "distributed/launcher/bin/test_script_local_rank",
         "distributed/test_c10d_spawn",
+        "distributed/_tensor/test_dtensor_ops",
         'distributions/test_transforms',
         'distributions/test_utils',
     ],
@@ -284,7 +290,9 @@ CI_SERIAL_LIST = [
     'test_tensor_creation_ops',
     'test_sparse_csr',
     'test_dispatch',
+    'test_spectral_ops',    # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/88916
     'nn/test_pooling',
+    'nn/test_convolution',  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     'distributions/test_distributions',
     'test_autograd',  # slow gradcheck runs a test that checks the cuda memory allocator
     'test_prims',  # slow gradcheck runs a test that checks the cuda memory allocator
@@ -742,33 +750,75 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
 
 
 def run_test_ops(test_module, test_directory, options):
+    if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
+        # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
+        # flakiness status. Default to 50 re-runs
+        rerun_options = ["--flake-finder", "--flake-runs=50"]
+    elif options.continue_through_error:
+        # If continue through error, don't stop on first failure
+        rerun_options = ["--reruns=2"]
+    else:
+        # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
+        # failure
+        rerun_options = ["-x", "--reruns=2"]
+
+    default_unittest_args = [
+        "--use-pytest",
+        "-vv",
+        "-rfEX"
+    ]
+    default_unittest_args.extend(rerun_options)
+
     if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
+        extra_unittest_args = default_unittest_args.copy()
         # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
         # it's also on periodic so we don't care about TTS as much
-        return run_test(test_module, test_directory, copy.deepcopy(options),
-                        extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
-                        )
+        return run_test(
+            test_module,
+            test_directory,
+            copy.deepcopy(options),
+            extra_unittest_args=extra_unittest_args,
+        )
+
     return_codes = []
     os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
     pool = get_context("spawn").Pool(NUM_PROCS)
     for i in range(NUM_PROCS):
-        return_code = pool.apply_async(run_test, args=(test_module, test_directory, copy.deepcopy(options)),
-                                       kwds={"extra_unittest_args": ["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
-                                                                     f'--shard-id={i}', f'--num-shards={NUM_PROCS}',
-                                                                     "-k=not _linalg_cholesky_"],
-                                             })
+        extra_unittest_args = default_unittest_args.copy()
+        extra_unittest_args.extend([
+            f"--shard-id={i}",
+            f"--num-shards={NUM_PROCS}",
+            "-k=not _linalg_cholesky_",
+        ])
+
+        return_code = pool.apply_async(
+            run_test,
+            args=(test_module, test_directory, copy.deepcopy(options)),
+            kwds={
+                "extra_unittest_args": extra_unittest_args,
+            },
+        )
         return_codes.append(return_code)
+
     pool.close()
     pool.join()
-    del os.environ['NUM_PARALLEL_PROCS']
+    del os.environ["NUM_PARALLEL_PROCS"]
 
     for return_code in return_codes:
         if return_code.get() != 0:
             return return_code.get()
-    return_code = run_test(test_module, test_directory, copy.deepcopy(options),
-                           extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
-                                                "-k=_linalg_cholesky_"],
-                           )
+
+    extra_unittest_args = default_unittest_args.copy()
+    extra_unittest_args.extend([
+        "-k=_linalg_cholesky_",
+    ])
+
+    return_code = run_test(
+        test_module,
+        test_directory,
+        copy.deepcopy(options),
+        extra_unittest_args=extra_unittest_args,
+    )
     return return_code
 
 
@@ -785,6 +835,7 @@ CUSTOM_HANDLERS = {
     "distributed/test_c10d_common": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_spawn_gloo": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_spawn_nccl": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_spawn_ucc": get_run_test_with_subprocess_fn(),
     "distributed/test_store": get_run_test_with_subprocess_fn(),
     "distributed/test_pg_wrapper": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_faulty_agent": get_run_test_with_subprocess_fn(),
@@ -792,6 +843,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
     "doctests": run_doctests,
+    "inductor/test_torchinductor_opinfo": run_test_ops,
     "test_ops": run_test_ops,
     "test_ops_gradients": run_test_ops,
     "test_ops_fwd_gradients": run_test_ops,
@@ -928,6 +980,7 @@ def parse_args():
     # )
     parser.add_argument(
         "--continue-through-error",
+        "--keep-going",
         action="store_true",
         help="Runs the full test suite despite one of the tests failing",
         default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")),
@@ -1023,6 +1076,7 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None, exact_matc
 
 def must_serial(file: str) -> bool:
     return (
+        os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1" or
         "distributed" in os.getenv("TEST_CONFIG", "") or
         "dynamo" in os.getenv("TEST_CONFIG", "") or
         "distributed" in file or
@@ -1150,11 +1204,6 @@ def get_selected_tests(options):
         else:
             print("Found test time stats from artifacts")
             test_file_times_config = test_file_times[test_config]
-            if is_slow_gradcheck_env():
-                # HACK: hardcode approx test times, so these two don't get put in the same shard
-                #       we can remove this when their actual runtimes are recorded
-                test_file_times_config["test_ops_fwd_gradients"] = 3600 * 2 + 600  # 2:10
-                test_file_times_config["test_ops_gradients"] = 3600 * 2 + 600  # 2:10
             shards = calculate_shards(num_shards, selected_tests, test_file_times_config,
                                       must_serial=must_serial)
             _, tests_from_shard = shards[which_shard - 1]
@@ -1258,7 +1307,13 @@ def main():
         del os.environ['PARALLEL_TESTING']
 
         if not options.continue_through_error and len(failure_messages) != 0:
-            raise RuntimeError("\n".join(failure_messages))
+            raise RuntimeError(
+                "\n".join(failure_messages) +
+                "\n\nTip: You can keep running tests even on failure by "
+                "passing --keep-going to run_test.py.\n"
+                "If running on CI, add the 'keep-going' label to "
+                "your PR and rerun your jobs."
+            )
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
