@@ -1,5 +1,7 @@
 .. currentmodule:: torch.func
 
+.. _ux-limitations:
+
 UX Limitations
 ==============
 
@@ -110,7 +112,7 @@ a for-loop. For example, the following function:
 will print "hello!" once and pop only one element from ``lst``.
 
 
-:func:`vmap` executes `f` a single time, so all side effects only happen once.
+:func:`vmap` executes ``f`` a single time, so all side effects only happen once.
 
 This is a consequence of how vmap is implemented. torch.func has a special,
 internal BatchedTensor class. ``vmap(f)(*inputs)`` takes all Tensor inputs,
@@ -122,7 +124,8 @@ behavior for each PyTorch operator.
 Mutation: in-place PyTorch Operations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-:func:`vmap` will raise an error if it encounters an unsupported PyTorch
+You might be here due to receiving an error about vmap-incompatible in-place
+operations. :func:`vmap` will raise an error if it encounters an unsupported PyTorch
 in-place operation and it will succeed otherwise. Unsupported operations
 are those that would cause a Tensor with more elements to be written to a
 Tensor with fewer elements. Here's an example of how this can occur:
@@ -134,9 +137,9 @@ Tensor with fewer elements. Here's an example of how this can occur:
     return x
 
   x = torch.randn(1)
-  y = torch.randn(3)
+  y = torch.randn(3, 1)  # When vmapped over, looks like it has shape [1]
 
-  # Raises an error because `y` has fewer elements than `x`.
+  # Raises an error because `x` has fewer elements than `y`.
   vmap(f, in_dims=(None, 0))(x, y)
 
 ``x`` is a Tensor with one element, ``y`` is a Tensor with three elements.
@@ -144,8 +147,8 @@ Tensor with fewer elements. Here's an example of how this can occur:
 three elements back into ``x``, which only has one element, raises an error
 due to attempting to write three elements into a Tensor with a single element.
 
-There is no problem if the Tensor being written to has the same number of
-elements (or more):
+There is no problem if the Tensor being written to is batched under
+:func:`~torch.vmap` (i.e. it is being vmapped over).
 
 ::
 
@@ -153,13 +156,56 @@ elements (or more):
     x.add_(y)
     return x
 
-  x = torch.randn(3)
-  y = torch.randn(3)
+  x = torch.randn(3, 1)
+  y = torch.randn(3, 1)
   expected = x + y
 
-  # Does not raise an error because x and y have the same number of elements.
+  # Does not raise an error because x is being vmapped over.
   vmap(f, in_dims=(0, 0))(x, y)
   assert torch.allclose(x, expected)
+
+One common fix for this is to replace calls to factory functions with
+their "new_*" equivalent. For example:
+
+- Replace :func:`torch.zeros` with :meth:`Tensor.new_zeros`
+- Replace :func:`torch.empty` with :meth:`Tensor.new_empty`
+
+To see why this helps, consider the following.
+
+::
+
+  def diag_embed(vec):
+    assert vec.dim() == 1
+    result = torch.zeros(vec.shape[0], vec.shape[0])
+    result.diagonal().copy_(vec)
+    return result
+
+  vecs = torch.tensor([[0., 1, 2], [3., 4, 5]])
+
+  # RuntimeError: vmap: inplace arithmetic(self, *extra_args) is not possible ...
+  vmap(diag_embed)(vecs)
+
+Inside of :func:`~torch.vmap`, ``result`` is a Tensor of shape [3, 3].
+However, although ``vec`` looks like it has shape [3], ``vec`` actually has
+underlying shape [2, 3].
+It is not possible to copy ``vec`` into ``result.diagonal()``, which has
+shape [3], because it has too many elements.
+
+::
+
+  def diag_embed(vec):
+    assert vec.dim() == 1
+    result = vec.new_zeros(vec.shape[0], vec.shape[0])
+    result.diagonal().copy_(vec)
+    return result
+
+  vecs = torch.tensor([[0., 1, 2], [3., 4, 5]])
+  vmap(diag_embed)(vecs)
+
+Replacing :func:`torch.zeros` with :meth:`Tensor.new_zeros` makes it so that
+``result`` has an underlying Tensor of shape [2, 3, 3], so it is now possible
+to copy ``vec``, which has underlying shape [2, 3], into ``result.diagonal()``.
+
 
 Mutation: out= PyTorch Operations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

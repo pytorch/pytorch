@@ -60,7 +60,7 @@ to the first input.
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Note: :func:`vmap` imposes restrictions on the code that it can be used on. For more
-details, please read its docstring.
+details, please see :ref:`ux-limitations`.
 
 ``vmap(func)(*inputs)`` is a transform that adds a dimension to all Tensor
 operations in ``func``. ``vmap(func)`` returns a new function that maps ``func``
@@ -136,8 +136,8 @@ but it returns the outputs of ``func(inputs)`` as well as the jvps.
     x = torch.randn(5)
     y = torch.randn(5)
     f = lambda x, y: (x * y)
-    _, output = jvp(f, (x, y), (torch.ones(5), torch.ones(5)))
-    assert torch.allclose(output, x + y)
+    _, out_tangent = jvp(f, (x, y), (torch.ones(5), torch.ones(5)))
+    assert torch.allclose(out_tangent, x + y)
 
 :func:`jacrev`, :func:`jacfwd`, and :func:`hessian`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -153,8 +153,7 @@ the Jacobian of the function with respect to ``x`` using reverse-mode AD.
     expected = torch.diag(torch.cos(x))
     assert torch.allclose(jacobian, expected)
 
-Use :func:`jacrev` to compute the jacobian. This can be composed with vmap to produce
-batched jacobians:
+:func:`jacrev` can be composed with :func:`vmap` to produce batched jacobians:
 
 .. code-block:: python
 
@@ -178,11 +177,11 @@ Composing :func:`jacrev` with itself or :func:`jacfwd` can produce hessians:
 .. code-block:: python
 
     def f(x):
-      return x.sin().sum()
+        return x.sin().sum()
 
-      x = torch.randn(5)
-      hessian0 = jacrev(jacrev(f))(x)
-      hessian1 = jacfwd(jacrev(f))(x)
+    x = torch.randn(5)
+    hessian0 = jacrev(jacrev(f))(x)
+    hessian1 = jacfwd(jacrev(f))(x)
 
 :func:`hessian` is a convenience function that combines jacfwd and jacrev:
 
@@ -191,7 +190,7 @@ Composing :func:`jacrev` with itself or :func:`jacfwd` can produce hessians:
     from torch.func import hessian
 
     def f(x):
-      return x.sin().sum()
+        return x.sin().sum()
 
-      x = torch.randn(5)
-      hess = hessian(f)(x)
+    x = torch.randn(5)
+    hess = hessian(f)(x)

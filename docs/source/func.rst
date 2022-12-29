@@ -21,7 +21,7 @@ What are composable function transforms?
 - A "function transform" is a higher-order function that accepts a numerical function
   and returns a new function that computes a different quantity.
 
-- functorch has auto-differentiation transforms (``grad(f)`` returns a function that
+- :mod:`torch.func` has auto-differentiation transforms (``grad(f)`` returns a function that
   computes the gradient of ``f``), a vectorization/batching transform (``vmap(f)``
   returns a function that computes ``f`` over batches of inputs), and others.
 
