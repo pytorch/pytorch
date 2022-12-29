@@ -880,7 +880,7 @@ inline void DsDbRowwiseMomentsChannelsLast(
 }
 
 template <typename T, typename PT>
-void ApplyInputGradientsChannelsLast(
+inline void ApplyInputGradientsChannelsLastColMov(
   const T* dY_data,
   const T* X_data,
   T* dX_data,
@@ -890,63 +890,42 @@ void ApplyInputGradientsChannelsLast(
   PT c3,
   int64_t HxW,
   int64_t C,
-  int64_t D,
-  bool ColMov) {
+  int64_t D) {
   const bool gamma_null = (gamma == nullptr);
   int64_t d = 0;
   auto K = vec::Vectorized<T>::size();
   for (; d < D / K * K; d += K) {
-    if (ColMov) {
-      for (const auto m : c10::irange(HxW)) {
-        const T* X_ptr = X_data + m * C;
-        const T* dY_ptr = dY_data + m * C;
-        T* dX_ptr = dX_data + m * C;
-        auto c1 = vec::Vectorized<T>(*rstd) *
-          (gamma_null ? vec::Vectorized<T>(1) : vec::Vectorized<T>::loadu(gamma + d));
-        auto dy_vec = vec::Vectorized<T>::loadu(dY_ptr + d);
-        auto x_vec = vec::Vectorized<T>::loadu(X_ptr + d);
-        auto dx_vec = c1 * dy_vec +
-          vec::Vectorized<T>(c2) * x_vec + vec::Vectorized<T>(c3);
-        dx_vec.store(dX_ptr + d);
-      }
-    } else {
+    for (const auto m : c10::irange(HxW)) {
+      const T* X_ptr = X_data + m * C;
+      const T* dY_ptr = dY_data + m * C;
+      T* dX_ptr = dX_data + m * C;
       auto c1 = vec::Vectorized<T>(*rstd) *
         (gamma_null ? vec::Vectorized<T>(1) : vec::Vectorized<T>::loadu(gamma + d));
-      auto dy_vec = vec::Vectorized<T>::loadu(dY_data + d);
-      auto x_vec = vec::Vectorized<T>::loadu(X_data + d);
+      auto dy_vec = vec::Vectorized<T>::loadu(dY_ptr + d);
+      auto x_vec = vec::Vectorized<T>::loadu(X_ptr + d);
       auto dx_vec = c1 * dy_vec +
         vec::Vectorized<T>(c2) * x_vec + vec::Vectorized<T>(c3);
-      dx_vec.store(dX_data + d);
+      dx_vec.store(dX_ptr + d);
     }
   }
   if (D - d > 0) {
-    if (ColMov) {
-      for (const auto m : c10::irange(HxW)) {
-        const T* X_ptr = X_data + m * C;
-        const T* dY_ptr = dY_data + m * C;
-        T* dX_ptr = dX_data + m * C;
-        auto c1 = vec::Vectorized<T>(*rstd) *
-        (gamma_null ? vec::Vectorized<T>(1) : vec::Vectorized<T>::loadu(gamma + d, D - d));
-      auto dy_vec = vec::Vectorized<T>::loadu(dY_ptr + d, D - d);
-      auto x_vec = vec::Vectorized<T>::loadu(X_ptr + d, D - d);
-      auto dx_vec = c1 * dy_vec +
-        vec::Vectorized<T>(c2) * x_vec + vec::Vectorized<T>(c3);
-      dx_vec.store(dX_ptr + d, D - d);
-      }
-    } else {
+    for (const auto m : c10::irange(HxW)) {
+      const T* X_ptr = X_data + m * C;
+      const T* dY_ptr = dY_data + m * C;
+      T* dX_ptr = dX_data + m * C;
       auto c1 = vec::Vectorized<T>(*rstd) *
-        (gamma_null ? vec::Vectorized<T>(1) : vec::Vectorized<T>::loadu(gamma + d, D - d));
-      auto dy_vec = vec::Vectorized<T>::loadu(dY_data + d, D - d);
-      auto x_vec = vec::Vectorized<T>::loadu(X_data + d, D - d);
-      auto dx_vec = c1 * dy_vec +
-        vec::Vectorized<T>(c2) * x_vec + vec::Vectorized<T>(c3);
-      dx_vec.store(dX_data + d, D - d);
+      (gamma_null ? vec::Vectorized<T>(1) : vec::Vectorized<T>::loadu(gamma + d, D - d));
+    auto dy_vec = vec::Vectorized<T>::loadu(dY_ptr + d, D - d);
+    auto x_vec = vec::Vectorized<T>::loadu(X_ptr + d, D - d);
+    auto dx_vec = c1 * dy_vec +
+      vec::Vectorized<T>(c2) * x_vec + vec::Vectorized<T>(c3);
+    dx_vec.store(dX_ptr + d, D - d);
     }
   }
 }
 
 template <>
-void ApplyInputGradientsChannelsLast(
+inline void ApplyInputGradientsChannelsLastColMov(
   const BFloat16* dY_data,
   const BFloat16* X_data,
   BFloat16* dX_data,
@@ -956,81 +935,131 @@ void ApplyInputGradientsChannelsLast(
   float c3,
   int64_t HxW,
   int64_t C,
-  int64_t D,
-  bool ColMov) {
+  int64_t D) {
   using bVec = vec::Vectorized<BFloat16>;
   using fVec = vec::Vectorized<float>;
   const bool gamma_null = (gamma == nullptr);
   auto K = bVec::size();
   int64_t d = 0;
   for (; d < D / K * K; d += K) {
-    if (ColMov) {
-      for (const auto m : c10::irange(HxW)) {
-        const BFloat16* X_ptr = X_data + m * C;
-        const BFloat16* dY_ptr = dY_data + m * C;
-        BFloat16* dX_ptr = dX_data + m * C;
-        fVec c1_0 = fVec(*rstd) *
-          (gamma_null ? fVec(1) : fVec::loadu(gamma + d));
-        fVec c1_1 = fVec(*rstd) *
-          (gamma_null ? fVec(1) : fVec::loadu(gamma + d + fVec::size()));
-        bVec dy_vec = bVec::loadu(dY_ptr + d);
-        bVec x_vec = bVec::loadu(X_ptr + d);
-        fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
-        std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
-        std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
-        fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
-        fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
-        convert_float_bfloat16(dx_vec0, dx_vec1).store(dX_ptr + d);
-      }
-    } else {
+    for (const auto m : c10::irange(HxW)) {
+      const BFloat16* X_ptr = X_data + m * C;
+      const BFloat16* dY_ptr = dY_data + m * C;
+      BFloat16* dX_ptr = dX_data + m * C;
       fVec c1_0 = fVec(*rstd) *
         (gamma_null ? fVec(1) : fVec::loadu(gamma + d));
       fVec c1_1 = fVec(*rstd) *
         (gamma_null ? fVec(1) : fVec::loadu(gamma + d + fVec::size()));
-      bVec dy_vec = bVec::loadu(dY_data + d);
-      bVec x_vec = bVec::loadu(X_data + d);
+      bVec dy_vec = bVec::loadu(dY_ptr + d);
+      bVec x_vec = bVec::loadu(X_ptr + d);
       fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
       std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
       std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
       fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
       fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
-      convert_float_bfloat16(dx_vec0, dx_vec1).store(dX_data + d);
+      convert_float_bfloat16(dx_vec0, dx_vec1).store(dX_ptr + d);
     }
   }
   if (D - d > 0) {
-    if (ColMov) {
-      for (const auto m : c10::irange(HxW)) {
-        const BFloat16* X_ptr = X_data + m * C;
-        const BFloat16* dY_ptr = dY_data + m * C;
-        BFloat16* dX_ptr = dX_data + m * C;
-        fVec c1_0 = fVec(*rstd) *
-          (gamma_null ? fVec(1) : fVec::loadu(gamma + d, (D - d) > fVec::size() ? fVec::size() : (D - d)));
-        fVec c1_1 = fVec(*rstd) *
-          (gamma_null ? fVec(1) : fVec::loadu(gamma + d + fVec::size(), (D - d) > fVec::size() ? (D - d - fVec::size()) : 0));
-        bVec dy_vec = bVec::loadu(dY_ptr + d, D - d);
-        bVec x_vec = bVec::loadu(X_ptr + d, D - d);
-        fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
-        std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
-        std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
-        fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
-        fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
-        convert_float_bfloat16(dx_vec0, dx_vec1).store(dX_ptr + d, D - d);
-      }
-    } else {
+    for (const auto m : c10::irange(HxW)) {
+      const BFloat16* X_ptr = X_data + m * C;
+      const BFloat16* dY_ptr = dY_data + m * C;
+      BFloat16* dX_ptr = dX_data + m * C;
       fVec c1_0 = fVec(*rstd) *
         (gamma_null ? fVec(1) : fVec::loadu(gamma + d, (D - d) > fVec::size() ? fVec::size() : (D - d)));
       fVec c1_1 = fVec(*rstd) *
         (gamma_null ? fVec(1) : fVec::loadu(gamma + d + fVec::size(), (D - d) > fVec::size() ? (D - d - fVec::size()) : 0));
-      bVec dy_vec = bVec::loadu(dY_data + d, D - d);
-      bVec x_vec = bVec::loadu(X_data + d, D - d);
+      bVec dy_vec = bVec::loadu(dY_ptr + d, D - d);
+      bVec x_vec = bVec::loadu(X_ptr + d, D - d);
       fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
       std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
       std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
       fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
       fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
-      convert_float_bfloat16(dx_vec0, dx_vec1).store(dX_data + d, D - d);
+      convert_float_bfloat16(dx_vec0, dx_vec1).store(dX_ptr + d, D - d);
     }
+  }
+}
 
+template <typename T, typename PT>
+inline void ApplyInputGradientsChannelsLastRowMov(
+  const T* dY_data,
+  const T* X_data,
+  T* dX_data,
+  const PT* rstd,
+  const PT* gamma,
+  PT c2,
+  PT c3,
+  int64_t HxW,
+  int64_t C,
+  int64_t D) {
+  const bool gamma_null = (gamma == nullptr);
+  int64_t d = 0;
+  auto K = vec::Vectorized<T>::size();
+  for (; d < D / K * K; d += K) {
+    auto c1 = vec::Vectorized<T>(*rstd) *
+      (gamma_null ? vec::Vectorized<T>(1) : vec::Vectorized<T>::loadu(gamma + d));
+    auto dy_vec = vec::Vectorized<T>::loadu(dY_data + d);
+    auto x_vec = vec::Vectorized<T>::loadu(X_data + d);
+    auto dx_vec = c1 * dy_vec +
+      vec::Vectorized<T>(c2) * x_vec + vec::Vectorized<T>(c3);
+    dx_vec.store(dX_data + d);
+  }
+  if (D - d > 0) {
+    auto c1 = vec::Vectorized<T>(*rstd) *
+      (gamma_null ? vec::Vectorized<T>(1) : vec::Vectorized<T>::loadu(gamma + d, D - d));
+    auto dy_vec = vec::Vectorized<T>::loadu(dY_data + d, D - d);
+    auto x_vec = vec::Vectorized<T>::loadu(X_data + d, D - d);
+    auto dx_vec = c1 * dy_vec +
+      vec::Vectorized<T>(c2) * x_vec + vec::Vectorized<T>(c3);
+    dx_vec.store(dX_data + d, D - d);
+  }
+}
+
+template <>
+inline void ApplyInputGradientsChannelsLastRowMov(
+  const BFloat16* dY_data,
+  const BFloat16* X_data,
+  BFloat16* dX_data,
+  const float* rstd,
+  const float* gamma,
+  float c2,
+  float c3,
+  int64_t HxW,
+  int64_t C,
+  int64_t D) {
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  const bool gamma_null = (gamma == nullptr);
+  auto K = bVec::size();
+  int64_t d = 0;
+  for (; d < D / K * K; d += K) {
+    fVec c1_0 = fVec(*rstd) *
+      (gamma_null ? fVec(1) : fVec::loadu(gamma + d));
+    fVec c1_1 = fVec(*rstd) *
+      (gamma_null ? fVec(1) : fVec::loadu(gamma + d + fVec::size()));
+    bVec dy_vec = bVec::loadu(dY_data + d);
+    bVec x_vec = bVec::loadu(X_data + d);
+    fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
+    std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
+    std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
+    fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
+    fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
+    convert_float_bfloat16(dx_vec0, dx_vec1).store(dX_data + d);
+  }
+  if (D - d > 0) {
+    fVec c1_0 = fVec(*rstd) *
+      (gamma_null ? fVec(1) : fVec::loadu(gamma + d, (D - d) > fVec::size() ? fVec::size() : (D - d)));
+    fVec c1_1 = fVec(*rstd) *
+      (gamma_null ? fVec(1) : fVec::loadu(gamma + d + fVec::size(), (D - d) > fVec::size() ? (D - d - fVec::size()) : 0));
+    bVec dy_vec = bVec::loadu(dY_data + d, D - d);
+    bVec x_vec = bVec::loadu(X_data + d, D - d);
+    fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
+    std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
+    std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
+    fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
+    fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
+    convert_float_bfloat16(dx_vec0, dx_vec1).store(dX_data + d, D - d);
   }
 }
 
@@ -1222,7 +1251,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
         const PT c2 =
             (db_gamma * mean_data[i] - ds_gamma) * rstd_data[i] * rstd_data[i] * rstd_data[i] * s;
         const PT c3 = -c2 * mean_data[i] - db_gamma * rstd_data[i] * s;
-        ApplyInputGradientsChannelsLast<T, PT>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D, true);
+        ApplyInputGradientsChannelsLastColMov<T, PT>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D);
         data_index_step(n, N, g, G);
       }
     });
@@ -1302,7 +1331,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
             const PT c2 =
             (db_val * (*mean_ptr) - ds_val) * (*rstd_ptr) * (*rstd_ptr)* (*rstd_ptr) * s;
             const PT c3 = -c2 * (*mean_ptr) - db_val * (*rstd_ptr) * s;
-            ApplyInputGradientsChannelsLast<T, PT>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D, false);
+            ApplyInputGradientsChannelsLastRowMov<T, PT>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D);
           }
 
           data_index_step(n, N, m, HxW);
