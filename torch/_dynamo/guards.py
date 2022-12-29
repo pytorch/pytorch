@@ -21,6 +21,7 @@ from torch._guards import (
     GuardBuilderBase,
     GuardEnvExpr,
     GuardSource,
+    Source,
 )
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
@@ -83,11 +84,13 @@ class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
         id_ref: Callable[[Type[object]], str],
+        source_ref: Callable[[Source], str],
         scope: Optional[Dict[str, object]],
         guarded_code: "CheckFunctionManager",
         renames=True,
     ):
         self.id_ref = id_ref
+        self.source_ref = source_ref
         if scope:
             if renames:
                 scope = {rename_implicit(k): v for k, v in scope.items()}
@@ -373,10 +376,10 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.guarded_code.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        # TODO: arg_ref the used arg names
         code = output_graph.shape_env.codegen_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
+            source_ref=self.source_ref,
         )
         if code != "True":
             self._produce_guard_code(guard, [code], shape_env=True)
@@ -487,10 +490,28 @@ class CheckFunctionManager:
 
             return {**left, **right}
 
+        def source_ref(source):
+            guard_source = source.guard_source()
+            if guard_source is GuardSource.CONSTANT:
+                # No need to track constants
+                return source.name()
+            builder = guard_source.select(w_local(), w_global())
+            assert builder is not None
+            return builder.arg_ref(source.name())
+
         local_builder = GuardBuilder(
-            self.id_ref, combine_scopes(f_globals, f_locals), self, renames=True
+            self.id_ref,
+            source_ref,
+            combine_scopes(f_globals, f_locals),
+            self,
+            renames=True,
         )
-        global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
+        global_builder = GuardBuilder(
+            self.id_ref, source_ref, f_globals, self, renames=False
+        )
+        # source_ref can cause a cycle, make sure we break it with weakref
+        w_local = weakref.ref(local_builder)
+        w_global = weakref.ref(global_builder)
         for guard in sorted(guards or [], key=Guard.sort_key):
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
