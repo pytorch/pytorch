@@ -37,10 +37,6 @@ COMMON_COPTS = [
     # use cub in a safe manner, see:
     # https://github.com/pytorch/pytorch/pull/55292
     "-DCUB_WRAPPED_NAMESPACE=at_cuda_detail",
-    "-DUSE_C10D",
-    "-DUSE_TENSORPIPE",
-    "-DUSE_CUDA_NOT_ROCM",
-    "-DTENSORPIPE_SUPPORTS_CUDA=1",
 ])
 
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
