@@ -869,7 +869,7 @@ class TestSparseCompressed(TestCase):
                  base.device != other.device)):
                 return False
             if base.device.type == 'cpu' or base.device.type == 'cuda':
-                if base._storage().data_ptr() != other._storage().data_ptr():
+                if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                     return False
             return True
 
