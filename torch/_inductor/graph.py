@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import time
+from typing import Dict, List, Optional, Set
 
 import sympy
 
@@ -34,6 +35,22 @@ from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+
+
+def supported_dtype_of_cpp_wrapper(dtype):
+    supported_dtype = {
+        torch.float32,
+        torch.float64,
+        torch.int64,
+        torch.int32,
+        torch.int16,
+        torch.int8,
+        torch.uint8,
+        torch.bool,
+        # torch.float16, # TODO: implement this
+        # torch.bfloat16, # TODO: implement this
+    }
+    return dtype in supported_dtype
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -69,8 +86,13 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
+        fake_mode=None,
     ):
         super().__init__(gm)
+        if fake_mode is None:
+            self.fake_mode = torch._subclasses.FakeTensorMode()
+        else:
+            self.fake_mode = fake_mode
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -79,26 +101,27 @@ class GraphLowering(torch.fx.Interpreter):
             self.reuse_shape_env = True
         self._shape_env = shape_env
         self.sizevars = SizeVarAllocator(shape_env)
-        self.graph_inputs = {}
-        self.graph_inputs_original = {}
-        self.graph_outputs = None
-        self.device_types = set()
-        self.buffers = []
-        self.constants = {}
-        self.removed_buffers = set()
-        self.inplaced_to_remove = set()
+        self.graph_inputs: Dict[str, TensorBox] = {}
+        self.graph_inputs_original: Dict[str, InputBuffer] = {}
+        self.graph_outputs: Optional[List[ir.IRNode]] = None
+        self.device_types: Set[str] = set()
+        self.buffers: List[ir.ComputedBuffer] = []
+        self.constants: Dict[str, torch.Tensor] = {}
+        self.removed_buffers: Set[str] = set()
+        self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code = None
         self.num_static_inputs = num_static_inputs
-        self.mutated_inputs = set()
-        self.unaligned_buffers = set()
+        self.mutated_inputs: Set[str] = set()
+        self.unaligned_buffers: Set[str] = set()
         self.randomness_offset = sympy.Integer(0)
-        self.randomness_seeds = []
-        self.name_to_buffer = {}
+        self.randomness_seeds: List[str] = []
+        self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
+        self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
 
-    def get_dtype(self, buffer_name):
+    def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
             return self.constants[buffer_name].dtype
         if buffer_name in self.name_to_buffer:
@@ -152,10 +175,11 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
-            self.disable_cpp_wrapper("ExternKernel")
-        if isinstance(buffer, ir.ComputedBuffer):
-            if buffer.data.get_reduction_type():
-                self.disable_cpp_wrapper("Reduction")
+            if not isinstance(
+                buffer,
+                (ir.MatrixMultiply, ir.BatchMatrixMultiply, ir.MatrixMultiplyAdd),
+            ):
+                self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
         if config.cpp_wrapper:
@@ -222,7 +246,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.constants[alt_name] = self.constants[name].to(device_override)
         return alt_name
 
-    def placeholder(self, target, args, kwargs):
+    def placeholder(self, target: str, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
         if config.static_weight_shapes and (
             len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
@@ -344,6 +368,21 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 result = super().run_node(n)
 
+            # require the same stride order for dense outputs,
+            # so that user-land view() will not throw because inductor
+            # output different strides than eager
+            # long term the solution is to make view() always succeed
+            # with infallible strides.
+            if any(user.op == "output" for user in n.users):
+                strides = n.meta["val"].stride()
+                dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                # requiring a stride order for a non-dense output wouldn't
+                # recreate the same strides, and would fail with view, defer for now.
+                if dense and len(strides):
+                    result = ir.ExternKernel.require_stride_order(
+                        result, ir.get_stride_order(strides)
+                    )
+
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
@@ -382,6 +421,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # there are multiple branches meach with small number of memory
                 # reads, but they converge to a user.
                 result.realize_hint()
+
         return result
 
     def check_platform(self):
@@ -401,13 +441,8 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
-            if value.get_dtype() != torch.float32:
-                self.disable_cpp_wrapper("inputs not FP32")
-
-    def check_output_for_cpp_buffer(self):
-        for item in self.graph_outputs:
-            if isinstance(item, ir.NoneAsConstantBuffer):
-                self.disable_cpp_wrapper("NoneAsConstantBuffer")
+            if not supported_dtype_of_cpp_wrapper(value.get_dtype()):
+                self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):
         if self.constants:
@@ -418,7 +453,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.check_profiler_mark_wrapper_call()
         self.check_device_for_cpp_buffer()
         self.check_input_for_cpp_buffer()
-        self.check_output_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
@@ -438,6 +472,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.scheduler = Scheduler(self.buffers)
         self.scheduler.codegen()
+        assert self.wrapper_code is not None
         return self.wrapper_code.generate()
 
     def count_bytes(self):
@@ -503,6 +538,7 @@ class GraphLowering(torch.fx.Interpreter):
         return self.compile_to_module().call
 
     def get_output_names(self):
+        assert self.graph_outputs is not None
         return [
             node.get_name()
             for node in self.graph_outputs
@@ -510,7 +546,7 @@ class GraphLowering(torch.fx.Interpreter):
             and not isinstance(node, ir.ShapeAsConstantBuffer)
         ]
 
-    def is_unspec_arg(self, name):
+    def is_unspec_arg(self, name: str):
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
         return (
