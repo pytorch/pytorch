@@ -860,11 +860,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # override `_apply()` to have the storage change directly performed on
         # the `FlatParameter`s instead of applying to the original parameters
         # and then writing back to the `FlatParameter`s.
-        with (
+        context = (
             self._deregister_orig_params_ctx()
             if self._use_orig_params
             else contextlib.suppress()
-        ):
+        )
+        with context:
             return super()._apply(*args, **kwargs)
 
     def named_buffers(
