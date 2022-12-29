@@ -47,6 +47,19 @@ it accepts an nn.Module, the transformed ``parameters``, and the inputs to the
 Module's forward pass. It returns the value of running the Module's forward pass
 with the replaced parameters.
 
+Here's how we would compute the Jacobian over the parameters
+
+.. code-block:: python
+
+    model = torch.nn.Linear(3, 3)
+
+    def f(params, x):
+        return torch.func.functional_call(model, params, x)
+
+    x = torch.randn(3)
+    jacobian = jacrev(f)(dict(model.named_parameters()), x)
+
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
