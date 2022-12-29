@@ -140,8 +140,7 @@ additional comments::
 
         # Note that forward, setup_context, and backward are @staticmethods
         @staticmethod
-        # bias is an optional argument
-        def forward(input, weight, bias=None):
+        def forward(input, weight, bias):
             output = input.mm(weight.t())
             if bias is not None:
                 output += bias.unsqueeze(0).expand_as(output)
@@ -178,10 +177,16 @@ additional comments::
 
             return grad_input, grad_weight, grad_bias
 
-Now, to make it easier to use these custom ops, we recommend aliasing their
-``apply`` method::
+Now, to make it easier to use these custom ops, we recommend either aliasing
+them or wrapping them in a function. Wrapping in a function lets us support
+default arguments and keyword arguments::
 
+    # Option 1: alias
     linear = LinearFunction.apply
+
+    # Option 2: wrap in a function, to support default args and keyword args.
+    def linear(input, weight, bias=None):
+        return LinearFunction.apply(input, weight, bias)
 
 Here, we give an additional example of a function that is parametrized by
 non-Tensor arguments::
@@ -306,7 +311,7 @@ There are two main ways to define :class:`~Function`. Either:
 We recommend the second option (separate :meth:`~Function.forward` and ``setup_context``)
 because that is closer to how PyTorch native operations are implemented and it composes
 with :mod:`torch.func` transforms. However, we plan to support both approaches going forward;
-combining :meth:`~Function.forward` with ``setup_context`` leads to more flexibility since
+combining :meth:`~Function.forward` with ``setup_context``: leads to more flexibility since
 you are able to save intermediates without returning them as output.
 
 Please see the previous section for how to define :class:`~Function` with separate
