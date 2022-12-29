@@ -625,6 +625,7 @@ class SyncBatchNorm(_BatchNorm):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> # With Learnable Parameters
         >>> m = nn.SyncBatchNorm(100)
         >>> # creating process group (optional)
@@ -634,7 +635,6 @@ class SyncBatchNorm(_BatchNorm):
         >>> # Note: every rank calls into new_group for every
         >>> # process group created, even if that rank is not
         >>> # part of the group.
-        >>> # xdoctest: +SKIP
         >>> process_groups = [torch.distributed.new_group(pids) for pids in [r1, r2]]
         >>> process_group = process_groups[0 if dist.get_rank() <= 3 else 1]
         >>> # Without Learnable Parameters
