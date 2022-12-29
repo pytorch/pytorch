@@ -1713,7 +1713,7 @@ def empty_strided(
     size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
 ):
     assert isinstance(size, (list, type))
-    assert isinstance(stride, (list, type)) or stride is None
+    assert isinstance(stride, (list, type, type(None)))
     assert not pin_memory
     assert not layout or layout == torch.strided
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
