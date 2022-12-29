@@ -476,6 +476,22 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 **options,
             )
 
+            def track_out_tensors(new_tensor_variable, old_tensor_variable):
+                local_name = tx.find_symbolic_locals_name(old_tensor_variable)
+                if local_name:
+                    tx.symbolic_locals[local_name] = new_tensor_variable
+                    return
+
+                global_name = tx.find_global_name(old_tensor_variable)
+                if global_name and global_name in tx.f_globals:
+                    # We are writing into a global variable, so track mutation.
+                    tx.track_side_effect_for_globals(global_name, new_tensor_variable)
+                    return
+
+                unimplemented(
+                    "Torch op with out variant is not supported in this setting"
+                )
+
             if "out" in kwargs:
                 # out variants of torch operators like torch.sort and
                 # torch.sigmoid mutate the tensors in the out field. Track such
@@ -490,9 +506,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         tx.symbolic_locals[name] = tensor_variable.items[idx]
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
-                    name = tx.find_symbolic_locals_name(kwargs["out"])
-                    assert name in tx.symbolic_locals
-                    tx.symbolic_locals[name] = tensor_variable
+                    track_out_tensors(tensor_variable, kwargs["out"])
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 

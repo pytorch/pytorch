@@ -40,6 +40,8 @@ except ImportError:
 
 _orig_module_call = torch.nn.Module.__call__
 
+global_y = torch.zeros(2)
+
 
 def is_fx_tracing_test() -> bool:
     """
@@ -2225,6 +2227,45 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
+
+    def test_torch_out_global(self):
+        def fn(x):
+            torch.full(size=global_y.shape, fill_value=1.0, out=global_y)
+            return global_y + x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
+        opt_fn(torch.randn(2, 2))
+        # Check that the global_y is updated
+        self.assertTrue(same(global_y, torch.ones(2)))
+
+    def test_torch_out_nn_module(self):
+        class MockModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("mask", torch.zeros((2, 2)))
+                self.mask_initialized = False
+
+            def _fill_causal_attn_mask(self):
+                assert isinstance(self.mask, torch.Tensor)  # for type checking
+                x = torch.randn(4)  # This line just gets two graphs, and helps testing
+                torch.full(size=self.mask.shape, fill_value=1.0, out=self.mask)
+
+            def forward(self, x):
+                if not self.mask_initialized:
+                    self._fill_causal_attn_mask()
+                    self.mask_initialized = True
+                return x + self.mask
+
+            def get_mask(self):
+                return self.mask
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        mod = MockModule()
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        opt_mod(torch.zeros(2, 2))
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_mod.get_mask(), torch.ones(2, 2))
 
 
 if __name__ == "__main__":

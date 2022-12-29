@@ -649,9 +649,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         source = self.get_global_source(name)
         self.push(VariableBuilder(self, source)(value))
 
-    def STORE_GLOBAL(self, inst):
-        value = self.pop()
-        name = inst.argval
+    def track_side_effect_for_globals(self, name, value):
         source = self.get_global_source(name)
         if name not in self.symbolic_globals:
             self.symbolic_globals[name] = object()  # sentinel object
@@ -659,6 +657,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             source, self.symbolic_globals[name]
         )
         self.output.side_effects.store_global(variable, name, value)
+
+    def STORE_GLOBAL(self, inst):
+        value = self.pop()
+        name = inst.argval
+        self.track_side_effect_for_globals(name, value)
 
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
@@ -1531,6 +1534,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         for key, value in self.symbolic_locals.items():
             if value is tensor_variable:
                 return key
+        return None
+
+    def find_global_name(self, tensor_variable):
+        if isinstance(tensor_variable.source, GlobalSource):
+            return tensor_variable.source.global_name
         return None
 
     def __init__(
