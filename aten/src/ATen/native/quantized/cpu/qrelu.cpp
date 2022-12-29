@@ -150,7 +150,7 @@ Tensor& leaky_relu_quantized_cpu_(Tensor& self, const Scalar& negval) {
   return self;
 }
 
-Tensor prelu_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
+Tensor _prelu_kernel_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
                                 double output_scale, int64_t output_zero_point) {
   auto ndim = self.dim();
   // for ndim < 1 or > 5, go to reference path
@@ -172,8 +172,8 @@ Tensor prelu_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
   return qy;
 }
 
-Tensor prelu_quantized_cpu(const Tensor& self, const Tensor& weight) {
-  return prelu_quantized_cpu_impl(self, weight, self.q_scale(), self.q_zero_point());
+Tensor _prelu_kernel_quantized_cpu(const Tensor& self, const Tensor& weight) {
+  return _prelu_kernel_quantized_cpu_impl(self, weight, self.q_scale(), self.q_zero_point());
 }
 
 namespace {
@@ -220,7 +220,7 @@ class QLeakyRelu final {
 class QPRelu final {
  public:
   static Tensor run(Tensor self, const Tensor& weight, double output_scale, int64_t output_zero_point) {
-  return prelu_quantized_cpu_impl(self, weight, output_scale, output_zero_point);
+  return _prelu_kernel_quantized_cpu_impl(self, weight, output_scale, output_zero_point);
   }
 };
 
