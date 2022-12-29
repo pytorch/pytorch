@@ -350,7 +350,6 @@ def compile_fx(
     inner_compile=compile_fx_inner,
 ):
     """Main entrypoint to a compile given FX graph"""
-
     if not is_aot_autograd_safe_to_run(model_, example_inputs_):
         log.warning("Aot Autograd is not safe to run, so falling back to eager")
         return model_
@@ -358,10 +357,17 @@ def compile_fx(
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
+    log.warning("Printing initial graph...")
+    model_.graph.print_tabular()
     with overrides.patch_functions():
+        log.warning("normalizing ir!!!")
         model_ = normalize_ir(model_, example_inputs_)
+        log.warning("replacing fx!!!")
         model_ = overrides.replace_fx(model_)
+        log.warning("Fusing!!!")
         model_ = overrides.fuse_fx(model_, example_inputs_)
+        log.warning("Printing resulting graph...")
+        model_.graph.print_tabular()
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs and not config.dynamic_shapes)
 

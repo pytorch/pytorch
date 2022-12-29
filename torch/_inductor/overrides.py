@@ -79,6 +79,8 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         gm = permute_linear_fusion(gm)
         gm = permute_matmul_fusion(gm)
 
+    gm = tanh_relu_fusion(gm)
+
     # make sure the autograd is disabled.
     if torch.is_grad_enabled():
         return gm
@@ -477,6 +479,40 @@ def transpose_matmul(A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: boo
     if Btrans:
         B = B.transpose(-1, -2)
     return torch.matmul(A, B)
+
+
+# try to register fusion for two simple ops
+def tanh_relu_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    for node in module.graph.nodes:
+        if node.op == "call_method" and node.target == "relu":
+            if len(node.args) > 0:
+                input_node = node.args[0]
+            else:
+                input_node = node.kwargs["input"]
+            if (
+                input_node.op == "call_method"
+                and input_node.target == "tanh"
+            ):
+                if len(input_node.args) > 0:
+                    input = input_node.args[0]
+                else:
+                    input = input_node.kwargs["input"]
+                with module.graph.inserting_before(node):
+                    fused_node = module.graph.call_function(
+                        tanh_relu, args=(input,)
+                    )
+                    node.replace_all_uses_with(fused_node)
+                    module.graph.erase_node(node)
+                    module.graph.erase_node(input_node)
+
+    module.graph.lint()
+    module.recompile()
+    return module
+
+def tanh_relu(
+    input: torch.Tensor
+) -> torch.Tensor:
+    return torch.tanh(torch.relu(input))
 
 
 philox_rand_like = _prims._make_prim(
