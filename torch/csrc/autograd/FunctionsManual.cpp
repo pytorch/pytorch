@@ -3489,37 +3489,39 @@ Tensor linalg_lstsq_jvp(
 }
 
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
-    const Tensor& grad,
+    const Tensor& gX_,
     const Tensor& A,
-    const Tensor& B,
-    const c10::optional<double> rcond,
-    const c10::optional<c10::string_view> driver,
+    const Tensor& B_,
     const std::array<bool, 2>& grad_input_mask) {
   at::NoTF32Guard disable_tf32;
-  Tensor A_grad, B_grad;
-  if (!grad.defined()) {
-    return std::make_tuple(A_grad, B_grad);
-  }
-
   auto A_requires_grad = grad_input_mask[0];
   auto B_requires_grad = grad_input_mask[1];
+  if (!gX_.defined() || (!A_requires_grad && !B_requires_grad)) {
+    return {};
+  }
 
-  Tensor pinvA;
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(A, B_);
+  const auto vector_to_matrix = [vector_case](const Tensor& X) {
+    return vector_case ? X.unsqueeze(-1) : X;
+  };
+  const auto matrix_to_vector = [vector_case](const Tensor& X) {
+    return vector_case ? X.squeeze(-1) : X;
+  };
+
+  auto gX = vector_to_matrix(gX_);
+  auto B = vector_to_matrix(B_);
+  Tensor pinvA = at::linalg_pinv(A);
+  Tensor A_grad, B_grad;
   if (A_requires_grad) {
-    pinvA = at::linalg_pinv(A);
-    auto pinvA_grad = grad.matmul(B.transpose(-1, -2).conj());
+    auto pinvA_grad = gX.matmul(B.mH());
     A_grad = pinv_backward(pinvA_grad, pinvA, A);
   }
 
   if (B_requires_grad) {
-    if (!pinvA.defined()) {
-      pinvA = at::linalg_pinv(A);
-    }
     // Equivalent to
-    // B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2).conj(), grad,
-    // rcond, driver)); but we avoid this approach as `gelsy` is
-    // non-deterministic
-    B_grad = pinvA.transpose(-1, -2).conj().matmul(grad);
+    // B_grad = std::get<0>(at::linalg_lstsq(A.mH(), gX, rcond, driver));
+    // but we avoid this approach as `gelsy` is non-deterministic
+    B_grad = matrix_to_vector(pinvA.mH().matmul(gX));
   }
 
   return std::make_tuple(A_grad, B_grad);
