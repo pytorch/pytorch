@@ -5,6 +5,7 @@ import warnings
 
 import torch
 from torch import _VF
+from torch import sym_float as _sym_float, sym_int as _sym_int
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes, sparse_support_notes
 # A workaround to support both TorchScript and MyPy:
@@ -23,7 +24,6 @@ from . import _reduction as _Reduction
 from . import grad  # noqa: F401
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
-
 
 Tensor = torch.Tensor
 
@@ -3904,15 +3904,21 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if recompute_scale_factor is not None and recompute_scale_factor:
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
+        assert scale_factors is not None
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [
                 (torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
                 for i in range(dim)
             ]
+        elif torch.jit.is_scripting():
+            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i]))
+                           for i in range(dim)]
         else:
-            assert scale_factors is not None
-            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+            output_size = [
+                _sym_int(math.floor(_sym_float(input.size(i + 2)) * scale_factors[i]))
+                for i in range(dim)
+            ]
         scale_factors = None
 
     if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
