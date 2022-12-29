@@ -148,32 +148,6 @@ AdvancedIndex make_info(Tensor self, IOptTensorListRef orig);
 
 namespace meta {
 
-native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce, bool use_new_options = false) {
-  if (use_new_options) {
-    if (reduce == "sum") {
-      return native::SCATTER_GATHER_OP::REDUCE_ADD;
-    } else if (reduce == "prod") {
-      return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
-    } else if (reduce == "mean") {
-      return native::SCATTER_GATHER_OP::REDUCE_MEAN;
-    } else if (reduce == "amax") {
-      return native::SCATTER_GATHER_OP::REDUCE_MAXIMUM;
-    } else if (reduce == "amin") {
-    return native::SCATTER_GATHER_OP::REDUCE_MINIMUM;
-    } else {
-      TORCH_CHECK(false, "reduce argument must be either sum, prod, mean, amax or amin.");
-    }
-  } else {
-    if (reduce == "add") {
-      return native::SCATTER_GATHER_OP::REDUCE_ADD;
-    } else if (reduce == "multiply") {
-      return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
-    } else {
-      TORCH_CHECK(false, "reduce argument must be either add or multiply.")
-    }
-  }
-}
-
 TORCH_META_FUNC(gather)
 (const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   const Tensor& result = maybe_get_output(0);
@@ -227,7 +201,7 @@ void scatter_meta_impl(
   meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
   if (reduce.has_value()) {
     // Check if we have a valid reduce operator.
-    get_operator_enum(reduce.value(), use_new_options);
+    at::native::get_operator_enum(reduce.value(), use_new_options);
   }
 }
 
@@ -971,7 +945,7 @@ void index_reduce_func_impl(
   const Tensor& source,
   bool include_self,
   const Tensor& result,
-  const SCATTER_GATHER_OP& op) {
+  const ReductionType& op) {
   if (!result.is_same(self)) result.copy_(self);
   if (!include_self) {
     AT_DISPATCH_ALL_TYPES_AND2(
@@ -979,14 +953,14 @@ void index_reduce_func_impl(
       self.scalar_type(), "index_reduce_func_exclude_input_init", [&] {
       scalar_t init_val;
       switch (op) {
-        case SCATTER_GATHER_OP::REDUCE_MULTIPLY:
+        case ReductionType::PROD:
           init_val = (scalar_t)1;
           break;
-        case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
+        case ReductionType::MAX:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::lowest();
           break;
-        case SCATTER_GATHER_OP::REDUCE_MINIMUM:
+        case ReductionType::MIN:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::max();
           break;
@@ -1033,13 +1007,13 @@ void index_reduce_func_impl(
         iter.unsafe_replace_operand(2, source_data);
 
         switch (op) {
-          case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+          case ReductionType::PROD :
             mul_stub(iter.device_type(), iter);
             break;
-          case SCATTER_GATHER_OP::REDUCE_MINIMUM :
+          case ReductionType::MIN :
             minimum_stub(iter.device_type(), iter);
             break;
-          case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
+          case ReductionType::MAX :
             maximum_stub(iter.device_type(), iter);
             break;
           default :
@@ -1049,7 +1023,7 @@ void index_reduce_func_impl(
       }
     });
 
-    if (op == SCATTER_GATHER_OP::REDUCE_MEAN) {
+    if (op == ReductionType::MEAN) {
       auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
       counts.index_add_(dim, index, at::ones_like(source));
       counts.masked_fill_(counts == 0, 1);
@@ -1084,19 +1058,19 @@ void index_reduce_func_impl(
             scalar_t *count_ip;
             scalar_t val;
             switch (op) {
-              case SCATTER_GATHER_OP::REDUCE_MEAN :
+              case ReductionType::MEAN :
                 *self_ip += *(source_ptr + i * source_stride);
                 count_ip = counts_ptr + self_i * counts_stride;
                 *count_ip += 1;
                 break;
-              case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+              case ReductionType::PROD :
                 *self_ip *= *(source_ptr + i * source_stride);
                 break;
-              case SCATTER_GATHER_OP::REDUCE_MINIMUM :
+              case ReductionType::MIN :
                 val = *(source_ptr + i * source_stride);
                 *self_ip = at::_isnan<scalar_t>(val) ? val : std::min(*self_ip, val);
                 break;
-              case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
+              case ReductionType::MAX :
                 val = *(source_ptr + i * source_stride);
                 *self_ip = at::_isnan<scalar_t>(val) ? val : std::max(*self_ip, val);
                 break;
@@ -1106,7 +1080,7 @@ void index_reduce_func_impl(
         }
       });
     });
-    if (op == SCATTER_GATHER_OP::REDUCE_MEAN) {
+    if (op == ReductionType::MEAN) {
       counts.masked_fill_(counts == 0, 1);
       if (result.is_floating_point() || result.is_complex()) {
         result.div_(counts);
@@ -1126,7 +1100,7 @@ TORCH_IMPL_FUNC(index_reduce_cpu_out)
  bool include_input,
  const Tensor& result) {
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
-  auto op = meta::get_operator_enum(reduce, true);
+  auto op = get_operator_enum(reduce, true);
   index_reduce_func_impl(self, dim, index, source, include_input, result, op);
 }
 
@@ -1503,27 +1477,27 @@ static void scatter_reduce_exclude_self_helper(
   const Tensor& self,
   int64_t dim,
   const Tensor& index,
-  const SCATTER_GATHER_OP& op) {
+  const ReductionType& op) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
     self.scalar_type(), "scatter_reduce_exclude_input_init", [&] {
     scalar_t init_val;
     switch (op) {
-      case SCATTER_GATHER_OP::REDUCE_ADD:
+      case ReductionType::SUM:
         init_val = (scalar_t)0;
         break;
-      case SCATTER_GATHER_OP::REDUCE_MULTIPLY:
+      case ReductionType::PROD:
         init_val = (scalar_t)1;
         break;
-      case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
+      case ReductionType::MAX:
         init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
                    : std::numeric_limits<scalar_t>::lowest();
         break;
-      case SCATTER_GATHER_OP::REDUCE_MINIMUM:
+      case ReductionType::MIN:
         init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
                    : std::numeric_limits<scalar_t>::max();
         break;
-      case SCATTER_GATHER_OP::REDUCE_MEAN:
+      case ReductionType::MEAN:
         init_val = (scalar_t)0;
         break;
     }
@@ -1553,7 +1527,7 @@ void scatter_impl(
   if (index.numel() == 0) return;
 
   if (reduce.has_value()) {
-    auto op = meta::get_operator_enum(reduce.value(), use_new_options);
+    auto op = get_operator_enum(reduce.value(), use_new_options);
     if (!reduce_includes_self) {
       // scatter inits for reduction to appropriate indices (used by scatter_reduce.two)
       scatter_reduce_exclude_self_helper(mut_out, dim, index, op);
@@ -1744,7 +1718,7 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
                                          reduce,
                                          include_self);
 
-  if (meta::get_operator_enum(reduce, true) == SCATTER_GATHER_OP::REDUCE_MEAN) {
+  if (get_operator_enum(reduce, true) == ReductionType::MEAN) {
     auto ones = at::ones_like(src);
     auto count = include_self ? at::ones_like(out) : at::zeros_like(out);
     count.scatter_add_(dim, index, ones);
