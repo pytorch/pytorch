@@ -351,8 +351,13 @@ auto handle_torch_function_no_python_arg_parser(
   if (ret.ptr() == Py_NotImplemented) {
     // recurse!
     return handle_torch_function_no_python_arg_parser(
-        overloaded_args, args, kwargs, func_name, torch_api_function, module_name, torch_function_name
-    );
+        overloaded_args,
+        args,
+        kwargs,
+        func_name,
+        torch_api_function,
+        module_name,
+        torch_function_name);
   }
 
   if (ret.ptr() == nullptr) {
