@@ -2395,6 +2395,9 @@
   mat1: maybe_multiply(grad.sparse_mask(self).mm(mat2.mH()), alpha.conj())
   mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
 
+- name: sampled_reduce(Tensor self, Tensor other, str reduce, *, Tensor? left_index=None, Tensor? right_index=None) -> Tensor
+  self, other: "grad.defined() ? sampled_reduce_backward(grad, self, other, left_index, right_index, reduce, grad_input_mask) : std::tuple<Tensor, Tensor>()"
+
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
   grad_output: smooth_l1_loss_backward(grad, self, target, reduction, beta)
   self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)

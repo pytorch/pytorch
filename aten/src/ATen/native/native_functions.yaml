@@ -6390,6 +6390,14 @@
     SparseCsrCUDA: sparse_sampled_addmm_sparse_csr_cuda
     SparseCsrCPU: sparse_sampled_addmm_sparse_csr_cpu
 
+- func: sampled_reduce(Tensor self, Tensor other, str reduce, *, Tensor? left_index=None, Tensor? right_index=None) -> Tensor
+  dispatch:
+    CPU: sampled_reduce_cpu
+
+- func: sampled_reduce_backward(Tensor grad, Tensor self, Tensor other, Tensor left_index, Tensor right_index, str reduce, bool[2] output_mask) -> (Tensor, Tensor)
+  dispatch:
+    CPU: sampled_reduce_backward_cpu
+
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
