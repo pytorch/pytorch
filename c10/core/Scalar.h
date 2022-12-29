@@ -292,7 +292,7 @@ class C10_API Scalar {
   Tag tag;
 
   union v_t {
-    double d;
+    double d{};
     int64_t i;
     c10::complex<double> z;
     c10::intrusive_ptr_target* p;

@@ -24,8 +24,9 @@ from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
 from torch import SymInt, SymFloat
+from torch.utils.weak import WeakTensorKeyDictionary
 
-__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "get_proxy", "has_proxy", "py_sym_types"]
+__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
 aten = torch.ops.aten
 prim = torch.ops.prim
 
@@ -62,21 +63,20 @@ def is_sym_node(node):
     return "val" in node.meta and isinstance(node.meta['val'], py_sym_types)
 
 def set_proxy_slot(obj, tracer, proxy):
-    assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
-    d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())  # type: ignore[call-overload]
-    assert isinstance(d, weakref.WeakKeyDictionary)
-    # NB: Never clobber pre-existing proxy.  Although the proxies
-    # are in principle equivalent, when we do graph partitioning
-    # we need there not to be spurious dependencies on tangent inputs.
-    # This works because primals get their SymInts set first, and
-    # THEN later we allocate tangent inputs.  Make sure if a SymInt
-    # is derivable from a primal that we use that.
-    #
-    # However, we DO want to clobber proxies whenever we run an inplace operation
-    # on a tensor, and it affects the metadata on the proxy.
-    # This doesn't really apply to SymInts/SymFloats though, which are immutable.
-    if tracer not in d or isinstance(obj, torch.Tensor):
-        d[tracer] = proxy
+    if isinstance(obj, torch.Tensor):
+        # We DO want to clobber proxies whenever we run an inplace operation
+        # on a tensor, and it affects the metadata on the proxy.
+        tracer.tensor_tracker[obj] = proxy
+    else:
+        # NB: Never clobber pre-existing proxy.  Although the proxies
+        # are in principle equivalent, when we do graph partitioning
+        # we need there not to be spurious dependencies on tangent inputs.
+        # This works because primals get their SymInts set first, and
+        # THEN later we allocate tangent inputs.  Make sure if a SymInt
+        # is derivable from a primal that we use that.
+        assert isinstance(obj, SymNode), type(obj)
+        if obj not in tracer.symnode_tracker:
+            tracer.symnode_tracker[obj] = proxy
 
 def has_proxy_slot(obj, tracer):
     assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
@@ -86,36 +86,17 @@ def has_proxy_slot(obj, tracer):
 # the transform argument is handy if you need to extract a subfield from
 # the successfully looked up result (but NOT the default.)
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
-    assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
-    d = obj.__dict__.get(proxy_slot)  # type: ignore[call-overload]
-    if not d:
+    if isinstance(obj, torch.Tensor):
+        tracker = tracer.tensor_tracker
+    else:
+        assert isinstance(obj, SymNode), type(obj)
+        tracker = tracer.symnode_tracker
+
+    if obj not in tracker:
         if default is no_default:
-            raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
+            raise RuntimeError(f"{obj} is not tracked with proxy for {tracer}")
         return default
-    assert isinstance(d, weakref.WeakKeyDictionary)
-    if tracer not in d:
-        if default is no_default:
-            raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
-        else:
-            return default
-    return transform(d[tracer])
-
-
-def get_proxy_slots(obj):
-    return obj.__dict__.get(proxy_slot)
-
-
-# Gets the proxy for a tensor, if it exists.
-def get_proxy(obj):
-    res = get_proxy_slots(obj)
-    if res is None:
-        return None
-    vals = tuple(res.values())
-    assert len(vals) == 1
-    return vals[0]
-
-def has_proxy(obj):
-    return get_proxy(obj) is not None
+    return transform(tracker[obj])
 
 def snapshot_fake(val):
     return val.detach()
@@ -404,6 +385,8 @@ def proxy_call(proxy_mode, func, args, kwargs):
 class PythonKeyTracer(Tracer):
     def __init__(self):
         super().__init__()
+        self.tensor_tracker = WeakTensorKeyDictionary()
+        self.symnode_tracker = weakref.WeakKeyDictionary()  # type: ignore[var-annotated]
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -580,6 +563,9 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         super().__init__(module, **kwargs)
         self.new_graph = new_graph
         self.tracer = torch.fx.proxy.GraphAppendingTracer(self.new_graph)
+        # Blegh
+        self.tracer.tensor_tracker = WeakTensorKeyDictionary()  # type: ignore[attr-defined]
+        self.tracer.symnode_tracker = weakref.WeakKeyDictionary()  # type: ignore[attr-defined]
         self.decomposition_table = decomposition_table
         if self.decomposition_table is None:
             self.decomposition_table = {}
@@ -635,7 +621,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real"):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -649,10 +635,15 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+            fake_tensor_mode = FakeTensorMode(
+                allow_fallback_kernels=True,
+                allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
             shape_env = ShapeEnv()
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env)
+            fake_tensor_mode = FakeTensorMode(
+                allow_fallback_kernels=False,
+                allow_non_fake_inputs=_allow_non_fake_inputs,
+                shape_env=shape_env)
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
@@ -708,6 +699,13 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
 def get_torch_dispatch_modes():
     return torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+
+
+def get_innermost_proxy_mode():
+    for m in reversed(torch.utils._python_dispatch._get_current_dispatch_mode_stack()):
+        if isinstance(m, ProxyTorchDispatchMode):
+            return m
+    return None
 
 
 @contextlib.contextmanager
