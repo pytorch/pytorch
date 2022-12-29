@@ -10,7 +10,7 @@ namespace c10 {
 struct FunctionalityOffsetAndMask {
   // empty constructor shouldn't be used; only needed to initialize
   // the array before populating it.
-  FunctionalityOffsetAndMask() {}
+  FunctionalityOffsetAndMask() = default;
   FunctionalityOffsetAndMask(uint16_t offset, uint16_t mask)
       : offset(offset), mask(mask) {}
   // This needs to big enough to cover the size of the operator table.

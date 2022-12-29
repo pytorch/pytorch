@@ -129,7 +129,7 @@ struct TORCH_API MetaBase {
   const Tensor& maybe_get_output() {
     return maybe_get_output(0);
   }
-  virtual ~MetaBase() {}
+  virtual ~MetaBase() = default;
 };
 
 } // namespace impl

@@ -83,7 +83,7 @@ RandomnessType DynamicLayer::randomness() const {
 // this layer of indirection.
 class FuncTorchTLS : public FuncTorchTLSBase {
  public:
-  FuncTorchTLS() {}
+  FuncTorchTLS() = default;
 
   std::unique_ptr<FuncTorchTLSBase> deepcopy() const override {
     auto result = std::make_unique<FuncTorchTLS>();

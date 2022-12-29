@@ -303,7 +303,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   DependencySet getAllReadsWithin(StmtOrExprPtr v) {
     DependencySet reads;
     auto insertAllReads = [&](const auto& nodes) {
-      for (auto l : nodes) {
+      for (const auto& l : nodes) {
         auto bound = exprToAccess_.equal_range(l);
         for (auto it = bound.first; it != bound.second; ++it) {
           if (it->second->isRead()) {
@@ -328,7 +328,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
 
     // writes just Store currently.
     auto stores = NodeFinder<Store>::find(v);
-    for (auto s : stores) {
+    for (const auto& s : stores) {
       auto bound = stmtToAccess_.equal_range(s);
       for (auto it = bound.first; it != bound.second; ++it) {
         if (it->second->isWrite()) {
