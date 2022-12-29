@@ -119,6 +119,7 @@ Tensor _segment_reduce_lengths_cpu_kernel(
     const Tensor& lengths,
     int64_t axis,
     const c10::optional<Scalar>& initial) {
+
   auto output_shape = data.sizes().vec();
   output_shape[axis] = lengths.size(axis);
   auto output = at::empty(output_shape, data.options());
@@ -140,6 +141,7 @@ Tensor _segment_reduce_offsets_cpu_kernel(
     const Tensor& offsets,
     int64_t axis,
     const c10::optional<Scalar>& initial) {
+
   auto output_shape = data.sizes().vec();
   output_shape[axis] = offsets.size(axis) - 1;
   auto output = at::empty(output_shape, data.options());
@@ -154,204 +156,147 @@ Tensor _segment_reduce_offsets_cpu_kernel(
   return output;
 }
 
-template <typename T, bool is_offsets_like = false>
-void _segment_reduce_cpu_lengths_backward_kernel1(
-    const Tensor& grad_contig,
-    const Tensor& output_contig,
-    const Tensor& data_contig,
-    ReductionType reduction,
-    const T* lengths_data,
-    int64_t axis,
-    const c10::optional<Scalar>& initial,
-    Tensor& grad_input,
-    int64_t segment_count,
-    int64_t lengths_stride_axis) {
-  // outer_offset is the size of the outer dimensions of output (before axis)
-  // inner_offset is the size of the inner dimensions of output (after axis)
-  int64_t outer_offset = 1, inner_offset = 1;
-  for (int64_t d = 0; d < axis; d++)
-      outer_offset *= output_contig.size(d);
-  for (int64_t d = axis + 1; d < output_contig.dim(); d++)
-      inner_offset *= output_contig.size(d);
-  int64_t lengths_size_axis = is_offsets_like ? segment_count + 1 : segment_count;
-  auto data_stride_axis = data_contig.stride(axis);
-  auto data_size_axis = data_contig.size(axis);
-  auto output_stride_axis = output_contig.stride(axis);
-  auto output_size_axis = output_contig.size(axis);
-  // TODO: Switch to TensorIterator for better maintainablility and
-  // readability
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16,
-      kHalf,
-      data_contig.scalar_type(),
-      "_segment_reduce_cpu",
-      [&]() {
-        auto* output_data = output_contig.data_ptr<scalar_t>();
-        auto* grad_data = grad_contig.data_ptr<scalar_t>();
-        auto* grad_input_data = grad_input.data_ptr<scalar_t>();
-        const auto* values_data = data_contig.data_ptr<scalar_t>();
-        // Used to calculate exclusive prod
-        scalar_t initial_prod_value;
-        if (reduction == ReductionType::PROD) {
-          if (initial.has_value()) {
-            initial_prod_value = initial.value().to<scalar_t>();
-          } else {
-            initial_prod_value = 1;
-          }
-        }
+template <typename scalar_t, typename index_t>
+void segment_reduce_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& output,
+    const Tensor& input,
+    ReductionType reduce,
+    const Tensor& offsets,
+    const c10::optional<Scalar>& initial) {
 
-        for (const auto outer_idx : c10::irange(outer_offset)) {
-          // int64_t lengths_cum_sum = 0;
-          int64_t segment_start, segment_length;
-          int64_t segment_end = is_offsets_like ?
-                                lengths_data[outer_idx * lengths_stride_axis * lengths_size_axis] :
-                                0;
-          for (const auto dim_idx : c10::irange(segment_count)) {
-            // int64_t segment_length = lengths_data[outer_idx * lengths_stride_axis * segment_count + dim_idx];
-            segment_start = segment_end;
-            auto lengths_idx = outer_idx * lengths_stride_axis * lengths_size_axis + dim_idx;
-            if (is_offsets_like) {
-              segment_end = lengths_data[lengths_idx + 1];
-              segment_length = segment_end - segment_start;
-            } else {
-              segment_length = lengths_data[lengths_idx];
-              segment_end += segment_length;
+  int64_t axis = offsets.dim() - 1;
+
+  scalar_t* grad_input_data = grad_input.data_ptr<scalar_t>();
+  scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
+  scalar_t* output_data = output.data_ptr<scalar_t>();
+  scalar_t* input_data = input.data_ptr<scalar_t>();
+  index_t* offsets_data = offsets.data_ptr<index_t>();
+
+  auto input_sizes = input.sizes().vec();
+  auto output_sizes = output.sizes().vec();
+
+  int64_t B = c10::size_to_dim_(axis, input_sizes);
+  int64_t M = input_sizes[axis];
+  int64_t N = output_sizes[axis];
+  int64_t K = c10::size_from_dim_(axis + 1, input_sizes);
+
+  // parallel on {B, N}
+  using acc_t = vec_scalar_t<scalar_t>;
+  using Vec = Vectorized<acc_t>;
+  at::parallel_for(0, B * N, 1, [&](int64_t begin, int64_t end) {
+    int64_t b{0}, n{0};
+    data_index_init(begin, b, B, n, N);
+
+    for (const auto i : c10::irange(begin, end)) {
+      scalar_t* grad_input_ptr = grad_input_data + b * (M * K);
+      scalar_t* grad_output_ptr = grad_output_data + i * K;
+      scalar_t* output_ptr = output_data + i * K;
+      scalar_t* input_ptr = input_data + b * (M * K);
+      index_t* offsets_ptr = offsets_data + b * (N + 1);
+
+      int64_t row_start = offsets_ptr[n];
+      int64_t row_end = offsets_ptr[n + 1];
+
+      // skip the empty segment
+      if (row_end == row_start) { continue; }
+
+      if (reduce == ReductionType::SUM) {
+        for (const auto m : c10::irange(row_start, row_end)) {
+          vec::map<scalar_t>(
+              [](Vec x) { return x; },
+              grad_input_ptr + m * K,
+              grad_output_ptr,
+              K);
+        }
+      } else if (reduce == ReductionType::MEAN) {
+        int64_t count = row_end - row_start;
+        for (const auto m : c10::irange(row_start, row_end)) {
+          vec::map<scalar_t>(
+              [count](Vec x) { return x / Vec(count); },
+              grad_input_ptr + m * K,
+              grad_output_ptr,
+              K);
+        }
+      } else if (reduce == ReductionType::MAX || reduce == ReductionType::MIN) {
+        for (const auto k : c10::irange(K)) {
+          int64_t counter = 0;
+          for (const auto m : c10::irange(row_start, row_end)) {
+            scalar_t value = input_ptr[m * K + k];
+            if (at::_isnan(value) || value == output_ptr[k]) {
+              grad_input_ptr[m * K + k] = grad_output_ptr[k];
+              counter++;
             }
-            if (segment_length == 0) {
-              continue;
-            }
-            for (const auto inner_idx : c10::irange(inner_offset)) {
-              int64_t output_index = outer_idx * output_stride_axis * output_size_axis
-                                     + dim_idx * output_stride_axis + inner_idx;
-              if (reduction == ReductionType::MAX ||
-                  reduction == ReductionType::MIN) {
-                int64_t counter = 0;
-                for (const auto j : c10::irange(segment_start, segment_end)) {
-                  int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                                       + j * data_stride_axis + inner_idx;
-                  if (at::_isnan(values_data[data_index]) ||
-                      values_data[data_index] == output_data[output_index]) {
-                    grad_input_data[data_index] = grad_data[output_index];
-                    counter++;
-                  }
-                }
-                // Average gradient based on number of maximum elements in
-                // the segment
-                if (counter < 2) {
-                  continue;
-                }
-                for (const auto j : c10::irange(segment_start, segment_end)) {
-                  int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                                       + j * data_stride_axis + inner_idx;
-                  if (grad_input_data[data_index] > 0) {
-                    grad_input_data[data_index] =
-                        grad_input_data[data_index] / counter;
-                  }
-                }
-              } else if (reduction == ReductionType::MEAN) {
-                auto grad_val = grad_data[output_index] / segment_length;
-                for (const auto j : c10::irange(segment_start, segment_end)) {
-                  int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                                       + j * data_stride_axis + inner_idx;
-                  grad_input_data[data_index] = grad_val;
-                }
-              } else if (reduction == ReductionType::SUM) {
-                const auto& grad_val = grad_data[output_index];
-                for (const auto j : c10::irange(segment_start, segment_end)) {
-                  int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                                       + j * data_stride_axis + inner_idx;
-                  grad_input_data[data_index] = grad_val;
-                }
-              } else if (reduction == ReductionType::PROD) {
-                const auto& grad_val = grad_data[output_index] * output_data[output_index];
-                for (const auto j : c10::irange(segment_start, segment_end)) {
-                  int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                                       + j * data_stride_axis + inner_idx;
-                  if (at::_isnan(values_data[data_index]) ||
-                      values_data[data_index] == 0) {
-                    // explicitly compute exclusive prod
-                    scalar_t exclusive_prod = initial_prod_value;
-                    int64_t idx;
-                    for (const auto k : c10::irange(segment_start, segment_end)) {
-                      if (k != j) {
-                        idx = outer_idx * data_stride_axis * data_size_axis
-                              + k * data_stride_axis + inner_idx;
-                        exclusive_prod *= values_data[idx];
-                      }
-                    }
-                    grad_input_data[data_index] = grad_data[output_index] * exclusive_prod;
-                  } else {
-                    grad_input_data[data_index] = grad_val / values_data[data_index];
-                  }
+
+            if (counter > 1) {
+              for (const auto m : c10::irange(row_start, row_end)) {
+                if (grad_input_ptr[m * K + k] != 0) {
+                  grad_input_ptr[m * K + k] /=  counter;
                 }
               }
             }
           }
         }
-      });
+      } else {
+        for (const auto k : c10::irange(K)) {
+          for (const auto m : c10::irange(row_start, row_end)) {
+            scalar_t value = input_ptr[m * K + k];
+            if (at::_isnan(value) || value == 0) {
+              // explicitly compute exclusive prod
+              acc_t exclusive_prod = init_value<scalar_t, ReductionType::PROD>(initial);;
+              for (const auto m1 : c10::irange(row_start, row_end)) {
+                if (m1 != m) { exclusive_prod *= input_ptr[m1 * K + k]; }
+              }
+              grad_input_ptr[m * K + k] = grad_output_ptr[k] * exclusive_prod;
+            } else {
+              acc_t grad_val = grad_output_ptr[k] * output_ptr[k];
+              grad_input_ptr[m * K + k] = grad_val / value;
+            }
+          }
+        }
+      }
+
+      // move to the next {b, n}
+      data_index_step(b, B, n, N);
+    }
+  });
 }
 
 Tensor _segment_reduce_cpu_lengths_backward_kernel(
-    const Tensor& grad_contig,
-    const Tensor& output_contig,
-    const Tensor& data_contig,
+    const Tensor& grad_output,
+    const Tensor& output,
+    const Tensor& data,
     ReductionType reduction,
-    const Tensor& lengths_contig,
+    const Tensor& lengths,
     int64_t axis,
     const c10::optional<Scalar>& initial) {
-  axis = lengths_contig.dim() - 1;
-  int64_t segment_count = lengths_contig.size(axis);
-  int64_t lengths_stride_axis = lengths_contig.stride(axis);
-  auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
 
-  AT_DISPATCH_INDEX_TYPES(
-      lengths_contig.scalar_type(), "_segment_reduce_cpu_lengths_backward_kernel1", [&] {
-        const auto* lengths_data = lengths_contig.data_ptr<index_t>();
-        _segment_reduce_cpu_lengths_backward_kernel1(
-            grad_contig,
-            output_contig,
-            data_contig,
-            reduction,
-            lengths_data,
-            axis,
-            initial,
-            grad_input,
-            segment_count,
-            lengths_stride_axis);
-      });
-
+  auto grad_input = at::zeros({data.sizes()}, grad_output.options());
+  auto offsets = _segment_lengths_to_offsets(lengths, data.size(axis));
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, data.scalar_type(), "_segment_reduce_cpu_lengths_backward_kernel", [&]() {
+    AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_segment_reduce_cpu_lengths_backward_indices", [&]() {
+      segment_reduce_backward_kernel_impl<scalar_t, index_t>(grad_input, grad_output, output, data, reduction, offsets, initial);
+    });
+  });
   return grad_input;
 }
 
 Tensor _segment_reduce_cpu_offsets_backward_kernel(
-    const Tensor& grad_contig,
-    const Tensor& output_contig,
-    const Tensor& data_contig,
+    const Tensor& grad_output,
+    const Tensor& output,
+    const Tensor& data,
     ReductionType reduction,
-    const Tensor& offsets_contig,
+    const Tensor& offsets,
     int64_t axis,
     const c10::optional<Scalar>& initial) {
-  axis = offsets_contig.dim() - 1;
-  int64_t segment_count = offsets_contig.size(axis) - 1;
-  int64_t offsets_stride_axis = offsets_contig.stride(axis);
-  auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
 
-  AT_DISPATCH_INDEX_TYPES(
-      offsets_contig.scalar_type(), "_segment_reduce_cpu_offsets_backward_kernel1", [&] {
-        const auto* offsets_data = offsets_contig.data_ptr<index_t>();
-        _segment_reduce_cpu_lengths_backward_kernel1<index_t, /*is_offsets_like=*/true>(
-            grad_contig,
-            output_contig,
-            data_contig,
-            reduction,
-            offsets_data,
-            axis,
-            initial,
-            grad_input,
-            segment_count,
-            offsets_stride_axis);
-      });
-
+  auto grad_input = at::zeros({data.sizes()}, grad_output.options());
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, data.scalar_type(), "_segment_reduce_cpu_offsets_backward_kernel", [&]() {
+    AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_segment_reduce_cpu_offsets_backward_indices", [&]() {
+      segment_reduce_backward_kernel_impl<scalar_t, index_t>(grad_input, grad_output, output, data, reduction, offsets, initial);
+    });
+  });
   return grad_input;
 }
 
