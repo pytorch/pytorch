@@ -245,13 +245,23 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
   explicit PythonAwaitWrapper(c10::intrusive_ptr<c10::ivalue::Await> aw)
       : aw_(std::move(aw)) {}
 
+  explicit PythonAwaitWrapper(py::function pyf, py::tuple args) {
+    pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pyf));
+    args_ = std::move(args);
+    // TODO: pass to lambda by ref?
+    std::function<IValue()> ival_func = [fg(pyfg_), args(args_)]() {
+      pybind11::gil_scoped_acquire ag;
+      return toIValue(fg->func_(*args), PyObjectType::get());
+    };
+    aw_ = c10::make_intrusive<c10::ivalue::Await>(PyObjectType::get(), std::move(ival_func));
+  }
+
   explicit PythonAwaitWrapper(const PythonAwaitWrapper&) = delete;
   PythonAwaitWrapper& operator=(const PythonAwaitWrapper&) = delete;
 
   py::object wait() {
     py::gil_scoped_acquire acquire;
-    py::object py_obj = toPyObject(aw_->wait());
-    return py_obj;
+    return toPyObject(aw_->wait());
   }
 
   void markCompleted(const py::object& pyValue) {
@@ -262,8 +272,22 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
     aw_->markCompleted(std::move(value));
   }
 
-  c10::intrusive_ptr<c10::ivalue::Await> aw_;
+  bool is_nowait() {
+    return pyfg_ == nullptr;
+  }
 
+  const py::function fn() {
+    TORCH_CHECK(pyfg_, "Await constructed as awaitable_nowait does not have fn");
+    return pyfg_->func_;
+  }
+
+  const py::tuple args() {
+    return args_;
+  }
+
+  c10::intrusive_ptr<c10::ivalue::Await> aw_;
+  std::shared_ptr<torch::jit::PythonFunctionGuard> pyfg_;
+  py::tuple args_;
  private:
   std::shared_ptr<PythonAwaitWrapper> getPtr() {
     return shared_from_this();

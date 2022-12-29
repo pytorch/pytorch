@@ -1848,27 +1848,22 @@ void initJITBindings(PyObject* module) {
         return std::make_shared<PythonAwaitWrapper>(
             c10::make_intrusive<c10::ivalue::Await>(PyObjectType::get()));
       }))
-      .def(py::init([](py::function initFunc) {
-        auto functionGuard = std::make_shared<torch::jit::PythonFunctionGuard>(
-            std::move(initFunc));
-
-        std::function<IValue()> pf =
-            [functionGuard(std::move(functionGuard))]() {
-              py::object py_obj = functionGuard->func_();
-              return toTypeInferredIValue(py_obj.release());
-            };
-        return std::make_shared<PythonAwaitWrapper>(
-            c10::make_intrusive<c10::ivalue::Await>(
-                PyObjectType::get(), std::move(pf)));
-      }))
       .def(
           "wait",
           &PythonAwaitWrapper::wait,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_result",
-          // Intentionally not releasing GIL
           &PythonAwaitWrapper::markCompleted)
+      .def(
+          "is_nowait",
+          &PythonAwaitWrapper::is_nowait)
+      .def(
+          "fn",
+          &PythonAwaitWrapper::fn)
+      .def(
+          "args",
+          &PythonAwaitWrapper::args)
       .def(
           py::pickle(
               /* __getstate__ */
@@ -1911,41 +1906,46 @@ void initJITBindings(PyObject* module) {
   });
   m.def("awaitable", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
-    py::function f = py::cast<py::function>(args[0]);
+    py::function pyf = py::cast<py::function>(args[0]);
 
     py::tuple args_tup(args.size() - 1);
-
     for (const auto i : c10::irange(1, args.size())) {
       args_tup[i - 1] = args[i];
     }
 
-    TypePtr resultType;
-      // Run specified function to infer result type
-      auto result = toTypeInferredIValue(f(*args_tup, **kwargs));
-      resultType = result.type();
-
-      auto fg = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(f));
-
-      std::function<IValue()> ivf = [fg(std::move(fg))]() {
-        py::object py_obj = fg->func_();
-        return toTypeInferredIValue(py_obj.release());
-      };
-    auto retval =
-        c10::make_intrusive<c10::ivalue::Await>(resultType, std::move(ivf));
-    return std::make_shared<PythonAwaitWrapper>(retval);
+    if (jit::tracer::isTracing()) {
+      // TODO: support tracing mode
+      // auto result = toTypeInferredIValue(f(*args_tup, **kwargs));
+      // resultType = result.type();
+      TORCH_CHECK(false, "Tracing for Await is not implemented yet");
+    }
+    return std::make_shared<PythonAwaitWrapper>(std::move(pyf), std::move(args_tup));
+    //// For non-tracing python keep overhead as small as possible, skipping type inference
+    //auto py_fg = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(py_f));
+    //// Copying args_tup into lambda
+    //std::function<IValue()> ival_func = [fg(std::move(py_fg)), args_tup]() {
+    //  pybind11::gil_scoped_acquire ag;
+    //  return toIValue(fg->func_(*args_tup), PyObjectType::get());
+    //};
+    //auto iv_aw = c10::make_intrusive<c10::ivalue::Await>(PyObjectType::get(), std::move(ival_func));
+    //auto py_aw = std::make_shared<PythonAwaitWrapper>(iv_aw);
+    //return py_aw;
   });
   m.def("awaitable_nowait", [](py::handle input) {
-    auto iv = toTypeInferredIValueOptional(input);
-    c10::intrusive_ptr<c10::ivalue::Await> aw;
-    if (iv) {
-      aw = c10::make_intrusive<c10::ivalue::Await>(iv->type());
-      aw->markCompleted(*iv);
+    if (jit::tracer::isTracing()) {
+      // TODO: support tracing mode
+      //auto iv = toTypeInferredIValueOptional(input);
+      //c10::intrusive_ptr<c10::ivalue::Await> aw;
+      //if (iv) {
+      //  aw = c10::make_intrusive<c10::ivalue::Await>(iv->type());
+      //  aw->markCompleted(*iv);
+      //}
+      TORCH_CHECK(false, "Tracing for Await is not implemented yet");
     }
 
     auto type = PyObjectType::get();
-    aw = c10::make_intrusive<c10::ivalue::Await>(type);
+    auto aw = c10::make_intrusive<c10::ivalue::Await>(type);
     aw->markCompleted(toIValue(input, type));
-
     return std::make_shared<PythonAwaitWrapper>(aw);
   });
   m.def("awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {

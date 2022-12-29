@@ -1,16 +1,20 @@
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
 from torch.testing._internal.jit_utils import make_global
-from typing import List
+from typing import List, Optional
 from torch import Tensor
 from torch.awaits import Await
 
 class TestAwait(JitTestCase):
     def test_await_python(self):
-        @torch.jit.script
-        def foo():
-            return 13
-        aw = Await[int](foo)
+        def foo(x: int) -> int:
+            return x + 13
+        aw: Await[int] = torch.jit.awaitable(foo, 13)
+        self.assertTrue(aw.fn()(*aw.args()) == torch.jit.awaitable_wait(aw))
+        nw = torch.jit.awaitable_nowait(33)
+        print(f"XXX_NW_is_nowait:{nw.is_nowait()}")
+        print(f"XXX_NW_ARGS:{nw.args()}")
+        print(f"XXX_NW_FN:{nw.fn()}")
 
     def test_await_type_python(self):
         def foo() -> Tensor:
@@ -279,3 +283,41 @@ class TestAwait(JitTestCase):
         out = main(inp)
         script_out = sm(inp)
         self.assertTrue(torch.allclose(script_out, out))
+
+    def test_eager_await_non_scriptable(self):
+        # Tree type can not be compiled (Recursive type)
+        class Tree(object):
+            def __init__(self, v):
+                self.parent = torch.jit.annotate(Optional[Tree], None)
+                self.v = v
+        make_global(Tree)
+
+        def delayed(t: Tree):
+            t.v = t.v + 1
+            return t
+
+        aw = torch.jit.awaitable(delayed, Tree(2))
+        t = torch.jit.awaitable_wait(aw)
+        self.assertTrue(t.v == 3)
+
+    def test_await_fx(self):
+        def delayed(x: Tensor) -> Tensor:
+            return 2 * (x + 1)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def process(self, aw: Await[Tensor]):
+                return torch.jit.awaitable_wait(aw)
+
+            def forward(self, x: Tensor):
+                aw = torch.jit.awaitable(delayed, x)
+                y = 3 * x
+                r = self.process(aw)
+                return r + y
+        m = M()
+        tracer = torch.fx.Tracer()
+        g = tracer.trace(m)
+        print(f"XXX FX_AWAIT_GRAPH:{g}")
+
