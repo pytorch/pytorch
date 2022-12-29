@@ -272,11 +272,11 @@ enabled and at least one of the inputs required gradients), or ``None`` otherwis
     :toctree: generated
     :nosignatures:
 
-    torch.autograd.graph.Node.name
-    torch.autograd.graph.Node.metadata
-    torch.autograd.graph.Node.next_functions
-    torch.autograd.graph.Node.register_hook
-    torch.autograd.graph.Node.register_prehook
+    graph.Node.name
+    graph.Node.metadata
+    graph.Node.next_functions
+    graph.Node.register_hook
+    graph.Node.register_prehook
 
 Some operations need intermediary results to be saved during the forward pass
 in order to execute the backward pass.
