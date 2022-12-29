@@ -3663,10 +3663,11 @@ Tensor linalg_lstsq_jvp(
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& gX_,
     const Tensor& A,
-    const Tensor& B_) {
+    const Tensor& B_,
+    const std::array<bool, 2>& grad_input_mask) {
   at::NoTF32Guard disable_tf32;
-  auto A_requires_grad = A.requires_grad();
-  auto B_requires_grad = B_.requires_grad();
+  auto A_requires_grad = grad_input_mask[0];
+  auto B_requires_grad = grad_input_mask[1];
   if (!gX_.defined() || (!A_requires_grad && !B_requires_grad)) {
     return {};
   }

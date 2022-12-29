@@ -852,7 +852,8 @@ Tensor linalg_det_jvp(
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& grad,
     const Tensor& A,
-    const Tensor& B_);
+    const Tensor& B_,
+    const std::array<bool, 2>& grad_input_mask);
 Tensor linalg_lu_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
