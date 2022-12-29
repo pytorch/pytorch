@@ -345,7 +345,7 @@ class FakeTensorTest(TestCase):
         mode = FakeTensorMode(allow_fallback_kernels=allow_fallback_kernels)
         for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
             with context():
-                inps = (
+                inps1 = [
                     torch.randn([92, 8, 2048]).cuda(),
                     torch.randn([8192, 2048]).cuda(),
                     torch.randn([8192, 2048]).cuda(),
@@ -366,13 +366,17 @@ class FakeTensorTest(TestCase):
                     torch.randn([167837696]).cuda(),
                     torch.randn([4, 8, 2048]).cuda(),
                     torch.randn([4, 8, 2048]).cuda(),
-                )
-                out = fn(*inps)
-                self.assertIs(out[4], inps[-3])
-                for ten in out:
-                    if i == 1:
-                        self.assertTrue(isinstance(ten, FakeTensor))
-                    self.assertEqual(ten.device.type, 'cuda')
+                ]
+                inps2 = inps1
+                inps2[len(inps2) - 1] = None  # argument `cx` can be None
+
+                for inps in [inps1, inps2]:
+                    out = fn(*inps)
+                    self.assertIs(out[4], inps[-3])
+                    for ten in out:
+                        if i == 1:
+                            self.assertTrue(isinstance(ten, FakeTensor))
+                        self.assertEqual(ten.device.type, 'cuda')
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cuda_lstm(self):
