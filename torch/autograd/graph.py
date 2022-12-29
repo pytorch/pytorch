@@ -114,8 +114,10 @@ class Node(abc.ABC):
 
     @classmethod
     def __subclasshook__(cls, C):
-        if C is not None and C is getattr(torch._C._functions, C.__name__, None):
-            return True
+        if cls is Node:
+            # Subclasses of Node should not inherit this special isinstance hook
+            if C is not None and C is getattr(torch._C._functions, C.__name__, None):
+                return True
         return NotImplemented
 
 class saved_tensors_hooks():
