@@ -680,10 +680,23 @@ static void qprelu_out_kernel(Tensor& out,
   int64_t input_ndim = qx.dim();
   TORCH_CHECK(input_ndim > 0, "qprelu: zero-dim input tensor is not allowed.");
 
+  // This logic is present in at::prelu and repeated here, as this path can be
+  // hit via quantizied::prelu, which is registered under quantized/cpu/qprelu.cpu
+  auto qw_nd = qw;
+  if (input_ndim != qw_nd.dim()) {
+    DimVector dim_w(input_ndim, 1);
+    if (input_ndim > 1) {
+      dim_w[1] = qw.numel();
+    }
+    // This will always be a view in CPU/CUDA, but some backends
+    // like MKLDNN do not support views
+    qw_nd = qw_nd.reshape(dim_w);
+  }
+
   auto iter = TensorIteratorConfig()
     .add_output(out)
     .add_input(qx)
-    .add_input(qw)
+    .add_input(qw_nd)
     .build();
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qprelu", [&] {
