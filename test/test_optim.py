@@ -48,6 +48,7 @@ from torch.testing._internal.common_utils import (
 )
 from typing import Dict, Any, Tuple
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
+from torch.utils._pytree import tree_flatten
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -300,13 +301,12 @@ class TestOptim(TestCase):
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
 
-        # Make sure that device of state['step'] is still CPU
+        # Make sure that all singleton tensors in the state_dict are still on CPU.
         new_state_dict = optimizer_cuda.state_dict()
-        if "step" in state_dict["state"][0] and torch.is_tensor(
-            state_dict["state"][0]["step"]
-        ):
-            for state in new_state_dict["state"].values():
-                self.assertEqual(state["step"].device.type, "cpu")
+        flat_new_state_dict, _ = tree_flatten(new_state_dict)
+        for state_item in flat_new_state_dict:
+            if torch.is_tensor(state_item) and state_item.dim() == 0:
+                self.assertEqual(state_item.device.type, "cpu")
 
         for _i in range(20):
             optimizer.step(fn)
