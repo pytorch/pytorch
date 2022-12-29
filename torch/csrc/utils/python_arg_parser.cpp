@@ -297,11 +297,11 @@ auto handle_torch_function_no_python_arg_parser(
                              : c10::impl::TorchDispatchModeTLS::stack_len();
   };
 
+  at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
+  at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
   if (get_stack_len() > 0) {
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
-    at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
-    at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
     if (is_torch_function) {
       tf_g.emplace();
       mode_obj = tf_g->get_cur_mode()->ptr(getPyInterpreter());
@@ -348,7 +348,14 @@ auto handle_torch_function_no_python_arg_parser(
       throw python_error();
     }
   }
-  if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
+  if (ret.ptr() == Py_NotImplemented) {
+    // recurse!
+    return handle_torch_function_no_python_arg_parser(
+        overloaded_args, args, kwargs, func_name, torch_api_function, module_name, torch_function_name
+    );
+  }
+
+  if (ret.ptr() == nullptr) {
     for (auto& arg : overloaded_args) {
       // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
       py::object torch_function =
