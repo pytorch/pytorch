@@ -1,3 +1,4 @@
+import functools
 import math
 import warnings
 from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
@@ -5,6 +6,7 @@ from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 
 # Import the entire FSDP file to avoid circular imports
 import torch.nn as nn
@@ -16,9 +18,9 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 from torch.distributed.fsdp._common_utils import (
-    _all_handles,
     _FSDPState,
     _has_fsdp_params,
+    _is_composable,
     _module_handles,
     clean_tensor_name,
     FSDP_PREFIX,
@@ -128,7 +130,8 @@ def _common_pre_state_dict_hook(
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-        _clear_grads_if_needed(_all_handles(fsdp_state))
+        _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
+
 
 def _common_unshard_pre_state_dict_hook(
     module: nn.Module,
@@ -234,14 +237,19 @@ def _common_unshard_post_state_dict_hook(
             # TODO: for composable FSDP, this should be clean_tensor_name(clean_key),
             buffer_clean_fqns.append(clean_key)
             buffers.append(state_dict[fqn])
-    if buffers and fsdp_state._mixed_precision_enabled_for_buffers():
-        buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
-        _cast_buffers_to_dtype_and_device(
-            buffers, buffer_dtypes, fsdp_state.compute_device
+    if buffers:
+        mixed_precision_enabled_for_buffers = (
+            fsdp_state._mixed_precision_enabled_for_buffers() if not _is_composable(fsdp_state)
+            else (fsdp_state.mixed_precision.buffer_dtype is not None)
         )
-        for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
-            fqn = f"{prefix}{clean_fqn}"
-            state_dict[fqn] = buffer.clone()
+        if mixed_precision_enabled_for_buffers:
+            buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
+            _cast_buffers_to_dtype_and_device(
+                buffers, buffer_dtypes, fsdp_state.compute_device
+            )
+            for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
+                fqn = f"{prefix}{clean_fqn}"
+                state_dict[fqn] = buffer.clone()
     return state_dict
 
 
@@ -327,7 +335,9 @@ def _full_pre_load_state_dict_hook(
 ) -> None:
     _lazy_init(fsdp_state, module)
     _enter_unshard_params_ctx(module, fsdp_state, recurse=False, writeback=True)
-    _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
+    # Add FSDP_PREFIX only for wrapper-based FSDP.
+    if not _is_composable(fsdp_state):
+        _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
 
 
 def _full_post_load_state_dict_hook(
@@ -609,6 +619,7 @@ def _sharded_pre_load_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _post_state_dict_hook(
+    fsdp_state: _FSDPState,
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
@@ -619,8 +630,6 @@ def _post_state_dict_hook(
     FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
     """
-    # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
     _post_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
@@ -631,43 +640,47 @@ def _post_state_dict_hook(
     )
     return processed_state_dict
 
+
 @no_type_check
 @torch.no_grad()
 def _pre_state_dict_hook(
+    fsdp_state: _FSDPState,
     module: nn.Module,
     *args,
     **kwargs,
 ) -> None:
     """
-    _pre_state_dict_hook() is called before the state_dict() of this
-    FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
-    what postprocessing will be done.
+    This is called before the core state dict saving logic of ``module``.
+    ``fsdp_state._state_dict_type`` is used to decide what postprocessing will
+    be done.
     """
-    fsdp_state: _FSDPState = module
     _pre_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
         StateDictType.SHARDED_STATE_DICT: _sharded_pre_state_dict_hook,
     }
     _pre_state_dict_hook_fn[fsdp_state._state_dict_type](
-        fsdp_state, module, *args, **kwargs,
+        fsdp_state,
+        module,
+        *args,
+        **kwargs,
     )
+
 
 @no_type_check
 @torch.no_grad()
 def _pre_load_state_dict_hook(
+    fsdp_state: _FSDPState,
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
     *args: Any,
 ) -> None:
     """
-    ``_pre_state_dict_hook` is called before ``module._load_from_state_dict()``
-    is called. ``fsdp_state._state_dict_type`` is used to decide what preprocessing
-    will be done.
+    This is called before ``module._load_from_state_dict()``.
+    ``fsdp_state._state_dict_type`` is used to decide what preprocessing will
+    be done.
     """
-    # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
     _pre_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
@@ -684,9 +697,11 @@ def _pre_load_state_dict_hook(
 
 @no_type_check
 @torch.no_grad()
-def _post_load_state_dict_hook(module: nn.Module, *args: Any) -> None:
-    # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
+def _post_load_state_dict_hook(
+    fsdp_state: _FSDPState,
+    module: nn.Module,
+    *args: Any,
+) -> None:
     _post_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,
@@ -696,3 +711,44 @@ def _post_load_state_dict_hook(module: nn.Module, *args: Any) -> None:
     # Dispatch into state_dict type specific implementation of post-hook for
     # loading state_dict.
     _post_load_state_dict_hook_fn[fsdp_state._state_dict_type](module, fsdp_state)
+
+
+def _register_all_state_dict_hooks(state: _FSDPState):
+    """
+    Registers pre-save, post-save, pre-load, and post-load state dict hooks.
+    """
+    for hook_registration_fn_str, hook, hook_registration_fn_kwargs in (
+        ("register_state_dict_pre_hook", _pre_state_dict_hook, {}),
+        ("_register_state_dict_hook", _post_state_dict_hook, {}),
+        (
+            "_register_load_state_dict_pre_hook",
+            _pre_load_state_dict_hook,
+            {"with_module": True},
+        ),
+        ("register_load_state_dict_post_hook", _post_load_state_dict_hook, {}),
+    ):
+        _register_state_dict_hooks_base(
+            state, hook_registration_fn_str, hook, hook_registration_fn_kwargs
+        )
+
+
+@no_type_check
+def _register_state_dict_hooks_base(
+    state: _FSDPState,
+    hook_registration_fn_name: str,
+    hook: Callable,
+    hook_registration_fn_kwargs: Dict[str, Any],
+) -> None:
+    """Registers ``hook`` using ``hook_registration_fn``."""
+    # TODO: Use `_get_submodule_state(module)` in each hook instead of
+    # `partial`: https://github.com/pytorch/pytorch/issues/90788
+    hook_with_state = functools.partial(hook, state)
+    if not _is_composable(state):
+        getattr(state, hook_registration_fn_name)(
+            hook_with_state, **hook_registration_fn_kwargs
+        )
+    else:
+        for handle in state._handles:
+            getattr(handle._fully_sharded_module, hook_registration_fn_name)(
+                hook_with_state, **hook_registration_fn_kwargs
+            )

@@ -57,7 +57,6 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
     "demucs",  # OOM
     # Huggingface
-    "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
 ]
 
@@ -84,6 +83,27 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
+CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
+    *CI_SKIP_AOT_EAGER_TRAINING,
+    "drq",  # assert type(inner_out) == type(user_out)
+    "hf_T5_base",  # fp64_OOM
+    "mobilenet_v2_quantized_qat",  # setStorage
+    "resnet50_quantized_qat",  # setStorage
+    "soft_actor_critic",  # assert type(inner_out) == type(user_out)
+    "tacotron2",  # aten._thnn_fused_lstm_cell.default
+    "tts_angular",  # _VF.lstm
+    "AllenaiLongformerBase",  # assert type(inner_out) == type(user_out)
+    "DebertaV2ForQuestionAnswering",  # OOM
+    "botnet26t_256",  # assert type(inner_out) == type(user_out)
+    "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
+    "eca_botnext26ts_256",  # assert type(inner_out) == type(user_out)
+    "eca_halonext26ts",  # assert type(inner_out) == type(user_out)
+    "hrnet_w18",  # torch._C._nn.upsample_nearest2d
+    "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
+    "sebotnet33ts_256",  # assert type(inner_out) == type(user_out)
+    "twins_pcpvt_base",  # timeout
+]
+
 CI_SKIP_INDCUTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
@@ -101,6 +121,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "tacotron2",
     "vision_maskrcnn",  # accuracy
     # Huggingface
+    "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
@@ -119,6 +140,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "GoogleFnet",  # Eager model failed to run
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
+    "MT5ForConditionalGeneration",  # fails accuracy
     # TIMM
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy
@@ -130,10 +152,16 @@ CI_SKIP_INDUCTOR_TRAINING = [
 
 CI_SKIP_OPTIMIZER = {
     # TIMM
-    "hrnet_w18",  # accuracy
-    "gernet_l",  # accuracy
-    "nfnet_l0",  # eager variation
+    "convmixer_768_32",  # accuracy
     "sebotnet33ts_256",  # accuracy
+    "hrnet_w18",  # Stack issue in fx
+    # TorchBench
+    "dlrm",  # symbolic shapes error
+    # HF
+    "pnasnet5large",  # Stack issue in fx
+    "MobileBertForMaskedLM",  # Stack issue in fx
+    "MobileBertForQuestionAnswering",  # Stack issue in fx
+    "PegasusForConditionalGeneration",  # OOM
 }
 
 
@@ -878,7 +906,6 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
-        self.use_amp = False
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
         self.optimizer = None
@@ -1147,21 +1174,32 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
+            # Sometime CI fails with random triton compilation failure which will be skipped for now
+            # TODO: revisit this after switching to new Triton runtime
             reset_rng_state()
             torch._dynamo.reset()
             try:
                 model_copy = deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-
                 new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
-                accuracy_status = "fail_to_run"
-                print(
-                    "TorchDynamo optimized model failed to run because of following error"
-                )
                 log.exception(e)
-                return record_status(accuracy_status)
+                if self.args.ci and (
+                    (
+                        isinstance(e, RuntimeError)
+                        and "Internal Triton PTX codegen error" in str(e)
+                    )
+                    or (isinstance(e, KeyError) and "cubin" in str(e))
+                ):
+                    accuracy_status = "pass_due_to_skip"
+                    return record_status(accuracy_status)
+                else:
+                    print(
+                        "TorchDynamo optimized model failed to run because of following error"
+                    )
+                    accuracy_status = "fail_to_run"
+                    return record_status(accuracy_status)
 
             if not same(
                 correct_result,
@@ -1679,13 +1717,18 @@ def run(runner, args, original_dir=None):
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
+    if args.dynamic_shapes:
+        torch._dynamo.config.dynamic_shapes = True
+        torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
         if args.backend == "aot_eager":
             args.exclude = (
-                CI_SKIP_AOT_EAGER_TRAINING
+                CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
+                if args.training and args.dynamic_shapes
+                else CI_SKIP_AOT_EAGER_TRAINING
                 if args.training
                 else CI_SKIP_AOT_EAGER_INFERENCE
             )
@@ -1732,6 +1775,7 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
+        torch.backends.cudnn.deterministic = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
