@@ -1,4 +1,4 @@
-from typing import Dict, Union, Any, Tuple
+from typing import Dict, Union, Any, Tuple, List
 
 import torch
 import torch.nn as nn
@@ -106,7 +106,7 @@ def functional_call(
 
 
 @exposed_in("torch.func")
-def stack_module_state(models):
+def stack_module_state(models: List[nn.Module]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 
     Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.
@@ -131,6 +131,27 @@ def stack_module_state(models):
         output = vmap(wrapper, (0, 0, None))(params, buffers, data)
 
         assert output.shape == (num_models, batch_size, out_features)
+
+    When there's submodules, this follows state dict naming conventions
+
+    .. code-block:: python
+
+        import torch.nn as nn
+        class Foo(nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                hidden = 4
+                self.l1 = nn.Linear(in_features, hidden)
+                self.l2 = nn.Linear(hidden, out_features)
+
+            def forward(self, x):
+                return self.l2(self.l1(x))
+
+        num_models = 5
+        in_features, out_features = 3, 3
+        models = [Foo(in_features, out_features) for i in range(num_models)]
+        params, buffers = stack_module_state(models)
+        print(list(params.keys()))  # "l1.weight", "l1.bias", "l2.weight", "l2.bias"
 
     .. warning::
         All of the modules being stacked together must be the same (except for
