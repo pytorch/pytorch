@@ -1597,7 +1597,6 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps) (
 Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
     using namespace mps;
 
-    int64_t weight_num = weight_.numel();
     Tensor result = at::empty_like(self, self.suggest_memory_format());
     TORCH_INTERNAL_ASSERT(weight_.defined());
 
@@ -1680,7 +1679,6 @@ Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
 std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const Tensor& self, const Tensor& weight_) {
     using namespace mps;
 
-    int64_t weight_num = weight_.numel();
     Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
     Tensor weight_grad = at::empty_like(weight_, at::MemoryFormat::Contiguous);
 
