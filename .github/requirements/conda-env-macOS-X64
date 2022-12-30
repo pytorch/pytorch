@@ -1,8 +1,8 @@
-mkl=2022.1.0
-mkl-include=2022.1.0
-numpy=1.23.3
-pyyaml=6.0
-setuptools=63.4.1
+mkl=2021.2.0
+mkl-include=2021.2.0
+numpy=1.18.5
+pyyaml=5.3
+setuptools=46.0.0
 cmake=3.22.*
 cffi=1.15.1
 typing_extensions=4.3.0
@@ -16,8 +16,3 @@ wheel=0.37.1
 
 # Not pinning certifi so that we can always get the latest certificates
 certifi
-
-# iOS requirements
-blas=1.0
-ninja=1.10.2
-requests=2.28.1

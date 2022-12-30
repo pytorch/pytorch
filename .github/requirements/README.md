@@ -22,7 +22,7 @@ The list of support files are as follows:
   * conda-env-Linux-X64. This is used by Linux buck build and test jobs
     to setup the conda environment
 * Pip:
-  * pip-requirements-iOS-sim.txt. This is used by iOS build and test jobs to
+  * pip-requirements-iOS.txt. This is used by iOS build and test jobs to
     setup the pip environment
   * pip-requirements-macOS.txt. This is used by MacOS build and test jobs to
     setup the pip environment
