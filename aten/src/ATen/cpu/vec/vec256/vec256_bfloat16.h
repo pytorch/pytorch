@@ -86,9 +86,11 @@ public:
   Vectorized(BFloat16 val1, BFloat16 val2, BFloat16 val3, BFloat16 val4,
          BFloat16 val5, BFloat16 val6, BFloat16 val7, BFloat16 val8,
          BFloat16 val9, BFloat16 val10, BFloat16 val11, BFloat16 val12,
-         BFloat16 val13, BFloat16 val14, BFloat16 val15, BFloat16 val16) : values(_mm256_setr_epi16(
+         BFloat16 val13, BFloat16 val14, BFloat16 val15, BFloat16 val16) {
+    values = _mm256_setr_epi16(
         val1.x, val2.x, val3.x, val4.x, val5.x, val6.x, val7.x, val8.x,
-        val9.x, val10.x, val11.x, val12.x, val13.x, val14.x, val15.x, val16.x)) {}
+        val9.x, val10.x, val11.x, val12.x, val13.x, val14.x, val15.x, val16.x);
+  }
   operator __m256i() const {
     return values;
   }

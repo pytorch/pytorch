@@ -507,7 +507,7 @@ public:
   }
   using Vectorizedi::Vectorizedi;
   Vectorized8() {}
-  Vectorized8(T v) : values(_mm256_set1_epi8(v)) { }
+  Vectorized8(T v) { values = _mm256_set1_epi8(v); }
   Vectorized8(T val1, T val2, T val3, T val4,
          T val5, T val6, T val7, T val8,
          T val9, T val10, T val11, T val12,
@@ -515,10 +515,12 @@ public:
          T val17, T val18, T val19, T val20,
          T val21, T val22, T val23, T val24,
          T val25, T val26, T val27, T val28,
-         T val29, T val30, T val31, T val32) : values(_mm256_setr_epi8(val1, val2, val3, val4, val5, val6, val7, val8,
+         T val29, T val30, T val31, T val32) {
+    values = _mm256_setr_epi8(val1, val2, val3, val4, val5, val6, val7, val8,
                               val9, val10, val11, val12, val13, val14, val15, val16,
                               val17, val18, val19, val20, val21, val22, val23, val24,
-                              val25, val26, val27, val28, val29, val30, val31, val32)) {}
+                              val25, val26, val27, val28, val29, val30, val31, val32);
+  }
   template <int64_t mask>
   static Vectorized<T> blend(Vectorized<T> a, Vectorized<T> b) {
     __at_align__ T tmp_values[size()];

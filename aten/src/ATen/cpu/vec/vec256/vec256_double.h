@@ -29,8 +29,12 @@ public:
   }
   Vectorized() {}
   Vectorized(__m256d v) : values(v) {}
-  Vectorized(double val) : values(_mm256_set1_pd(val)) {}
-  Vectorized(double val1, double val2, double val3, double val4) : values(_mm256_setr_pd(val1, val2, val3, val4)) {}
+  Vectorized(double val) {
+    values = _mm256_set1_pd(val);
+  }
+  Vectorized(double val1, double val2, double val3, double val4) {
+    values = _mm256_setr_pd(val1, val2, val3, val4);
+  }
   operator __m256d() const {
     return values;
   }

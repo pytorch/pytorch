@@ -36,9 +36,9 @@ public:
     values = _mm256_setr_pd(real_value, imag_value,
                             real_value, imag_value);
   }
-  Vectorized(c10::complex<double> val1, c10::complex<double> val2) : values(_mm256_setr_pd(val1.real(), val1.imag(),
-                            val2.real(), val2.imag())) {
-
+  Vectorized(c10::complex<double> val1, c10::complex<double> val2) {
+    values = _mm256_setr_pd(val1.real(), val1.imag(),
+                            val2.real(), val2.imag());
   }
   operator __m256d() const {
     return values;
