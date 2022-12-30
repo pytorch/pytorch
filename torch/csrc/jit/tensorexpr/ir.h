@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <c10/util/string_utils.h>
@@ -79,7 +80,7 @@ class TORCH_API Cast : public ExprNode<Cast> {
     return ExprHandle(alloc<Cast>(dtype, src_value.node()));
   }
   Cast(Dtype dtype, ExprPtr src_value)
-      : ExprNodeBase(dtype, kCast), src_value_(src_value) {}
+      : ExprNodeBase(dtype, kCast), src_value_(std::move(src_value)) {}
 
   bool isConstant() const override {
     return src_value_->isConstant();
@@ -109,7 +110,7 @@ class TORCH_API BitCast : public ExprNode<BitCast> {
     return ExprHandle(alloc<BitCast>(dtype, src_value.node()));
   }
   BitCast(Dtype dtype, ExprPtr src_value)
-      : ExprNodeBase(dtype, kBitCast), src_value_(src_value) {
+      : ExprNodeBase(dtype, kBitCast), src_value_(std::move(src_value)) {
     TORCH_CHECK(src_value_->dtype().byte_size() == dtype.byte_size());
   }
 
@@ -436,7 +437,7 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
   Ramp(ExprPtr base, ExprPtr stride, int lanes)
       : ExprNodeBase(Dtype(base->dtype(), lanes)),
         base_(base),
-        stride_(stride),
+        stride_(std::move(stride)),
         lanes_(lanes) {}
 
  private:
@@ -556,7 +557,10 @@ class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
   }
 
   IfThenElse(ExprPtr c, ExprPtr t, ExprPtr f)
-      : ExprNodeBase(t->dtype()), condition_(c), true_(t), false_(f) {}
+      : ExprNodeBase(t->dtype()),
+        condition_(std::move(c)),
+        true_(t),
+        false_(std::move(f)) {}
 
  private:
   ExprPtr condition_;
@@ -646,10 +650,10 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased)
       : ExprNodeBase(ret_val1->dtype()),
-        lhs_(lhs),
-        rhs_(rhs),
+        lhs_(std::move(lhs)),
+        rhs_(std::move(rhs)),
         ret_val1_(ret_val1),
-        ret_val2_(ret_val2),
+        ret_val2_(std::move(ret_val2)),
         compare_op_(cmp_op),
         bias_(bias) {}
 
@@ -660,8 +664,8 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased)
       : ExprNodeBase(kInt),
-        lhs_(lhs),
-        rhs_(rhs),
+        lhs_(std::move(lhs)),
+        rhs_(std::move(rhs)),
         ret_val1_(alloc<IntImm>(1)),
         ret_val2_(alloc<IntImm>(0)),
         compare_op_(cmp_op),
