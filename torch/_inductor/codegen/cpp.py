@@ -405,6 +405,7 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def masked(mask, body, other):
+        assert V.interpreter.current_node.meta["is_masked_load"]
         code = BracesBuffer()
 
         var = V.kernel.cse.newvar()
@@ -420,7 +421,6 @@ class CppVecOverrides(OpOverrides):
             code.writeline(f"auto {var} = at::vec::Vectorized<float>({other});")
         else:
             code.writeline(f"auto {var} = at::vec::Vectorized<float>({other!r});")
-        assert V.interpreter.current_node.meta["is_masked_load"]
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
             zero_val = "at::vec::Vectorized<float>(0)"
@@ -432,6 +432,7 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
+        assert dtype == torch.int64
         assert V.interpreter.current_node.meta["dtype"] == torch.int32
         assert V.interpreter.current_node.meta["most_inner_loop_irrevelant"]
         return f"at::vec::Vectorized<int32_t>(static_cast<int32_t>({cexpr(V.kernel.rename_indexing(expr))}))"
@@ -1082,22 +1083,24 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def is_load_only_block(self, sub_graph: torch.fx.Graph):
+        # The sub graph only contains "placeholder", "output", "get_index", "load"
         is_load_only = False
         load_dtype = None
-        for __node in sub_graph.nodes:
-            _node: torch.fx.Node = __node
-            if _node.op in ["placeholder", "output"]:
+        skip_io_nodes = ["placeholder", "output"]
+        for _node in sub_graph.nodes:
+            if _node.op in skip_io_nodes:
                 continue
-            elif _node.target not in ["load", "get_index"]:
+
+            if _node.target not in ["load", "get_index"]:
                 # The body contains non load node
                 is_load_only = False
                 break
-            elif _node.target == "load":
+
+            if _node.target == "load":
                 _, name, _ = _node.args
                 load_dtype = V.graph.get_dtype(name)
                 is_load_only = True
-            else:
-                continue
+
         return is_load_only, load_dtype
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -1221,6 +1224,9 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype):
+                current_node: torch.fx.Node = V.interpreter.current_node
+                current_node["dtype"] = dtype
+
                 if dtype != torch.bool:
                     self.simd_vec = False
                 return x

@@ -71,9 +71,11 @@ void flag_to_float(const T* src, float* dst, int64_t n) {
 }
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
-template<typename SRC>
-inline at::vec::Vectorized<float> flag_to_float_vec(at::vec::Vectorized<SRC>& src) {
-  assert(at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
+template <typename SRC>
+inline at::vec::Vectorized<float> flag_to_float_vec(
+    at::vec::Vectorized<SRC>& src) {
+  assert(
+      at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
   at::vec::Vectorized<float> res_vec(0);
 #pragma unroll
   for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
@@ -81,8 +83,9 @@ inline at::vec::Vectorized<float> flag_to_float_vec(at::vec::Vectorized<SRC>& sr
   }
 }
 
-template<>
-inline at::vec::Vectorized<float> flag_to_float_vec(at::vec::Vectorized<int>& src) {
+template <>
+inline at::vec::Vectorized<float> flag_to_float_vec(
+    at::vec::Vectorized<int>& src) {
 #if defined(CPU_CAPABILITY_AVX2)
   return at::vec::Vectorized<float>(_mm256_cvtepi32_ps(src));
 #else
