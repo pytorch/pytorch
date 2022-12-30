@@ -73,7 +73,7 @@ class TORCH_API Cast : public ExprNode<Cast> {
   }
 
   void set_src_value(ExprPtr src_value) {
-    src_value_ = src_value;
+    src_value_ = std::move(src_value);
   }
 
   static ExprHandle make(Dtype dtype, const ExprHandle& src_value) {
@@ -103,7 +103,7 @@ class TORCH_API BitCast : public ExprNode<BitCast> {
   }
 
   void set_src_value(ExprPtr src_value) {
-    src_value_ = src_value;
+    src_value_ = std::move(src_value);
   }
 
   static ExprHandle make(Dtype dtype, const ExprHandle& src_value) {
@@ -141,11 +141,11 @@ class BinaryOpNode : public ExprNode<Op> {
   }
 
   void set_lhs(ExprPtr lhs) {
-    lhs_ = lhs;
+    lhs_ = std::move(lhs);
   }
 
   void set_rhs(ExprPtr rhs) {
-    rhs_ = rhs;
+    rhs_ = std::move(rhs);
   }
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -414,11 +414,11 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
   }
 
   void set_base(ExprPtr base) {
-    base_ = base;
+    base_ = std::move(base);
   }
 
   void set_stride(ExprPtr stride) {
-    stride_ = stride;
+    stride_ = std::move(stride);
   }
 
   static ExprHandle make(
@@ -463,11 +463,11 @@ class TORCH_API Load : public ExprNode<Load> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   void set_indices(std::vector<ExprPtr> indices) {
-    indices_ = indices;
+    indices_ = std::move(indices);
   }
 
   static ExprHandle make(
@@ -493,7 +493,7 @@ class TORCH_API Broadcast : public ExprNode<Broadcast> {
   }
 
   void set_value(ExprPtr value) {
-    value_ = value;
+    value_ = std::move(value);
   }
 
   int lanes() const {
@@ -529,15 +529,15 @@ class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
   }
 
   void set_condition(ExprPtr condition) {
-    condition_ = condition;
+    condition_ = std::move(condition);
   }
 
   void set_true_value(ExprPtr true_value) {
-    true_ = true_value;
+    true_ = std::move(true_value);
   }
 
   void set_false_value(ExprPtr false_value) {
-    false_ = false_value;
+    false_ = std::move(false_value);
   }
 
   static ExprHandle make(
