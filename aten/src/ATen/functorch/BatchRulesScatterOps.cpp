@@ -1062,7 +1062,7 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_scalar_batch_rule_impl(
     const Tensor & index, optional<int64_t> index_bdim,
     const Scalar & value,
     const bool inplace) {
-
+    const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
     Tensor self_ = moveBatchDimToFront(self, self_bdim);
     Tensor index_ = moveBatchDimToFront(index, index_bdim);
     dim = maybe_wrap_dim(dim, self_.dim());
@@ -1072,7 +1072,13 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_scalar_batch_rule_impl(
     }
 
     if (!index_bdim) {
-      self_.unsqueeze_(-1).index_fill_(dim + 1, index_, value).squeeze_(-1);
+      if (self_logical_rank == 0){
+        self_.unsqueeze_(-1);
+      }
+      self_.index_fill_(dim + 1, index_, value);
+      if (self_logical_rank == 0) {
+        self_.squeeze_(-1);
+      }
       return std::make_tuple(self_, 0);
     }
 
@@ -1114,7 +1120,13 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_scalar_batch_rule_impl(
       } else {
         // If self.dim() is 0 or 1, the batch dim is certainly 0, and we must apply batched indices to each row.
         index_ = reshape_dim_into(0, 0, index_);
-        self_.unsqueeze_(-1).index_fill_(dim + 1, index_, value).squeeze_(-1);
+        if (self_logical_rank == 0){
+          self_.unsqueeze_(-1);
+        }
+        self_.index_fill_(dim + 1, index_, value);
+        if (self_logical_rank == 0) {
+          self_.squeeze_(-1);
+        }
       }
     }
 
@@ -1139,7 +1151,13 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule_impl(
     }
 
     if (!index_bdim && !value_bdim) {
-      self_.unsqueeze_(-1).index_fill_(dim + 1, index_, value).squeeze_(-1);
+      if (self_logical_rank == 0){
+        self_.unsqueeze_(-1);
+      }
+      self_.index_fill_(dim + 1, index_, value);
+      if (self_logical_rank == 0) {
+        self_.squeeze_(-1);
+      }
       return std::make_tuple(self_, 0);
     }
 
@@ -1148,20 +1166,43 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule_impl(
     index_ = ensure_has_bdim(index_, index_bdim.has_value(), batch_size);
     value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
 
-    if (!inplace && !self_bdim.has_value()){
-      self_ = self_.clone();
+    self_ = self_bdim.has_value() ? self_ : self_.clone();
+
+    if (true){
+      for (const auto i : c10::irange(0, batch_size)) {
+        const auto& self_slice = self_.select(0, i);
+        const auto& index_slice = index_.select(0, i);
+        const auto& value_slice = value_.select(0, i);
+        self_slice.index_fill_(
+          dim,
+          index_slice,
+          value_slice
+        );
+      }
+    } else {
+      if (self.dim() > 1){
+        if (dim == 0) {
+          // The dim to which we're applying is batch dim which will be packed into the next dim for batched calculution.
+          // We add offsets to index to conform with the element positions of the reshaped self_.
+          auto index_offset = at::arange(
+            batch_size,
+            at::TensorOptions().dtype(index_.scalar_type()).device(index_.device())
+          );
+          index_ = index_.add(index_offset.unsqueeze(-1), self_.size(1));
+        }
+
+        index_ = reshape_dim_into(0, 0, index_);
+        self_ = reshape_dim_into(0, 0, self_);
+        //self_.index_fill_(dim, index_, value);
+        self_ = reshape_dim_outof(0, batch_size, self_);
+
+      } else {
+        // If self.dim() is 0 or 1, the batch dim is certainly 0, and we must apply batched indices to each row.
+        index_ = reshape_dim_into(0, 0, index_);
+        self_.unsqueeze_(-1).index_fill_(dim + 1, index_, value).squeeze_(-1);
+      }
     }
 
-    for (const auto i : c10::irange(0, batch_size)) {
-      const auto& self_slice = self_.select(0, i);
-      const auto& index_slice = index_.select(0, i);
-      const auto& value_slice = value_.select(0, i);
-      self_slice.index_fill_(
-        dim,
-        index_slice,
-        value_slice
-      );
-    }
     return std::make_tuple(self_, 0);
 }
 
