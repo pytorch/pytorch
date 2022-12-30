@@ -1,4 +1,4 @@
-r"""Functional interface"""
+"""Functional interface"""
 from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
@@ -4847,7 +4847,7 @@ Args:
      dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
      need_attn_weights (bool): If true, the second return value will contain the attention weights used;
          otherwise, the second return value is unspecified
-     is_causal (bool): If true, assumes causal attention masking; for this case, attn_mask should not be set.
+     is_causal (bool): If true, assumes causal attention masking and ignores attn_mask.
 
 
 Returns a tuple containing:
@@ -4956,7 +4956,8 @@ def multi_head_attention_forward(
         need_weights: output attn_output_weights.
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
-        is_causal: If specified, applies a causal mask as attention mask. Mutually exclusive with providing attn_mask.
+        is_causal: If specified, applies a causal mask as attention mask, and ignores
+            attn_mask for computing scaled dot product attention.
             Default: ``False``.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
@@ -5034,6 +5035,9 @@ def multi_head_attention_forward(
         )
 
     is_batched = _mha_shape_check(query, key, value, key_padding_mask, attn_mask, num_heads)
+
+    if is_causal:
+        attn_mask = None
 
     # For unbatched input, we unsqueeze at the expected batch-dim to pretend that the input
     # is batched, run the computation and before returning squeeze the
