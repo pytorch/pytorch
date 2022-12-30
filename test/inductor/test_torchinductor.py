@@ -1507,6 +1507,17 @@ class CommonTemplate:
                 (torch.randn(8, 12, 512, 512),),
             )
 
+    def test_channel_shuffle_with_transpose(self):
+        def channel_shuffle(x, groups):
+            batchsize, num_channels, height, width = x.size()
+            channels_per_group = num_channels // groups
+            x = x.view(batchsize, groups, channels_per_group, height, width)
+            x = torch.transpose(x, 1, 2).contiguous()
+            x = x.view(batchsize, -1, height, width)
+            return x.contiguous(memory_format=torch.channels_last)
+
+        self.common(channel_shuffle, (torch.randn(64, 58, 28, 28), 2))
+
     # For gpu path, there has a accurcy issue,
     @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_bn_fuse(self):
