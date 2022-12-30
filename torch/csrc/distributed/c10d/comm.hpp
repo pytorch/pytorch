@@ -21,18 +21,18 @@ class TORCH_API GradBucket {
   explicit GradBucket(
       size_t index,
       size_t bucket_count,
-      at::Tensor  tensor,
-      const std::vector<size_t>& offsets,
-      const std::vector<size_t>& lengths,
-      const std::vector<c10::IntArrayRef>& sizes_vec,
-      const std::vector<at::Tensor>& parameters)
+      at::Tensor tensor,
+      std::vector<size_t> offsets,
+      std::vector<size_t> lengths,
+      std::vector<c10::IntArrayRef> sizes_vec,
+      std::vector<at::Tensor> parameters)
       : index_(index),
         bucket_count_(bucket_count),
         buffer_(std::move(tensor)),
-        offsets_(offsets),
-        lengths_(lengths),
-        sizes_vec_(sizes_vec),
-        parameters_(parameters) {}
+        offsets_(std::move(offsets)),
+        lengths_(std::move(lengths)),
+        sizes_vec_(std::move(sizes_vec)),
+        parameters_(std::move(parameters)) {}
 
   // Returns the index of the bucket, which is unique across all the buckets.
   size_t getIndex() const {
@@ -115,7 +115,7 @@ namespace detail {
 template <typename T>
 class CppCommHookInterface : public CommHookInterface {
  public:
-  explicit CppCommHookInterface(T  state) : state_(std::move(state)) {}
+  explicit CppCommHookInterface(T state) : state_(std::move(state)) {}
 
   ~CppCommHookInterface() override = default;
 
