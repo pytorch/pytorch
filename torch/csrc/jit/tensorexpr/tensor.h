@@ -135,8 +135,8 @@ inline std::vector<VarHandle> create_index_vars(
   std::vector<VarHandle> vars;
   vars.reserve(dims.size());
   for (const ExprHandle& dim : dims) {
-    vars.push_back(VarHandle(alloc<Var>(
-        "i", dim.dtype().scalar_type() == ScalarType::Long ? kLong : kInt)));
+    vars.emplace_back(alloc<Var>(
+        "i", dim.dtype().scalar_type() == ScalarType::Long ? kLong : kInt));
   }
   return vars;
 }
