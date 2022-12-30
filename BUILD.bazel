@@ -403,7 +403,7 @@ cc_binary(
 
 cc_library(
     name = "aten_cuda_cpp",
-    srcs = [":aten_cuda_cpp_srcs"] + generated_cuda_cpp + ["//third_party:cudnn_frontend/include/cudnn_frontend.h"],
+    srcs = [":aten_cuda_cpp_srcs"] + generated_cuda_cpp,
     hdrs = [":aten_src_ATen_cuda_config"],
     copts = ATEN_COPTS,
     visibility = ["//visibility:public"],
@@ -413,6 +413,7 @@ cc_library(
         "@cuda//:cusolver",
         "@cuda//:nvrtc",
         "@cudnn",
+        "@cudnn_frontend",
     ],
     alwayslink = True,
 )
