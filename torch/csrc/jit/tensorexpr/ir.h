@@ -587,19 +587,19 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   }
 
   void set_lhs(ExprPtr lhs) {
-    lhs_ = lhs;
+    lhs_ = std::move(lhs);
   }
 
   void set_rhs(ExprPtr rhs) {
-    rhs_ = rhs;
+    rhs_ = std::move(rhs);
   }
 
   void set_ret_val1(ExprPtr ret_val1) {
-    ret_val1_ = ret_val1;
+    ret_val1_ = std::move(ret_val1);
   }
 
   void set_ret_val2(ExprPtr ret_val2) {
-    ret_val2_ = ret_val2;
+    ret_val2_ = std::move(ret_val2);
   }
 
   CompareSelectBias bias() const {
