@@ -1388,10 +1388,10 @@ struct TORCH_API WeakTypePtr {
 // internal build errors with std::variant :/
 struct WeakOrStrongCompilationUnit {
   explicit WeakOrStrongCompilationUnit(
-      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) : strong_ptr_(shared_cu), weak_ptr_(c10::nullopt) {}
+      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) : strong_ptr_(std::move(shared_cu)), weak_ptr_(c10::nullopt) {}
 
   explicit WeakOrStrongCompilationUnit(
-      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) : strong_ptr_(c10::nullopt), weak_ptr_(weak_cu) {}
+      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) : strong_ptr_(c10::nullopt), weak_ptr_(std::move(weak_cu)) {}
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
     TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
