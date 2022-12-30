@@ -68,7 +68,7 @@ struct ComplexHolder : c10::intrusive_ptr_target {
     ComplexHolder(c10::complex<T> c) {
       val = convert<decltype(val), c10::complex<T>>(c);
     }
-    ComplexHolder() {}
+    ComplexHolder() = default;
     c10::complex<double> val;
 };
 } // namespace ivalue
@@ -82,7 +82,7 @@ template <typename T>
 struct OptionalArray {
   c10::optional<std::vector<T>> list;
 
-  OptionalArray(){}
+  OptionalArray()= default;
   OptionalArray(std::vector<T> val) : list(std::move(val)) {}
 
   // Used when saving an argument for the backwards pass.
