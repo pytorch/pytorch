@@ -1419,9 +1419,9 @@ struct WeakOrStrongCompilationUnit {
 // Constant in the graph and a Owning reference otherwise
 struct TORCH_API WeakOrStrongTypePtr {
   explicit WeakOrStrongTypePtr(WeakTypePtr weak)
-      : cu_(WeakOrStrongCompilationUnit(weak.cu_)), type_(weak.type_) {}
+      : cu_(WeakOrStrongCompilationUnit(std::move(weak.cu_))), type_(std::move(weak.type_)) {}
   explicit WeakOrStrongTypePtr(StrongTypePtr strong)
-      : cu_(WeakOrStrongCompilationUnit(strong.cu_)), type_(strong.type_) {}
+      : cu_(WeakOrStrongCompilationUnit(std::move(strong.cu_))), type_(std::move(strong.type_)) {}
   explicit WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type)
       : cu_(std::move(cu)), type_(std::move(type)) {}
   WeakTypePtr asWeakTypePtr() const;
