@@ -240,9 +240,6 @@ filegroup(
             "aten/src/ATen/native/transformers/cuda/*.cpp",
         ],
     ),
-    includes = [
-        "third_party/cudnn_frontend/include",
-    ],
 )
 
 filegroup(
@@ -410,6 +407,9 @@ cc_library(
     hdrs = [":aten_src_ATen_cuda_config"],
     copts = ATEN_COPTS,
     visibility = ["//visibility:public"],
+    includes = [
+        "third_party/cudnn_frontend/include",
+    ],
     deps = [
         ":aten",
         "@cuda",
