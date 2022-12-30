@@ -683,10 +683,10 @@ class CppKernel(Kernel):
                     stack.enter_context(code.indent())
 
             def gen_kernel(kernel):
-                assert kernel
-                code.splice(kernel.loads)
-                code.splice(kernel.compute)
-                code.splice(kernel.stores)
+                    assert kernel
+                    code.splice(kernel.loads)
+                    code.splice(kernel.compute)
+                    code.splice(kernel.stores)
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
                 with contextlib.ExitStack() as stack_outer:
@@ -1399,21 +1399,36 @@ class LoopLevel:
         return bool(self.reduction_var_map)
 
     def split_with_tiling(self, depth, factor):
+        def clone_inner():
+            inner = []
+            if self.inner:
+                for loop in self.inner:
+                    inner.append(loop.clone())
+            return inner
+
         def do_split_with_tiling():
             sympy_factor = sympy.Integer(factor)
 
             main_loop_range = ir.IndexingDiv(self.size, sympy_factor)
-            main_loop = LoopLevel(self.var, main_loop_range, parent=self.parent)
+            main_loop = LoopLevel(self.var, main_loop_range)
             main_loop.parallel = self.parallel
             main_loop.collapsed = False
             main_loop.reduction_var_map = self.reduction_var_map
+            main_loop.inner = clone_inner()
+            if main_loop.inner:
+                for loop in main_loop.inner:
+                    loop.parent = main_loop
 
             offset = main_loop_range * sympy_factor
-            tail_loop = LoopLevel(self.var, self.size, parent=self.parent)
+            tail_loop = LoopLevel(self.var, self.size)
             tail_loop.offset = offset
             tail_loop.parallel = self.parallel
             tail_loop.collapsed = False
             tail_loop.reduction_var_map = self.reduction_var_map
+            tail_loop.inner = clone_inner()
+            if tail_loop.inner:
+                for loop in tail_loop.inner:
+                    loop.parent = tail_loop
 
             return main_loop, tail_loop
 
@@ -1422,10 +1437,21 @@ class LoopLevel:
             parent = self.parent
             if parent:
                 parent.inner = [main_loop, tail_loop]
+                main_loop.parent = parent
+                tail_loop.parent = parent
             return main_loop, tail_loop
         else:
             assert len(self.inner) == 1
-            return self.inner.split_with_tiling(depth - 1, factor)
+            return self.inner[0].split_with_tiling(depth - 1, factor)
+    
+    def clone(self):
+        loop = copy.copy(self)
+        if self.inner:
+            for idx, inner_loop in enumerate(self.inner):
+                loop.inner[idx] = inner_loop.clone()
+                loop.inner[idx].parent = loop
+        loop.kernel = copy.deepcopy(self.kernel)
+        return loop
 
     def lines(self):
         if self.reduction_var_map:
@@ -1475,7 +1501,6 @@ class LoopNestWithSplit:
     """
 
     root: List[LoopLevel] = None
-    depth: int = 0
     kernel: CppKernel = None
 
     @staticmethod
