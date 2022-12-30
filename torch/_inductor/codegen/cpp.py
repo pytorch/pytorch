@@ -435,7 +435,7 @@ class CppVecOverrides(OpOverrides):
         assert dtype == torch.int64
         assert V.interpreter.current_node.meta["dtype"] == torch.int32
         assert V.interpreter.current_node.meta["most_inner_loop_irrevelant"]
-        return f"at::vec::Vectorized<int32_t>(static_cast<int32_t>({cexpr(V.kernel.rename_indexing(expr))}))"
+        return f"at::vec::Vectorized<int>(static_cast<int>({cexpr(V.kernel.rename_indexing(expr))}))"
 
 
 class CppOverrides(OpOverrides):
