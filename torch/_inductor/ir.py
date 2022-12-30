@@ -2307,13 +2307,17 @@ class ConcatKernel(NopKernel):
                     )
             offsets_end.append(new_size[dim])
 
+        with V.graph.fake_mode:
+            x_fake = [ir_node_to_tensor(x, guard_shape=True) for x in inputs]
+            output = torch.ops.aten.cat(x_fake, dim)
+
         kernel = ConcatKernel(
             name=None,
             layout=FixedLayout(
                 device=device,
                 dtype=dtype,
                 size=new_size,
-                stride=FlexibleLayout.contiguous_strides(new_size),
+                stride=output.stride(),
             ),
             inputs=[],
         )
@@ -3916,6 +3920,26 @@ class StorageBox(MutableBox):
         return len(read_writes.reads)
 
 
+class InterpreterShim(torch.fx.Interpreter):
+    def __init__(self, graph, submodules):
+        """
+        We don't call super() here to avoid constructing a
+        GraphModule which is very expensive (it does codegen).
+        """
+        self.module = self
+        self.graph = graph
+        self.submodules = submodules
+        self.garbage_collect_values = False
+        self.env = {}
+        self.fetch_attr = submodules.__getitem__
+        self.name = V.get_ops_handler().name
+        self.current_node = None
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        self.current_node = n
+        return super().run_node(n)
+
+
 class LoopBody:
     """
     Captures the body of a Loops subclass into an FX graph.  Persists any
@@ -3973,7 +3997,7 @@ class LoopBody:
     def add_indirect(self):
         name = f"indirect{len(self.indirect_vars)}"
         var = sympy_symbol(name)
-        self.indirect_vars.append([var])
+        self.indirect_vars.append(var)
         return var
 
     def replace_indirect(self, old, new):
@@ -4019,6 +4043,8 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):
+            self.name = "CaptureIndexing"
+
             def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, "reads", name)
                 return self._inner.load(name, index)
@@ -4089,20 +4115,12 @@ class LoopBodyBlock:
         graph = self.graph
         submodules = self.body.submodules
 
-        class InterpreterShim(torch.fx.Interpreter):
-            def __init__(self):
-                """
-                We don't call super() here to avoid constructing a
-                GraphModule which is very expensive (it does codegen).
-                """
-                self.module = self
-                self.graph = graph
-                self.submodules = submodules
-                self.garbage_collect_values = False
-                self.env = {}
-                self.fetch_attr = submodules.__getitem__
-
-        return InterpreterShim().run(V.get_ops_handler())
+        _orig_interpreter = V.interpreter
+        interpreter_shim = InterpreterShim(graph, submodules)
+        V.set_interpreter_handler(interpreter_shim)
+        res = interpreter_shim.run(V.get_ops_handler())
+        V.set_interpreter_handler(_orig_interpreter)
+        return res
 
     def debug_str(self, name="block"):
         code = torch.fx.GraphModule(self.body.submodules, self.graph).code
