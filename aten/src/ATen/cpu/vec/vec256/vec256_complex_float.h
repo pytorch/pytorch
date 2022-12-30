@@ -42,9 +42,7 @@ public:
                             val2.real(), val2.imag(),
                             val3.real(), val3.imag(),
                             val4.real(), val4.imag()
-                            )) {
-
-  }
+                            )) {}
   operator __m256() const {
     return values;
   }

@@ -246,9 +246,7 @@ struct IndicesDtypeEnumTrait<uint8_t> {
 };
 
 template <typename INDICES_DTYPE>
-TypedBCSRMatrix<INDICES_DTYPE>::TypedBCSRMatrix() : indices_dtype(IndicesDtypeEnumTrait<INDICES_DTYPE>::dtype) {
-  
-}
+TypedBCSRMatrix<INDICES_DTYPE>::TypedBCSRMatrix() : indices_dtype(IndicesDtypeEnumTrait<INDICES_DTYPE>::dtype) {}
 
 template <typename INDICES_DTYPE>
 const void* TypedBCSRMatrix<INDICES_DTYPE>::col_indices_data_ptr() const {

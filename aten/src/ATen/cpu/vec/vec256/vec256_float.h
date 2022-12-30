@@ -28,13 +28,9 @@ public:
   }
   Vectorized() {}
   Vectorized(__m256 v) : values(v) {}
-  Vectorized(float val) : values(_mm256_set1_ps(val)) {
-    
-  }
+  Vectorized(float val) : values(_mm256_set1_ps(val)) {}
   Vectorized(float val1, float val2, float val3, float val4,
-         float val5, float val6, float val7, float val8) : values(_mm256_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8)) {
-    
-  }
+         float val5, float val6, float val7, float val8) : values(_mm256_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8)) {}
   operator __m256() const {
     return values;
   }
