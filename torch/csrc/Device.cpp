@@ -169,6 +169,26 @@ PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPDevice_enter(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  py::object mode = py::module::import("torch.utils._device")
+                        .attr("DeviceContext")(py::handle(self));
+  at::impl::PythonTorchFunctionTLS::push_onto_stack(
+      std::make_shared<c10::SafePyObject>(
+          mode.release().ptr(), getPyInterpreter()));
+  // So that with torch.device('cuda') as dev: works
+  Py_INCREF(self);
+  return self;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPDevice_exit(PyObject* self, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  at::impl::PythonTorchFunctionTLS::pop_stack();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 typedef PyObject* (*getter)(PyObject*, void*);
 
 // NB: If you edit these properties/methods, update torch/_C/__init__.pyi.in
@@ -182,6 +202,8 @@ static struct PyGetSetDef THPDevice_properties[] = {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDevice_methods[] = {
     {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
+    {"__enter__", THPDevice_enter, METH_NOARGS, nullptr},
+    {"__exit__", THPDevice_exit, METH_VARARGS, nullptr},
     {nullptr} /* Sentinel */
 };
 

@@ -35,6 +35,7 @@ import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
+    'set_default_tensor_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
@@ -442,6 +443,9 @@ def is_storage(obj):
         obj (Object): Object to test
     """
     return type(obj) in _storage_classes
+
+
+from torch.utils._device import set_default_tensor_device
 
 
 def set_default_tensor_type(t):
