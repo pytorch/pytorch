@@ -683,10 +683,10 @@ class CppKernel(Kernel):
                     stack.enter_context(code.indent())
 
             def gen_kernel(kernel):
-                    assert kernel
-                    code.splice(kernel.loads)
-                    code.splice(kernel.compute)
-                    code.splice(kernel.stores)
+                assert kernel
+                code.splice(kernel.loads)
+                code.splice(kernel.compute)
+                code.splice(kernel.stores)
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
                 with contextlib.ExitStack() as stack_outer:
@@ -1443,7 +1443,7 @@ class LoopLevel:
         else:
             assert len(self.inner) == 1
             return self.inner[0].split_with_tiling(depth - 1, factor)
-    
+
     def clone(self):
         loop = copy.copy(self)
         if self.inner:
