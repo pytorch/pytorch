@@ -167,6 +167,10 @@ inductor_skips["cuda"] = {
     "nn.functional.cosine_embedding_loss": {b8},
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
+    # https://github.com/pytorch/pytorch/pull/91534
+    # introduced unexpected successes
+    "index_add": {f16},
+    "index_select": {b8},
     # fft ops sometimes succeed locally and fail on CI.
     # they return complex values which is known unsupported,
     # so there is not much point in testing them currently.

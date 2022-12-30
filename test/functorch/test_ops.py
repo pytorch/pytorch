@@ -583,6 +583,8 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter'),
         xfail('_softmax_backward_data', device_type='cpu'),
         xfail('as_strided', 'partial_views'),
+        # https://github.com/pytorch/pytorch/pull/91534
+        xfail('index_fill', dtypes=(torch.float32,), device_type='cuda')
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
