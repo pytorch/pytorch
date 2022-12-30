@@ -2,8 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/Export.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <utility>
 
 namespace c10d {
 
@@ -20,14 +21,14 @@ class TORCH_API GradBucket {
   explicit GradBucket(
       size_t index,
       size_t bucket_count,
-      const at::Tensor& tensor,
+      at::Tensor  tensor,
       const std::vector<size_t>& offsets,
       const std::vector<size_t>& lengths,
       const std::vector<c10::IntArrayRef>& sizes_vec,
       const std::vector<at::Tensor>& parameters)
       : index_(index),
         bucket_count_(bucket_count),
-        buffer_(tensor),
+        buffer_(std::move(tensor)),
         offsets_(offsets),
         lengths_(lengths),
         sizes_vec_(sizes_vec),
@@ -114,7 +115,7 @@ namespace detail {
 template <typename T>
 class CppCommHookInterface : public CommHookInterface {
  public:
-  explicit CppCommHookInterface(const T& state) : state_(state) {}
+  explicit CppCommHookInterface(T  state) : state_(std::move(state)) {}
 
   ~CppCommHookInterface() override = default;
 

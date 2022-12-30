@@ -28,12 +28,12 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       c10::IntArrayRef sizes,
       bool is_non_overlapping_and_dense = true)
       : TensorImpl(key_set, data_type, device),
-        opaque_handle_(std::move(opaque_handle)) {
+        opaque_handle_(std::move(opaque_handle)),
+        is_non_overlapping_and_dense_(is_non_overlapping_and_dense) {
     set_storage_access_should_throw();
     set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
     sizes_and_strides_.set_sizes(sizes);
     refresh_numel();
-    is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
   }
 
   // Destructor doesn't call release_resources because it's

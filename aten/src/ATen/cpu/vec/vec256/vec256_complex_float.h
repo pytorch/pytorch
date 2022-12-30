@@ -38,12 +38,12 @@ public:
                             real_value, imag_value
                             );
   }
-  Vectorized(c10::complex<float> val1, c10::complex<float> val2, c10::complex<float> val3, c10::complex<float> val4) {
-    values = _mm256_setr_ps(val1.real(), val1.imag(),
+  Vectorized(c10::complex<float> val1, c10::complex<float> val2, c10::complex<float> val3, c10::complex<float> val4) : values(_mm256_setr_ps(val1.real(), val1.imag(),
                             val2.real(), val2.imag(),
                             val3.real(), val3.imag(),
                             val4.real(), val4.imag()
-                            );
+                            )) {
+
   }
   operator __m256() const {
     return values;

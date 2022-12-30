@@ -781,14 +781,13 @@ TupleType::TupleType(
     std::shared_ptr<FunctionSchema> schema)
     : NamedType(TypeKind::TupleType, std::move(name)),
       elements_(std::move(elements)),
-      schema_(std::move(schema)) {
-  has_free_variables_ =
-      std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+      has_free_variables_(std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
         if (!v) {
           throw std::runtime_error("Can not create tuple with None type");
         }
         return v->hasFreeVariables();
-      });
+      })), schema_(std::move(schema)) {
+
   if (schema_) {
     for (const Argument& arg : schema_->arguments()) {
       checkNoAny(*this, "attribute", arg.name(), arg.type());

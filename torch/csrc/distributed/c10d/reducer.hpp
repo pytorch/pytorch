@@ -384,9 +384,9 @@ class TORCH_API Reducer {
 
     VariableLocator() = default;
 
-    VariableLocator(size_t bucket_index_, size_t intra_bucket_index_) {
-      bucket_index = bucket_index_;
-      intra_bucket_index = intra_bucket_index_;
+    VariableLocator(size_t bucket_index_, size_t intra_bucket_index_) : bucket_index(bucket_index_), intra_bucket_index(intra_bucket_index_) {
+      
+      
     }
   };
 
