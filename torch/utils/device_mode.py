@@ -42,6 +42,7 @@ _DEVICE_CONSTRUCTOR = {
     # weird ones
     torch.tensor,
     torch.as_tensor,
+    torch.scalar_tensor,
 }
 
 class DeviceMode(TorchFunctionMode):
@@ -63,5 +64,8 @@ def set_default_tensor_device(device):
     global GLOBAL_DEVICE_MODE
     if GLOBAL_DEVICE_MODE is not None:
         GLOBAL_DEVICE_MODE.__exit__(None, None, None)
+    if device is None:
+        GLOBAL_DEVICE_MODE = None
+        return
     GLOBAL_DEVICE_MODE = DeviceMode(device)
     GLOBAL_DEVICE_MODE.__enter__()
