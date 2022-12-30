@@ -2739,8 +2739,8 @@ class TestCase(expecttest.TestCase):
             assert dim >= 0 and dim < t.ndim
             step = max(2, offset + 1)
             tmp = torch.zeros((*t.shape[:dim], t.shape[dim] * step, *t.shape[dim + 1:]), dtype=t.dtype, device=t.device)
-            tmp[(*((slice(None),) * dim), slice(offset, None, step))].copy_(t)
-            r = tmp[(*((slice(None),) * dim), slice(offset, None, step))]
+            dim_slices = (*((slice(None),) * dim), slice(offset, None, step))
+            r = tmp[dim_slices].copy_(t)
             self.assertFalse(r.is_contiguous())
             self.assertEqual(t, r)
             return r
