@@ -70,7 +70,7 @@ std::vector<Tensor> all_types_complex_bool_half_bfloat16(TensorList tensors1, Te
 template<template<class> class Op>
 void all_types_complex_bool_half_bfloat16_(TensorList tensors1, TensorList tensors2, const Scalar& alpha = 1) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list_cuda_", [&]() {
-        foreach_tensor_list_op<scalar_t, Op>(tensors1, tensors2, alpha);
+        foreach_tensor_list_op_<scalar_t, Op>(tensors1, tensors2, alpha);
     });
 }
 
@@ -84,7 +84,7 @@ std::vector<Tensor> all_types_bool_half_bfloat16(TensorList tensors1, TensorList
 template<template<class> class Op>
 void all_types_bool_half_bfloat16_(TensorList tensors1, TensorList tensors2, const Scalar& alpha = 1) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list_cuda_", [&]() {
-        foreach_tensor_list_op<scalar_t, Op>(tensors1, tensors2, alpha);
+        foreach_tensor_list_op_<scalar_t, Op>(tensors1, tensors2, alpha);
     });
 }
 
