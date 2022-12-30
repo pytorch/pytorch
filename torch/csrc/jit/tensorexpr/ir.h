@@ -185,34 +185,39 @@ bool bin_op_deducer(...);
 
 class TORCH_API Add : public BinaryOpNode<Add> {
  public:
-  Add(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kAdd) {}
+  Add(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kAdd) {}
 };
 
 class TORCH_API Sub : public BinaryOpNode<Sub> {
  public:
-  Sub(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kSub) {}
+  Sub(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kSub) {}
 };
 
 class TORCH_API Mul : public BinaryOpNode<Mul> {
  public:
-  Mul(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kMul) {}
+  Mul(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMul) {}
 };
 
 class TORCH_API Div : public BinaryOpNode<Div> {
  public:
-  Div(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kDiv) {}
+  Div(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kDiv) {}
 };
 
 class TORCH_API Mod : public BinaryOpNode<Mod> {
  public:
-  Mod(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kMod) {}
+  Mod(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMod) {}
 };
 
 template <typename Op>
 class BitwiseOpNode : public BinaryOpNode<Op> {
  public:
   BitwiseOpNode(ExprPtr lhs, ExprPtr rhs, IRNodeType type)
-      : BinaryOpNode<Op>(lhs, rhs, type) {}
+      : BinaryOpNode<Op>(std::move(lhs), std::move(rhs), type) {}
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
     if (!lhs.dtype().is_integral()) {
@@ -260,7 +265,7 @@ class Max : public BinaryOpNode<Max> {
 
  public:
   Max(ExprPtr lhs, ExprPtr rhs, bool propagate_nans)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kMax),
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMax),
         propagate_nans_(propagate_nans) {}
 
   bool propagate_nans() const {
@@ -284,7 +289,7 @@ class Min : public BinaryOpNode<Min> {
 
  public:
   Min(ExprPtr lhs, ExprPtr rhs, bool propagate_nans)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kMin),
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMin),
         propagate_nans_(propagate_nans) {}
 
   bool propagate_nans() const {
