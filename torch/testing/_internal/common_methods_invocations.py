@@ -4456,7 +4456,13 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
     else:
         alphas = (None,)
 
-    for shape, alpha in product(shapes, alphas):
+    if fill:
+        # A weird number to catch errors
+        values = (make_arg((1,)).item(), make_arg((1,)).squeeze(0))
+    else:
+        values = ()
+
+    for shape, alpha, value in product(shapes, alphas, values):
         t = make_arg(shape)
         args = []
 
@@ -4471,8 +4477,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
         if copy or add:
             args.append(make_arg(shape))
         elif fill:
-            # A weird number to catch errors
-            args.append(make_arg((1,)).item())
+            args.append(value)
 
         args = tuple(args)
         kwargs = {} if alpha is None else {"alpha": alpha}
