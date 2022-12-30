@@ -17,13 +17,7 @@ ThreadLocalState::ThreadLocalState()
       autograd_tls_(c10::AutogradState::get_tls_state()),
       torch_dispatch_mode_state_(c10::impl::TorchDispatchModeTLS::get_state()), python_dispatcher_state_(c10::impl::PythonDispatcherTLS::get_state()),
       python_torch_function_state_(at::impl::PythonTorchFunctionTLS::get_state()),
-      saved_tensors_default_hooks_state_(at::SavedTensorDefaultHooks::get_tls_state()), functionalization_reapply_views_state_(at::functionalization::impl::getFunctionalizationReapplyViewsTLS()) {
-
-
-
-
-
-}
+      saved_tensors_default_hooks_state_(at::SavedTensorDefaultHooks::get_tls_state()), functionalization_reapply_views_state_(at::functionalization::impl::getFunctionalizationReapplyViewsTLS()) {}
 
 void ThreadLocalState::set_grad_mode(bool enabled) {
   autograd_tls_.set_grad_mode(enabled);
