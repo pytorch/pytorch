@@ -566,8 +566,7 @@ class BroadcastLinearIndices {
     // The assumption is that the broadcast_shape is a materialized broadcast
     // shape of the original_shape. We need to compute the linear indices
     // compatible with the original_shape to access the elements in the original
-    // tensor corresponding to the broadcast tensor.
-    
+    // tensor corresponding to the broadcast tensor. 
     if (is_broadcasting_) {
       linear_indices_ =
           get_linear_indices(numel, original_shape, broadcast_shape);
