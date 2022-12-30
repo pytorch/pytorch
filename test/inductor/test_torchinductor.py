@@ -1516,7 +1516,10 @@ class CommonTemplate:
             x = x.view(batchsize, -1, height, width)
             return x.contiguous(memory_format=torch.channels_last)
 
-        self.common(channel_shuffle, (torch.randn(64, 58, 28, 28), 2))
+        for simdlen in (None, 256, 1) if self.device == "cpu" else (None,):
+            with patch.object(config.cpp, "simdlen", simdlen):
+                torch._dynamo.reset()
+                self.common(channel_shuffle, (torch.randn(64, 58, 28, 28), 2))
 
     # For gpu path, there has a accurcy issue,
     @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
