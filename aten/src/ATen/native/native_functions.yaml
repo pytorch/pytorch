@@ -6208,10 +6208,6 @@
   dispatch:
     CPU, CUDA: frexp_out
   tags: pointwise
-# Deprecated (v.1.12)
-
-- func: frobenius_norm(Tensor self) -> Tensor
-  variants: function
 
 # Deprecated (v.1.12)
 - func: frobenius_norm.dim(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
@@ -9439,7 +9435,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta: unfold
+    CPU, CUDA, Meta, MPS: unfold
     QuantizedCPU, QuantizedCUDA: unfold
 
 - func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor
