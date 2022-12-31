@@ -4,7 +4,7 @@
 namespace torch {
 namespace jit {
 TORCH_API std::shared_ptr<Graph> TraceGraph(
-    const std::shared_ptr<Graph>& graph,
+    std::shared_ptr<Graph> graph,
     Stack& stack);
 }
 } // namespace torch

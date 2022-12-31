@@ -8,10 +8,6 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
-#include <utility>
-
-#include <utility>
-
 namespace torch {
 namespace jit {
 
@@ -75,8 +71,8 @@ void TEWrapper::call(const std::vector<void*>& args) {
 
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
-    const Tensor& out,
-    const std::vector<CodeGen::BufferArg>& args,
+    Tensor out,
+    std::vector<CodeGen::BufferArg> args,
     int width = kVectorWidth) {
   return wrap;
 }
@@ -84,7 +80,7 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     LoopNest* ln,
-    const std::vector<CodeGen::BufferArg>& args) {
+    std::vector<CodeGen::BufferArg> args) {
   return wrap;
 }
 
@@ -113,7 +109,7 @@ std::shared_ptr<TEWrapper> lookupNNCCache(NodeKind kind) {
 
 void updateNNCCache(NodeKind kind, std::shared_ptr<TEWrapper> code) {
   std::lock_guard<std::mutex> lock(getNNCCacheMutex());
-  getNNCCache()[kind] = std::move(code);
+  getNNCCache()[kind] = code;
 }
 
 } // namespace
@@ -152,7 +148,7 @@ std::shared_ptr<TEWrapper> createDiv() {
         kEQ);
   });
 
-  wrap = wrapTECompute(wrap, std::move(C), {A, B, mode, dim});
+  wrap = wrapTECompute(wrap, C, {A, B, mode, dim});
 
   updateNNCCache(aten::div, wrap);
   return wrap;
@@ -178,7 +174,7 @@ std::shared_ptr<TEWrapper> createLogit() {
     }();
     return log_vml(A_elem / (FloatImm::make(1.0f) - A_elem));
   });
-  wrap = wrapTECompute(wrap, std::move(B), {A, N, C});
+  wrap = wrapTECompute(wrap, B, {A, N, C});
   updateNNCCache(aten::logit, wrap);
   return wrap;
 }
@@ -196,7 +192,7 @@ std::shared_ptr<TEWrapper> createRelu() {
     auto a = A.load(i);
     return CompareSelect::make(a, zero, zero, a, kLT);
   });
-  wrap = wrapTECompute(wrap, std::move(B), {A, N});
+  wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::relu, wrap);
   return wrap;
 }
@@ -213,7 +209,7 @@ std::shared_ptr<TEWrapper> createTanh() {
     auto a = A.load(i);
     return fast_tanh(a);
   });
-  wrap = wrapTECompute(wrap, std::move(B), {A, N});
+  wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::tanh, wrap);
   return wrap;
 }
@@ -228,7 +224,7 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   BufHandle A("A", {N}, kFloat);
   Tensor B = Compute(
       "B", {N}, [&](const VarHandle& i) { return fast_sigmoid(A.load(i)); });
-  wrap = wrapTECompute(wrap, std::move(B), {A, N});
+  wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::sigmoid, wrap);
   return wrap;
 }
@@ -249,7 +245,7 @@ std::shared_ptr<TEWrapper> createClamp() {
     auto a = A.load(i);
     return tensorexpr::clamp(min_handle, max_handle, a);
   });
-  wrap = wrapTECompute(wrap, std::move(result), {A, min_handle, max_handle, N});
+  wrap = wrapTECompute(wrap, result, {A, min_handle, max_handle, N});
   updateNNCCache(clamp_symbol, wrap);
   return wrap;
 }
@@ -277,7 +273,7 @@ std::shared_ptr<TEWrapper> createClampNanToNum() {
     return nans_replaced;
   });
   wrap = wrapTECompute(
-      wrap, std::move(result), {A, min_handle, max_handle, nan_replace_val, N});
+      wrap, result, {A, min_handle, max_handle, nan_replace_val, N});
   updateNNCCache(symbol, wrap);
   return wrap;
 }
@@ -302,7 +298,7 @@ std::shared_ptr<TEWrapper> createSignedLog1p() {
   Tensor output = Compute("aten_mul", {N}, [&](const VarHandle& i) {
     return sign.load(i) * log1p_result.load(i);
   });
-  LoopNest ln({output}, {std::move(abs_result), std::move(log1p_result), std::move(sign), output});
+  LoopNest ln({output}, {abs_result, log1p_result, sign, output});
   GRAPH_DEBUG("Original stmt: ", *ln.root_stmt());
   ln.inlineIntermediateBufs(true);
   ln.prepareForCodegen();

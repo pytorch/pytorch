@@ -73,43 +73,43 @@ struct TORCH_API Operator {
   };
 
  public:
-  Operator(const c10::OperatorHandle& opHandle, const Operation& operation)
+  Operator(c10::OperatorHandle opHandle, Operation operation)
       : op_(c10::make_left<C10Operator, JitOnlyOperator>(
-            C10Operator{opHandle, operation})) {}
+            C10Operator{opHandle, std::move(operation)})) {}
 
   Operator(
-      const std::string& schema,
-      const Operation& op,
+      std::string schema,
+      Operation op,
       c10::AliasAnalysisKind alias_analysis)
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
             c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
-                UnparsedFunctionSchema{schema, alias_analysis}),
-            c10::make_left<Operation, OperationCreator>(op)})) {}
+                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
+            c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
   Operator(
-      const std::string& name,
-      const std::string& overload_name,
+      std::string name,
+      std::string overload_name,
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
-      const Operation& op,
+      Operation op,
       c10::AliasAnalysisKind alias_analysis)
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
             c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
                 varArgSchemaWithName(
                     name,
                     overload_name,
-                    std::move(arguments),
-                    std::move(returns),
+                    arguments,
+                    returns,
                     alias_analysis)),
-            c10::make_left<Operation, OperationCreator>(op)})) {}
+            c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
   Operator(
-      const std::string& schema,
+      std::string schema,
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
             c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
-                UnparsedFunctionSchema{schema, alias_analysis}),
+                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
             c10::make_right<Operation, OperationCreator>(op_creator)})) {}
 
   // Helper constructor to register `op` to run
@@ -225,16 +225,16 @@ struct TORCH_API Operator {
   }
 
   static FunctionSchema varArgSchemaWithName(
-      const std::string& name,
-      const std::string& overload_name,
+      std::string name,
+      std::string overload_name,
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       AliasAnalysisKind alias_analysis) {
     auto result = FunctionSchema(
         name,
         overload_name,
-        std::move(arguments),
-        std::move(returns),
+        arguments,
+        returns,
         /*is_vararg*/ false,
         /*is_varret*/ false);
     result.setAliasAnalysis(alias_analysis);

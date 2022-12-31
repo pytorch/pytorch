@@ -374,7 +374,7 @@ class BlockInfo {
 class TORCH_API StaticModule {
  public:
   explicit StaticModule(
-      const std::shared_ptr<torch::jit::Graph>& g,
+      std::shared_ptr<torch::jit::Graph> g,
       const StaticModuleOptions& opts = StaticModuleOptions(),
       std::vector<IValue> sample_inputs = {});
 
@@ -865,7 +865,7 @@ class TORCH_API ProcessedNodeMetadata {
   ProcessedNodeMetadata(
       std::vector<BlockRunner> runners,
       torch::jit::TaskLauncher* launcher)
-      : block_runners_(std::move(runners)), launcher_(launcher) {}
+      : block_runners_(std::move(runners)), launcher_(std::move(launcher)) {}
 
   ProcessedNodeMetadata() : launcher_(nullptr) {}
 
