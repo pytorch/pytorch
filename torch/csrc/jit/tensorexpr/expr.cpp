@@ -206,12 +206,12 @@ ExprHandle fast_log(const ExprHandle& v) {
   // https://github.com/shibatch/sleef/blob/master/src/libm/sleefsp.c#L1131
   // to generate coefficients, this tool is provided
   // https://github.com/shibatch/sleef/blob/master/src/gencoef/gencoef.txt
-  auto ilogb2kf = [](ExprHandle x) {
+  auto ilogb2kf = [](const ExprHandle& x) {
     auto y = (bitcast<int32_t>(x) >> IntImm::make(23)) & IntImm::make(0xff);
     return y - IntImm::make(0x7f);
   };
 
-  auto ldexp3kf = [](ExprHandle x, ExprHandle e) {
+  auto ldexp3kf = [](const ExprHandle& x, const ExprHandle& e) {
     return bitcast<float>(bitcast<int32_t>(x) + (e << IntImm::make(23)));
   };
   auto e = ilogb2kf(v * FloatImm::make(1.0 / 0.75));
@@ -220,15 +220,15 @@ ExprHandle fast_log(const ExprHandle& v) {
   auto x = (m - one) / (m + one);
   auto x2 = x * x;
 
-  auto mlaf = [](ExprHandle x, ExprHandle y, float z) {
+  auto mlaf = [](const ExprHandle& x, const ExprHandle& y, float z) {
     return x * y + FloatImm::make(z);
   };
 
   auto t = FloatImm::make(0.2392828464508056640625);
-  t = mlaf(std::move(t), x2, 0.28518211841583251953125);
-  t = mlaf(std::move(t), x2, 0.400005877017974853515625);
-  t = mlaf(std::move(t), x2, 0.666666686534881591796875);
-  t = mlaf(t, std::move(x2), 2.0);
+  t = mlaf(t, x2, 0.28518211841583251953125);
+  t = mlaf(t, x2, 0.400005877017974853515625);
+  t = mlaf(t, x2, 0.666666686534881591796875);
+  t = mlaf(t, x2, 2.0);
   x = x * t + FloatImm::make(0.693147180559945286226764) * e;
 
   auto zero = FloatImm::make(0);
@@ -252,14 +252,14 @@ ExprHandle log_vml(const ExprHandle& v) {
   x = bitcast<float>(x) - 1.0f;
 
   auto t = FloatImm::make(-0.12891686f);
-  t = mlaf(x, std::move(t), 0.139844373f);
-  t = mlaf(x, std::move(t), -0.121842608f);
-  t = mlaf(x, std::move(t), 0.140058696f);
-  t = mlaf(x, std::move(t), -0.16680488f);
-  t = mlaf(x, std::move(t), 0.200104058f);
-  t = mlaf(x, std::move(t), -0.249997973f);
-  t = mlaf(x, std::move(t), 0.333332151f);
-  t = mlaf(x, std::move(t), -0.5f);
+  t = mlaf(x, t, 0.139844373f);
+  t = mlaf(x, t, -0.121842608f);
+  t = mlaf(x, t, 0.140058696f);
+  t = mlaf(x, t, -0.16680488f);
+  t = mlaf(x, t, 0.200104058f);
+  t = mlaf(x, t, -0.249997973f);
+  t = mlaf(x, t, 0.333332151f);
+  t = mlaf(x, t, -0.5f);
   t = x * t;
   t = x * t + x;
 
