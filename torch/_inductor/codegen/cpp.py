@@ -1521,9 +1521,9 @@ class LoopNestWithSplit:
         root: List[LoopLevel] = []
         levels: List[LoopLevel] = root
         loop: LoopLevel = None
-        for depth, (var, size) in enumerate(zip(itervars, ranges)):
+        for loop_idx, (var, size) in enumerate(zip(itervars, ranges)):
             loop = LoopLevel(var, size, parent=loop)
-            if depth >= reduction_depth:
+            if loop_idx >= reduction_depth:
                 loop.reduction_var_map = kernel.reduction_var_map.copy()
             levels.append(loop)
             levels = loop.inner
