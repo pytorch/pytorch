@@ -399,8 +399,11 @@ inline void transpose_kernel_8x8_avx256(
 
 #endif
 
+// copy tile_size*tile_size data from src to dst
 #define TILE2D_COPY(dst, src, offset, tile_size)                                           \
   for (long offset = 0; offset < tile_size; offset++) {                                    \
-    auto tmp = at::vec::Vectorized<std::remove_pointer<decltype(src)>::type>::loadu(src);  \
-    tmp.store(dst + offset * tile_size);                                                   \
+    auto tmp = at::vec::Vectorized<                                                        \
+      typename std::remove_extent<typename std::remove_pointer<decltype(src)>::type>::type \
+    >::loadu(src);                                                                         \
+    tmp.store(dst);                                                                        \
   }

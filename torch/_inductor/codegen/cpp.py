@@ -586,11 +586,11 @@ class CppKernel(Kernel):
         self.num_threads = num_threads  # num_threads the kernel specialized for
 
     def scale_index_with_offset(
-        self, index: sympy.Expr, scale, itervar_idx=-1, offset=None
+        self, index: sympy.Expr, scale, itervar_idx=-1, offset=0
     ):
         expanded_index = sympy.expand(index)
         var = self.itervars[itervar_idx]
-        replacement = {var: var * scale + (offset if offset is not None else 0)}
+        replacement = {var: var * scale + offset}
         new_index = sympy_subs(expanded_index, replacement)
         return new_index
 
@@ -951,7 +951,7 @@ class CppTile2DKernel(CppVecKernel):
         self.outer_tiling_depth = outer_tiling_depth
         self.load_contig_inner_most: Dict[str, bool] = {}
 
-    def transform_tile2d_index(self, index, offset=None):
+    def transform_tile2d_index(self, index, offset=0):
         assert self.is_stride1_at(self.itervars[-1], index) or self.is_stride1_at(
             self.itervars[self.outer_tiling_depth], index
         )
@@ -980,20 +980,26 @@ class CppTile2DKernel(CppVecKernel):
         expanded_index = sympy.expand(index)
         offset = sympy.symbols(f"{self.itervars[self.outer_tiling_depth]}_inner")
         new_index, contig_depth, non_contig_depth = self.transform_tile2d_index(
-            expanded_index, offset
+            expanded_index
         )
+        new_index_with_offset, *_ = self.transform_tile2d_index(expanded_index, offset)
         assert new_index != expanded_index
+        assert new_index_with_offset != expanded_index
 
         # Make sure the tmp tile buffer is contiguous along inner-most itervar
         if contig_depth == len(self.itervars) - 1:
-            expr = f"TILE2D_COPY(__place_holder__, {var} + {cexpr(new_index)}, {offset}, {self.tiling_factor})"
-        else:
             expr = (
-                f"TILE2D_COPY_TRANSPOSE(__place_holder__, {var} + {cexpr(new_index)}, {self.tiling_factor}, "
-                f"{self.stride_at(self.itervars[non_contig_depth], expanded_index)});"
+                f"TILE2D_COPY(__place_holder__ + {offset} * {self.tiling_factor}, {var} + {cexpr(new_index_with_offset)}, "
+                f"{offset}, {self.tiling_factor})"
             )
+        else:
+            ld_src = f"{cexpr(self.stride_at(self.itervars[non_contig_depth], expanded_index))}"
+            ld_dst = f"{self.tiling_factor}"
+            expr = f"TILE2D_COPY_TRANSPOSE(__place_holder__, {var} + {cexpr(new_index)}, {ld_dst}, {ld_src})"
+
         if expr in self.cse.cache:
             return self.cse.cache[expr]
+
         cse_var = self.cse.generate(self.loads, expr, write=False)
         expr = expr.replace("__place_holder__", str(cse_var))
         # TODO(jgong5): support other data types than float
@@ -1012,19 +1018,25 @@ class CppTile2DKernel(CppVecKernel):
         assert mode is None
         # TODO(jgong5): assert the index is an affine expression on the itervars in concern
         expanded_index = sympy.expand(index)
-
+        offset = sympy.symbols(f"{self.itervars[self.outer_tiling_depth]}_inner")
         new_index, contig_depth, non_contig_depth = self.transform_tile2d_index(
             expanded_index
         )
+        new_index_with_offset, *_ = self.transform_tile2d_index(expanded_index, offset)
         assert new_index != expanded_index
+        assert new_index_with_offset != expanded_index
+
         # TODO(jgong5): cache the transposed result for multiple use
         if contig_depth == len(self.itervars) - 1:
-            line = f"TILE2D_COPY({var} + {cexpr(new_index)}, {value}, {self.tiling_factor});"
-        else:
             line = (
-                f"TILE2D_COPY_TRANSPOSE({var} + {cexpr(new_index)}, {value}, "
-                f"{self.stride_at(self.itervars[non_contig_depth], expanded_index)}, {self.tiling_factor});"
+                f"TILE2D_COPY({var} + {cexpr(new_index_with_offset)}, {value} + {offset} * {self.tiling_factor}, "
+                f"{offset}, {self.tiling_factor});"
             )
+        else:
+            ld_dst = f"{cexpr(self.stride_at(self.itervars[non_contig_depth], expanded_index))}"
+            ld_src = f"{self.tiling_factor}"
+            line = f"TILE2D_COPY_TRANSPOSE({var} + {cexpr(new_index)}, {value}, {ld_dst}, {ld_src});"
+
         self.stores.writeline(name, line)
 
 
@@ -1389,14 +1401,12 @@ class CppKernelProxy(CppKernel):
                 run(tile2d_checker)
 
             if vec_checker.simd_vec:
-                # TODO(jgong5): support alternative tiling factors and data types
                 main_loop, tail_loop = self.loop_nest.split_with_tiling(
                     inner_most_depth, factor=tiling_factor
                 )
                 main_loop.set_kernel(codegen_kernel(CppVecKernel, tiling_factor))
                 tail_loop.set_kernel(scalar_kernel)
             elif tile2d_checker.can_tile2d:
-                # TODO(jgong5): support alternative tiling factors and data types
                 outer_tiling_depth = tile2d_checker.outer_tiling_depth
                 assert outer_tiling_depth < inner_most_depth
                 outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
@@ -1449,61 +1459,6 @@ class CppScheduling:
     @classmethod
     def can_fuse_vertical(cls, node1, node2):
         return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
-
-    def _codegen_nodes_impl(self, nodes, is_simd_vec=False):
-        """
-        Turn an set of pre-fused nodes into a C++ kernel.
-        """
-        kernel_group = self.kernel_group
-        _, (group, reduction_group) = max(
-            nodes, key=lambda x: int(x.is_reduction())
-        ).group
-
-        def create_kernel(_is_simd_vec):
-            in_suffix = False
-
-            with kernel_group.new_kernel(_is_simd_vec) as kernel:
-                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-
-                for node in nodes:
-                    if node.group[1] in [
-                        (group, reduction_group),
-                        (group + reduction_group, ()),
-                    ]:
-                        assert not in_suffix
-                        node.run(vars, reduction_vars)
-                    else:
-                        in_suffix = True
-                        assert node.group[1] == (
-                            group,
-                            (),
-                        ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
-                        # we can fuse in some extra pointwise into the suffix
-                        with kernel.write_to_suffix():
-                            node.run(vars, ())
-                return kernel
-
-        org_inplace_buffers_flag = config.inplace_buffers
-        if is_simd_vec:
-            # Create vectorization kernel
-            cpp_vec_kernel = create_kernel(True)
-
-            # Since a kernel is divided into two parts - vectorization and non-vectorization.
-            # And the two parts share the same global contexts like V.graph.wrapper_code,
-            # V.kernel.args. But the vectorization kernel generation has updated these global
-            # contexts. Hence, the non-vectorization kernel should not do this again to avoid
-            # conext conflict. By now, we only control the config.inplace_buffers. In the future,
-            # we could maintain more contexts.
-            config.inplace_buffers = False
-
-            # Create non-vectorization kernel
-            cpp_kernel = create_kernel(False)
-
-            # Restore the inplace_buffers flag
-            config.inplace_buffers = org_inplace_buffers_flag
-            return (cpp_vec_kernel, cpp_kernel)
-        else:
-            return (None, create_kernel(False))
 
     def codegen_nodes(self, nodes):
         """

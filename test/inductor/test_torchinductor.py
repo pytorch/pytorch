@@ -1507,7 +1507,9 @@ class CommonTemplate:
                 (torch.randn(8, 12, 512, 512),),
             )
 
-    def test_channel_shuffle_with_transpose(self):
+    def test_channel_shuffle_cl_output(self):
+        """code and shape extracted from shufflenet_v2_x1_0"""
+
         def channel_shuffle(x, groups):
             batchsize, num_channels, height, width = x.size()
             channels_per_group = num_channels // groups
@@ -1520,6 +1522,24 @@ class CommonTemplate:
             with patch.object(config.cpp, "simdlen", simdlen):
                 torch._dynamo.reset()
                 self.common(channel_shuffle, (torch.randn(64, 58, 28, 28), 2))
+
+    def test_transpose_copy(self):
+        def fn(a):
+            return a.t().contiguous()
+
+        for simdlen in (None, 256, 1) if self.device == "cpu" else (None,):
+            with patch.object(config.cpp, "simdlen", simdlen):
+                torch._dynamo.reset()
+                for shape in (
+                    (7, 7),
+                    (8, 8),
+                    (9, 9),
+                    (16, 16),
+                    (17, 17),
+                    (32, 32),
+                    (33, 33),
+                ):
+                    self.common(fn, (torch.randn(shape),))
 
     # For gpu path, there has a accurcy issue,
     @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
