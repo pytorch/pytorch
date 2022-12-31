@@ -4,6 +4,8 @@
 
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -41,7 +43,7 @@ void castIndicesToInts(std::vector<ExprPtr>& indices) {
 }
 
 Load::Load(Dtype dtype, BufPtr buf, std::vector<ExprPtr> indices)
-    : ExprNodeBase(dtype), buf_(buf), indices_(std::move(indices)) {
+    : ExprNodeBase(dtype), buf_(std::move(buf)), indices_(std::move(indices)) {
   castIndicesToInts(indices_);
 }
 
@@ -63,7 +65,9 @@ ExprHandle Load::make(
 }
 
 Store::Store(BufPtr buf, std::vector<ExprPtr> indices, ExprPtr value)
-    : buf_(buf), indices_(std::move(indices)), value_(value) {
+    : buf_(std::move(buf)),
+      indices_(std::move(indices)),
+      value_(std::move(value)) {
   castIndicesToInts(indices_);
 }
 

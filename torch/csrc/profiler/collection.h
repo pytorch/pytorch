@@ -264,7 +264,9 @@ struct OptimizerInfo {
 
 struct PyExtraFieldsBase {
   PyExtraFieldsBase(time_t end_time_ns, size_t python_tid, PyFrameState caller)
-      : end_time_ns_{end_time_ns}, python_tid_{python_tid}, caller_{caller} {}
+      : end_time_ns_{end_time_ns},
+        python_tid_{python_tid},
+        caller_{std::move(caller)} {}
 
   time_t end_time_ns_;
   size_t python_tid_;
@@ -307,7 +309,7 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
       PyFrameState caller,
       args_t args)
       : PyExtraFieldsBase(end_time_ns, python_tid, caller),
-        function_name_{args} {}
+        function_name_{std::move(args)} {}
 
   at::StringView function_name_;
 };

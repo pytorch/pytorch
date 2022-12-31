@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/Export.h>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
@@ -45,9 +46,9 @@ class TORCH_API AccessInfo {
       IndexBounds bounds)
       : id_(id),
         type_(type),
-        stmt_(stmt),
+        stmt_(std::move(stmt)),
         expr_(nullptr),
-        var_(var),
+        var_(std::move(var)),
         bounds_(std::move(bounds)) {}
 
   AccessInfo(
@@ -59,9 +60,9 @@ class TORCH_API AccessInfo {
       IndexBounds bounds)
       : id_(id),
         type_(type),
-        stmt_(stmt),
-        expr_(expr),
-        var_(var),
+        stmt_(std::move(stmt)),
+        expr_(std::move(expr)),
+        var_(std::move(var)),
         bounds_(std::move(bounds)) {}
 
   // Id is a unique int representing the order this access occured in the graph.
@@ -275,7 +276,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   // An internal struct holding the accesses found within a scope Block.
   struct Scope {
     Scope(BlockPtr b, std::shared_ptr<Scope> p)
-        : block(b), parent(std::move(p)) {}
+        : block(std::move(b)), parent(std::move(p)) {}
 
     BlockPtr block;
     std::shared_ptr<Scope> parent;

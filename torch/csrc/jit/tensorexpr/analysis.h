@@ -5,12 +5,14 @@
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 class HasRand : public IRVisitor {
  public:
-  HasRand(StmtPtr stmt) : stmt_(stmt) {
+  HasRand(StmtPtr stmt) : stmt_(std::move(stmt)) {
     stmt_->accept(this);
   }
 
@@ -113,7 +115,7 @@ class BufFinder : public IRVisitor {
 class WritesToBuf : public IRVisitor {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  WritesToBuf(BufPtr target) : target_(target) {}
+  WritesToBuf(BufPtr target) : target_(std::move(target)) {}
 
   std::vector<StmtPtr> writes() {
     return writes_;
@@ -145,7 +147,7 @@ class WritesToBuf : public IRVisitor {
 class StmtsReadingBuf : public IRVisitor {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  StmtsReadingBuf(BufPtr target) : target_(target) {}
+  StmtsReadingBuf(BufPtr target) : target_(std::move(target)) {}
 
   std::vector<StmtPtr> reads() {
     return reads_;
@@ -227,7 +229,7 @@ class ExternalAllocBufFinder : public IRVisitor {
 // Traverses the IR to determine if a particular Var is modified within it.
 class ModifiesVarChecker : public IRVisitor {
  public:
-  ModifiesVarChecker(VarPtr v) : var_(v) {}
+  ModifiesVarChecker(VarPtr v) : var_(std::move(v)) {}
 
   static bool check(StmtPtr s, VarPtr v) {
     ModifiesVarChecker checker(v);
@@ -281,7 +283,7 @@ class ModifiesVarChecker : public IRVisitor {
 // stmt in block stmts that access to the buf.
 class BufLiveRange : public IRVisitor {
  public:
-  BufLiveRange(BufPtr b) : buf_(b) {}
+  BufLiveRange(BufPtr b) : buf_(std::move(b)) {}
 
   static std::tuple<int32_t, int32_t> liveRange(StmtPtr s, BufPtr b) {
     BlockPtr block = to<Block>(s);
