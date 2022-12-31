@@ -79,12 +79,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)        \
   _CATCH_GENERIC_ERROR(                                                 \
       DistBackendError, THPException_DistBackendError, retstmnt)        \
-  _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)             \
-  catch (torch::PyTorchError & e) {                                     \
-    auto msg = torch::processErrorMsg(e.what());                        \
-    PyErr_SetString(e.python_type(), msg);                              \
-    retstmnt;                                                           \
-  }
+  _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)
 
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
 #define CATCH_C10D_ERRORS(retstmnt)              \
