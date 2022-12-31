@@ -1315,8 +1315,8 @@ bool simplifyNestedMinMax(
     bool propagate_nans,
     HashProvider& hasher,
     ExprPtr* new_op) {
-  auto lhs_opterm = to<OtherOpTerm>(lhs);
-  auto rhs_opterm = to<OtherOpTerm>(rhs);
+  auto lhs_opterm = to<OtherOpTerm>(std::move(lhs));
+  auto rhs_opterm = to<OtherOpTerm>(std::move(rhs));
   if (lhs_opterm && rhs_opterm &&
       lhs_opterm->propagate_nans() == propagate_nans &&
       rhs_opterm->propagate_nans() == propagate_nans) {
@@ -1993,7 +1993,11 @@ c10::optional<class ModRound> isModRound(const TermPtr& e) {
     scalar = immLike(std::move(multiplier), 1);
   }
 
-  return ModRound(std::move(scalar), std::move(denom), std::move(divisor), std::move(mod_divisor));
+  return ModRound(
+      std::move(scalar),
+      std::move(denom),
+      std::move(divisor),
+      std::move(mod_divisor));
 }
 
 // Search the polynomial for Terms that can be merged in

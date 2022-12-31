@@ -352,12 +352,12 @@ ExprPtr getImmediateByType(Dtype dtype, T initialVal) {
 }
 
 template <typename T>
-ExprPtr immLike(ExprPtr e, T v) {
+ExprPtr immLike(const ExprPtr& e, T v) {
   return getImmediateByType<T>(e->dtype(), v);
 }
 
 template <typename T>
-ExprPtr immLike(ExprHandle e, T v) {
+ExprPtr immLike(const ExprHandle& e, T v) {
   return immLike(e.node(), v);
 }
 
