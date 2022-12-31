@@ -37,6 +37,7 @@
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <mutex>
+#include <utility>
 
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
@@ -633,7 +634,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     GRAPH_DUMP("Optimized SimpleExecutor Graph: ", copy);
-    optimized_plan_ = ExecutionPlan(copy, function_name_);
+    optimized_plan_ = ExecutionPlan(std::move(copy), function_name_);
     return *optimized_plan_;
   }
 
@@ -674,7 +675,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   runFinalOptimizations(copy);
   CheckStrictFusion(copy);
   GRAPH_DUMP("Optimized Graph: ", copy);
-  optimized_plan_ = ExecutionPlan(copy, function_name_);
+  optimized_plan_ = ExecutionPlan(std::move(copy), function_name_);
   return *optimized_plan_;
 }
 
@@ -715,7 +716,7 @@ Node* insertFallbackFunctionCall(
   Value* result =
       graph->insertNode(graph->create(prim::CallFunction, func_call_inputs))
           ->output()
-          ->setType(tuple_type);
+          ->setType(std::move(tuple_type));
 
   auto fun_unpack_tuple = graph->insertNode(graph->createTupleUnpack(result));
   return fun_unpack_tuple;
@@ -732,14 +733,14 @@ GraphFunction* createFallbackPathFunction(
       graph->return_node()->inputs(), [](Value* v) { return v->type(); });
   // a GraphFunction call only have one output, so all the outputs
   // need to be packed into a tuple
-  auto tuple_type = TupleType::create(otypes);
+  auto tuple_type = TupleType::create(std::move(otypes));
   auto return_tuple = graph->createTuple(graph->return_node()->inputs());
   graph->appendNode(return_tuple);
   for (int i = static_cast<int>(graph->outputs().size()) - 1; i >= 0; i--) {
     graph->eraseOutput(i);
   }
   graph->registerOutput(return_tuple->output());
-  return new GraphFunction(function_name, graph, nullptr);
+  return new GraphFunction(function_name, std::move(graph), nullptr);
 }
 
 void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(

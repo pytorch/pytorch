@@ -23,8 +23,8 @@ enum ExecutorExecutionMode {
 
 struct ExecutionPlan {
   ExecutionPlan() = default;
-  ExecutionPlan(std::shared_ptr<Graph> graph, std::string function_name)
-      : code(graph, std::move(function_name)), graph(std::move(graph)) {}
+  ExecutionPlan(std::shared_ptr<Graph> graph, const std::string& function_name)
+      : code(graph, function_name), graph(std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
