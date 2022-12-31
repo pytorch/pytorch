@@ -123,7 +123,7 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
  private:
-  SimplifierHashType hashOf(ExprPtr e) {
+  SimplifierHashType hashOf(const ExprPtr& e) {
     auto it = exprToHash_.find(e);
     if (it != exprToHash_.end()) {
       return it->second;
@@ -134,12 +134,12 @@ class TORCH_API HashProvider : public IRVisitor {
     IRPrinter printer(ss);
     e->accept(&printer);
     SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
-    putHash(std::move(e), hash);
+    putHash(e, hash);
 
     return hash;
   }
 
-  SimplifierHashType hashOf(StmtPtr s) {
+  SimplifierHashType hashOf(const StmtPtr& s) {
     auto it = stmtToHash_.find(s);
     if (it != stmtToHash_.end()) {
       return it->second;
@@ -150,7 +150,7 @@ class TORCH_API HashProvider : public IRVisitor {
     IRPrinter printer(ss);
     s->accept(&printer);
     SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
-    putHash(std::move(s), hash);
+    putHash(s, hash);
 
     return hash;
   }

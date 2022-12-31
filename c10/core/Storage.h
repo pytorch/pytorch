@@ -15,12 +15,12 @@ struct C10_API Storage {
   // Allocates memory buffer using given allocator and creates a storage with it
   Storage(
       use_byte_size_t /*use_byte_size*/,
-      SymInt size_bytes,
+      const SymInt& size_bytes,
       Allocator* allocator = nullptr,
       bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             StorageImpl::use_byte_size_t(),
-            std::move(size_bytes),
+            size_bytes,
             allocator,
             resizable)) {}
 

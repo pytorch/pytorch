@@ -86,63 +86,59 @@ class TORCH_API Block : public StmtNode<Block> {
     return stmts_.empty();
   }
 
-  void prepend_stmt(StmtPtr s) {
+  void prepend_stmt(const StmtPtr& s) {
     if (s->get_parent()) {
-      throw malformed_input(
-          "Block prepend Stmt with existing parent", std::move(s));
+      throw malformed_input("Block prepend Stmt with existing parent", s);
     }
 
     stmts_.push_front(s);
-    set_parent(std::move(s), this);
+    set_parent(s, this);
   }
-  void append_stmt(StmtPtr s) {
+  void append_stmt(const StmtPtr& s) {
     if (s->get_parent()) {
-      throw malformed_input(
-          "Block append Stmt with existing parent", std::move(s));
+      throw malformed_input("Block append Stmt with existing parent", s);
     }
 
     stmts_.push_back(s);
-    set_parent(std::move(s), this);
+    set_parent(s, this);
   }
 
-  void insert_stmt_before(StmtPtr s, const StmtPtr& before) {
+  void insert_stmt_before(const StmtPtr& s, const StmtPtr& before) {
     if (s->get_parent()) {
-      throw malformed_input(
-          "Block append Stmt with existing parent", std::move(s));
+      throw malformed_input("Block append Stmt with existing parent", s);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), before);
     if (pos == stmts_.end()) {
       throw malformed_input(
-          "Inserting after statement that is not in block", std::move(s));
+          "Inserting after statement that is not in block", s);
     }
 
     stmts_.insert(pos, s);
-    set_parent(std::move(s), this);
+    set_parent(s, this);
   }
 
-  void insert_stmt_after(StmtPtr s, const StmtPtr& after) {
+  void insert_stmt_after(const StmtPtr& s, const StmtPtr& after) {
     if (s->get_parent()) {
-      throw malformed_input(
-          "Block append Stmt with existing parent", std::move(s));
+      throw malformed_input("Block append Stmt with existing parent", s);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), after);
     if (pos == stmts_.end()) {
       throw malformed_input(
-          "Inserting after statement that is not in block", std::move(s));
+          "Inserting after statement that is not in block", s);
     }
 
     ++pos;
 
     stmts_.insert(pos, s);
-    set_parent(std::move(s), this);
+    set_parent(s, this);
   }
 
-  bool replace_stmt(StmtPtr old_stmt, StmtPtr new_stmt) {
+  bool replace_stmt(const StmtPtr& old_stmt, const StmtPtr& new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
-          "Block replace Stmt with existing parent", std::move(new_stmt));
+          "Block replace Stmt with existing parent", new_stmt);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
@@ -151,18 +147,18 @@ class TORCH_API Block : public StmtNode<Block> {
     }
     stmts_.insert(pos, new_stmt);
     stmts_.erase(pos);
-    set_parent(std::move(old_stmt), nullptr);
-    set_parent(std::move(new_stmt), this);
+    set_parent(old_stmt, nullptr);
+    set_parent(new_stmt, this);
     return true;
   }
 
   // Creates a new block by cloning `this` block and replacing the given
   // statement with a new statement. Note that `old_stmt` refers to a statement
   // in `this` block. If the `old_stmt` is not found, it will return `nullptr`.
-  BlockPtr clone_and_replace(const StmtPtr& old_stmt, StmtPtr new_stmt) {
+  BlockPtr clone_and_replace(const StmtPtr& old_stmt, const StmtPtr& new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
-          "Block replace Stmt with existing parent", std::move(new_stmt));
+          "Block replace Stmt with existing parent", new_stmt);
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -184,13 +180,13 @@ class TORCH_API Block : public StmtNode<Block> {
     return alloc<Block>(cloned_stmts);
   }
 
-  bool remove_stmt(StmtPtr stmt) {
+  bool remove_stmt(const StmtPtr& stmt) {
     auto pos = std::find(stmts_.begin(), stmts_.end(), stmt);
     if (pos == stmts_.end()) {
       return false;
     }
 
-    set_parent(std::move(stmt), nullptr);
+    set_parent(stmt, nullptr);
     stmts_.erase(pos);
     return true;
   }
@@ -554,7 +550,9 @@ class TORCH_API Cond : public StmtNode<Cond> {
     set_false_stmt(std::move(false_stmt));
   }
 
-  CondPtr cloneWithNewBodies(const StmtPtr& true_stmt, const StmtPtr& false_stmt) {
+  CondPtr cloneWithNewBodies(
+      const StmtPtr& true_stmt,
+      const StmtPtr& false_stmt) {
     return alloc<Cond>(condition_, true_stmt, false_stmt);
   }
 

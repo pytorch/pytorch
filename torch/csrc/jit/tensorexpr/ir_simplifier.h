@@ -169,7 +169,7 @@ class Term : public ExprNode<Term> {
   }
   template <class... Es>
   void addComponent(ExprPtr e, Es... es) {
-    addComponent(std::move(e));
+    addComponent(e);
     addComponent(es...);
   }
 
@@ -246,7 +246,7 @@ class Polynomial : public ExprNode<Polynomial> {
   }
   template <class... Ts>
   void addTerm(TermPtr t, Ts... ts) {
-    addTerm(std::move(t));
+    addTerm(t);
     addTerm(ts...);
   }
 
@@ -274,7 +274,11 @@ class MaxTerm : public ExprNode<MaxTerm> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  MaxTerm(HashProvider& hasher, const ExprPtr& s, bool p, std::vector<ExprPtr> v)
+  MaxTerm(
+      HashProvider& hasher,
+      const ExprPtr& s,
+      bool p,
+      std::vector<ExprPtr> v)
       : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -309,7 +313,7 @@ class MaxTerm : public ExprNode<MaxTerm> {
   }
   template <class... Es>
   void addComponent(ExprPtr e, Es... es) {
-    addComponent(std::move(e));
+    addComponent(e);
     addComponent(es...);
   }
 
@@ -331,7 +335,11 @@ class MinTerm : public ExprNode<MinTerm> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  MinTerm(HashProvider& hasher, const ExprPtr& s, bool p, std::vector<ExprPtr> v)
+  MinTerm(
+      HashProvider& hasher,
+      const ExprPtr& s,
+      bool p,
+      std::vector<ExprPtr> v)
       : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -366,7 +374,7 @@ class MinTerm : public ExprNode<MinTerm> {
   }
   template <class... Es>
   void addComponent(ExprPtr e, Es... es) {
-    addComponent(std::move(e));
+    addComponent(e);
     addComponent(es...);
   }
 

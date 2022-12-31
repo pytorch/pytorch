@@ -561,7 +561,7 @@ public:
     payload.u.as_int = i;
   }
 
-  IValue(c10::SymInt i) {
+  IValue(const c10::SymInt& i) {
     if (i.is_symbolic()) {
       tag = Tag::SymInt;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
@@ -578,7 +578,7 @@ public:
   c10::SymInt toSymInt() &&;
   c10::SymInt toSymInt() const&;
 
-  IValue(c10::SymFloat i) {
+  IValue(const c10::SymFloat& i) {
     if (i.is_symbolic()) {
       tag = Tag::SymFloat;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();

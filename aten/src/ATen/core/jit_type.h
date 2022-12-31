@@ -685,7 +685,7 @@ struct TORCH_API TensorType : public SharedType {
 
   TensorTypePtr withStrides(VaryingShape<Stride> sstrides) const {
     auto cloned = clone();
-    cloned->strides_ = sstrides;
+    cloned->strides_ = std::move(sstrides);
     return cloned;
   }
 
@@ -1168,7 +1168,7 @@ struct TORCH_API TupleType : public NamedType {
 
   bool compare(
       const Type& rhs,
-      std::function<bool(const Type&, const Type&)> fn) const {
+      const std::function<bool(const Type&, const Type&)>& fn) const {
     if (rhs.kind() != kind()) {
       return false;
     }

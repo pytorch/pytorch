@@ -271,11 +271,15 @@ class Maximum : public Reducer {
   Maximum(Dtype dtype)
       : Reducer(
             minimumVal(dtype.scalar_type()),
-            [](const ExprHandle& a, const ExprHandle& b) { return Max::make(a, b, true); }) {}
+            [](const ExprHandle& a, const ExprHandle& b) {
+              return Max::make(a, b, true);
+            }) {}
   Maximum(ExprHandle initializer)
-      : Reducer(std::move(initializer), [](const ExprHandle& a, const ExprHandle& b) {
-          return Max::make(a, b, true);
-        }) {}
+      : Reducer(
+            std::move(initializer),
+            [](const ExprHandle& a, const ExprHandle& b) {
+              return Max::make(a, b, true);
+            }) {}
 };
 
 class Minimum : public Reducer {
@@ -283,11 +287,15 @@ class Minimum : public Reducer {
   Minimum(Dtype dtype)
       : Reducer(
             maximumVal(dtype.scalar_type()),
-            [](const ExprHandle& a, const ExprHandle& b) { return Min::make(a, b, true); }) {}
+            [](const ExprHandle& a, const ExprHandle& b) {
+              return Min::make(a, b, true);
+            }) {}
   Minimum(ExprHandle initializer)
-      : Reducer(std::move(initializer), [](const ExprHandle& a, const ExprHandle& b) {
-          return Min::make(a, b, true);
-        }) {}
+      : Reducer(
+            std::move(initializer),
+            [](const ExprHandle& a, const ExprHandle& b) {
+              return Min::make(a, b, true);
+            }) {}
 };
 
 class ReductionExpander : public IRMutator {

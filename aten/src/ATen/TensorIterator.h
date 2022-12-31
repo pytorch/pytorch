@@ -445,7 +445,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
 
   // Helper functions for advanced stride manipulations (e.g. torch.flip)
   void _unsafe_set_arg_strides(const int arg, IntArrayRef strides) {
-    operands_[arg].stride_bytes = std::move(strides);
+    operands_[arg].stride_bytes = strides;
   }
   void _unsafe_set_arg_data(const int arg, void* data) {
     operands_[arg].data = data;

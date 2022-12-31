@@ -232,17 +232,20 @@ class BitwiseOpNode : public BinaryOpNode<Op> {
 
 class TORCH_API And : public BitwiseOpNode<And> {
  public:
-  And(ExprPtr lhs, ExprPtr rhs) : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kAnd) {}
+  And(ExprPtr lhs, ExprPtr rhs)
+      : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kAnd) {}
 };
 
 class TORCH_API Or : public BitwiseOpNode<Or> {
  public:
-  Or(ExprPtr lhs, ExprPtr rhs) : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kOr) {}
+  Or(ExprPtr lhs, ExprPtr rhs)
+      : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kOr) {}
 };
 
 class TORCH_API Xor : public BitwiseOpNode<Xor> {
  public:
-  Xor(ExprPtr lhs, ExprPtr rhs) : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kXor) {}
+  Xor(ExprPtr lhs, ExprPtr rhs)
+      : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kXor) {}
 };
 
 class TORCH_API Lshift : public BitwiseOpNode<Lshift> {

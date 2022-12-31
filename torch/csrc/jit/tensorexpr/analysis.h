@@ -160,8 +160,8 @@ class StmtsReadingBuf : public IRVisitor {
   }
 
  private:
-  bool readsBuffer(StmtPtr s) {
-    auto loads = NodeFinder<Load>::find(std::move(s));
+  bool readsBuffer(const StmtPtr& s) {
+    auto loads = NodeFinder<Load>::find(s);
     for (const auto& l : loads) {
       if (l->buf() == target_) {
         return true;
@@ -302,7 +302,7 @@ class BufLiveRange : public IRVisitor {
     return std::make_tuple(begin_, end_);
   }
 
-  bool hasBufReads(StmtPtr s) {
+  bool hasBufReads(const StmtPtr& s) {
     auto loads1 = NodeFinder<Load>::find(s);
     for (const auto& l : loads1) {
       if (l->buf() == buf_) {
@@ -317,7 +317,7 @@ class BufLiveRange : public IRVisitor {
         }
       }
     }
-    auto loads3 = NodeFinder<ExternalCallWithAlloc>::find(std::move(s));
+    auto loads3 = NodeFinder<ExternalCallWithAlloc>::find(s);
     for (const auto& l : loads3) {
       for (const auto& lb : l->buf_args()) {
         if (lb == buf_) {
@@ -328,7 +328,7 @@ class BufLiveRange : public IRVisitor {
     return false;
   }
 
-  bool hasBufWrites(StmtPtr s) {
+  bool hasBufWrites(const StmtPtr& s) {
     auto writes1 = NodeFinder<Store>::find(s);
     for (const auto& w : writes1) {
       if (w->buf() == buf_) {
@@ -341,7 +341,7 @@ class BufLiveRange : public IRVisitor {
         return true;
       }
     }
-    auto writes3 = NodeFinder<ExternalCallWithAlloc>::find(std::move(s));
+    auto writes3 = NodeFinder<ExternalCallWithAlloc>::find(s);
     for (const auto& w : writes3) {
       for (const auto& wb : w->buf_out_args()) {
         if (wb == buf_) {
@@ -352,8 +352,8 @@ class BufLiveRange : public IRVisitor {
     return false;
   }
 
-  void findAccAndUpdateLiveRange(StmtPtr s) {
-    bool has_reads = hasBufReads(s), has_writes = hasBufWrites(std::move(s));
+  void findAccAndUpdateLiveRange(const StmtPtr& s) {
+    bool has_reads = hasBufReads(s), has_writes = hasBufWrites(s);
     if (has_reads || has_writes) {
       if (begin_ == -1) {
         begin_ = curr_index_;

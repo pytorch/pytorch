@@ -30,7 +30,7 @@ inline c10::optional<Device> device_of(const c10::optional<Tensor>& t) {
 /// Return the Device of a TensorList, if the list is non-empty and
 /// the first Tensor is defined.  (This function implicitly assumes
 /// that all tensors in the list have the same device.)
-inline c10::optional<Device> device_of(ITensorListRef t) {
+inline c10::optional<Device> device_of(const ITensorListRef& t) {
   if (!t.empty()) {
     return device_of(t.front());
   } else {
