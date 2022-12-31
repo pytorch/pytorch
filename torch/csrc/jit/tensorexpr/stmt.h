@@ -195,7 +195,7 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   void clear() {
-    for (auto s : stmts_) {
+    for (const auto& s : stmts_) {
       set_parent(s, nullptr);
     }
     stmts_.clear();
@@ -247,7 +247,7 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   void splice(Block::iterator it, BlockPtr other) {
-    for (StmtPtr s : *other) {
+    for (const StmtPtr& s : *other) {
       set_parent(s, this);
     }
 
@@ -293,7 +293,7 @@ class TORCH_API Block : public StmtNode<Block> {
   std::list<StmtPtr> stmts_;
 
   void init(const std::vector<StmtPtr>& stmts) {
-    for (StmtPtr s : stmts) {
+    for (const StmtPtr& s : stmts) {
       if (!s) {
         continue;
       }

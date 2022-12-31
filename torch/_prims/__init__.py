@@ -11,7 +11,7 @@ import torch
 
 import torch._prims_common as utils
 import torch.library
-from torch import Tensor, TypedStorage
+from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims_common import (
@@ -31,7 +31,6 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.fx.experimental.symbolic_shapes import sym_float
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
@@ -1828,7 +1827,7 @@ def _as_strided_scatter_meta(
         lambda: f"expected src to have a size equal to the slice of self. src size = {src.shape}, slice size = {size}",
     )
 
-    return _clone_meta(input)
+    return utils.clone_preserve_strides(input)
 
 
 _as_strided_scatter_doc = """
