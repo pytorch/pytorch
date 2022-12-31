@@ -312,14 +312,14 @@ c10::optional<int64_t> evalInt(ExprPtr e);
 
 // Substitutes the given vars with their corresponding expressions in the input
 // expression.
-inline ExprPtr Substitute(ExprPtr expr, const VarMapping& var_mapping) {
+inline ExprPtr Substitute(const ExprPtr& expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return expr->accept_mutator(&var_sub);
 }
 
 // Substitutes the given vars with their corresponding expressions in the input
 // statement.
-inline StmtPtr Substitute(StmtPtr stmt, const VarMapping& var_mapping) {
+inline StmtPtr Substitute(const StmtPtr& stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
 }

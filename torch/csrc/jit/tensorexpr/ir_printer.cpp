@@ -6,8 +6,6 @@
 
 #include <c10/util/irange.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -83,44 +81,44 @@ void visitBinaryOp(
 }
 
 void IRPrinter::visit(AddPtr v) {
-  visitBinaryOp(std::move(v), "+", this);
+  visitBinaryOp(v, "+", this);
 }
 
 void IRPrinter::visit(SubPtr v) {
-  visitBinaryOp(std::move(v), "-", this);
+  visitBinaryOp(v, "-", this);
 }
 
 void IRPrinter::visit(MulPtr v) {
-  visitBinaryOp(std::move(v), "*", this);
+  visitBinaryOp(v, "*", this);
 }
 
 void IRPrinter::visit(DivPtr v) {
-  visitBinaryOp(std::move(v), "/", this);
+  visitBinaryOp(v, "/", this);
 }
 
 void IRPrinter::visit(AndPtr v) {
-  visitBinaryOp(std::move(v), "&", this);
+  visitBinaryOp(v, "&", this);
 }
 
 void IRPrinter::visit(OrPtr v) {
-  visitBinaryOp(std::move(v), "|", this);
+  visitBinaryOp(v, "|", this);
 }
 
 void IRPrinter::visit(XorPtr v) {
-  visitBinaryOp(std::move(v), "^", this);
+  visitBinaryOp(v, "^", this);
 }
 
 void IRPrinter::visit(LshiftPtr v) {
-  visitBinaryOp(std::move(v), "<<", this);
+  visitBinaryOp(v, "<<", this);
 }
 
 void IRPrinter::visit(RshiftPtr v) {
-  visitBinaryOp(std::move(v), ">>", this);
+  visitBinaryOp(v, ">>", this);
 }
 
 void IRPrinter::visit(ModPtr v) {
   if (v->dtype().is_integral()) {
-    visitBinaryOp(std::move(v), "%", this);
+    visitBinaryOp(v, "%", this);
   } else if (v->dtype().is_floating_point()) {
     os() << "mod(" << *v->lhs() << ", " << *v->rhs() << ")";
   } else {
@@ -169,7 +167,7 @@ void IRPrinter::visit(CompareSelectPtr v) {
   }
   os() << " ? ";
 
-  auto withParens = [&](ExprPtr e) {
+  auto withParens = [&](const ExprPtr& e) {
     auto prec = getPrecedence(e->expr_type());
     if (prec >= self_prec) {
       os() << "(";
@@ -246,7 +244,7 @@ void IRPrinter::visit(BitCastPtr v) {
 }
 
 void IRPrinter::visit(VarPtr v) {
-  os() << name_manager_.get_unique_name(std::move(v));
+  os() << name_manager_.get_unique_name(v);
 }
 
 void IRPrinter::visit(BufPtr v) {
@@ -646,7 +644,7 @@ std::ostream& operator<<(std::ostream& stream, const Tensor& t) {
   return stream;
 }
 
-void print(ExprPtr expr) {
+void print(const ExprPtr& expr) {
   if (expr) {
     IRPrinter p(std::cout);
     p.print(*expr);
@@ -656,7 +654,7 @@ void print(ExprPtr expr) {
   std::cout << "\n";
 }
 
-void print(StmtPtr stmt) {
+void print(const StmtPtr& stmt) {
   if (stmt) {
     IRPrinter p(std::cout);
     p.print(*stmt);
@@ -674,13 +672,13 @@ void print(const Tensor& t) {
 } // namespace torch
 
 namespace std {
-std::string to_string(ExprPtr expr) {
+std::string to_string(const ExprPtr& expr) {
   std::ostringstream oss;
   oss << *expr;
   return oss.str();
 }
 
-std::string to_string(StmtPtr stmt) {
+std::string to_string(const StmtPtr& stmt) {
   std::ostringstream oss;
   oss << *stmt;
   return oss.str();

@@ -61,10 +61,10 @@ class TORCH_API HashProvider : public IRVisitor {
     return hashOf(e);
   }
 
-  bool cachedHash(ExprPtr e) {
+  bool cachedHash(const ExprPtr& e) {
     return exprToHash_.find(e) != exprToHash_.end();
   }
-  bool cachedHash(StmtPtr s) {
+  bool cachedHash(const StmtPtr& s) {
     return stmtToHash_.find(s) != stmtToHash_.end();
   }
 
@@ -189,14 +189,14 @@ class TORCH_API HashProvider : public IRVisitor {
     _hash_combine(seed, args...);
   }
 
-  void putHash(ExprPtr e, SimplifierHashType h) {
+  void putHash(const ExprPtr& e, SimplifierHashType h) {
     auto res = exprToHash_.emplace(e, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
       throw std::runtime_error("hash collision");
     }
   }
-  void putHash(StmtPtr s, SimplifierHashType h) {
+  void putHash(const StmtPtr& s, SimplifierHashType h) {
     auto res = stmtToHash_.emplace(s, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.

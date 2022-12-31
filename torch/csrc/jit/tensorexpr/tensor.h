@@ -226,7 +226,7 @@ Tensor Reduce(
       dims,
       strides,
       reducer,
-      [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
+      [&](ParameterList& p) { return ExprHandle(reducer.initializer()); },
       body_func,
       reduce_dims);
 }
