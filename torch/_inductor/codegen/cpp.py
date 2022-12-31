@@ -1405,6 +1405,14 @@ class CppKernelProxy(CppKernel):
                 )
                 main_loop.set_kernel(codegen_kernel(CppVecKernel, tiling_factor))
                 tail_loop.set_kernel(scalar_kernel)
+                main_loop.simd_vec = True
+                tail_loop.simd_omp = True
+                # We chop the loop into two cubes by the nelements - main loop and tail loop.
+                # Regarding the main loop, it is straightforward that it could be vectorized with
+                # nelements. But for the tail loop, it still could be vectorized. For example,
+                # if the nelements is 8(256bits), then the tail loop still could be vectorized
+                # as 4(128bits).
+                tail_loop.simd_nelements = tiling_factor // 2
             elif tile2d_checker.can_tile2d:
                 outer_tiling_depth = tile2d_checker.outer_tiling_depth
                 assert outer_tiling_depth < inner_most_depth
