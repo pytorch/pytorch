@@ -291,8 +291,7 @@ class TestForeach(TestCase):
                 expected = ref(ref_inputs, values=values)
                 self.assertEqual(expected, actual)
 
-    def _test_pointwise_op(self, device, dtype, opinfo, N, is_fastpath, disable_fastpath, *, values=None,
-                           custom_values_err=None):
+    def _test_pointwise_op(self, device, dtype, opinfo, N, is_fastpath, disable_fastpath, *, values=None, custom_values_err=None):
         n_expected_cudaLaunchKernels = N if disable_fastpath else 1
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
         inputs = [
