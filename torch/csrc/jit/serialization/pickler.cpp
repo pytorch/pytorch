@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
 #include <type_traits>
-#include <utility>
 
 namespace torch {
 namespace jit {
@@ -111,7 +110,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
       Function& getstate = type->getMethod("__getstate__");
-      pushIValue(getstate({std::move(obj)}));
+      pushIValue(getstate({obj}));
     } else {
       push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
       push<PickleOpCode>(PickleOpCode::MARK);
@@ -176,8 +175,8 @@ void Pickler::pushDevice(const IValue& ivalue) {
 void Pickler::pushRRef(const IValue& ivalue) {
   // It is the same as how rref is pickled in python, see PyRRef::pickle
   auto rrefInterface = ivalue.toRRef();
-  auto rref = c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(
-      std::move(rrefInterface));
+  auto rref =
+      c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(rrefInterface);
   pushGlobal("torch.distributed.rpc", "rref");
   auto& ctx = distributed::rpc::RRefContext::getInstance();
   auto rrefForkData = ctx.prepareChildFork(rref);

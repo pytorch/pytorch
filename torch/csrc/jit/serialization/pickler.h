@@ -348,7 +348,7 @@ inline void setTensorMetadata(
     auto key = *pair.key().toString();
     metadata[key] = pair.value().toBool();
   }
-  setTensorMetadata(t, std::move(metadata));
+  setTensorMetadata(t, metadata);
 }
 
 } // namespace jit

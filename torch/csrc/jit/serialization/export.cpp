@@ -33,7 +33,6 @@ C10_DIAGNOSTIC_POP()
 #include <regex>
 #include <set>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace torch {
@@ -489,7 +488,7 @@ GraphEncoder::GraphEncoder(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path,
-    NodeAttrNameMap node_attr_to_name)
+    const NodeAttrNameMap& node_attr_to_name)
     : num_blocks_(0),
       num_op_nodes_(0),
       num_external_data_(0),
@@ -500,7 +499,7 @@ GraphEncoder::GraphEncoder(
       onnx_opset_version_(onnx_opset_version),
       custom_opsets_(custom_opsets),
       graph_(graph),
-      node_attr_to_name_(std::move(node_attr_to_name)) {
+      node_attr_to_name_(node_attr_to_name) {
   model_proto_.set_producer_name("pytorch");
   TORCH_CHECK(
       onnx_opset_version > 0 &&

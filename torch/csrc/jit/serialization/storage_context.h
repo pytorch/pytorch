@@ -2,8 +2,6 @@
 
 #include <ATen/core/ivalue.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 
@@ -18,7 +16,7 @@ class TORCH_API SerializationStorageContext {
   SerializationStorageContext(const SerializationStorageContext&) = delete;
 
   uint64_t getOrAddStorage(c10::Storage storage) {
-    if (!hasStorage(std::move(storage))) {
+    if (!hasStorage(storage)) {
       uint64_t size = storage_id_map_.size();
       storage_id_map_[storage] = size;
     }

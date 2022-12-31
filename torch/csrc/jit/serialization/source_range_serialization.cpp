@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <algorithm>
-#include <utility>
 
 namespace torch {
 namespace jit {
@@ -53,7 +52,7 @@ SourceRange SourceRangeDeserializer::deserialize(const c10::IValue& iv) {
   std::shared_ptr<Source> source_ = deserialize_source(tup_elems[0]);
   int64_t start_ = tup_elems[1].toInt();
   int64_t end_ = tup_elems[2].toInt();
-  return SourceRange(std::move(source_), start_, end_);
+  return SourceRange(source_, start_, end_);
 }
 
 std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
@@ -176,11 +175,10 @@ std::vector<char> SourceRangePickler::pickle(
   std::vector<char> result;
   if (should_use_format_with_string_table_) {
     result = jit::pickle(
-        c10::ivalue::Tuple::create(
-            {kFormatWithStringTable, std::move(textTable), std::move(ivalue)}),
+        c10::ivalue::Tuple::create({kFormatWithStringTable, textTable, ivalue}),
         &table);
   } else {
-    result = jit::pickle(std::move(ivalue), &table);
+    result = jit::pickle(ivalue, &table);
   }
   TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
   return result;
@@ -217,7 +215,7 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     lines = ivalues[2];
   } else {
     deserializer.reset(new SourceRangeDeserializer());
-    lines = std::move(ivaluesTuple);
+    lines = ivaluesTuple;
   }
   for (auto& val : lines.toTuple()->elements()) {
     const auto& tup_elems = val.toTupleRef().elements();
