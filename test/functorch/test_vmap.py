@@ -3440,8 +3440,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
-        xfail('clamp_min', ''),  # Exception not raised on error input
-        xfail('clamp_max', ''),  # Exception not raised on error input
 
         xfail('view_as_complex'),  # RuntimeError: Tensor must have a last dimension with stride 1
         xfail('tensor_split'),  # data_ptr
@@ -3622,13 +3620,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.ldl_solve', '', device_type='cpu'),
         xfail('chalf', ''),
         xfail('arange', ''),
-        xfail('clamp_max', ''),
         xfail('jiterator_binary_return_by_ref', device_type='cuda'),
         xfail('special.spherical_bessel_j0'),
         xfail('jiterator_unary', device_type='cuda'),
         xfail('jiterator_2inputs_2outputs', device_type='cuda'),
         xfail('special.airy_ai'),
-        xfail('clamp_min', ''),
         xfail('special.bessel_j0'),
         xfail('sparse.sampled_addmm'),
         xfail('special.bessel_y0'),
