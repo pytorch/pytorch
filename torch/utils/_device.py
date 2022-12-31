@@ -60,15 +60,3 @@ class DeviceContext(TorchFunctionMode):
                 kwargs['device'] = self.device
             return func(*args, **kwargs)
         return func(*args, **kwargs)
-
-GLOBAL_DEVICE_CONTEXT = None
-
-def set_default_tensor_device(device):
-    global GLOBAL_DEVICE_CONTEXT
-    if GLOBAL_DEVICE_CONTEXT is not None:
-        GLOBAL_DEVICE_CONTEXT.__exit__(None, None, None)
-    if device is None:
-        GLOBAL_DEVICE_CONTEXT = None
-        return
-    GLOBAL_DEVICE_CONTEXT = DeviceContext(device)
-    GLOBAL_DEVICE_CONTEXT.__enter__()

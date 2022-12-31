@@ -45,6 +45,10 @@ class device:
     @overload
     def __init__(self, type: str, index: _int) -> None: ...
 
+    def __enter__(self) -> "device": ...
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+
     def __reduce__(self) -> Tuple[Any, ...]: ...  # THPDevice_reduce
 
 # Defined in torch/csrc/Stream.cpp
