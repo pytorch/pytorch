@@ -1,20 +1,21 @@
 # Owner(s): ["module: onnx"]
 import onnx.checker
+import pytorch_test_common
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.onnx._internal._fx import export
+from torch.onnx._internal import _fx
 from torch.testing._internal import common_utils
 
 
-class TestFxToOnnx(common_utils.TestCase):
+class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def test_simple_function(self):
         def func(x):
             y = x + 1
             z = y.relu()
             return (y, z)
 
-        onnx_model = export(func, torch.randn(1, 1, 2))
+        onnx_model = _fx.export(func, torch.randn(1, 1, 2))
         onnx.checker.check_model(onnx_model)
 
     def test_mnist(self):
@@ -40,8 +41,8 @@ class TestFxToOnnx(common_utils.TestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        onnx_model = export(MNISTModel(), tensor_x)
-        onnx.checker.check_model(onnx_model)
+        onnx_model = _fx.export(MNISTModel(), tensor_x)
+        onnx.checker.check_model(onnx_model, full_check=True)
 
 
 if __name__ == "__main__":
