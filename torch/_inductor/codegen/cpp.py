@@ -3,7 +3,7 @@ import dataclasses
 import functools
 import math
 import sys
-from copy import deepcopy, copy
+from copy import copy, deepcopy
 from pathlib import Path
 from typing import Dict, List
 
