@@ -510,9 +510,9 @@ class TORCH_API Broadcast : public ExprNode<Broadcast> {
   static ExprHandle make(const ExprHandle& value, int lanes) {
     return ExprHandle(alloc<Broadcast>(value.node(), lanes));
   }
-  Broadcast(const ExprPtr& value, int lanes)
+  Broadcast(ExprPtr value, int lanes)
       : ExprNodeBase(Dtype(value->dtype(), lanes)),
-        value_(value),
+        value_(std::move(value)),
         lanes_(lanes) {}
 
  private:
