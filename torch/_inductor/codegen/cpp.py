@@ -3,7 +3,7 @@ import dataclasses
 import functools
 import math
 import sys
-from copy import deepcopy
+from copy import deepcopy, copy
 from pathlib import Path
 from typing import Dict, List
 
@@ -1445,12 +1445,12 @@ class LoopLevel:
             return self.inner[0].split_with_tiling(depth - 1, factor)
 
     def clone(self):
-        loop = copy.copy(self)
+        loop = copy(self)
         if self.inner:
             for idx, inner_loop in enumerate(self.inner):
                 loop.inner[idx] = inner_loop.clone()
                 loop.inner[idx].parent = loop
-        loop.kernel = copy.deepcopy(self.kernel)
+        loop.kernel = deepcopy(self.kernel)
         return loop
 
     def lines(self):
