@@ -442,8 +442,8 @@ struct TORCH_API ClosureValue : public SugaredValue {
 struct MethodValue : public SugaredValue {
   MethodValue(Value* self, std::vector<std::string> method_names)
       : self_(self), method_names_(std::move(method_names)) {}
-  MethodValue(Value* self, std::string method_name)
-      : MethodValue(self, std::vector<std::string>({std::move(method_name)})) {}
+  MethodValue(Value* self, const std::string& method_name)
+      : MethodValue(self, std::vector<std::string>({method_name})) {}
 
   std::string kind() const override {
     return "method";
@@ -537,7 +537,7 @@ struct TORCH_API CastValue : public BuiltinFunction {
 };
 
 struct TORCH_API TensorCastValue : public SugaredValue {
-  TensorCastValue(at::ScalarType type, NamedValue self)
+  TensorCastValue(at::ScalarType type, NamedValue  self)
       : dtype_(type), self_(std::move(self)) {}
 
   std::string kind() const override {

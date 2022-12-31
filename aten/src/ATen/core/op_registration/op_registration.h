@@ -473,8 +473,8 @@ public:
   }
 
   // internal only for registering caffe2 ops
-  RegisterOperators&& op(FunctionSchema schema, Options&& options) && {
-    return std::move(*this).op(std::move(options).schema(std::move(schema)));
+  RegisterOperators&& op(const FunctionSchema& schema, Options&& options) && {
+    return std::move(*this).op(std::move(options).schema(schema));
   }
 
   template<class FuncType>

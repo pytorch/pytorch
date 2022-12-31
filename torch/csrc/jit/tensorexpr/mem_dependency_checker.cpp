@@ -335,7 +335,7 @@ bool MemDependencyChecker::dependsDirectly(StmtPtr A, StmtPtr B) {
   return dependsDirectlyHelper(std::move(A), std::move(B));
 }
 
-bool MemDependencyChecker::dependsDirectly(const BufPtr& O, StmtPtr B) {
+bool MemDependencyChecker::dependsDirectly(const BufPtr& O, const StmtPtr& B) {
   auto outputAccess = output(O);
   auto bWrites = getAllWritesWithin(B);
 
@@ -388,7 +388,7 @@ bool MemDependencyChecker::dependsIndirectly(StmtPtr A, StmtPtr B) {
   return dependsIndirectlyHelper(std::move(A), std::move(B));
 }
 
-bool MemDependencyChecker::dependsIndirectly(const BufPtr& O, StmtPtr B) {
+bool MemDependencyChecker::dependsIndirectly(const BufPtr& O, const StmtPtr& B) {
   auto outputAccess = output(O);
 
   DependencySet dependencies;

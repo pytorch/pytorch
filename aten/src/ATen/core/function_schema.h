@@ -27,13 +27,13 @@ bool operator==(const Argument& lhs, const Argument& rhs);
 
 struct Argument {
   Argument(
-      std::string name = "",
+      const std::string& name = "",
       const TypePtr& type = nullptr,
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
       c10::optional<AliasInfo> alias_info = c10::nullopt)
-    : Argument(std::move(name), type, type, N, std::move(default_value), kwarg_only, std::move(alias_info)) {}
+    : Argument(name, type, type, N, std::move(default_value), kwarg_only, std::move(alias_info)) {}
 
   Argument(
       std::string name,
@@ -438,10 +438,10 @@ struct TORCH_API FunctionSchema {
     }
     return c10::nullopt;
   }
-  FunctionSchema cloneWithName(std::string name, std::string overload_name) const {
+  FunctionSchema cloneWithName(const std::string& name, const std::string& overload_name) const {
     return FunctionSchema(
-        std::move(name),
-        std::move(overload_name),
+        name,
+        overload_name,
         arguments(),
         returns(),
         is_vararg(),

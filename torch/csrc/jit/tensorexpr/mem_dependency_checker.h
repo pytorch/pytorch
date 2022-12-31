@@ -202,7 +202,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   bool dependsDirectly(ExprPtr A, StmtPtr B);
 
   // Returns true of the output depends directly on a write contained in B.
-  bool dependsDirectly(const BufPtr& output, StmtPtr B);
+  bool dependsDirectly(const BufPtr& output, const StmtPtr& B);
 
   // Returns true if a read in A depends directly on the provided input.
   bool dependsDirectly(StmtPtr A, const BufPtr& input);
@@ -220,7 +220,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   bool dependsIndirectly(ExprPtr A, StmtPtr B);
 
   // Returns true of the output depends indirectly on a write contained in B.
-  bool dependsIndirectly(const BufPtr& output, StmtPtr B);
+  bool dependsIndirectly(const BufPtr& output, const StmtPtr& B);
 
   // Returns true if a read in A depends indirectly on the provided input.
   bool dependsIndirectly(StmtPtr A, const BufPtr& input);

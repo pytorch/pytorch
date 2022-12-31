@@ -38,8 +38,8 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
-  TensorMaker& deleter(std::function<void(void*)> value) noexcept {
-    deleter_ = std::move(value);
+  TensorMaker& deleter(const std::function<void(void*)>& value) noexcept {
+    deleter_ = value;
 
     return *this;
   }

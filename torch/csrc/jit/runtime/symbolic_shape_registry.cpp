@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -220,7 +221,7 @@ void checkInputAndOutputTypes(
 
 void transformShapeFunction(
     const FunctionSchema* schema_string,
-    std::shared_ptr<Graph> graph) {
+    const std::shared_ptr<Graph>& graph) {
   Inline(*graph);
 
   // ATEN operators can return multiple unboxed values, this in contrast to
@@ -296,7 +297,7 @@ void registerBoundedSchema(
       schema_string, lower_bound_function_name, reused_functions, module);
   auto upper_graph = genShapeComputeFn(
       schema_string, upper_bound_function_name, reused_functions, module);
-  cached_bounded_schema_to_graph[schema_string] = {lower_graph, upper_graph};
+  cached_bounded_schema_to_graph[schema_string] = {std::move(lower_graph), std::move(upper_graph)};
 }
 
 void loadModule(const CompilationUnit& module) {
@@ -412,7 +413,7 @@ TORCH_API c10::optional<BoundedShapeGraphs> boundedGraphsForSchema(
 
 void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
-    std::shared_ptr<Graph> g) {
+    const std::shared_ptr<Graph>& g) {
   std::lock_guard<std::mutex> guard(lock);
   if (cached_schema_to_graph.size() == 0) {
     loadFunctions();

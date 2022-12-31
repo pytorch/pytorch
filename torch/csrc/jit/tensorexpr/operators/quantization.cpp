@@ -176,7 +176,7 @@ Tensor computeQuantizePerTensor(
       c10::nullopt,
       qscale.node(),
       qzero.node());
-  return Tensor(buf, vars, e.node());
+  return Tensor(std::move(buf), vars, e.node());
 }
 
 Tensor computeQuantizedAdd(
@@ -205,8 +205,8 @@ Tensor computeQuantizedAdd(
   auto lhs = tensorOrConstant(inputs[0], indices);
   auto rhs = tensorOrConstant(inputs[1], indices);
   ExprHandle exprHandle = quant(
-      dequant(lhs, dequant_dtype, qa_scale, qa_zero) +
-          dequant(rhs, dequant_dtype, qb_scale, qb_zero),
+      dequant(std::move(lhs), dequant_dtype, std::move(qa_scale), std::move(qa_zero)) +
+          dequant(std::move(rhs), dequant_dtype, std::move(qb_scale), std::move(qb_zero)),
       out_dtype,
       out_qscale,
       out_qzero);
@@ -219,7 +219,7 @@ Tensor computeQuantizedAdd(
                          : make_contiguous_strides(outputShape),
       out_qscale.node(),
       out_qzero.node());
-  return Tensor(buf, vars, exprHandle.node());
+  return Tensor(std::move(buf), vars, exprHandle.node());
 }
 
 Tensor computeQuantizePerTensorExternalCall(
@@ -252,7 +252,7 @@ Tensor computeQuantizePerTensorExternalCall(
   }();
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_aten_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeDequantizeExternalCall(
@@ -277,7 +277,7 @@ Tensor computeDequantizeExternalCall(
       {ExprHandle(IRSimplifier::simplify(qx.node()->qscale())),
        ExprHandle(IRSimplifier::simplify(qx.node()->qzero())),
        qdtype});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedConv2dPrepack(
@@ -326,7 +326,7 @@ Tensor computeQuantizedConv2dPrepack(
        immQScale(qw),
        immQZero(qw),
        (int64_t)immQDType(qw)});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedConv1d(
@@ -358,7 +358,7 @@ Tensor computeQuantizedConv1d(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedConv2d(
@@ -390,7 +390,7 @@ Tensor computeQuantizedConv2d(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedConv2dRelu(
@@ -422,7 +422,7 @@ Tensor computeQuantizedConv2dRelu(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedLinear(
@@ -454,7 +454,7 @@ Tensor computeQuantizedLinear(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedLinearRelu(
@@ -486,7 +486,7 @@ Tensor computeQuantizedLinearRelu(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedAddExternalCall(
@@ -530,7 +530,7 @@ Tensor computeQuantizedAddExternalCall(
        (int64_t)immQDType(qb),
        out_qscale,
        out_qzero});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedMul(
@@ -561,7 +561,7 @@ Tensor computeQuantizedMul(
        (int64_t)immQDType(qb),
        out_qscale,
        out_qzero});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedMulScalar(
@@ -588,7 +588,7 @@ Tensor computeQuantizedMulScalar(
       "nnc_aten_quantized_mul_scalar",
       {qa},
       {scale1, immQZero(qa), (int64_t)immQDType(qa), scalar});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedRelu(
@@ -619,7 +619,7 @@ Tensor computeQuantizedRelu(
       "nnc_aten_quantized_relu",
       {qa},
       {immQScale(qa), immQZero(qa), (int64_t)immQDType(qa)});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedCat(
@@ -658,7 +658,7 @@ Tensor computeQuantizedCat(
       out_qzero);
   StmtPtr s =
       ExternalCall::make(ResultBuf, "nnc_aten_quantized_cat", args, extra_args);
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeDequantize(
@@ -687,10 +687,10 @@ Tensor computeDequantize(
     vars.push_back(var);
     indices.push_back(VarHandle(var));
   }
-  auto y = dequant(tensorOrConstant(inputs[0], indices), dtype, qscale, qzero);
+  auto y = dequant(tensorOrConstant(inputs[0], indices), dtype, std::move(qscale), std::move(qzero));
   BufPtr buf = alloc<Buf>(
       "dequantize", ExprHandleVectorToExprVector(outputShape), dtype);
-  return Tensor(buf, vars, y.node());
+  return Tensor(std::move(buf), vars, y.node());
 }
 
 Tensor computeUpsampleNearest2d(
@@ -739,7 +739,7 @@ Tensor computeUpsampleNearest2d(
           [&](ExprPtr stride) { return ExprHandle(std::move(stride)); }),
       ExprHandle(A.node()->qscale()),
       ExprHandle(A.node()->qzero()));
-  return Tensor(buf, args, e);
+  return Tensor(std::move(buf), args, std::move(e));
 }
 
 Tensor computeUpsampleNearest2dExternalCall(
@@ -798,7 +798,7 @@ Tensor computeUpsampleNearest2dExternalCall(
        output_size_w,
        scale_factor_h,
        scale_factor_w});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeQuantizedSigmoidExternalCall(
@@ -835,7 +835,7 @@ Tensor computeQuantizedSigmoidExternalCall(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 } // namespace tensorexpr

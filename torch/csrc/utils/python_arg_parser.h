@@ -490,7 +490,7 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
 
-inline PyObject* toPyObject(c10::SymInt symint) {
+inline PyObject* toPyObject(const c10::SymInt& symint) {
   if (symint.is_symbolic()) {
     auto r = py::cast(symint).release().ptr();
     TORCH_INTERNAL_ASSERT(r);

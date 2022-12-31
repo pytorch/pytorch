@@ -1148,7 +1148,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       if (has_symbolic_shapes_) {
         auto desc = getSymbolicStrideDesc(input);
         contiguous_symbolic_tensor =
-            is_symbolic_cont(desc, memory_layout_policy_);
+            is_symbolic_cont(std::move(desc), memory_layout_policy_);
       }
 
       // Get input size and strides
@@ -1191,7 +1191,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       flat_size = IRSimplifier::simplify(flat_size);
       BufHandle inBuffer(
           "t" + input_name_map_[input],
-          {flat_size},
+          {std::move(flat_size)},
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
 
       result = Compute(
@@ -1329,7 +1329,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
       : at::MemoryFormat::ChannelsLast;
   // output is contiguous with specified memory format, no work to do
   if (buf->is_contiguous(memory_format)) {
-    return Tensor(buf, nullptr);
+    return Tensor(std::move(buf), nullptr);
   }
 
   TORCH_INTERNAL_ASSERT(
@@ -1374,7 +1374,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
   std::vector<int64_t> default_strides =
       TensorType::contiguousStridesOf(sizes, memory_format);
   if (!tt->strides().concrete_sizes()) {
-    return Tensor(buf, nullptr);
+    return Tensor(std::move(buf), nullptr);
   }
   TORCH_INTERNAL_ASSERT(
       tt->strides().concrete_sizes(),
@@ -1383,12 +1383,12 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
   // All Tensors in NNC are layed out in default, contiguous layout.
   // If the output is also default contiguous we don't need to do anything
   if (strides == default_strides) {
-    return Tensor(buf, nullptr);
+    return Tensor(std::move(buf), nullptr);
   }
   // If the tensor is not dense or overlaps, we have
   // no way of matching the profiled striding
   if (!denseAndNonOverlapping(sizes, strides)) {
-    return Tensor(buf, nullptr);
+    return Tensor(std::move(buf), nullptr);
   }
 
   auto dims = sizesForValue(v);
@@ -1414,7 +1414,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
           if (size != 1) {
             auto stride = strides[stride_index];
             index = absolute_position /
-                ExprHandle(immLike(absolute_position, stride));
+                ExprHandle(immLike(std::move(absolute_position), stride));
             absolute_position = absolute_position %
                 ExprHandle(immLike(absolute_position, stride));
           }

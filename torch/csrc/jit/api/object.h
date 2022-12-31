@@ -48,7 +48,7 @@ struct TORCH_API Object {
     c10::optional<Method> setter_func;
   };
 
-  void setattr(const std::string& name, c10::IValue v) {
+  void setattr(const std::string& name, const c10::IValue& v) {
     if (_ivalue()->type()->hasConstant(name)) {
       TORCH_CHECK(
           false,
@@ -67,7 +67,7 @@ struct TORCH_API Object {
           "', but found '",
           v.type()->repr_str(),
           "'");
-      _ivalue()->setSlot(*slot, std::move(v));
+      _ivalue()->setSlot(*slot, v);
     } else {
       TORCH_CHECK(false, "Module has no attribute '", name, "'");
     }

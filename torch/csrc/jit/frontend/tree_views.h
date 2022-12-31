@@ -8,6 +8,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -228,9 +229,9 @@ struct Ident : public TreeView {
   const std::string& name() const {
     return subtree(0)->stringValue();
   }
-  static Ident create(const SourceRange& range, std::string name) {
+  static Ident create(const SourceRange& range, const std::string& name) {
     return Ident(
-        Compound::create(TK_IDENT, range, {String::create(std::move(name))}));
+        Compound::create(TK_IDENT, range, {String::create(name)}));
   }
 };
 
@@ -359,7 +360,7 @@ struct Param : public TreeView {
     TreeRef kwarg_only_tree =
         Compound::create(kwarg_only ? TK_TRUE : TK_FALSE, range, {});
     return Param(
-        Compound::create(TK_PARAM, range, {ident, type, def, kwarg_only_tree}));
+        Compound::create(TK_PARAM, range, {ident, type, def, std::move(kwarg_only_tree)}));
   }
   Ident ident() const {
     return Ident(subtree(0));
@@ -404,8 +405,8 @@ struct Def : public TreeView {
   explicit Def(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_DEF);
   }
-  Def withName(std::string new_name) const {
-    auto new_ident = Ident::create(name().range(), std::move(new_name));
+  Def withName(const std::string& new_name) const {
+    auto new_ident = Ident::create(name().range(), new_name);
     return create(range(), new_ident, decl(), statements());
   }
   Def withDecl(const Decl& decl) const {
@@ -462,8 +463,8 @@ struct ClassDef : public TreeView {
   explicit ClassDef(TreeRef&& tree) : TreeView(std::move(tree)) {
     tree_->match(TK_CLASS_DEF);
   }
-  ClassDef withName(std::string new_name) const {
-    auto new_ident = Ident::create(name().range(), std::move(new_name));
+  ClassDef withName(const std::string& new_name) const {
+    auto new_ident = Ident::create(name().range(), new_name);
     return create(range(), new_ident, superclass(), body());
   }
   Ident name() const {

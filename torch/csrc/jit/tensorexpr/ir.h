@@ -170,7 +170,7 @@ class BinaryOpNode : public ExprNode<Op> {
     if (expr->dtype() == dst_dtype) {
       return expr;
     }
-    return Cast::make(dst_dtype, ExprHandle(expr)).node();
+    return Cast::make(dst_dtype, ExprHandle(std::move(expr))).node();
   }
 
   ExprPtr lhs_;
@@ -371,12 +371,12 @@ inline c10::optional<int64_t> intValue(const ExprPtr& e) {
   return c10::nullopt;
 }
 
-inline c10::optional<int64_t> intValue(ExprHandle e) {
+inline c10::optional<int64_t> intValue(const ExprHandle& e) {
   return intValue(e.node());
 }
 
 template <typename T>
-T immediateAs(ExprPtr e) {
+T immediateAs(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value();                     \
@@ -388,12 +388,12 @@ T immediateAs(ExprPtr e) {
 }
 
 template <typename T>
-T immediateAs(ExprHandle e) {
+T immediateAs(const ExprHandle& e) {
   return immediateAs<T>(e.node());
 }
 
 template <typename T>
-bool immediateEquals(ExprPtr e, T val) {
+bool immediateEquals(const ExprPtr& e, T val) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() == val;              \

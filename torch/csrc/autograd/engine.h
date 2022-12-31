@@ -69,7 +69,7 @@ struct NodeTask {
       std::shared_ptr<Node> fn,
       InputBuffer inputs,
       bool isShutdownTask = false)
-      : base_(base),
+      : base_(std::move(base)),
         fn_(std::move(fn)),
         inputs_(std::move(inputs)),
         isShutdownTask_(isShutdownTask) {}

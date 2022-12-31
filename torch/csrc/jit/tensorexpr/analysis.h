@@ -25,7 +25,7 @@ class HasRand : public IRVisitor {
     if (v->op_type() == IntrinsicsOp::kRand) {
       has_rand_ = true;
     } else {
-      IRVisitor::visit(v);
+      IRVisitor::visit(std::move(v));
     }
   }
   StmtPtr stmt_;
@@ -61,7 +61,7 @@ class VarFinder : public IRVisitor {
  public:
   void visit(VarPtr v) override {
     vars_.insert(v);
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   static std::unordered_set<VarPtr> find(const StmtPtr& s) {
@@ -88,7 +88,7 @@ class BufFinder : public IRVisitor {
  public:
   void visit(BufPtr v) override {
     bufs_.insert(v);
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   static std::unordered_set<BufPtr> find(const StmtPtr& s) {
@@ -203,7 +203,7 @@ class ExternalAllocBufFinder : public IRVisitor {
   void visit(ExternalCallWithAllocPtr v) override {
     const auto& bufs_out = v->buf_out_args();
     bufs_.insert(bufs_out.begin(), bufs_out.end());
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   static std::unordered_set<BufPtr> find(const StmtPtr& s) {
@@ -247,7 +247,7 @@ class ModifiesVarChecker : public IRVisitor {
       found_ = true;
       return;
     }
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   void visit(AtomicAddPtr v) override {
@@ -255,7 +255,7 @@ class ModifiesVarChecker : public IRVisitor {
       found_ = true;
       return;
     }
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   void visit(LetPtr v) override {
@@ -263,7 +263,7 @@ class ModifiesVarChecker : public IRVisitor {
       found_ = true;
       return;
     }
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   void visit(ForPtr v) override {
@@ -271,7 +271,7 @@ class ModifiesVarChecker : public IRVisitor {
       found_ = true;
       return;
     }
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   VarPtr var_;

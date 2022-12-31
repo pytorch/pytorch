@@ -13,9 +13,9 @@ namespace jit {
 struct BuiltinOpFunction : public Function {
   BuiltinOpFunction(
       c10::QualifiedName qualname,
-      c10::FunctionSchema schema,
+      c10::FunctionSchema  schema,
       std::function<void(Stack&)> callable,
-      std::string doc_string = "")
+      std::string  doc_string = "")
       : name_(std::move(qualname)),
         callable_(std::move(callable)),
         schema_(std::move(schema)),

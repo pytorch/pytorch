@@ -58,7 +58,7 @@ template <typename T>
 inline typename remove_symint<T>::type unpackSymInt(T x) { return x; }
 
 template <>
-inline typename remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
+inline typename remove_symint<c10::SymInt>::type unpackSymInt(const c10::SymInt& x) {
   return x.expect_int();
 }
 

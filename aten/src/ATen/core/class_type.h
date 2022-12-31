@@ -213,12 +213,12 @@ struct TORCH_API ClassType : public NamedType {
   // compatible type otherwise.
   size_t addOrCheckAttribute(
       const std::string& name,
-      TypePtr ty,
+      const TypePtr& ty,
       bool is_parameter = false,
       bool is_buffer = false) {
     auto slot_idx = findAttributeSlot(name);
     if (!slot_idx) {
-      return addAttribute(name, std::move(ty), is_parameter, is_buffer);
+      return addAttribute(name, ty, is_parameter, is_buffer);
     }
 
     TORCH_CHECK(

@@ -33,7 +33,7 @@ namespace jit {
 namespace {
 
 std::string stringSlice(
-    std::string string,
+    const std::string& string,
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
     int64_t step) {
@@ -1417,7 +1417,7 @@ void dictItems(Stack& stack) {
   auto key_type = dict.keyType();
   auto value_type = dict.valueType();
   auto items =
-      c10::impl::GenericList(TupleType::create({key_type, value_type}));
+      c10::impl::GenericList(TupleType::create({std::move(key_type), std::move(value_type)}));
   items.reserve(dict.size());
   for (const auto& item : dict) {
     items.emplace_back(c10::ivalue::Tuple::create({item.key(), item.value()}));

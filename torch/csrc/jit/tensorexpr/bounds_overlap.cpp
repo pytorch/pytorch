@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {

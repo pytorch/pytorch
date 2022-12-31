@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/norm.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -49,7 +51,7 @@ Tensor computeBatchNorm(
           exprInputs.push_back(weight);
         }
         if (hasBias) {
-          bias = tensorOrConstant(inputs[2], {c});
+          bias = tensorOrConstant(inputs[2], {std::move(c)});
           exprInputs.push_back(bias);
         }
         promoteInputs(exprInputs);

@@ -82,7 +82,7 @@ class ToIValueAllowNumbersAsTensors {
 // 'torch::jit::PythonFunctionGuard' declared with greater visibility than the
 // type of its field 'torch::jit::PythonFunctionGuard::func_'
 struct VISIBILITY_HIDDEN PythonFunctionGuard {
-  explicit PythonFunctionGuard(py::function func) : func_(std::move(func)) {}
+  explicit PythonFunctionGuard(const py::function& func) : func_(std::move(func)) {}
 
   ~PythonFunctionGuard() {
     pybind11::gil_scoped_acquire ag;
@@ -478,7 +478,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
       key_type = *unified_key;
       value_type = *unified_value;
     }
-    return InferredType(DictType::create(key_type, value_type));
+    return InferredType(DictType::create(std::move(key_type), std::move(value_type)));
   } else if (PyList_Check(input.ptr())) {
     auto list = py::cast<py::list>(input);
     size_t len = py::len(list);
@@ -711,11 +711,11 @@ inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
 }
 
 struct VISIBILITY_HIDDEN tuple_slice {
-  /*implicit*/ tuple_slice(py::tuple tup_)
+  /*implicit*/ tuple_slice(const py::tuple& tup_)
       : tup(std::move(tup_)), b(0), e(tup.size()) {}
-  tuple_slice(py::tuple tup_, int64_t b_)
+  tuple_slice(const py::tuple& tup_, int64_t b_)
       : tup(std::move(tup_)), b(b_), e(tup.size()) {}
-  tuple_slice(py::tuple tup_, int64_t b_, int64_t e_)
+  tuple_slice(const py::tuple& tup_, int64_t b_, int64_t e_)
       : tup(std::move(tup_)), b(b_), e(e_) {}
   py::detail::tuple_iterator begin() const {
     return {tup, static_cast<pybind11::ssize_t>(b)};

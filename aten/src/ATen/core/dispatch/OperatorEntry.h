@@ -16,8 +16,9 @@
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <ATen/core/enum_tag.h>
 
-#include <list>
 #include <array>
+#include <list>
+#include <utility>
 
 #ifdef C10_MOBILE
 #define C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
@@ -52,7 +53,7 @@ struct AnnotatedKernel final {
 // This data structure represents operator schema, with metadata specifying
 // where the registration of this schema occurred
 struct AnnotatedSchema final {
-  AnnotatedSchema(FunctionSchema s, std::string d)
+  AnnotatedSchema(FunctionSchema  s, std::string d)
     : schema(std::move(s))
     , debug(std::move(d))
     {}

@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -14,7 +16,7 @@ struct TORCH_API MutationRemover {
       std::shared_ptr<Graph> graph,
       c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt)
       : aliasDb_(nullptr), graph_(std::move(graph)) {
-    mutation_filter_ = mutation_filter;
+    mutation_filter_ = std::move(mutation_filter);
   }
 
   // return true if graph is modified

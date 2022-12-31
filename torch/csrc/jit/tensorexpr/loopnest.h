@@ -430,7 +430,7 @@ class TORCH_API LoopNest {
   // Unrolls the given loop for the specified factor.
   // This does not require constant bounds for the loop being unrolled.
   static void unroll(const ForPtr& f, int factor, ForPtr* tail);
-  static void unroll(ForPtr f, int factor);
+  static void unroll(const ForPtr& f, int factor);
 
   static bool normalize(const ForPtr& f);
   static bool isNormalized(const ForPtr& f);

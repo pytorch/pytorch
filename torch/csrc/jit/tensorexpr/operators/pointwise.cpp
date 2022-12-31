@@ -24,7 +24,7 @@ Tensor computeSign(
         auto inp = inputs[0];
         auto zero = ExprHandle(immLike(inp, 0.0f));
         auto res = (zero < inp) - (inp < zero);
-        return promoteToDtype(res, inp.dtype().scalar_type());
+        return promoteToDtype(std::move(res), inp.dtype().scalar_type());
       });
 }
 
@@ -225,7 +225,7 @@ Tensor computeScalar(
       Let::make(VarHandle(let_var), demoteOutput(compute, outputType));
   std::vector<ExprPtr> dims;
   BufPtr buf = alloc<Buf>(let_var, dims, dt);
-  return Tensor(buf, let_stmt);
+  return Tensor(std::move(buf), std::move(let_stmt));
 }
 
 } // namespace tensorexpr

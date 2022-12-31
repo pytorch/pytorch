@@ -109,7 +109,7 @@ Tensor Compute(
   ExprHandle body = body_func(args);
   BufHandle buf =
       Buf::make(name, dims, body.dtype(), c10::nullopt, std::move(strides));
-  return Tensor(buf, args, body);
+  return Tensor(std::move(buf), args, std::move(body));
 }
 Tensor Compute(
     const std::string& name,
@@ -131,7 +131,7 @@ Tensor Compute(
   ExprHandle body = body_func(args[0]);
   BufHandle buf =
       Buf::make(name, dims, body.dtype(), c10::nullopt, std::move(strides));
-  return Tensor(buf, args, body);
+  return Tensor(std::move(buf), args, std::move(body));
 }
 Tensor Compute(
     const std::string& name,
@@ -153,7 +153,7 @@ Tensor Compute(
   ExprHandle body = body_func(args[0], args[1]);
   BufHandle buf =
       Buf::make(name, dims, body.dtype(), c10::nullopt, std::move(strides));
-  return Tensor(buf, args, body);
+  return Tensor(std::move(buf), args, std::move(body));
 }
 Tensor Compute(
     const std::string& name,
@@ -177,7 +177,7 @@ Tensor Compute(
   ExprHandle body = body_func(args[0], args[1], args[2]);
   BufHandle buf =
       Buf::make(name, dims, body.dtype(), c10::nullopt, std::move(strides));
-  return Tensor(buf, args, body);
+  return Tensor(std::move(buf), args, std::move(body));
 }
 Tensor Compute(
     const std::string& name,
@@ -204,7 +204,7 @@ Tensor Compute(
   ExprHandle body = body_func(args[0], args[1], args[2], args[3]);
   BufHandle buf =
       Buf::make(name, dims, body.dtype(), c10::nullopt, std::move(strides));
-  return Tensor(buf, args, body);
+  return Tensor(std::move(buf), args, std::move(body));
 }
 Tensor Compute(
     const std::string& name,

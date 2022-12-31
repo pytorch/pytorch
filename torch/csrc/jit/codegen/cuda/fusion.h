@@ -200,12 +200,12 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   std::vector<std::pair<int, int>> getInputAliasIndices() const;
 
   // mark input at index to be permuted by permutation
-  void setPermutationOnInput(int index, std::vector<int64_t> permutation) {
+  void setPermutationOnInput(int index, const std::vector<int64_t>& permutation) {
     permuted_input_map_.insert({index, permutation});
   }
 
   // mark output at index to be restored by permutation
-  void setPermutationOnOutput(int index, std::vector<int64_t> permutation) {
+  void setPermutationOnOutput(int index, const std::vector<int64_t>& permutation) {
     permuted_output_map_.insert({index, permutation});
   }
 

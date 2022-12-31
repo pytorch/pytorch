@@ -210,7 +210,7 @@ ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
       return ret;
     }
 
-    if (RampPtr r = to<Ramp>(rhs)) {
+    if (RampPtr r = to<Ramp>(std::move(rhs))) {
       if (bc->lanes() != r->lanes()) {
         throw malformed_input("multilane lane mismatch");
       }
@@ -219,7 +219,7 @@ ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
           alloc<Op>(bc->value(), r->base()), r->stride(), r->lanes());
       return ret;
     }
-  } else if (RampPtr ramp = to<Ramp>(lhs)) {
+  } else if (RampPtr ramp = to<Ramp>(std::move(lhs))) {
     if (RampPtr rother = to<Ramp>(rhs)) {
       if (ramp->lanes() != rother->lanes()) {
         throw malformed_input("multilane lane mismatch");
@@ -232,7 +232,7 @@ ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
       return ret;
     }
 
-    if (BroadcastPtr bc = to<Broadcast>(rhs)) {
+    if (BroadcastPtr bc = to<Broadcast>(std::move(rhs))) {
       if (ramp->lanes() != bc->lanes()) {
         throw malformed_input("multilane lane mismatch");
       }
@@ -640,7 +640,7 @@ ExprPtr PolynomialTransformer::mutate(SubPtr v) {
   }
 
   if (lhsTerm && rhsTerm) {
-    return subTerms(lhsTerm, rhsTerm, false);
+    return subTerms(lhsTerm, std::move(rhsTerm), false);
   }
 
   bool lhsScalar = lhs_new->isConstant();
@@ -708,7 +708,7 @@ ExprPtr PolynomialTransformer::mutate(SubPtr v) {
   }
 
   if (lhsTerm && rhsTerm) {
-    return subTerms(lhsTerm, rhsTerm, createdRHSnegated);
+    return subTerms(lhsTerm, std::move(rhsTerm), createdRHSnegated);
   }
 
   // Insert wrapped Term into LHS Polynomial.
@@ -1036,8 +1036,8 @@ ExprPtr factorizeDivision(ExprPtr lhs_new, ExprPtr rhs_new) {
   ExprPtr leftScalar = lhs_new->isConstant() ? lhs_new : nullptr;
   ExprPtr rightScalar = rhs_new->isConstant() ? rhs_new : nullptr;
 
-  auto lhsTerm = to<Term>(lhs_new);
-  auto rhsTerm = to<Term>(rhs_new);
+  auto lhsTerm = to<Term>(std::move(lhs_new));
+  auto rhsTerm = to<Term>(std::move(rhs_new));
   if (lhsTerm) {
     leftScalar = lhsTerm->scalar();
   }
@@ -1379,7 +1379,7 @@ ExprPtr PolynomialTransformer::mutate(MaxPtr v) {
   }
 
   return combineMinMaxTerms<Max, MaxTerm>(
-      lhs_new, rhs_new, v->propagate_nans(), hasher_);
+      std::move(lhs_new), std::move(rhs_new), v->propagate_nans(), hasher_);
 }
 
 ExprPtr PolynomialTransformer::mutate(MinPtr v) {
@@ -1410,7 +1410,7 @@ ExprPtr PolynomialTransformer::mutate(MinPtr v) {
   }
 
   return combineMinMaxTerms<Min, MinTerm>(
-      lhs_new, rhs_new, v->propagate_nans(), hasher_);
+      std::move(lhs_new), std::move(rhs_new), v->propagate_nans(), hasher_);
 }
 
 ExprPtr PolynomialTransformer::mutate(CompareSelectPtr v) {
@@ -1573,19 +1573,19 @@ ExprPtr PolynomialTransformer::mutate(IfThenElsePtr v) {
 }
 
 ExprPtr PolynomialTransformer::mutate(AndPtr v) {
-  return mutateBinaryOp(v, this);
+  return mutateBinaryOp(std::move(v), this);
 }
 
 ExprPtr PolynomialTransformer::mutate(XorPtr v) {
-  return mutateBinaryOp(v, this);
+  return mutateBinaryOp(std::move(v), this);
 }
 
 ExprPtr PolynomialTransformer::mutate(LshiftPtr v) {
-  return mutateBinaryOp(v, this);
+  return mutateBinaryOp(std::move(v), this);
 }
 
 ExprPtr PolynomialTransformer::mutate(RshiftPtr v) {
-  return mutateBinaryOp(v, this);
+  return mutateBinaryOp(std::move(v), this);
 }
 
 StmtPtr PolynomialBase::mutate(CondPtr v) {
@@ -1623,7 +1623,7 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
     return alloc<Block>(std::vector<StmtPtr>({}));
   }
   if (cond_old != cond_new) {
-    v->set_condition(cond_new);
+    v->set_condition(std::move(cond_new));
   }
   if (true_old != true_new) {
     v->set_true_stmt(true_new);
@@ -1659,7 +1659,7 @@ StmtPtr PolynomialBase::mutate(ForPtr v) {
   StmtPtr body = v->body();
   LoopOptions loop_options = v->loop_options();
   ExprPtr var_new_expr = var->accept_mutator(this);
-  VarPtr var_new = to<Var>(var_new_expr);
+  VarPtr var_new = to<Var>(std::move(var_new_expr));
   ExprPtr start_new = start->accept_mutator(this);
   ExprPtr stop_new = stop->accept_mutator(this);
   StmtPtr body_new = body;
@@ -1697,13 +1697,13 @@ StmtPtr PolynomialBase::mutate(ForPtr v) {
   }
 
   if (var != var_new) {
-    v->set_var(var_new);
+    v->set_var(std::move(var_new));
   }
   if (start != start_new) {
-    v->set_start(start_new);
+    v->set_start(std::move(start_new));
   }
   if (stop != stop_new) {
-    v->set_stop(stop_new);
+    v->set_stop(std::move(stop_new));
   }
   if (body != body_new) {
     v->set_body(body_new);
@@ -1941,7 +1941,7 @@ c10::optional<class ModRound> isModRound(const TermPtr& e) {
   mod_divisor = IRSimplifier::simplify(mod->rhs());
   other = mod->lhs();
 
-  if (!(div = to<Div>(other))) {
+  if (!(div = to<Div>(std::move(other)))) {
     return c10::nullopt;
   }
 
@@ -1990,10 +1990,10 @@ c10::optional<class ModRound> isModRound(const TermPtr& e) {
   }
 
   if (!scalar) {
-    scalar = immLike(multiplier, 1);
+    scalar = immLike(std::move(multiplier), 1);
   }
 
-  return ModRound(scalar, denom, divisor, mod_divisor);
+  return ModRound(std::move(scalar), std::move(denom), std::move(divisor), std::move(mod_divisor));
 }
 
 // Search the polynomial for Terms that can be merged in
@@ -2237,7 +2237,7 @@ ExprPtr TermExpander::mutate(PolynomialPtr v) {
     }
 
     if (isMultilanePrimitive(simpleNode)) {
-      auto ret = combineMultilane<Add>(lastNode, simpleNode);
+      auto ret = combineMultilane<Add>(std::move(lastNode), simpleNode);
       if (ret) {
         // simplify result first, then expand.
         lastNode = ret->accept_mutator(simplifier_);
@@ -2285,7 +2285,7 @@ ExprPtr TermExpander::mutate(PolynomialPtr v) {
   if (immediateIsNegative(v->scalar())) {
     // Negate the scalar and subtract.
     ExprPtr negated =
-        evaluateOp(alloc<Mul>(immLike(lastNode, -1), v->scalar()));
+        evaluateOp(alloc<Mul>(immLike(std::move(lastNode), -1), v->scalar()));
     lastNode = alloc<Sub>(lastNode, evaluateOp(negated));
   } else {
     // we want to avoid a cast to the scalar if it would happen.
@@ -2387,7 +2387,7 @@ StmtPtr TermExpander::mutate(AllocatePtr v) {
   }
 
   if (buf != buf_new) {
-    v->set_buf(buf_new);
+    v->set_buf(std::move(buf_new));
   }
   return v;
 }
@@ -2405,7 +2405,7 @@ StmtPtr TermExpander::mutate(FreePtr v) {
   }
 
   if (buf != buf_new) {
-    v->set_buf(buf_new);
+    v->set_buf(std::move(buf_new));
   }
   return v;
 }
@@ -2535,7 +2535,7 @@ StmtPtr TermExpander::fuseSyncThreads(BlockPtr block) {
 }
 
 StmtPtr TermExpander::mutate(BlockPtr v) {
-  StmtPtr new_stmt = PolynomialBase::mutate(v);
+  StmtPtr new_stmt = PolynomialBase::mutate(std::move(v));
   BlockPtr new_block = to<Block>(new_stmt);
   if (!new_block) {
     return new_stmt;
@@ -2544,7 +2544,7 @@ StmtPtr TermExpander::mutate(BlockPtr v) {
   // fuseConditions will return the original block if it cannot fuse.
   new_block = fuseConditions(new_block);
   /// fuseSyncThreads too.
-  return fuseSyncThreads(new_block);
+  return fuseSyncThreads(std::move(new_block));
 }
 
 // SimplifierUnderContext
@@ -2559,7 +2559,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
   StmtPtr body = v->body();
   LoopOptions loop_options = v->loop_options();
   ExprPtr var_new_expr = var->accept_mutator(this);
-  VarPtr var_new = to<Var>(var_new_expr);
+  VarPtr var_new = to<Var>(std::move(var_new_expr));
   ExprPtr start_new = start->accept_mutator(this);
   ExprPtr stop_new = stop->accept_mutator(this);
   StmtPtr body_new = body;
@@ -2642,13 +2642,13 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
   }
 
   if (var != var_new) {
-    v->set_var(var_new);
+    v->set_var(std::move(var_new));
   }
   if (start != start_new) {
-    v->set_start(start_new);
+    v->set_start(std::move(start_new));
   }
   if (stop != stop_new) {
-    v->set_stop(stop_new);
+    v->set_stop(std::move(stop_new));
   }
   if (body != body_new) {
     v->set_body(body_new);
@@ -2716,7 +2716,7 @@ ExprPtr distributeDiv(
   VarPtr var_key = to<Var>(lhsAdd1);
   ExprPtr main = lhsAdd2;
   if (var_key == nullptr) {
-    var_key = to<Var>(lhsAdd2);
+    var_key = to<Var>(std::move(lhsAdd2));
     main = lhsAdd1;
   }
 
@@ -2735,7 +2735,7 @@ ExprPtr distributeDiv(
   // range
   auto end = got->second.end;
   ExprPtr check_start = IRSimplifier::simplify(
-      alloc<CompareSelect>(start, immLike(start, 0), kGE));
+      alloc<CompareSelect>(start, immLike(std::move(start), 0), kGE));
   ExprPtr check_end =
       IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
   if (!check_start->isConstant() || !check_end->isConstant() ||
@@ -2757,7 +2757,7 @@ ExprPtr distributeDiv(
   }
 
   // simplify type 2 exprs: '(i+j*n)/n' => 'j'
-  auto ret_var = to<Var>(ret);
+  auto ret_var = to<Var>(std::move(ret));
   // FIXME: Allow any integral type.
   if (ret_var && ret_var->dtype() == kInt) {
     // retrieve j's range info
@@ -2840,7 +2840,7 @@ ExprPtr distributeMod(
   VarPtr var_key = to<Var>(lhsAdd1);
   ExprPtr main = lhsAdd2;
   if (var_key == nullptr) {
-    var_key = to<Var>(lhsAdd2);
+    var_key = to<Var>(std::move(lhsAdd2));
     main = lhsAdd1;
   }
   if (var_key == nullptr) {
@@ -2858,7 +2858,7 @@ ExprPtr distributeMod(
   // range
   auto end = got->second.end;
   ExprPtr check_start = IRSimplifier::simplify(
-      alloc<CompareSelect>(start, immLike(start, 0), kGE));
+      alloc<CompareSelect>(start, immLike(std::move(start), 0), kGE));
   ExprPtr check_end =
       IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
   if (!check_start->isConstant() || !check_end->isConstant() ||
@@ -2879,7 +2879,7 @@ ExprPtr distributeMod(
 
   // simplify type 2) exprs: '(i+j*n)%n' => 'i'
   ExprPtr main_div = IRSimplifier::simplify(alloc<Div>(main, rhsScalar));
-  auto j_var = to<Var>(main_div);
+  auto j_var = to<Var>(std::move(main_div));
   // FIXME: Allow any integral type.
   if (j_var && j_var->dtype() == kInt) {
     // retrieve j's range info
@@ -2920,7 +2920,7 @@ ExprPtr SimplifierUnderContext::mutate(DivPtr v) {
       auto start = got->second.start;
       auto end = got->second.end;
       ExprPtr check_start = IRSimplifier::simplify(
-          alloc<CompareSelect>(start, immLike(start, 0), kGE));
+          alloc<CompareSelect>(start, immLike(std::move(start), 0), kGE));
       ExprPtr check_end =
           IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
       if (check_start->isConstant() && check_end->isConstant() &&
@@ -2959,7 +2959,7 @@ ExprPtr SimplifierUnderContext::mutate(IfThenElsePtr v) {
   bool nothing_changed = (simplified_condition == condition) &&
       (simplified_true_val == true_val) && (simplified_false_val == false_val);
   return nothing_changed
-      ? v
+      ? std::move(v)
       : alloc<IfThenElse>(
             simplified_condition, simplified_true_val, simplified_false_val);
 }
@@ -3041,7 +3041,7 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
       auto start = got->second.start;
       auto end = got->second.end;
       ExprPtr check_start = IRSimplifier::simplify(
-          alloc<CompareSelect>(start, immLike(start, 0), kGE));
+          alloc<CompareSelect>(start, immLike(std::move(start), 0), kGE));
       ExprPtr check_end =
           IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
       if (check_start->isConstant() && check_end->isConstant() &&

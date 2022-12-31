@@ -98,16 +98,16 @@ ExprPtr IRMutator::mutate(CompareSelectPtr v) {
   ExprPtr ret_val1_new = ret_val1->accept_mutator(this);
   ExprPtr ret_val2_new = ret_val2->accept_mutator(this);
   if (lhs != lhs_new) {
-    v->set_lhs(lhs_new);
+    v->set_lhs(std::move(lhs_new));
   }
   if (rhs != rhs_new) {
-    v->set_rhs(rhs_new);
+    v->set_rhs(std::move(rhs_new));
   }
   if (ret_val1 != ret_val1_new) {
-    v->set_ret_val1(ret_val1_new);
+    v->set_ret_val1(std::move(ret_val1_new));
   }
   if (ret_val2 != ret_val2_new) {
-    v->set_ret_val2(ret_val2_new);
+    v->set_ret_val2(std::move(ret_val2_new));
   }
   return v;
 }
@@ -124,7 +124,7 @@ ExprPtr IRMutator::mutate(CastPtr v) {
   ExprPtr src_value = v->src_value();
   ExprPtr src_value_new = src_value->accept_mutator(this);
   if (src_value != src_value_new) {
-    v->set_src_value(src_value_new);
+    v->set_src_value(std::move(src_value_new));
   }
   return v;
 }
@@ -133,7 +133,7 @@ ExprPtr IRMutator::mutate(BitCastPtr v) {
   ExprPtr src_value = v->src_value();
   ExprPtr src_value_new = src_value->accept_mutator(this);
   if (src_value != src_value_new) {
-    v->set_src_value(src_value_new);
+    v->set_src_value(std::move(src_value_new));
   }
   return v;
 }
@@ -148,10 +148,10 @@ ExprPtr IRMutator::mutate(RampPtr v) {
   ExprPtr base_new = base->accept_mutator(this);
   ExprPtr stride_new = stride->accept_mutator(this);
   if (base != base_new) {
-    v->set_base(base_new);
+    v->set_base(std::move(base_new));
   }
   if (stride != stride_new) {
-    v->set_stride(stride_new);
+    v->set_stride(std::move(stride_new));
   }
   return v;
 }
@@ -172,10 +172,10 @@ ExprPtr IRMutator::mutate(LoadPtr v) {
   BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
 
   if (buf != buf_new) {
-    v->set_buf(buf_new);
+    v->set_buf(std::move(buf_new));
   }
   if (any_index_changed) {
-    v->set_indices(indices_new);
+    v->set_indices(std::move(indices_new));
   }
   return v;
 }
@@ -196,17 +196,17 @@ ExprPtr IRMutator::mutate(BufPtr v) {
   }
 
   if (var != var_new) {
-    v->set_base_handle(var_new);
+    v->set_base_handle(std::move(var_new));
   }
   if (dims_changed) {
-    v->set_dims(dims_new);
+    v->set_dims(std::move(dims_new));
   }
 
   ExprPtr qscale = v->qscale();
   if (qscale) {
     ExprPtr qscale_new = qscale->accept_mutator(this);
     if (qscale != qscale_new) {
-      v->set_qscale(qscale_new);
+      v->set_qscale(std::move(qscale_new));
     }
   }
 
@@ -214,7 +214,7 @@ ExprPtr IRMutator::mutate(BufPtr v) {
   if (qzero) {
     ExprPtr qzero_new = qzero->accept_mutator(this);
     if (qzero != qzero_new) {
-      v->set_qzero(qzero_new);
+      v->set_qzero(std::move(qzero_new));
     }
   }
 
@@ -225,7 +225,7 @@ ExprPtr IRMutator::mutate(BroadcastPtr v) {
   ExprPtr value = v->value();
   ExprPtr value_new = value->accept_mutator(this);
   if (value != value_new) {
-    v->set_value(value_new);
+    v->set_value(std::move(value_new));
   }
   return v;
 }
@@ -239,13 +239,13 @@ ExprPtr IRMutator::mutate(IfThenElsePtr v) {
   ExprPtr false_value_new = false_value->accept_mutator(this);
 
   if (condition != condition_new) {
-    v->set_condition(condition_new);
+    v->set_condition(std::move(condition_new));
   }
   if (true_value != true_value_new) {
-    v->set_true_value(true_value_new);
+    v->set_true_value(std::move(true_value_new));
   }
   if (false_value != false_value_new) {
-    v->set_false_value(false_value_new);
+    v->set_false_value(std::move(false_value_new));
   }
   return v;
 }
@@ -262,7 +262,7 @@ ExprPtr IRMutator::mutate(IntrinsicsPtr v) {
     params[i] = value_new;
   }
   if (any_change) {
-    v->set_params(params);
+    v->set_params(std::move(params));
   }
   return v;
 }
@@ -336,7 +336,7 @@ StmtPtr IRMutator::mutate(ForPtr v) {
   StmtPtr body = v->body();
   LoopOptions loop_options = v->loop_options();
   ExprPtr var_new_expr = var->accept_mutator(this);
-  VarPtr var_new = to<Var>(var_new_expr);
+  VarPtr var_new = to<Var>(std::move(var_new_expr));
   ExprPtr start_new = start->accept_mutator(this);
   ExprPtr stop_new = stop->accept_mutator(this);
   StmtPtr body_new = body->accept_mutator(this);
@@ -347,13 +347,13 @@ StmtPtr IRMutator::mutate(ForPtr v) {
     v->set_body(body_new);
   }
   if (var != var_new) {
-    v->set_var(var_new);
+    v->set_var(std::move(var_new));
   }
   if (start != start_new) {
-    v->set_start(start_new);
+    v->set_start(std::move(start_new));
   }
   if (stop != stop_new) {
-    v->set_stop(stop_new);
+    v->set_stop(std::move(stop_new));
   }
   return v;
 }
@@ -396,13 +396,13 @@ StmtPtr IRMutator::mutate(StorePtr v) {
   ExprPtr value_new = value->accept_mutator(this);
 
   if (buf != buf_new) {
-    v->set_buf(buf_new);
+    v->set_buf(std::move(buf_new));
   }
   if (any_index_changed) {
-    v->set_indices(indices_new);
+    v->set_indices(std::move(indices_new));
   }
   if (value != value_new) {
-    v->set_value(value_new);
+    v->set_value(std::move(value_new));
   }
   return v;
 }
@@ -424,13 +424,13 @@ StmtPtr IRMutator::mutate(AtomicAddPtr v) {
   ExprPtr value_new = value->accept_mutator(this);
 
   if (buf != buf_new) {
-    v->set_buf(buf_new);
+    v->set_buf(std::move(buf_new));
   }
   if (any_index_changed) {
-    v->set_indices(indices_new);
+    v->set_indices(std::move(indices_new));
   }
   if (value != value_new) {
-    v->set_value(value_new);
+    v->set_value(std::move(value_new));
   }
   return v;
 }
@@ -466,13 +466,13 @@ StmtPtr IRMutator::mutate(ExternalCallPtr v) {
   }
 
   if (buf != buf_new) {
-    v->set_buf(buf_new);
+    v->set_buf(std::move(buf_new));
   }
   if (buf_args_changed) {
-    v->set_buf_args(buf_args_new);
+    v->set_buf_args(std::move(buf_args_new));
   }
   if (args_changed) {
-    v->set_args(args_new);
+    v->set_args(std::move(args_new));
   }
   return v;
 }
@@ -510,13 +510,13 @@ StmtPtr IRMutator::mutate(ExternalCallWithAllocPtr v) {
   }
 
   if (buf_out_args_changed) {
-    v->set_buf_out_args(buf_out_args_new);
+    v->set_buf_out_args(std::move(buf_out_args_new));
   }
   if (buf_args_changed) {
-    v->set_buf_args(buf_args_new);
+    v->set_buf_args(std::move(buf_args_new));
   }
   if (args_changed) {
-    v->set_args(args_new);
+    v->set_args(std::move(args_new));
   }
   return v;
 }
@@ -527,7 +527,7 @@ StmtPtr IRMutator::mutate(AllocatePtr v) {
   TORCH_INTERNAL_ASSERT(
       buf_new, buildErrorMessage("IRMutator produced null for Buf."));
   if (buf != buf_new) {
-    v->set_buf(buf_new);
+    v->set_buf(std::move(buf_new));
   }
   return v;
 }
@@ -538,7 +538,7 @@ StmtPtr IRMutator::mutate(FreePtr v) {
   TORCH_INTERNAL_ASSERT(
       buf_new, buildErrorMessage("IRMutator produced null for Buf."));
   if (buf != buf_new) {
-    v->set_buf(buf_new);
+    v->set_buf(std::move(buf_new));
   }
   return v;
 }
@@ -556,7 +556,7 @@ StmtPtr IRMutator::mutate(FreeExtPtr v) {
   }
 
   if (bufs_changed) {
-    v->set_bufs(bufs_new);
+    v->set_bufs(std::move(bufs_new));
   }
   return v;
 }
@@ -566,13 +566,13 @@ StmtPtr IRMutator::mutate(PlacementAllocatePtr v) {
   BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
   TORCH_INTERNAL_ASSERT(
       buf_new, buildErrorMessage("IRMutator produced null for Buf."));
-  v->set_buf(buf_new);
+  v->set_buf(std::move(buf_new));
 
   BufPtr buf_to_reuse = v->buf_to_reuse();
   BufPtr buf_to_reuse_new = to<Buf>(buf_to_reuse->accept_mutator(this));
   TORCH_INTERNAL_ASSERT(
       buf_to_reuse_new, buildErrorMessage("IRMutator produced null for Buf."));
-  v->set_buf_to_reuse(buf_to_reuse_new);
+  v->set_buf_to_reuse(std::move(buf_to_reuse_new));
 
   return v;
 }
@@ -585,10 +585,10 @@ StmtPtr IRMutator::mutate(LetPtr v) {
   ExprPtr val_new = val_old->accept_mutator(this);
 
   if (var_old != var_new) {
-    v->set_var(var_new);
+    v->set_var(std::move(var_new));
   }
   if (val_old != val_new) {
-    v->set_val(val_new);
+    v->set_val(std::move(val_new));
   }
   return v;
 }
@@ -603,7 +603,7 @@ StmtPtr IRMutator::mutate(CondPtr v) {
   StmtPtr false_new = false_old ? false_old->accept_mutator(this) : false_old;
 
   if (cond_old != cond_new) {
-    v->set_condition(cond_new);
+    v->set_condition(std::move(cond_new));
   }
 
   if (true_old != true_new) {

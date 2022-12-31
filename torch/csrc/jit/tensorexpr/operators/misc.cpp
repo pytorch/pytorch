@@ -74,7 +74,7 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
 
 bool isScalar(ExprHandle e) {
   auto n = e.node();
-  return n->isConstant() || to<Var>(n);
+  return n->isConstant() || to<Var>(std::move(n));
 }
 
 ExprHandle promoteHalfToFloat(const ExprHandle& e) {
@@ -171,7 +171,7 @@ c10::optional<TensorInfo> getTensorInfo(const BufHandle& b) {
     }
     dims.push_back(*val);
   }
-  return TensorInfo{dims, static_cast<at::ScalarType>(b.dtype().scalar_type())};
+  return TensorInfo{std::move(dims), static_cast<at::ScalarType>(b.dtype().scalar_type())};
 }
 
 ExprHandle clamp(
@@ -182,8 +182,8 @@ ExprHandle clamp(
   return CompareSelect::make(mm, cmax, cmax, mm, kGT);
 }
 
-static bool isOne(ExprHandle e) {
-  auto const& n = intValue(std::move(e));
+static bool isOne(const ExprHandle& e) {
+  auto const& n = intValue(e);
   if (!n) {
     return false;
   }
@@ -235,7 +235,7 @@ std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
   auto res1 = broadcastShapesImpl(shapes[n - 2], shapes[n - 1]);
   shapes[n - 2] = res1.first;
   shapes.pop_back();
-  auto res2 = broadcastShapesImpl(shapes);
+  auto res2 = broadcastShapesImpl(std::move(shapes));
   return {res2.first, (res1.second || res2.second)};
 }
 
@@ -546,7 +546,7 @@ Tensor computeCatWoConditionals(
       output_strides_expr);
   if (non_empty_inputs.size() == 0) {
     return Tensor(
-        output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
+        std::move(output_buf), alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
   }
 
   int64_t concat_dim = c10::get<int64_t>(arg_dim);
@@ -617,7 +617,7 @@ Tensor computeCatWoConditionals(
     concat_dim_size =
         alloc<Add>(concat_dim_size, input_dims[norm_concat_dim].node());
   }
-  return Tensor(output_buf, IRSimplifier::simplify(block));
+  return Tensor(std::move(output_buf), IRSimplifier::simplify(block));
 }
 
 Tensor computeCat(
@@ -700,7 +700,7 @@ Tensor computeEmbedding(
 
   StmtPtr s =
       ExternalCall::make(ResultBuf, "nnc_aten_embedding", {w, indices}, {});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 } // namespace tensorexpr

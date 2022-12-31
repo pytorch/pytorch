@@ -24,7 +24,7 @@ class OrderedDict {
   /// Constructs the `OrderedDict` with a short description of the kinds of keys
   /// stored in the `OrderedDict`. This description is used in error messages
   /// thrown by the `OrderedDict`.
-  explicit OrderedDict(std::string key_description = "Key");
+  explicit OrderedDict(std::string  key_description = "Key");
 
   /// Copy constructs this `OrderedDict` from `other`.
   OrderedDict(const OrderedDict& other);
@@ -255,7 +255,7 @@ class OrderedDict<Key, Value>::Item {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ OrderedDict ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename Key, typename Value>
-OrderedDict<Key, Value>::OrderedDict(std::string key_description)
+OrderedDict<Key, Value>::OrderedDict(std::string  key_description)
     : key_description_(std::move(key_description)) {}
 
 template <typename Key, typename Value>

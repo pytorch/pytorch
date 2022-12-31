@@ -124,7 +124,7 @@ Tensor conv2d_depthwise_dynamic(
 
   return Reduce(
       "conv2d_depthwise",
-      {std::move(N), std::move(K), OH, OW},
+      {std::move(N), std::move(K), std::move(OH), std::move(OW)},
       c10::nullopt, // TODO
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
@@ -398,7 +398,7 @@ Tensor computeConv2d(
        dilation[0],
        dilation[1],
        groups});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeConv1d(
@@ -432,7 +432,7 @@ Tensor computeConv1d(
       "nnc_aten_conv1d",
       {inp, w, b},
       {strides[0], padding[0], dilation[0], groups});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computePrepackedConv2dClampRun(
@@ -451,7 +451,7 @@ Tensor computePrepackedConv2dClampRun(
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_prepacked_conv2d_clamp_run", {inp, prepacked}, {});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computePrepackedLinearClampRun(
@@ -470,7 +470,7 @@ Tensor computePrepackedLinearClampRun(
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_prepacked_linear_clamp_run", {inp, prepacked}, {});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 Tensor computeMkldnnPrepackedConvRun(
@@ -490,7 +490,7 @@ Tensor computeMkldnnPrepackedConvRun(
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_mkldnn_prepacked_conv_run", {inp, prepacked}, {});
-  return Tensor(ResultBuf.node(), s);
+  return Tensor(ResultBuf.node(), std::move(s));
 }
 
 } // namespace tensorexpr

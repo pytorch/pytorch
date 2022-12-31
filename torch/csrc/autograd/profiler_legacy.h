@@ -183,7 +183,7 @@ struct TORCH_API LegacyEvent {
     node_id_ = node_id;
   }
 
-  void setName(at::StringView newName_) {
+  void setName(const at::StringView& newName_) {
     name_ = std::move(newName_);
   }
 

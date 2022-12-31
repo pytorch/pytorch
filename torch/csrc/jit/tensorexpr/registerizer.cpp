@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -673,14 +675,14 @@ StmtPtr RegisterizerReplacer::mutate(StorePtr v) {
   auto it = storeToAccess_.find(v);
   if (it == storeToAccess_.end()) {
     // This access cannot be registerized.
-    return IRMutator::mutate(v);
+    return IRMutator::mutate(std::move(v));
   }
 
   auto& info = it->second;
 
   ExprPtr new_val = v->value()->accept_mutator(this);
 
-  v->set_value(new_val);
+  v->set_value(std::move(new_val));
   v->set_buf(info->replacement().var_wrapper);
   v->set_indices({});
   return v;

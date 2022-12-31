@@ -118,29 +118,29 @@ struct TORCH_API Module : public Object {
   // as parameters. This is different than in nn.Module where there is a special
   // register_buffer method. With this simplification, we only need to track
   // whether a slot is a parameter to be able to classify it.
-  void register_buffer(const std::string& name, at::Tensor v) {
+  void register_buffer(const std::string& name, const at::Tensor& v) {
     bool is_param = false;
     bool is_buffer = true;
     type()->addOrCheckAttribute(name, TensorType::get(), is_param, is_buffer);
-    _ivalue()->setAttr(name, std::move(v));
+    _ivalue()->setAttr(name, v);
   }
 
   void register_parameter(
       const std::string& name,
-      at::Tensor v,
+      const at::Tensor& v,
       bool is_buffer) {
     type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer, is_buffer);
-    _ivalue()->setAttr(name, std::move(v));
+    _ivalue()->setAttr(name, v);
   }
 
   void register_attribute(
       const std::string& name,
       const TypePtr& t,
-      IValue v,
+      const IValue& v,
       bool is_param = false,
       bool is_buffer = false) {
     type()->addOrCheckAttribute(name, t, is_param, is_buffer);
-    _ivalue()->setAttr(name, std::move(v));
+    _ivalue()->setAttr(name, v);
   }
 
   void register_module(const std::string& name, const Module& module) {
@@ -284,8 +284,8 @@ struct TORCH_API Module : public Object {
       const Function& method,
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
-  c10::QualifiedName getNameForMethod(std::string basename) const {
-    return QualifiedName(*type()->name(), std::move(basename));
+  c10::QualifiedName getNameForMethod(const std::string& basename) const {
+    return QualifiedName(*type()->name(), basename);
   }
 
   void to_impl(
@@ -550,8 +550,8 @@ struct TORCH_API ModulePolicy {
   // of that object.
   static value_type create(
       const std::vector<detail::SlotCursor>& cursors,
-      IValue v) {
-    return Module(std::move(v).toObject());
+      const IValue& v) {
+    return Module(v.toObject());
   }
   // is slot i in typ something that this iterator should return, otherwise,
   // we skip it.
@@ -567,8 +567,8 @@ struct TORCH_API ParameterPolicy {
   using value_type = at::Tensor;
   static value_type create(
       const std::vector<detail::SlotCursor>& cursors,
-      IValue v) {
-    return std::move(v).toTensor();
+      const IValue& v) {
+    return v.toTensor();
   }
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return typ->is_parameter(i) && v.isTensor();
@@ -580,8 +580,8 @@ struct TORCH_API BufferPolicy {
   using value_type = at::Tensor;
   static value_type create(
       const std::vector<detail::SlotCursor>& cursors,
-      IValue v) {
-    return std::move(v).toTensor();
+      const IValue& v) {
+    return v.toTensor();
   }
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return typ->getAttribute(i)->isSubtypeOf(*TensorType::get()) &&
@@ -611,7 +611,7 @@ struct NamedPolicy {
   using value_type = Named<typename Policy::value_type>;
   static value_type create(
       const std::vector<detail::SlotCursor>& cursors,
-      IValue v) {
+      const IValue& v) {
     std::string name;
     if (cursors.size() == 1) {
       name = (cursors.back().i_ == -1) ? "" : nameFragment(cursors.back());
@@ -625,7 +625,7 @@ struct NamedPolicy {
       }
       name = ss.str();
     }
-    return value_type{std::move(name), Policy::create(cursors, std::move(v))};
+    return value_type{std::move(name), Policy::create(cursors, v)};
   }
   static bool valid(const ClassTypePtr& t, size_t i, const IValue& v) {
     return Policy::valid(t, i, v);

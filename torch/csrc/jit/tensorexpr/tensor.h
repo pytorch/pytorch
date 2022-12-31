@@ -162,7 +162,7 @@ Tensor Reduce(
     ExprHandle body = Reducer::getReduceBody(body_func, vars);
     BufHandle func_result = Buf::make(
         func_name, dims, body.dtype(), c10::nullopt, std::move(strides));
-    return Tensor(func_result, vars, body);
+    return Tensor(std::move(func_result), vars, std::move(body));
   }
 
   std::vector<VarHandle> all_vars;
@@ -180,10 +180,10 @@ Tensor Reduce(
     BufHandle func_result_acc =
         Buf::make(func_name + "_acc", dims, kFloat, init_expr_acc);
     reduce_op =
-        reducer(func_result, func_result_acc, body, output_args, reduce_vars);
+        reducer(func_result, std::move(func_result_acc), body, output_args, reduce_vars);
   }
 
-  Tensor t = Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
+  Tensor t = Tensor(std::move(func_result), vars, reduce_dims, reduce_vars, std::move(reduce_op));
   return t;
 }
 template <typename InitFunc, typename BodyFunc>

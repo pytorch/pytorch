@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/operators/matmul.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -48,7 +50,7 @@ Tensor computeMatmul(
   } else {
     return Tensor(
         ResultBuf.node(),
-        ExternalCall::make(ResultBuf, "nnc_aten_matmul", {a, b}, {}));
+        ExternalCall::make(std::move(ResultBuf), "nnc_aten_matmul", {a, b}, {}));
   }
 }
 
@@ -66,7 +68,7 @@ Tensor computeAddMM(
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
-          ResultBuf,
+          std::move(ResultBuf),
           "nnc_aten_addmm",
           {c10::get<BufHandle>(inputs[0]),
            c10::get<BufHandle>(inputs[1]),
