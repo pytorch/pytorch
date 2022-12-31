@@ -8432,7 +8432,7 @@ op_db: List[OpInfo] = [
                     ref=_clamp_max_numpy,
                     dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
                     supports_forward_ad=True,
-                    supports_rhs_python_scalar=False,
+                    supports_rhs_python_scalar=True,
                     supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
@@ -8450,7 +8450,7 @@ op_db: List[OpInfo] = [
                     ref=_clamp_min_numpy,
                     dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
                     supports_forward_ad=True,
-                    supports_rhs_python_scalar=False,
+                    supports_rhs_python_scalar=True,
                     supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
@@ -18197,19 +18197,11 @@ python_ref_db = [
         "_refs.clamp_min",
         torch_opinfo_name="clamp_min",
         supports_nvfuser=False,
-        skips=(
-            # test error disabled since rhs non-tensor python scalar is supported
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_max",
         torch_opinfo_name="clamp_max",
         supports_nvfuser=False,
-        skips=(
-            # test error disabled since rhs non-tensor python scalar is supported
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.clamp",
