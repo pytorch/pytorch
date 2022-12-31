@@ -2,8 +2,6 @@
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/quantization.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace mobile {
@@ -50,7 +48,7 @@ void PTQQuanizationHelper::quantize_dynamic(
                     .vec();
   m.get_method(reset_observers_method_name)({});
   m.get_method(observe_method_name)(inputs);
-  m.get_method(quantize_method_name)(std::move(inputs));
+  m.get_method(quantize_method_name)(inputs);
 
   m.compareMethodSchemas(method_name, quantized_method_name);
   m.unsafeRemoveMethod(method_name);

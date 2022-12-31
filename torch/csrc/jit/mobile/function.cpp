@@ -8,8 +8,6 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 
@@ -253,7 +251,7 @@ Function& Function::registerFunc(
   // Register the function if it's not found in the map.
   if (found == upgrader_function_holder.end()) {
     auto name_function_pair =
-        upgrader_function_holder.emplace(name, Function(std::move(name)));
+        upgrader_function_holder.emplace(name, Function(name));
     auto& func = name_function_pair.first->second;
     for (auto const& inst : instructions) {
       func.append_instruction(inst.op, inst.X, inst.N);

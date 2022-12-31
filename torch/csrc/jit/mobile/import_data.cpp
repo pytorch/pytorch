@@ -21,7 +21,6 @@
 #include <exception>
 #include <fstream>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace torch {
@@ -61,7 +60,7 @@ c10::IValue IValueUnpickler::deserialize(c10::optional<at::Device> device) {
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
   // NOLINTNEXTLINE(performance-move-const-arg)
-  return readArchive("data", std::move(mcu), std::move(device));
+  return readArchive("data", mcu, std::move(device));
 }
 
 c10::IValue IValueUnpickler::readArchive(
@@ -105,7 +104,7 @@ c10::IValue IValueUnpickler::readArchive(
     } else {
       type = c10::parseType(qn.qualifiedName());
     }
-    return c10::StrongTypePtr(compilation_unit_, std::move(type));
+    return c10::StrongTypePtr(compilation_unit_, type);
   };
 
   auto obj_loader = [&](const at::StrongTypePtr& type, IValue input) {
@@ -122,13 +121,13 @@ c10::IValue IValueUnpickler::readArchive(
     };
     if (setstate) {
       auto obj = c10::ivalue::Object::create(type, 0);
-      Stack stack({obj, std::move(input)});
+      Stack stack({obj, input});
       setstate->run(stack);
       return obj;
     } else if (auto custom_class_type = find_custom_class_with_setstate()) {
       auto obj = c10::ivalue::Object::create(
           c10::StrongTypePtr(nullptr, custom_class_type), 1);
-      Stack stack({obj, std::move(input)});
+      Stack stack({obj, input});
       custom_class_type->getMethod("__setstate__").run(stack);
       return obj;
     } else {
@@ -249,7 +248,7 @@ std::map<std::string, at::Tensor> _load_parameters_bytes(
   std::map<std::string, at::Tensor> map;
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-      auto m = parse_flatbuffer_no_object(std::move(data), size, device);
+      auto m = parse_flatbuffer_no_object(data, size, device);
       map = mobile_module_to_parameter_map(m);
       break;
     }

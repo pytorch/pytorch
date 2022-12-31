@@ -27,7 +27,6 @@
 #include <exception>
 #include <fstream>
 #include <string>
-#include <utility>
 #include <vector>
 
 // The import process to serialize the bytecode package.
@@ -120,7 +119,7 @@ c10::StrongTypePtr typeResolverMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit) {
   return c10::StrongTypePtr(
-      compilation_unit, resolveTypeNameMobile(qn, std::move(compilation_unit)));
+      compilation_unit, resolveTypeNameMobile(qn, compilation_unit));
 }
 
 c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
@@ -469,7 +468,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   }
   operator_version_ = reader_->version();
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);
-  auto m = mobile::Module(readArchive("data", mcu).toObject(), std::move(mcu));
+  auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
   m.set_min_operator_version(operator_version_);
   m.set_bytecode_version(bytecode_version_);
   m.setHasDebugHandles(has_debug_handles);
@@ -555,7 +554,7 @@ mobile::Module _load_for_mobile(
     size_t size = 0;
     std::tie(data, size) = get_stream_content(in);
     return _load_mobile_from_bytes(
-        std::move(data), size, device, extra_files, kDefaultMobileLoadOptions);
+        data, size, device, extra_files, kDefaultMobileLoadOptions);
   }
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   auto module = _load_for_mobile_impl(
@@ -583,7 +582,7 @@ mobile::Module _load_for_mobile(
     size_t size = 0;
     std::tie(data, size) = get_file_content(filename.c_str());
     return _load_mobile_from_bytes(
-        std::move(data), size, device, extra_files, module_load_options);
+        data, size, device, extra_files, module_load_options);
   }
 
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
@@ -601,7 +600,7 @@ TORCH_API mobile::Module _load_for_mobile(
   size_t size = 0;
   std::tie(data, size) = get_rai_content(rai.get());
   return _load_mobile_from_bytes(
-      std::move(data), size, device, extra_files, module_load_options);
+      data, size, device, extra_files, module_load_options);
 }
 
 mobile::Module _load_mobile_from_bytes(
@@ -621,7 +620,7 @@ mobile::Module _load_mobile_from_bytes(
     }
     case FileFormat::FlatbufferFileFormat: {
       return parse_and_initialize_mobile_module(
-          std::move(data), size, device, &extra_files);
+          data, size, device, &extra_files);
     }
     default: {
       TORCH_CHECK(false, "Format error");

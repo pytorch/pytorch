@@ -200,7 +200,7 @@ TypePtr resolveType(
     if (cu->get_class(qn) == nullptr) {
       auto classtype = ClassType::create(qn, cu, true);
       cu->register_type(classtype);
-      type = std::move(classtype);
+      type = classtype;
     } else {
       type = cu->get_class(qn);
     }
@@ -491,7 +491,7 @@ at::Tensor parseTensorFromMetadata(
 
   c10::Storage storage;
   storage = loader->getStorage(tensor_md->storage_location_index());
-  impl->set_storage_keep_dtype(std::move(storage));
+  impl->set_storage_keep_dtype(storage);
   impl->set_storage_offset(tensor_md->storage_offset());
 
   std::vector<int64_t> size{
@@ -566,7 +566,7 @@ IValue parseTuple(
   for (int i : *tuple->items()) {
     res.emplace_back(loader.getIValue(i));
   }
-  return c10::ivalue::Tuple::create(std::move(res));
+  return c10::ivalue::Tuple::create(res);
 }
 
 IValue parseDict(
@@ -635,8 +635,7 @@ IValue parseObject(
   switch (obj_type->type()) {
     case mobile::serialization::TypeType::CLASS_WITH_FIELD: {
       auto obj = c10::ivalue::Object::create(
-          at::StrongTypePtr(loader.cu_, std::move(cls)),
-          object->attrs()->size());
+          at::StrongTypePtr(loader.cu_, cls), object->attrs()->size());
       for (uint32_t i = 0; i < object->attrs()->size(); i++) {
         IValue val = loader.getIValue(object->attrs()->Get(i));
         obj->setSlot(i, std::move(val));
@@ -646,8 +645,8 @@ IValue parseObject(
     case mobile::serialization::TypeType::CLASS_WITH_SETSTATE: {
       IValue input = loader.getIValue(object->state());
       mobile::Function* setstate = loader.getFunction(object->setstate_func());
-      auto obj = c10::ivalue::Object::create(
-          at::StrongTypePtr(loader.cu_, std::move(cls)), 0);
+      auto obj =
+          c10::ivalue::Object::create(at::StrongTypePtr(loader.cu_, cls), 0);
       stack.emplace_back(obj);
       stack.emplace_back(std::move(input));
       setstate->run(stack);
@@ -898,13 +897,12 @@ mobile::Module parse_flatbuffer_no_object(
         const mobile::serialization::Object* object = ivalue.val_as_Object();
         auto cls = loader.getOrCreateClassTypeForObject(object);
         auto obj = c10::ivalue::Object::create(
-            at::StrongTypePtr(loader.cu_, std::move(cls)),
-            object->attrs()->size());
+            at::StrongTypePtr(loader.cu_, cls), object->attrs()->size());
         for (uint32_t i = 0; i < object->attrs()->size(); i++) {
           IValue val = loader.getIValue(object->attrs()->Get(i));
           obj->setSlot(i, std::move(val));
         }
-        return static_cast<c10::IValue>(std::move(obj));
+        return static_cast<c10::IValue>(obj);
       });
 
   mobile::Module m = loader.parseModule(flatbuffer_module);

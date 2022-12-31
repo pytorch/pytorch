@@ -13,7 +13,6 @@
 #include <ATen/core/jit_type.h>
 
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace torch {
@@ -111,7 +110,7 @@ mobile::Module tensor_dict_to_mobile(
 
   // Wrap the Object in a Module.
   auto mcu = std::make_shared<mobile::CompilationUnit>();
-  return mobile::Module(std::move(object), std::move(mcu));
+  return mobile::Module(object, mcu);
 }
 
 } // namespace mobile

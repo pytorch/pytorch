@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <exception>
-#include <utility>
 
 #include <ATen/record_function.h>
 #include <c10/util/ScopeExit.h>
@@ -297,7 +296,7 @@ void Method::run(Stack& stack) const {
     // symbolicate all handles
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
         e.getDebugHandles(), getTopModuleTypeName(*owner_));
-    e.add_context(std::move(debug_string));
+    e.add_context(debug_string);
 #endif
     error_message = e.what();
     TORCH_RETHROW(e);
@@ -305,7 +304,7 @@ void Method::run(Stack& stack) const {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
         function_->getExceptionDebugHandles(), getTopModuleTypeName(*owner_));
-    error.add_context(std::move(debug_string));
+    error.add_context(debug_string);
 #endif
     error_message = error.what();
     TORCH_RETHROW(error);
