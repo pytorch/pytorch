@@ -249,10 +249,19 @@ This is caused by `ld` from the Conda environment shadowing the system `ld`. You
 
 **On macOS**
 
+You should use AppleClang rather than Clang here. 
+
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py develop
 ```
+For default macOS configuration, you can just use 
+
+```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=gcc CXX=g++ python setup.py develop
+```
+
 
 **On Windows**
 
