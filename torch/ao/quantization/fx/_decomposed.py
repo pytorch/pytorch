@@ -277,6 +277,21 @@ def quantize_per_channel(
     out = res.permute(tuple(permute_axis_list))
     return out.to(dtype)
 
+@impl(quantized_decomposed_lib, "quantize_per_channel", "Meta")
+def quantize_per_channel_meta(
+        input: torch.Tensor,
+        scales: torch.Tensor,
+        zero_points: torch.Tensor,
+        axis: int,
+        quant_min: int,
+        quant_max: int,
+        dtype: torch.dtype
+) -> torch.Tensor:
+    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
+    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+    return torch.empty_like(input, dtype=dtype)
+
 # Note: quant_min/quant_max/dtype are not used in the operator, but for now it's kept in
 # the signature as metadata for the input Tensor, this might be useful for pattern
 # matching in the future
@@ -321,7 +336,7 @@ def dequantize_per_channel(
     Returns:
        dequantized float32 Tensor
     """
-    assert input.dtype == dtype, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype == dtype, f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     input, permute_axis_list = _permute_to_axis_zero(input, axis)
@@ -335,3 +350,18 @@ def dequantize_per_channel(
 
     out = res.permute(tuple(permute_axis_list))
     return out
+
+@impl(quantized_decomposed_lib, "dequantize_per_channel", "Meta")
+def dequantize_per_channel_meta(
+        input: torch.Tensor,
+        scales: torch.Tensor,
+        zero_points: torch.Tensor,
+        axis: int,
+        quant_min: int,
+        quant_max: int,
+        dtype: torch.dtype
+) -> torch.Tensor:
+    assert input.dtype == dtype, f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
+    assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
+    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+    return torch.empty_like(input, dtype=torch.float32)

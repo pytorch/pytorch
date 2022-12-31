@@ -99,7 +99,7 @@ class NodeNameGenerator {
   std::shared_ptr<Graph> graph_;
   const std::string layer_separator_ = "/";
 };
-NodeNameGenerator::~NodeNameGenerator(){};
+NodeNameGenerator::~NodeNameGenerator() = default;
 
 class ScopedNodeNameGenerator : public NodeNameGenerator {
  public:
