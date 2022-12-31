@@ -13,7 +13,6 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #include <stack>
-#include <utility>
 
 namespace torch {
 namespace jit {
@@ -266,7 +265,7 @@ c10::optional<std::string> getEmbeddingBagObsName(
   auto observer_module = module.attr(findObserverName(v).value()).toModule();
   if (observer_module.hasattr("custom_op")) {
     auto op_name = observer_module.attr("custom_op").toStringRef();
-    return isPlaceholderObserver(observer) ? std::move(op_name) : "";
+    return isPlaceholderObserver(observer) ? op_name : "";
   }
   return c10::nullopt;
 }
