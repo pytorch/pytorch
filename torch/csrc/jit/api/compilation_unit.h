@@ -171,7 +171,7 @@ struct TORCH_API CompilationUnit {
   /**
    * Register a class as being owned by this compilation unit.
    */
-  void register_type(const c10::NamedTypePtr& namedType) {
+  void register_type(c10::NamedTypePtr namedType) {
     // TODO: class types cannot be redefined because we have no way right now
     // of invalidating their methods. NamedTuples are fine though, since they
     // don't have methods.
@@ -180,7 +180,7 @@ struct TORCH_API CompilationUnit {
         "class '",
         namedType->name()->qualifiedName(),
         "' already defined.");
-    classes_.push_back(namedType);
+    classes_.push_back(std::move(namedType));
     classDict_[*classes_.back()->name()] = classes_.size() - 1;
   };
 
