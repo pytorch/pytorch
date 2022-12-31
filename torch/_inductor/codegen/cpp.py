@@ -1079,6 +1079,14 @@ class CppKernelProxy(CppKernel):
         )
         main_loop.set_kernel(self.simd_vec_kernel)
         tail_loop.set_kernel(self.simd_omp_kernel)
+        main_loop.simd_vec = True
+        tail_loop.simd_omp = True
+        # We chope the loop into two cubes by the nelements - main loop and tail loop.
+        # Regarding the main loop, it is straightforward that it could be vectorized with
+        # nelements. But for the tail loop, it still could be vectorized. For example,
+        # if the nelements is 8(256bits), then the tail loop still could be vectorized
+        # as 4(128bits).
+        tail_loop.simd_nelements = self.simd_vec_kernel.simd_nelements // 2
         self.codegen_loops_impl(loop_nest, code, worksharing)
 
 
