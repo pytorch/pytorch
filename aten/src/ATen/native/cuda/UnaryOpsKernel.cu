@@ -167,7 +167,7 @@ void sqrt_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void clamp_kernel_cuda(TensorIteratorBase& iter, const Scalar& min_value, const Scalar& max_value) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.dtype(), "clamp_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
@@ -182,7 +182,7 @@ void clamp_kernel_cuda(TensorIteratorBase& iter, const Scalar& min_value, const 
 }
 
 void clamp_min_kernel_cuda(TensorIteratorBase& iter, const Scalar& min_value) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_min_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.dtype(), "clamp_min_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
       // Propagate nan, which doesn't propagate automatically for ROCm
@@ -196,7 +196,7 @@ void clamp_min_kernel_cuda(TensorIteratorBase& iter, const Scalar& min_value) {
 }
 
 void clamp_max_kernel_cuda(TensorIteratorBase& iter, const Scalar& max_value) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_max_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.dtype(), "clamp_max_cuda", [&]() {
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
       // Propagate nan, which doesn't propagate automatically for ROCm
