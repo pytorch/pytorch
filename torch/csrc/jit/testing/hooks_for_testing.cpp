@@ -2,8 +2,6 @@
 
 #include <torch/csrc/jit/api/module.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 
@@ -17,7 +15,7 @@ void didFinishEmitModule(Module module) {
 static FunctionHook emit_function_callback;
 void didFinishEmitFunction(StrongFunctionPtr fn) {
   if (emit_function_callback) {
-    emit_function_callback(std::move(fn));
+    emit_function_callback(fn);
   }
 }
 

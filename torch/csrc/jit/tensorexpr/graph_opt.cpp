@@ -6,8 +6,6 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -67,7 +65,7 @@ Node* moveCatAfterUse(Node* cat, Node* user, std::shared_ptr<Graph> subgraph) {
   auto new_cat = subgraph->createClone(cat, [&](Value* k) {
     return (k == cat_list->output()) ? new_cat_list->output() : k;
   });
-  new_cat->output()->setType(std::move(user_tensor_type));
+  new_cat->output()->setType(user_tensor_type);
   new_cat->insertBefore(cat);
 
   user->output()->replaceAllUsesWith(new_cat->output());
@@ -155,7 +153,7 @@ void moveCatOpToEnd(Node* cat, std::shared_ptr<Graph> subgraph) {
             buildErrorMessage(
                 "aten::cat user graph does not math the given subgraph."));
         auto new_cat = moveCatAfterUse(cat, use.user, subgraph);
-        moveCatOpToEnd(new_cat, std::move(subgraph));
+        moveCatOpToEnd(new_cat, subgraph);
       }
     }
   }
@@ -318,7 +316,7 @@ void fixupTypeInfoForValue(
     auto const_tensor = toIValue(v)->toTensor();
     auto concrete_tensor_type =
         tensorTypeInCurrentExecutionContext(const_tensor);
-    v->setType(std::move(concrete_tensor_type));
+    v->setType(concrete_tensor_type);
     return;
   }
 
@@ -338,7 +336,7 @@ void fixupTypeInfoForValue(
   new_tt = TensorType::create(
       dtype, device, concrete_sizes, concrete_strides, false);
 
-  v->setType(std::move(new_tt));
+  v->setType(new_tt);
 }
 
 c10::optional<at::ScalarType> inferScalarType(Node* n) {

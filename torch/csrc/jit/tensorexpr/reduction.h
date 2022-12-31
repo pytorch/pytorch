@@ -108,24 +108,24 @@ class TORCH_API Reducer {
   // Completes the reduction operator by applying the interaction function to
   // the accumulation and the body expression.
   static ExprPtr complete(
-      const BufPtr& accumulator,
-      const ReduceInteraction& interaction,
+      BufPtr accumulator,
+      ReduceInteraction interaction,
       ExprHandle body,
       const std::vector<ExprPtr>& output_args,
       const std::vector<VarPtr>& reduce_args) {
     ExprHandle accum =
         ExprHandle(alloc<Load>(body.dtype(), accumulator, output_args));
-    auto e = interaction(std::move(accum), std::move(body));
+    auto e = interaction(accum, body);
     return e.node();
   }
   static ExprHandle complete(
-      const BufHandle& accumulator,
-      const ReduceInteraction& interaction,
+      BufHandle accumulator,
+      ReduceInteraction interaction,
       ExprHandle body,
       const std::vector<ExprHandle>& output_args,
       const std::vector<VarHandle>& reduce_args) {
     ExprHandle accum = Load::make(body.dtype(), accumulator, output_args);
-    auto e = interaction(std::move(accum), std::move(body));
+    auto e = interaction(accum, body);
     return e;
   }
 
@@ -143,7 +143,7 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ReduceOp(
-      const ExprPtr& body,
+      ExprPtr body,
       std::vector<VarPtr> reduce_args,
       const Reducer& reducer)
       : ExprNodeBase(body->dtype()),
@@ -156,7 +156,7 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
   }
 
   ReduceOp(
-      const ExprPtr& body,
+      ExprPtr body,
       std::vector<VarPtr> reduce_args,
       BufPtr result_buf,
       BufPtr acc_buf,
@@ -234,7 +234,7 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
 class Sum : public Reducer {
  public:
   Sum()
-      : Reducer(ExprHandle(0), [](const ExprHandle& a, const ExprHandle& b) {
+      : Reducer(ExprHandle(0), [](ExprHandle a, ExprHandle b) {
           return a + b;
         }) {}
 };
@@ -271,15 +271,11 @@ class Maximum : public Reducer {
   Maximum(Dtype dtype)
       : Reducer(
             minimumVal(dtype.scalar_type()),
-            [](const ExprHandle& a, const ExprHandle& b) {
-              return Max::make(a, b, true);
-            }) {}
+            [](ExprHandle a, ExprHandle b) { return Max::make(a, b, true); }) {}
   Maximum(ExprHandle initializer)
-      : Reducer(
-            std::move(initializer),
-            [](const ExprHandle& a, const ExprHandle& b) {
-              return Max::make(a, b, true);
-            }) {}
+      : Reducer(initializer, [](ExprHandle a, ExprHandle b) {
+          return Max::make(a, b, true);
+        }) {}
 };
 
 class Minimum : public Reducer {
@@ -287,20 +283,16 @@ class Minimum : public Reducer {
   Minimum(Dtype dtype)
       : Reducer(
             maximumVal(dtype.scalar_type()),
-            [](const ExprHandle& a, const ExprHandle& b) {
-              return Min::make(a, b, true);
-            }) {}
+            [](ExprHandle a, ExprHandle b) { return Min::make(a, b, true); }) {}
   Minimum(ExprHandle initializer)
-      : Reducer(
-            std::move(initializer),
-            [](const ExprHandle& a, const ExprHandle& b) {
-              return Min::make(a, b, true);
-            }) {}
+      : Reducer(initializer, [](ExprHandle a, ExprHandle b) {
+          return Min::make(a, b, true);
+        }) {}
 };
 
 class ReductionExpander : public IRMutator {
  public:
-  StmtPtr expand(const StmtPtr& s) {
+  StmtPtr expand(StmtPtr s) {
     return s->accept_mutator(this);
   }
 

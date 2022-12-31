@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 
 #include <sstream>
-#include <utility>
 
 namespace torch {
 namespace jit {
@@ -58,7 +57,7 @@ std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& kernel_func_name) {
   RegisterCodeGenList::StmtFactoryMethod method =
       RegisterCodeGenList::GetInstance().FindStmtFactoryMethod(name);
-  return method(std::move(stmt), params, device, kernel_func_name);
+  return method(stmt, params, device, kernel_func_name);
 }
 
 ExprPtr GenericIntrinsicsExpander::mutate(IntrinsicsPtr v) {
@@ -68,10 +67,10 @@ ExprPtr GenericIntrinsicsExpander::mutate(IntrinsicsPtr v) {
         ExprHandle(getImmediateByType(v->dtype(), 1.0)), v->dtype().lanes());
     auto zero = expr_to_vec(
         ExprHandle(getImmediateByType(v->dtype(), 0.0)), v->dtype().lanes());
-    ExprHandle y = one / (one + exp(zero - ExprHandle(std::move(x))));
+    ExprHandle y = one / (one + exp(zero - ExprHandle(x)));
     return y.node();
   }
-  return IRMutator::mutate(std::move(v));
+  return IRMutator::mutate(v);
 }
 
 void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
@@ -207,7 +206,7 @@ StmtPtr insertAllocFree(
     StmtPtr stmt) {
   BlockPtr b = to<Block>(stmt);
   if (!b) {
-    b = alloc<Block>(std::vector<StmtPtr>({std::move(stmt)}));
+    b = alloc<Block>(std::vector<StmtPtr>({stmt}));
   }
 
   std::vector<BufPtr> bufs_ext_to_free;
@@ -314,7 +313,7 @@ void CodeGen::allocIntermediateBufs() {
   // Insert memory allocation/mapping nodes.
   if (buf_allocs.size() > 0) {
     auto stmt_new = insertAllocFree(buf_allocs, bufs_external_allocs, stmt_);
-    set_stmt(std::move(stmt_new));
+    set_stmt(stmt_new);
   }
 
   GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");

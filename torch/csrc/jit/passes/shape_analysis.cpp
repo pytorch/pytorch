@@ -682,7 +682,7 @@ class ShapePropagator : public PropertyPropBase {
         // grad may be undefined
         // requires_grad may be required
         auto grad_type = TensorType::get()->withPossiblyUndefined();
-        node->output()->setType(std::move(grad_type));
+        node->output()->setType(grad_type);
         return;
       }
       case prim::CallFunction:
@@ -1113,7 +1113,7 @@ class ShapePropagator : public PropertyPropBase {
         },
         [](Node* node) -> type_vec_t {
           if (auto type = any_tensor_type(node)) {
-            return {std::move(type)};
+            return {type};
           }
           return {};
         }};
@@ -1201,7 +1201,7 @@ class ShapePropagator : public PropertyPropBase {
             if (maybe_dtype_option && !maybe_dtype_option->isNone()) {
               return {ret->withScalarType(maybe_dtype_option->toScalarType())};
             } else {
-              return {std::move(ret)};
+              return {ret};
             }
           }
           return {};
@@ -1232,10 +1232,10 @@ class ShapePropagator : public PropertyPropBase {
                 if (type->scalarType()) {
                   return {
                       at::isFloatingType(*type->scalarType())
-                          ? std::move(type)
+                          ? type
                           : type->withScalarType(at::kLong)};
                 } else {
-                  return {std::move(type)};
+                  return {type};
                 }
               }
               return {};
@@ -1259,7 +1259,7 @@ class ShapePropagator : public PropertyPropBase {
         if (*type->dim() >= num_reduced_dim && num_reduced_dim > 0) {
           return {type->withDim(*type->dim() - num_reduced_dim)};
         } else {
-          return {std::move(type)};
+          return {type};
         }
       }
       return {};
@@ -1353,7 +1353,7 @@ class ShapePropagator : public PropertyPropBase {
               node,
               /*num_reduce_dim=*/*maybe_keepdim ? 0 : 1,
               /*integer_upcast=*/true,
-              std::move(opt_dtype));
+              opt_dtype);
         }};
 
     // Requirements:
@@ -1372,10 +1372,7 @@ class ShapePropagator : public PropertyPropBase {
         [](Node* node) -> type_vec_t {
           at::optional<IValue> opt_dtype = node->get(attr::dtype);
           return reduce_op_handler(
-              node,
-              /*num_reduce_dim=*/0,
-              /*integer_upcast=*/true,
-              std::move(opt_dtype));
+              node, /*num_reduce_dim=*/0, /*integer_upcast=*/true, opt_dtype);
         }};
 
     // Requirements:
@@ -1391,10 +1388,7 @@ class ShapePropagator : public PropertyPropBase {
         [](Node* node) -> type_vec_t {
           at::optional<IValue> opt_dtype = node->get(attr::dtype);
           return reduce_op_handler(
-              node,
-              /*num_reduced_dim=*/0,
-              /*upcast_integer=*/false,
-              std::move(opt_dtype));
+              node, /*num_reduced_dim=*/0, /*upcast_integer=*/false, opt_dtype);
         }};
 
     static const auto factory_with_ndim =
@@ -1610,7 +1604,7 @@ class ShapePropagator : public PropertyPropBase {
         }
         type = type->withDim(1);
         node->outputs()[0]->setType(type);
-        node->outputs()[1]->setType(std::move(type));
+        node->outputs()[1]->setType(type);
         return true;
       }
     } else if (node->matches(
@@ -1657,7 +1651,7 @@ class ShapePropagator : public PropertyPropBase {
         if (*type->dim() == 0) {
           node->output()->setType(type->withDim(index_type->dim()));
         } else {
-          node->output()->setType(std::move(type));
+          node->output()->setType(type);
         }
         return true;
       }
@@ -1673,7 +1667,7 @@ class ShapePropagator : public PropertyPropBase {
         if (*index_type->dim() == 0) {
           node->output()->setType(type->withDim(0));
         } else {
-          node->output()->setType(std::move(type));
+          node->output()->setType(type);
         }
         return true;
       }
@@ -1690,11 +1684,11 @@ class ShapePropagator : public PropertyPropBase {
         node->matches(
             "aten::bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor")) {
       if (auto type = input_type(0)) {
-        node->output()->setType(std::move(type));
+        node->output()->setType(type);
         return true;
       }
       if (auto type = input_type(1)) {
-        node->output()->setType(std::move(type));
+        node->output()->setType(type);
         return true;
       }
     } else if (
@@ -1863,7 +1857,7 @@ class ShapePropagator : public PropertyPropBase {
     }
     if (node->outputs().size() == 1) {
       if (auto type = getSingleOutputType()) {
-        node->output()->setType(std::move(type));
+        node->output()->setType(type);
         return true;
       }
     }
@@ -1895,7 +1889,7 @@ class ShapePropagator : public PropertyPropBase {
       auto op = getOperatorForLiteral(
                     "aten::mul(Tensor self, Tensor other) -> Tensor")
                     ->getOperation();
-      return PropagateShapeOnNodeByRunningIt(node, std::move(op));
+      return PropagateShapeOnNodeByRunningIt(node, op);
     } else if (node->matches(
                    "aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
       node->output()->setType(tensor_types.at(0));
@@ -1918,7 +1912,7 @@ class ShapePropagator : public PropertyPropBase {
         auto default_dtype =
             at::typeMetaToScalarType(caffe2::get_default_dtype());
         auto type = tensor_types[0]->withScalarType(default_dtype);
-        node->output()->setType(std::move(type));
+        node->output()->setType(type);
         return true;
       }
       if (c10::ScalarType::Bool == *first_scalar_type &&
@@ -1926,11 +1920,11 @@ class ShapePropagator : public PropertyPropBase {
         auto result_type =
             c10::promoteTypes(*first_scalar_type, *second_scalar_type);
         auto type = tensor_types[0]->withScalarType(result_type);
-        node->output()->setType(std::move(type));
+        node->output()->setType(type);
         return true;
       }
       auto type = tensor_types[0]->withScalarType(first_scalar_type);
-      node->output()->setType(std::move(type));
+      node->output()->setType(type);
       return true;
     } else if (
         insert_expands &&
@@ -2169,7 +2163,7 @@ TypePtr unshapedTypeImpl(TypePtr type, TypeCache& unshaped_type_cache) {
     unshaped_contained_types.push_back(
         getOrCreateUnshapedType(contained_type, unshaped_type_cache));
   }
-  return type->withContained(std::move(unshaped_contained_types));
+  return type->withContained(unshaped_contained_types);
 }
 
 TypePtr getOrCreateUnshapedType(TypePtr type, TypeCache& unshaped_type_cache) {

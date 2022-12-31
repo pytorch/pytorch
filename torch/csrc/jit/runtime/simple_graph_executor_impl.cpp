@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/simple_graph_executor_impl.h>
 #include <mutex>
-#include <utility>
 
 namespace torch {
 namespace jit {
@@ -26,7 +25,7 @@ const ExecutionPlan& SimpleGraphExecutorImpl::getPlanFor(
   }
   auto copy = graph->copy();
   runNooptPassPipeline(copy);
-  execution_plan_ = ExecutionPlan(std::move(copy), function_name_);
+  execution_plan_ = ExecutionPlan(copy, function_name_);
 
   return *execution_plan_;
 }

@@ -108,8 +108,8 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const ExprHandle&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Stmt&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Tensor&);
 
-TORCH_API void print(const ExprPtr& expr);
-TORCH_API void print(const StmtPtr& stmt);
+TORCH_API void print(ExprPtr expr);
+TORCH_API void print(StmtPtr stmt);
 TORCH_API void print(const Tensor& t);
 
 } // namespace tensorexpr
@@ -124,7 +124,7 @@ using torch::jit::tensorexpr::Stmt;
 using torch::jit::tensorexpr::StmtPtr;
 using torch::jit::tensorexpr::Tensor;
 
-TORCH_API std::string to_string(const ExprPtr& expr);
-TORCH_API std::string to_string(const StmtPtr& stmt);
+TORCH_API std::string to_string(ExprPtr expr);
+TORCH_API std::string to_string(StmtPtr stmt);
 TORCH_API std::string to_string(const Tensor& t);
 } // namespace std

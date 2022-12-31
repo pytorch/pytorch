@@ -3,8 +3,6 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -206,12 +204,12 @@ ExprHandle fast_log(const ExprHandle& v) {
   // https://github.com/shibatch/sleef/blob/master/src/libm/sleefsp.c#L1131
   // to generate coefficients, this tool is provided
   // https://github.com/shibatch/sleef/blob/master/src/gencoef/gencoef.txt
-  auto ilogb2kf = [](const ExprHandle& x) {
+  auto ilogb2kf = [](ExprHandle x) {
     auto y = (bitcast<int32_t>(x) >> IntImm::make(23)) & IntImm::make(0xff);
     return y - IntImm::make(0x7f);
   };
 
-  auto ldexp3kf = [](const ExprHandle& x, const ExprHandle& e) {
+  auto ldexp3kf = [](ExprHandle x, ExprHandle e) {
     return bitcast<float>(bitcast<int32_t>(x) + (e << IntImm::make(23)));
   };
   auto e = ilogb2kf(v * FloatImm::make(1.0 / 0.75));
@@ -220,7 +218,7 @@ ExprHandle fast_log(const ExprHandle& v) {
   auto x = (m - one) / (m + one);
   auto x2 = x * x;
 
-  auto mlaf = [](const ExprHandle& x, const ExprHandle& y, float z) {
+  auto mlaf = [](ExprHandle x, ExprHandle y, float z) {
     return x * y + FloatImm::make(z);
   };
 
@@ -520,7 +518,7 @@ bool Buf::is_cont_with(int cur_dim, int adjacent_dim) const {
       return res;
 
     // For symbolic shape
-    auto mul_node = to<Mul>(std::move(cur_stride));
+    auto mul_node = to<Mul>(cur_stride);
     if (!mul_node) {
       return false;
     }

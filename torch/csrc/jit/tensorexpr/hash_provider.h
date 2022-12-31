@@ -5,8 +5,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -61,10 +59,10 @@ class TORCH_API HashProvider : public IRVisitor {
     return hashOf(e);
   }
 
-  bool cachedHash(const ExprPtr& e) {
+  bool cachedHash(ExprPtr e) {
     return exprToHash_.find(e) != exprToHash_.end();
   }
-  bool cachedHash(const StmtPtr& s) {
+  bool cachedHash(StmtPtr s) {
     return stmtToHash_.find(s) != stmtToHash_.end();
   }
 
@@ -123,7 +121,7 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
  private:
-  SimplifierHashType hashOf(const ExprPtr& e) {
+  SimplifierHashType hashOf(ExprPtr e) {
     auto it = exprToHash_.find(e);
     if (it != exprToHash_.end()) {
       return it->second;
@@ -139,7 +137,7 @@ class TORCH_API HashProvider : public IRVisitor {
     return hash;
   }
 
-  SimplifierHashType hashOf(const StmtPtr& s) {
+  SimplifierHashType hashOf(StmtPtr s) {
     auto it = stmtToHash_.find(s);
     if (it != stmtToHash_.end()) {
       return it->second;
@@ -177,7 +175,7 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
   void _hash_combine(SimplifierHashType& seed, ExprPtr e) {
-    _hash_combine(seed, hash(std::move(e)));
+    _hash_combine(seed, hash(e));
   }
 
   template <typename T, typename... Types>
@@ -189,14 +187,14 @@ class TORCH_API HashProvider : public IRVisitor {
     _hash_combine(seed, args...);
   }
 
-  void putHash(const ExprPtr& e, SimplifierHashType h) {
+  void putHash(ExprPtr e, SimplifierHashType h) {
     auto res = exprToHash_.emplace(e, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
       throw std::runtime_error("hash collision");
     }
   }
-  void putHash(const StmtPtr& s, SimplifierHashType h) {
+  void putHash(StmtPtr s, SimplifierHashType h) {
     auto res = stmtToHash_.emplace(s, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.

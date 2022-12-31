@@ -81,7 +81,7 @@ void MergeInferredTypeAndSetMap(
   bool inferred;
   std::tie(mergedType, inferred) =
       MergeInferredType(existing_type, inferred_type);
-  dest_v->setType(std::move(mergedType));
+  dest_v->setType(mergedType);
   ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
 }
 
@@ -615,7 +615,7 @@ void UpdateRank(Value* value, size_t rank) {
   if (TensorTypePtr value_type = value->type()->cast<TensorType>()) {
     c10::optional<size_t> rank_opt = rank;
     auto shape = ::c10::SymbolicShape(rank_opt);
-    value->setType(value_type->withSymbolicShapes(std::move(shape)));
+    value->setType(value_type->withSymbolicShapes(shape));
   }
 }
 
@@ -630,7 +630,7 @@ void UpdateShapeFromVector(
   }
   ConstantValueMap::SetRank(value->debugName(), shape_size.size());
   if (TensorTypePtr value_type = value->type()->cast<TensorType>()) {
-    value->setType(value_type->withSymbolicShapes(std::move(shape)));
+    value->setType(value_type->withSymbolicShapes(shape));
   }
 }
 

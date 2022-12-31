@@ -37,7 +37,7 @@ class TORCH_API CodeGen {
   }
 
   void set_stmt(StmtPtr s) {
-    stmt_ = std::move(s);
+    stmt_ = s;
   }
 
   void apply_mutator(IRMutator* mutator) {
@@ -125,10 +125,10 @@ class TORCH_API ExtCallMemoryReuse : public IRMutator {
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(const Tensor& tensor) : buf_(tensor.buf()) {}
+  BufferArg(Tensor tensor) : buf_(tensor.buf()) {}
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
-  BufferArg(BufPtr buf) : buf_(std::move(buf)) {}
+  BufferArg(const BufPtr& buf) : buf_(buf) {}
 
   VarPtr var() const {
     return isVar_ ? var_ : buf_->base_handle();

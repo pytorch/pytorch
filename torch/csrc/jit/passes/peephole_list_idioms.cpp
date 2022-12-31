@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/csrc/utils/memory.h>
 #include <limits>
-#include <utility>
 
 namespace torch {
 namespace jit {
@@ -41,7 +40,7 @@ struct ListLenRefiner {
       return false;
     }
     ListRefinement refinements;
-    RefineListLens(graph_->block(), std::move(refinements));
+    RefineListLens(graph_->block(), refinements);
     return changed_;
   }
 

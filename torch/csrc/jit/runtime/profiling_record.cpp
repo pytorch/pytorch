@@ -10,8 +10,6 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-
-#include <utility>
 namespace torch {
 namespace jit {
 
@@ -203,7 +201,7 @@ void ProfilingRecord::insertShapeProfile(
     push(stack, v);
   };
 
-  pn->setCallback(std::move(shape_profiler));
+  pn->setCallback(shape_profiler);
   pn->insertBefore(n);
   n->replaceInput(offset, pn->output());
 }

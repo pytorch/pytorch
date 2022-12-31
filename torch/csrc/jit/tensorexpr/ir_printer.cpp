@@ -167,7 +167,7 @@ void IRPrinter::visit(CompareSelectPtr v) {
   }
   os() << " ? ";
 
-  auto withParens = [&](const ExprPtr& e) {
+  auto withParens = [&](ExprPtr e) {
     auto prec = getPrecedence(e->expr_type());
     if (prec >= self_prec) {
       os() << "(";
@@ -644,7 +644,7 @@ std::ostream& operator<<(std::ostream& stream, const Tensor& t) {
   return stream;
 }
 
-void print(const ExprPtr& expr) {
+void print(ExprPtr expr) {
   if (expr) {
     IRPrinter p(std::cout);
     p.print(*expr);
@@ -654,7 +654,7 @@ void print(const ExprPtr& expr) {
   std::cout << "\n";
 }
 
-void print(const StmtPtr& stmt) {
+void print(StmtPtr stmt) {
   if (stmt) {
     IRPrinter p(std::cout);
     p.print(*stmt);
@@ -672,13 +672,13 @@ void print(const Tensor& t) {
 } // namespace torch
 
 namespace std {
-std::string to_string(const ExprPtr& expr) {
+std::string to_string(ExprPtr expr) {
   std::ostringstream oss;
   oss << *expr;
   return oss.str();
 }
 
-std::string to_string(const StmtPtr& stmt) {
+std::string to_string(StmtPtr stmt) {
   std::ostringstream oss;
   oss << *stmt;
   return oss.str();

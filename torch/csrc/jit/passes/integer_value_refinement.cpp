@@ -5,8 +5,6 @@
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
 #include <torch/csrc/utils/memory.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 
@@ -30,7 +28,7 @@ struct IntegerValueRefiner {
       return false;
     }
     IntegerRefinement refinements;
-    RefineIntegerValues(graph_->block(), std::move(refinements));
+    RefineIntegerValues(graph_->block(), refinements);
     return changed_;
   }
 

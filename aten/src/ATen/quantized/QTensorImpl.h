@@ -4,6 +4,8 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 
+#include <utility>
+
 namespace at {
 
 /**
@@ -36,7 +38,7 @@ struct TORCH_API QTensorImpl : public c10::TensorImpl {
   }
 
   void set_quantizer_(QuantizerPtr quantizer) {
-    quantizer_ = quantizer;
+    quantizer_ = std::move(quantizer);
   }
 
   /**
@@ -74,7 +76,7 @@ struct TORCH_API QTensorImpl : public c10::TensorImpl {
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
-      /*version_counter=*/std::move(version_counter),
+      /*version_counter=*/version_counter,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
     impl->refresh_contiguous();

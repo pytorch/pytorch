@@ -19,8 +19,6 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 
@@ -290,8 +288,8 @@ void Module::clone_method(
   graph->remapTypes(type_remap_fn);
   auto schema = method.getSchema().cloneWithRemappedTypes(type_remap_fn);
   const auto this_method_name = getNameForMethod(method.name());
-  auto copied = _ivalue()->compilation_unit()->create_function(
-      this_method_name, std::move(graph));
+  auto copied =
+      _ivalue()->compilation_unit()->create_function(this_method_name, graph);
   type()->addMethod(copied);
   copied->setSchema(std::move(schema));
 }
@@ -325,11 +323,7 @@ Module Module::clone(bool inplace) const {
   const std::unordered_set<std::string> ignored_methods;
   const std::unordered_set<std::string> ignored_attributes;
   return clone_impl(
-      type_remap,
-      inplace,
-      std::move(memo),
-      ignored_methods,
-      ignored_attributes);
+      type_remap, inplace, memo, ignored_methods, ignored_attributes);
 }
 
 Module Module::clone(
@@ -339,11 +333,7 @@ Module Module::clone(
   std::unordered_map<TypePtr, TypePtr> type_remap;
   IValue::HashAliasedIValueMap memo;
   return clone_impl(
-      type_remap,
-      inplace,
-      std::move(memo),
-      ignored_methods,
-      ignored_attributes);
+      type_remap, inplace, memo, ignored_methods, ignored_attributes);
 }
 
 Module Module::clone_impl(
@@ -434,7 +424,7 @@ Module Module::clone_impl(
       auto getstate_method = r.find_method("__getstate__");
       TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
       auto state = (*getstate_method)(Stack{});
-      (*setstate_method)(Stack{std::move(state)});
+      (*setstate_method)(Stack{state});
     }
   }
   return r;

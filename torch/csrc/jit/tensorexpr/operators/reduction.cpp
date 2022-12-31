@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/operators/reduction.h>
 
-#include <utility>
-
 using namespace torch::jit::tensorexpr;
 
 // Remove all indices from axes positions.
@@ -136,11 +134,7 @@ Tensor computeMean(
   extra_args.push_back(LongImm::make(static_cast<int64_t>(keepdim)));
   return Tensor(
       ResultBuf.node(),
-      ExternalCall::make(
-          std::move(ResultBuf),
-          "nnc_aten_mean",
-          {std::move(InputBuf)},
-          extra_args));
+      ExternalCall::make(ResultBuf, "nnc_aten_mean", {InputBuf}, extra_args));
 }
 
 Tensor computeMax(
@@ -161,9 +155,9 @@ Tensor computeMax(
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
-          std::move(ResultBuf),
+          ResultBuf,
           "nnc_aten_max_red",
-          {std::move(InputBuf)},
+          {InputBuf},
           {max_dim, (int64_t)keep_dim}));
 }
 
@@ -183,7 +177,7 @@ Tensor computeAdaptiveAvgPool2d(
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
-          std::move(ResultBuf),
+          ResultBuf,
           "nnc_aten_adaptive_avg_pool2d",
           {c10::get<BufHandle>(inputs[0])},
           c10::fmap<ExprHandle>(out_size_param)));

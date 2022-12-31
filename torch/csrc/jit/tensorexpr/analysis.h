@@ -25,7 +25,7 @@ class HasRand : public IRVisitor {
     if (v->op_type() == IntrinsicsOp::kRand) {
       has_rand_ = true;
     } else {
-      IRVisitor::visit(std::move(v));
+      IRVisitor::visit(v);
     }
   }
   StmtPtr stmt_;
@@ -41,13 +41,13 @@ class NodeFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  static std::vector<NodePtr<Op>> find(const StmtPtr& s) {
+  static std::vector<NodePtr<Op>> find(StmtPtr s) {
     NodeFinder<Op> nf;
     s->accept(&nf);
     return nf.nodes;
   }
 
-  static std::vector<NodePtr<Op>> find(const ExprPtr& e) {
+  static std::vector<NodePtr<Op>> find(ExprPtr e) {
     NodeFinder<Op> nf;
     e->accept(&nf);
     return nf.nodes;
@@ -61,16 +61,16 @@ class VarFinder : public IRVisitor {
  public:
   void visit(VarPtr v) override {
     vars_.insert(v);
-    IRVisitor::visit(std::move(v));
+    IRVisitor::visit(v);
   }
 
-  static std::unordered_set<VarPtr> find(const StmtPtr& s) {
+  static std::unordered_set<VarPtr> find(StmtPtr s) {
     VarFinder nf;
     s->accept(&nf);
     return nf.vars();
   }
 
-  static std::unordered_set<VarPtr> find(const ExprPtr& e) {
+  static std::unordered_set<VarPtr> find(ExprPtr e) {
     VarFinder nf;
     e->accept(&nf);
     return nf.vars();
@@ -88,16 +88,16 @@ class BufFinder : public IRVisitor {
  public:
   void visit(BufPtr v) override {
     bufs_.insert(v);
-    IRVisitor::visit(std::move(v));
+    IRVisitor::visit(v);
   }
 
-  static std::unordered_set<BufPtr> find(const StmtPtr& s) {
+  static std::unordered_set<BufPtr> find(StmtPtr s) {
     BufFinder nf;
     s->accept(&nf);
     return nf.bufs();
   }
 
-  static std::unordered_set<BufPtr> find(const ExprPtr& e) {
+  static std::unordered_set<BufPtr> find(ExprPtr e) {
     BufFinder nf;
     e->accept(&nf);
     return nf.bufs();
@@ -121,8 +121,8 @@ class WritesToBuf : public IRVisitor {
     return writes_;
   }
 
-  static std::vector<StmtPtr> find(const StmtPtr& s, BufPtr b) {
-    WritesToBuf finder(std::move(b));
+  static std::vector<StmtPtr> find(StmtPtr s, BufPtr b) {
+    WritesToBuf finder(b);
     s->accept(&finder);
     return finder.writes();
   }
@@ -153,14 +153,14 @@ class StmtsReadingBuf : public IRVisitor {
     return reads_;
   }
 
-  static std::vector<StmtPtr> find(const StmtPtr& s, BufPtr b) {
-    StmtsReadingBuf finder(std::move(b));
+  static std::vector<StmtPtr> find(StmtPtr s, BufPtr b) {
+    StmtsReadingBuf finder(b);
     s->accept(&finder);
     return finder.reads();
   }
 
  private:
-  bool readsBuffer(const StmtPtr& s) {
+  bool readsBuffer(StmtPtr s) {
     auto loads = NodeFinder<Load>::find(s);
     for (const auto& l : loads) {
       if (l->buf() == target_) {
@@ -203,16 +203,16 @@ class ExternalAllocBufFinder : public IRVisitor {
   void visit(ExternalCallWithAllocPtr v) override {
     const auto& bufs_out = v->buf_out_args();
     bufs_.insert(bufs_out.begin(), bufs_out.end());
-    IRVisitor::visit(std::move(v));
+    IRVisitor::visit(v);
   }
 
-  static std::unordered_set<BufPtr> find(const StmtPtr& s) {
+  static std::unordered_set<BufPtr> find(StmtPtr s) {
     ExternalAllocBufFinder f;
     s->accept(&f);
     return f.bufs();
   }
 
-  static std::unordered_set<BufPtr> find(const ExprPtr& e) {
+  static std::unordered_set<BufPtr> find(ExprPtr e) {
     ExternalAllocBufFinder f;
     e->accept(&f);
     return f.bufs();
@@ -231,8 +231,8 @@ class ModifiesVarChecker : public IRVisitor {
  public:
   ModifiesVarChecker(VarPtr v) : var_(std::move(v)) {}
 
-  static bool check(const StmtPtr& s, VarPtr v) {
-    ModifiesVarChecker checker(std::move(v));
+  static bool check(StmtPtr s, VarPtr v) {
+    ModifiesVarChecker checker(v);
     s->accept(&checker);
     return checker.found();
   }
@@ -247,7 +247,7 @@ class ModifiesVarChecker : public IRVisitor {
       found_ = true;
       return;
     }
-    IRVisitor::visit(std::move(v));
+    IRVisitor::visit(v);
   }
 
   void visit(AtomicAddPtr v) override {
@@ -255,7 +255,7 @@ class ModifiesVarChecker : public IRVisitor {
       found_ = true;
       return;
     }
-    IRVisitor::visit(std::move(v));
+    IRVisitor::visit(v);
   }
 
   void visit(LetPtr v) override {
@@ -263,7 +263,7 @@ class ModifiesVarChecker : public IRVisitor {
       found_ = true;
       return;
     }
-    IRVisitor::visit(std::move(v));
+    IRVisitor::visit(v);
   }
 
   void visit(ForPtr v) override {
@@ -271,7 +271,7 @@ class ModifiesVarChecker : public IRVisitor {
       found_ = true;
       return;
     }
-    IRVisitor::visit(std::move(v));
+    IRVisitor::visit(v);
   }
 
   VarPtr var_;
@@ -286,13 +286,13 @@ class BufLiveRange : public IRVisitor {
   BufLiveRange(BufPtr b) : buf_(std::move(b)) {}
 
   static std::tuple<int32_t, int32_t> liveRange(StmtPtr s, BufPtr b) {
-    BlockPtr block = to<Block>(std::move(s));
+    BlockPtr block = to<Block>(s);
     // We Only analze buffer live ranges for block stmts.
     if (!block) {
       return std::make_tuple(0, 0);
     }
 
-    BufLiveRange analyzer(std::move(b));
+    BufLiveRange analyzer(b);
     block->accept(&analyzer);
     return analyzer.getLiveRange();
   }
@@ -302,7 +302,7 @@ class BufLiveRange : public IRVisitor {
     return std::make_tuple(begin_, end_);
   }
 
-  bool hasBufReads(const StmtPtr& s) {
+  bool hasBufReads(StmtPtr s) {
     auto loads1 = NodeFinder<Load>::find(s);
     for (const auto& l : loads1) {
       if (l->buf() == buf_) {
@@ -328,7 +328,7 @@ class BufLiveRange : public IRVisitor {
     return false;
   }
 
-  bool hasBufWrites(const StmtPtr& s) {
+  bool hasBufWrites(StmtPtr s) {
     auto writes1 = NodeFinder<Store>::find(s);
     for (const auto& w : writes1) {
       if (w->buf() == buf_) {
@@ -352,7 +352,7 @@ class BufLiveRange : public IRVisitor {
     return false;
   }
 
-  void findAccAndUpdateLiveRange(const StmtPtr& s) {
+  void findAccAndUpdateLiveRange(StmtPtr s) {
     bool has_reads = hasBufReads(s), has_writes = hasBufWrites(s);
     if (has_reads || has_writes) {
       if (begin_ == -1) {

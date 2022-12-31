@@ -8,8 +8,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
-#include <utility>
-
 /* IR Simplification
  *
  * Simplfies expressions in two stages:
@@ -90,7 +88,7 @@ Dtype promoteTypesVar(ExprType e, Args... es) {
 // Uses the evaluator to fold an Expression with constant terms.
 // E.g. evaluateOp(Add(3, 4)) => 7.
 // Expr v must not have any unbound Vars.
-inline ExprPtr evaluateOp(const ExprPtr& v) {
+inline ExprPtr evaluateOp(ExprPtr v) {
   ExprHandle handle(v);
   ExprEval<SimpleIREvaluator> eval(handle);
 
@@ -123,7 +121,7 @@ class Term : public ExprNode<Term> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Term(HashProvider& hasher, const ExprPtr& s, std::vector<ExprPtr> v)
+  Term(HashProvider& hasher, ExprPtr s, std::vector<ExprPtr> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -135,7 +133,7 @@ class Term : public ExprNode<Term> {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Term(
       HashProvider& hasher,
-      const ExprPtr& s,
+      ExprPtr s,
       std::unordered_map<SimplifierHashType, ExprPtr> varmap)
       : ExprNodeBase(promoteTypesMap(s, varmap)), scalar_(s), hasher_(hasher) {
     for (auto& p : varmap) {
@@ -164,7 +162,7 @@ class Term : public ExprNode<Term> {
   HashProvider& hasher_;
 
   void addComponent() {}
-  void addComponent(const ExprPtr& e) {
+  void addComponent(ExprPtr e) {
     variables_.push_back(e);
   }
   template <class... Es>
@@ -192,7 +190,7 @@ class Polynomial : public ExprNode<Polynomial> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Polynomial(HashProvider& hasher, const ExprPtr& s, std::vector<TermPtr> v)
+  Polynomial(HashProvider& hasher, ExprPtr s, std::vector<TermPtr> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -215,7 +213,7 @@ class Polynomial : public ExprNode<Polynomial> {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Polynomial(
       HashProvider& hasher,
-      const ExprPtr& s,
+      ExprPtr s,
       std::unordered_map<SimplifierHashType, TermPtr> varmap)
       : ExprNodeBase(promoteTypesMap(s, varmap)), scalar_(s), hasher_(hasher) {
     for (auto& p : varmap) {
@@ -241,7 +239,7 @@ class Polynomial : public ExprNode<Polynomial> {
   ExprPtr scalar_;
   HashProvider& hasher_;
 
-  void addTerm(const TermPtr& t) {
+  void addTerm(TermPtr t) {
     variables_.push_back(t);
   }
   template <class... Ts>
@@ -257,7 +255,7 @@ class Polynomial : public ExprNode<Polynomial> {
 class RoundOff : public BinaryOpNode<RoundOff> {
  public:
   RoundOff(ExprPtr lhs, ExprPtr rhs)
-      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kOther) {}
+      : BinaryOpNode(lhs, rhs, IRNodeType::kOther) {}
 };
 
 class MaxTerm : public ExprNode<MaxTerm> {
@@ -274,11 +272,7 @@ class MaxTerm : public ExprNode<MaxTerm> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  MaxTerm(
-      HashProvider& hasher,
-      const ExprPtr& s,
-      bool p,
-      std::vector<ExprPtr> v)
+  MaxTerm(HashProvider& hasher, ExprPtr s, bool p, std::vector<ExprPtr> v)
       : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -308,7 +302,7 @@ class MaxTerm : public ExprNode<MaxTerm> {
   bool propagate_nans_;
 
   void addComponent() {}
-  void addComponent(const ExprPtr& e) {
+  void addComponent(ExprPtr e) {
     variables_.push_back(e);
   }
   template <class... Es>
@@ -335,11 +329,7 @@ class MinTerm : public ExprNode<MinTerm> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  MinTerm(
-      HashProvider& hasher,
-      const ExprPtr& s,
-      bool p,
-      std::vector<ExprPtr> v)
+  MinTerm(HashProvider& hasher, ExprPtr s, bool p, std::vector<ExprPtr> v)
       : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -369,7 +359,7 @@ class MinTerm : public ExprNode<MinTerm> {
   bool propagate_nans_;
 
   void addComponent() {}
-  void addComponent(const ExprPtr& e) {
+  void addComponent(ExprPtr e) {
     variables_.push_back(e);
   }
   template <class... Es>

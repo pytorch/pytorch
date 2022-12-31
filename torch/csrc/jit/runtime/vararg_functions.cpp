@@ -5,8 +5,6 @@
 #include <ATen/core/class_type.h>
 #include <c10/util/irange.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 
@@ -367,7 +365,7 @@ void createObject(
   if (as_weak_ref) {
     c10::WeakTypePtr weak(type->compilation_unit(), type);
     auto userObj = c10::ivalue::Object::create(
-        c10::WeakOrStrongTypePtr(std::move(weak)), type->numAttributes());
+        c10::WeakOrStrongTypePtr(weak), type->numAttributes());
     push(stack, std::move(userObj));
   } else {
     auto userObj = c10::ivalue::Object::create(

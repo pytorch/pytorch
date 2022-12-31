@@ -2,8 +2,6 @@
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
 #include <torch/csrc/jit/passes/onnx/naming.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace onnx {
@@ -295,7 +293,7 @@ bool FunctionExtractor::IsAncestor(ScopePtr parent, ScopePtr child) {
     if (parent == child) {
       return true;
     }
-  } while (IsValidScope(std::move(child)));
+  } while (IsValidScope(child));
   return false;
 }
 
@@ -477,7 +475,7 @@ Node* FunctionExtractor::CreateFunctionDefNode(
 
   // create and insert local function definition node
   auto func_def_n = graph->create(func_def_nk, 0);
-  func_def_n->g_(func_g_attr, std::move(func_graph));
+  func_def_n->g_(func_g_attr, func_graph);
   func_def_n->s_(func_name_attr, func_name);
   func_def_n->s_(func_domain_attr, domain_name);
   graph->prependNode(func_def_n);
@@ -547,7 +545,7 @@ Node* FunctionExtractor::CreateFunctionDefNode(
     final_attr_names.emplace_back(attr_name.toUnqualString());
   }
 
-  func_def_n->ss_(Symbol::attr("attributes"), std::move(final_attr_names));
+  func_def_n->ss_(Symbol::attr("attributes"), final_attr_names);
 
   return func_def_n;
 }
@@ -918,7 +916,7 @@ FunctionExtractor::scope_ctx_map FunctionExtractor::PartitionNodesByScope(
   node_list no_scope_nlist;
   std::tie(scope_ctxs, no_scope_nlist) = PartitionNodesByScope(graph->block());
 
-  HandleNoScopeNodes(scope_ctxs, std::move(no_scope_nlist));
+  HandleNoScopeNodes(scope_ctxs, no_scope_nlist);
 
   return scope_ctxs;
 }

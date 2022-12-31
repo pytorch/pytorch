@@ -38,7 +38,6 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
-#include <utility>
 
 #ifdef FBCODE_CAFFE2
 #include <common/logging/logging.h>
@@ -1288,7 +1287,7 @@ c10::intrusive_ptr<c10::ivalue::Future> BlockRunner::run_impl_async(
     return_type = outputs().at(0)->type();
   }
   c10::intrusive_ptr<Future> future = c10::make_intrusive<Future>(return_type);
-  future->markCompleted(std::move(output));
+  future->markCompleted(output);
   return future;
 }
 

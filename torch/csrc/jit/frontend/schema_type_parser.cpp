@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/custom_class.h>
 #include <string>
-#include <utility>
 
 using c10::AliasInfo;
 using c10::BoolType;
@@ -297,7 +296,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     ptr = at::TensorType::create(
         dtype,
         device,
-        c10::VaryingShape<int64_t>(std::move(dims)),
+        c10::VaryingShape<int64_t>(dims),
         c10::VaryingShape<int64_t>(strides),
         requires_grad);
   } else {
@@ -340,8 +339,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value =
-        c10::TypeFactory::create<FutureType>(std::move(subtype));
+    fake_value = real_value = c10::TypeFactory::create<FutureType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
     L.next(); // RRef
     L.expect('(');
@@ -349,8 +347,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value =
-        c10::TypeFactory::create<RRefType>(std::move(subtype));
+    fake_value = real_value = c10::TypeFactory::create<RRefType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
     L.next();
     fake_value = real_value = c10::TypeFactory::get<TensorType>();
@@ -364,7 +361,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     L.expect(')');
     alias_info = parseAliasAnnotation();
     fake_value = real_value =
-        c10::TypeFactory::create<DictType>(std::move(key_type), value_type);
+        c10::TypeFactory::create<DictType>(key_type, value_type);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
     L.next();
     L.expect('(');

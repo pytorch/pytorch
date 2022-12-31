@@ -25,8 +25,6 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 
-#include <utility>
-
 // NOLINTNEXTLINE
 C10_DEFINE_bool(
     torch_jit_disable_cat,
@@ -342,7 +340,7 @@ void insertTypeGuard(
       guarded_node->owningGraph()
           ->create(kind, inputs_to_check, inputs_to_check.size() + 1)
           ->insertBefore(guarded_node);
-  typecheck_node->tys_(attr::types, std::move(guard_types));
+  typecheck_node->tys_(attr::types, guard_types);
   Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
 
   std::unordered_map<Value*, Value*> typechecked_inputs;

@@ -1,5 +1,4 @@
 #include <memory>
-#include <utility>
 
 #include <ATen/nnapi/nnapi_bind.h>
 #include <torch/csrc/jit/backends/backend.h>
@@ -80,7 +79,7 @@ class NnapiBackend : public PyTorchBackendInterface {
       }
     }
 
-    comp_->run(std::move(fixed_inputs), outputs.vec());
+    comp_->run(fixed_inputs, outputs.vec());
 
     // Adjust output memory formats
     auto out_mem_fmts = dict.at("out_mem_fmts").toIntList();
@@ -126,7 +125,7 @@ class NnapiBackend : public PyTorchBackendInterface {
     // Create and initialize NnapiComilation object
     comp_ = std::make_unique<torch::nnapi::bind::NnapiCompilation>();
     auto weights = dict.at("weights").toTensorVector();
-    comp_->init(std::move(ser_model), std::move(weights));
+    comp_->init(ser_model, weights);
   }
 };
 

@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/frontend/name_mangler.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 
@@ -26,14 +24,14 @@ c10::QualifiedName NameMangler::mangle(const c10::QualifiedName& name) {
       newAtomPrefix.append(manglePrefix);
       atom = newAtomPrefix + c10::to_string(mangleIndex_++);
       // increment mangleIndex_ until the type is not defined
-      return c10::QualifiedName(std::move(atoms));
+      return c10::QualifiedName(atoms);
     }
   }
 
   // Otherwise add a mangle namespace right before the basename
   TORCH_INTERNAL_ASSERT(!atoms.empty());
   atoms.insert(atoms.end() - 1, manglePrefix + c10::to_string(mangleIndex_++));
-  return c10::QualifiedName(std::move(atoms));
+  return c10::QualifiedName(atoms);
 }
 
 } // namespace jit

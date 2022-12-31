@@ -5,8 +5,6 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -124,7 +122,7 @@ Tensor conv2d_depthwise_dynamic(
 
   return Reduce(
       "conv2d_depthwise",
-      {std::move(N), std::move(K), std::move(OH), std::move(OW)},
+      {N, K, OH, OW},
       c10::nullopt, // TODO
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
@@ -146,7 +144,7 @@ Tensor conv2d_depthwise_dynamic(
             input.load(n, k, oh * stride - pad + r, ow * stride - pad + s));
         return in * weight.load(k, c, r, s);
       },
-      {C / groups, std::move(R), std::move(S)});
+      {C / groups, R, S});
 }
 
 } // namespace
@@ -162,8 +160,7 @@ Tensor conv2d_depthwise(
   auto init_func = [&](const std::vector<VarHandle>& v) {
     return bias.load(v[1]);
   };
-  return conv2d_depthwise_static(
-      std::move(input), std::move(weight), init_func, stride, pad, groups);
+  return conv2d_depthwise_static(input, weight, init_func, stride, pad, groups);
 }
 
 Tensor conv2d_depthwise(
@@ -175,8 +172,7 @@ Tensor conv2d_depthwise(
   auto init_func = [](const std::vector<VarHandle>& v) {
     return ExprHandle(Sum().initializer());
   };
-  return conv2d_depthwise_static(
-      std::move(input), std::move(weight), init_func, stride, pad, groups);
+  return conv2d_depthwise_static(input, weight, init_func, stride, pad, groups);
 }
 
 Tensor conv2d_depthwise(
@@ -199,20 +195,20 @@ Tensor conv2d_depthwise(
     return bias.load(v[1]);
   };
   return conv2d_depthwise_dynamic(
-      std::move(input),
-      std::move(weight),
+      input,
+      weight,
       init_func,
-      std::move(N),
-      std::move(C),
-      std::move(H),
-      std::move(W),
-      std::move(K),
-      std::move(CperG),
-      std::move(R),
-      std::move(S),
-      std::move(stride),
-      std::move(pad),
-      std::move(groups));
+      N,
+      C,
+      H,
+      W,
+      K,
+      CperG,
+      R,
+      S,
+      stride,
+      pad,
+      groups);
 }
 
 Tensor conv2d_depthwise(
@@ -233,20 +229,20 @@ Tensor conv2d_depthwise(
     return ExprHandle(Sum().initializer());
   };
   return conv2d_depthwise_dynamic(
-      std::move(input),
-      std::move(weight),
+      input,
+      weight,
       init_func,
-      std::move(N),
-      std::move(C),
-      std::move(H),
-      std::move(W),
-      std::move(K),
-      std::move(CperG),
-      std::move(R),
-      std::move(S),
-      std::move(stride),
-      std::move(pad),
-      std::move(groups));
+      N,
+      C,
+      H,
+      W,
+      K,
+      CperG,
+      R,
+      S,
+      stride,
+      pad,
+      groups);
 }
 
 std::vector<int64_t> _pair_int(ArgValue v) {
@@ -398,7 +394,7 @@ Tensor computeConv2d(
        dilation[0],
        dilation[1],
        groups});
-  return Tensor(ResultBuf.node(), std::move(s));
+  return Tensor(ResultBuf.node(), s);
 }
 
 Tensor computeConv1d(
@@ -432,7 +428,7 @@ Tensor computeConv1d(
       "nnc_aten_conv1d",
       {inp, w, b},
       {strides[0], padding[0], dilation[0], groups});
-  return Tensor(ResultBuf.node(), std::move(s));
+  return Tensor(ResultBuf.node(), s);
 }
 
 Tensor computePrepackedConv2dClampRun(
@@ -451,7 +447,7 @@ Tensor computePrepackedConv2dClampRun(
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_prepacked_conv2d_clamp_run", {inp, prepacked}, {});
-  return Tensor(ResultBuf.node(), std::move(s));
+  return Tensor(ResultBuf.node(), s);
 }
 
 Tensor computePrepackedLinearClampRun(
@@ -470,7 +466,7 @@ Tensor computePrepackedLinearClampRun(
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_prepacked_linear_clamp_run", {inp, prepacked}, {});
-  return Tensor(ResultBuf.node(), std::move(s));
+  return Tensor(ResultBuf.node(), s);
 }
 
 Tensor computeMkldnnPrepackedConvRun(
@@ -490,7 +486,7 @@ Tensor computeMkldnnPrepackedConvRun(
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_mkldnn_prepacked_conv_run", {inp, prepacked}, {});
-  return Tensor(ResultBuf.node(), std::move(s));
+  return Tensor(ResultBuf.node(), s);
 }
 
 } // namespace tensorexpr

@@ -10,7 +10,6 @@
 
 #include <functional>
 #include <memory>
-#include <utility>
 #include <vector>
 
 using at::TypeKind;
@@ -129,7 +128,7 @@ struct SchemaParser {
         is_a_valid_overload_name,
         overload_name,
         " is not a legal overload name for aten operators");
-    return {std::move(name), std::move(overload_name)};
+    return {name, overload_name};
   }
 
   std::vector<either<OperatorName, FunctionSchema>> parseDeclarations() {
@@ -344,8 +343,7 @@ struct SchemaParser {
             arg_type.expectRef<c10::DynamicType>().dynamicKind(),
             arg_N);
       default:
-        throw ErrorReport(std::move(range))
-            << "unexpected type, file a bug report";
+        throw ErrorReport(range) << "unexpected type, file a bug report";
     }
     return IValue(); // silence warnings
   }

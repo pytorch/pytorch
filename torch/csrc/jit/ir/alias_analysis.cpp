@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
 #include <fstream>
-#include <utility>
 
 namespace torch {
 namespace jit {
@@ -138,7 +137,7 @@ class MutableTypePtrHelper {
         if (mutable_types.size() == 0) {
           return c10::nullopt;
         }
-        return {AliasTypeSet{TupleType::create(std::move(mutable_types))}};
+        return {AliasTypeSet{TupleType::create(mutable_types)}};
       }
       default:
         return c10::nullopt;
@@ -740,11 +739,11 @@ void AliasDb::analyzeImpl(Node* node) {
           function_call_copies_[graph.get()];
       if (graphs.size() == 0) {
         graphs.push_back(graph);
-        analyzeSubgraph(node, std::move(graph));
+        analyzeSubgraph(node, graph);
       } else {
         auto copied_graph = graph->copy();
         graphs.push_back(copied_graph);
-        analyzeSubgraph(node, std::move(copied_graph));
+        analyzeSubgraph(node, copied_graph);
       }
       return;
     }
@@ -1919,7 +1918,7 @@ Element* AliasDb::getWildcard(const TypePtr& type) const {
     auto union_type = UnionType::create(*maybe_mut_types);
     // Get a <TypePtr, Element*> pair where the TypePtr is this Union
     // type and the Element is the corresponding Wildcard
-    auto maybe_union_pair = wildcardIndex_.find(std::move(union_type));
+    auto maybe_union_pair = wildcardIndex_.find(union_type);
     if (maybe_union_pair != wildcardIndex_.end()) {
       return (*maybe_union_pair).second;
     }

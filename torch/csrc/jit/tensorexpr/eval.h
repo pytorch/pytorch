@@ -4,7 +4,6 @@
 #include <cstring>
 #include <type_traits>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 #include <c10/macros/Macros.h>
@@ -312,14 +311,14 @@ c10::optional<int64_t> evalInt(ExprPtr e);
 
 // Substitutes the given vars with their corresponding expressions in the input
 // expression.
-inline ExprPtr Substitute(const ExprPtr& expr, const VarMapping& var_mapping) {
+inline ExprPtr Substitute(ExprPtr expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return expr->accept_mutator(&var_sub);
 }
 
 // Substitutes the given vars with their corresponding expressions in the input
 // statement.
-inline StmtPtr Substitute(const StmtPtr& stmt, const VarMapping& var_mapping) {
+inline StmtPtr Substitute(StmtPtr stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
 }
@@ -330,7 +329,7 @@ inline StmtPtr Substitute(const StmtPtr& stmt, const VarMapping& var_mapping) {
 // ones, and `VarMapping` input has variables as the key.
 inline ExprPtr SubstituteInClone(ExprPtr expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
-  return Expr::clone(std::move(expr))->accept_mutator(&var_sub);
+  return Expr::clone(expr)->accept_mutator(&var_sub);
 }
 
 // Creates a clone of the input statement and substitutes the given vars with
@@ -339,7 +338,7 @@ inline ExprPtr SubstituteInClone(ExprPtr expr, const VarMapping& var_mapping) {
 // ones, and `VarMapping` input has variables as the key.
 inline StmtPtr SubstituteInClone(StmtPtr stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
-  return Stmt::clone(std::move(stmt))->accept_mutator(&var_sub);
+  return Stmt::clone(stmt)->accept_mutator(&var_sub);
 }
 
 } // namespace tensorexpr

@@ -5,8 +5,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/custom_class.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace {
@@ -51,7 +49,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     for (auto expr : subscript.subscript_exprs()) {
       subscript_expr_types.emplace_back(parseTypeFromExprImpl(expr));
     }
-    return TupleType::create(std::move(subscript_expr_types));
+    return TupleType::create(subscript_expr_types);
   } else if (typeName == "List" || typeName == "list") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
@@ -70,7 +68,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     }
     auto elem_type =
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
-    return OptionalType::create(std::move(elem_type));
+    return OptionalType::create(elem_type);
 
   } else if (typeName == "Union") {
     std::vector<TypePtr> subscript_expr_types;
@@ -78,7 +76,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     for (auto expr : subscript.subscript_exprs()) {
       subscript_expr_types.emplace_back(parseTypeFromExprImpl(expr));
     }
-    return UnionType::create(std::move(subscript_expr_types));
+    return UnionType::create(subscript_expr_types);
   } else if (typeName == "Future" || typeName == "torch.jit.Future") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
@@ -87,7 +85,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     }
     auto elem_type =
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
-    return FutureType::create(std::move(elem_type));
+    return FutureType::create(elem_type);
   } else if (typeName == "RRef") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
@@ -96,7 +94,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     }
     auto elem_type =
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
-    return RRefType::create(std::move(elem_type));
+    return RRefType::create(elem_type);
   } else if (typeName == "Dict" || typeName == "dict") {
     if (subscript.subscript_exprs().size() != 2) {
       throw ErrorReport(subscript)
@@ -105,7 +103,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     }
     auto key_type = parseTypeFromExprImpl(subscript.subscript_exprs()[0]);
     auto value_type = parseTypeFromExprImpl(subscript.subscript_exprs()[1]);
-    return DictType::create(std::move(key_type), std::move(value_type));
+    return DictType::create(key_type, value_type);
   } else {
     throw ErrorReport(subscript.range())
         << "Unknown type constructor " << typeName;
@@ -334,7 +332,7 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
       r,
       Ident::create(r, "defaults"),
       blank_decl,
-      List<Stmt>::create(r, {std::move(ret)}));
+      List<Stmt>::create(r, {ret}));
 
   CompilationUnit cu;
   cu.define(
@@ -413,7 +411,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     }
     auto arg = Argument(
         decl_arg.ident().name(),
-        std::move(type),
+        type,
         N,
         default_value,
         decl_arg.kwarg_only(),
@@ -440,7 +438,7 @@ std::vector<Argument> ScriptTypeParser::parseReturnFromDecl(const Decl& decl) {
   parsed_type = parseTypeFromExpr(type_expr);
   return {Argument(
       "",
-      std::move(parsed_type),
+      parsed_type,
       /*N =*/c10::nullopt,
       /*default_value =*/c10::nullopt,
       /*kwarg_only =*/false)};
@@ -482,8 +480,7 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
         << subscript.subscript_exprs().size();
   }
   auto type = *subscript.subscript_exprs().begin();
-  auto default_val =
-      evaluateDefaults(expr.range(), {std::move(type)}, {std::move(expr)});
+  auto default_val = evaluateDefaults(expr.range(), {type}, {expr});
   return *default_val.begin();
 }
 

@@ -28,7 +28,6 @@
 #include <memory>
 #include <numeric>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 /*
@@ -801,7 +800,7 @@ c10::SymbolicShape combine_bounds(
       merged_shapes.push_back(c10::ShapeSymbol::newSymbol());
     }
   }
-  return c10::SymbolicShape(std::move(merged_shapes));
+  return c10::SymbolicShape(merged_shapes);
 }
 
 struct SymbolicShapeGraphAnalyzer {
@@ -911,9 +910,9 @@ struct SymbolicShapeGraphAnalyzer {
 
     updateGraphWithSymbolicShapeEqualities(discovered_sym_shape_equalities);
     return ShapeComputeGraphMapping(
-        std::move(stitched_shape_compute_graph),
+        stitched_shape_compute_graph,
         enclosing_graph_value_to_shape_graph_input_,
-        std::move(graph_output_to_symbolic_shape_dim));
+        graph_output_to_symbolic_shape_dim);
   }
 
   void updateGraphWithSymbolicShapeEqualities(

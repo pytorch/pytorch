@@ -1148,9 +1148,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
               pop(stack).toOptional<c10::Device>();
           at::Tensor self = pop(stack).toTensor();
           push(
-              stack,
-              to_dispatch(
-                  std::move(self), device, scalarType, non_blocking, copy));
+              stack, to_dispatch(self, device, scalarType, non_blocking, copy));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1183,7 +1181,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
-          push(stack, autograd::Variable(std::move(a)).variable_data());
+          push(stack, autograd::Variable(a).variable_data());
         },
         aliasAnalysisFromSchema()),
 // these ops are not defined for Tensor
@@ -1418,8 +1416,8 @@ void dictItems(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   auto key_type = dict.keyType();
   auto value_type = dict.valueType();
-  auto items = c10::impl::GenericList(
-      TupleType::create({std::move(key_type), std::move(value_type)}));
+  auto items =
+      c10::impl::GenericList(TupleType::create({key_type, value_type}));
   items.reserve(dict.size());
   for (const auto& item : dict) {
     items.emplace_back(c10::ivalue::Tuple::create({item.key(), item.value()}));
@@ -1625,7 +1623,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           c10::optional<int64_t> end = pop(stack).toOptional<int64_t>();
           c10::optional<int64_t> start = pop(stack).toOptional<int64_t>();
           std::string string = pop(stack).toStringRef();
-          push(stack, stringSlice(std::move(string), start, end, step));
+          push(stack, stringSlice(string, start, end, step));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1944,7 +1942,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string substr = pop(stack).toStringRef();
           std::string string = pop(stack).toStringRef();
 
-          push(stack, stringFindImpl(std::move(string), substr, start, end));
+          push(stack, stringFindImpl(string, substr, start, end));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1956,9 +1954,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string substr = pop(stack).toStringRef();
           std::string string = pop(stack).toStringRef();
 
-          push(
-              stack,
-              stringFindImpl(std::move(string), substr, start, end, true));
+          push(stack, stringFindImpl(string, substr, start, end, true));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1969,7 +1965,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           int64_t start = pop(stack).toInt();
           std::string substr = pop(stack).toStringRef();
           std::string string = pop(stack).toStringRef();
-          auto result = stringFindImpl(std::move(string), substr, start, end);
+          auto result = stringFindImpl(string, substr, start, end);
           if (result < 0) {
             throw std::runtime_error("ValueError: substring not found");
           }
@@ -1984,8 +1980,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           int64_t start = pop(stack).toInt();
           std::string substr = pop(stack).toStringRef();
           std::string string = pop(stack).toStringRef();
-          auto result =
-              stringFindImpl(std::move(string), substr, start, end, true);
+          auto result = stringFindImpl(string, substr, start, end, true);
           if (result < 0) {
             throw std::runtime_error("ValueError: substring not found");
           }
@@ -2317,9 +2312,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           c10::optional<c10::Device> device = c10::nullopt;
           c10::optional<at::ScalarType> scalarType = c10::nullopt;
           push(
-              stack,
-              to_dispatch(
-                  std::move(self), device, scalarType, non_blocking, copy));
+              stack, to_dispatch(self, device, scalarType, non_blocking, copy));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
