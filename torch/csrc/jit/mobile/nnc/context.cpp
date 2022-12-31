@@ -7,6 +7,8 @@
 
 #include <torch/csrc/jit/mobile/nnc/registry.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace mobile {
@@ -21,7 +23,7 @@ c10::IValue Tup(std::initializer_list<c10::IValue> ivalues) {
 }
 
 c10::IValue Tup(std::vector<c10::IValue>&& ivalues) {
-  return c10::ivalue::Tuple::create(ivalues);
+  return c10::ivalue::Tuple::create(std::move(ivalues));
 }
 
 } // namespace

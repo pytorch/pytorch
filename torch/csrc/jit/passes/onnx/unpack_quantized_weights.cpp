@@ -14,6 +14,7 @@
 #include <ATen/Functions.h>
 
 #include <stack>
+#include <utility>
 
 using ::c10::Dispatcher;
 using ::c10::DispatchKey;
@@ -108,10 +109,10 @@ Node* CreateQuantizedWeightsCaffe2(
     double scale,
     int64_t zero_point) {
   Node* const_node = graph->create(Symbol::caffe2("Int8GivenTensorFill"));
-  const_node->is_(Symbol::attr("shape"), shapes);
+  const_node->is_(Symbol::attr("shape"), std::move(shapes));
   const_node->i_(Symbol::attr("Y_zero_point"), zero_point);
   const_node->f_(Symbol::attr("Y_scale"), scale);
-  const_node->s_(Symbol::attr("values"), data);
+  const_node->s_(Symbol::attr("values"), std::move(data));
   return const_node;
 }
 
@@ -122,10 +123,10 @@ Node* CreateQuantizedBiasCaffe2(
     double scale,
     int64_t zero_point) {
   Node* const_node = graph->create(Symbol::caffe2("Int8GivenIntTensorFill"));
-  const_node->is_(Symbol::attr("shape"), shapes);
+  const_node->is_(Symbol::attr("shape"), std::move(shapes));
   const_node->i_(Symbol::attr("Y_zero_point"), zero_point);
   const_node->f_(Symbol::attr("Y_scale"), scale);
-  const_node->is_(Symbol::attr("values"), data);
+  const_node->is_(Symbol::attr("values"), std::move(data));
   return const_node;
 }
 
@@ -235,7 +236,7 @@ Node* CreateQuantizedBias(
   auto options = c10::TensorOptions().dtype(at::kFloat).device(at::kCPU);
   at::Tensor const_bias_copy = at::empty(c10::IntArrayRef(shapes), options);
   const_bias_copy.copy_(const_bias);
-  const_node_1->t_(Symbol::attr("value"), const_bias_copy);
+  const_node_1->t_(Symbol::attr("value"), std::move(const_bias_copy));
   return const_node_1;
 }
 
@@ -281,7 +282,7 @@ void ConvertQuantizedWeight(
       os << static_cast<char>(wt_data[i] + 128);
     }
     Node* c2_weight = CreateQuantizedWeightsCaffe2(
-        os.str(), graph, wt_sizes, weight.q_scale(), weight_zp);
+        os.str(), graph, std::move(wt_sizes), weight.q_scale(), weight_zp);
     graph->setInsertPoint(node);
     c2_weight->insertBefore(node);
     node->insertInput(1, c2_weight->output());

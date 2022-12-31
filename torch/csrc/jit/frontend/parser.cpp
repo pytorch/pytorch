@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -146,7 +148,8 @@ struct ParserImpl {
                   << " expected a single list comprehension within '[' , ']'";
             }
           }
-          prefix = ListLiteral::create(list.range(), List<Expr>(list));
+          prefix =
+              ListLiteral::create(list.range(), List<Expr>(std::move(list)));
         }
 
       } break;
@@ -300,7 +303,8 @@ struct ParserImpl {
       if (kind == TK_NOTIN) {
         // NB: `not in` is just `not( in )`, so we don't introduce new tree view
         // but just make it a nested call in our tree view structure
-        prefix = create_compound(TK_IN, pos, {prefix, parseExp(binary_prec)});
+        prefix = create_compound(
+            TK_IN, pos, {std::move(prefix), parseExp(binary_prec)});
         prefix = create_compound(TK_NOT, pos, {prefix});
         continue;
       }
@@ -382,7 +386,8 @@ struct ParserImpl {
         auto ident = parseIdent();
         L.expect('=');
         auto v = parseAttributeValue();
-        attributes.push_back(Attribute::create(ident.range(), Ident(ident), v));
+        attributes.push_back(
+            Attribute::create(ident.range(), Ident(std::move(ident)), v));
       } else {
         inputs.push_back(parseExp());
       }
@@ -462,7 +467,7 @@ struct ParserImpl {
     }
     return Param::create(
         type->range(),
-        Ident(ident),
+        Ident(std::move(ident)),
         Maybe<Expr>(type),
         Maybe<Expr>(def),
         kwarg_only);
@@ -527,7 +532,7 @@ struct ParserImpl {
               << " augmented assignment can only have one LHS expression";
         }
         return AugAssign::create(
-            lhs.range(), lhs, AugAssignKind(*maybeOp), Expr(rhs));
+            lhs.range(), lhs, AugAssignKind(*maybeOp), Expr(std::move(rhs)));
       }
     } else {
       // There is no assignment operator, so this is of the form `lhs : <type>`
@@ -576,7 +581,7 @@ struct ParserImpl {
         Maybe<Expr> maybe_first = Maybe<Expr>::create(range);
         if (L.nextIf(',')) {
           auto msg = parseExp();
-          maybe_first = Maybe<Expr>::create(range, Expr(msg));
+          maybe_first = Maybe<Expr>::create(range, Expr(std::move(msg)));
         }
         L.expect(TK_NEWLINE);
         return Assert::create(range, cond, maybe_first);
@@ -658,7 +663,10 @@ struct ParserImpl {
       false_branch = makeList(range, {parseIf(false)});
     }
     return If::create(
-        r, Expr(cond), List<Stmt>(true_branch), List<Stmt>(false_branch));
+        r,
+        Expr(std::move(cond)),
+        List<Stmt>(true_branch),
+        List<Stmt>(false_branch));
   }
   TreeRef parseWhile() {
     auto r = L.cur().range;
@@ -666,7 +674,7 @@ struct ParserImpl {
     auto cond = parseExp();
     L.expect(':');
     auto body = parseStatements(/*expect_indent=*/true);
-    return While::create(r, Expr(cond), List<Stmt>(body));
+    return While::create(r, Expr(std::move(cond)), List<Stmt>(body));
   }
 
   TreeRef parseFor() {
@@ -730,7 +738,9 @@ struct ParserImpl {
     Maybe<Expr> return_annotation = parseReturnAnnotation();
     L.expect(':');
     return Decl::create(
-        paramlist.range(), List<Param>(paramlist), return_annotation);
+        paramlist.range(),
+        List<Param>(std::move(paramlist)),
+        return_annotation);
   }
 
   TreeRef parseClass() {
@@ -780,7 +790,10 @@ struct ParserImpl {
     }
 
     return Def::create(
-        name.range(), Ident(name), Decl(decl), List<Stmt>(stmts_list));
+        name.range(),
+        Ident(std::move(name)),
+        Decl(std::move(decl)),
+        List<Stmt>(stmts_list));
   }
   Lexer& lexer() {
     return L;

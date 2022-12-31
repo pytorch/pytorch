@@ -2,6 +2,8 @@
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -12,7 +14,10 @@ ExprHandle Reducer::operator()(
     const std::vector<ExprHandle>& output,
     const std::vector<VarHandle>& inner) const {
   return ReduceOp::make(
-      complete(result_buf, interaction_, body, output, inner), inner, *this);
+      complete(
+          std::move(result_buf), interaction_, std::move(body), output, inner),
+      inner,
+      *this);
 }
 
 ReduceOpPtr Reducer::operator()(
@@ -21,7 +26,12 @@ ReduceOpPtr Reducer::operator()(
     const std::vector<ExprPtr>& output,
     const std::vector<VarPtr>& inner) const {
   return alloc<ReduceOp>(
-      complete(result_buf, interaction_, ExprHandle(body), output, inner),
+      complete(
+          std::move(result_buf),
+          interaction_,
+          ExprHandle(std::move(body)),
+          output,
+          inner),
       inner,
       *this);
 }
@@ -35,9 +45,9 @@ ExprHandle Reducer::operator()(
   return ReduceOp::make(
       complete(result_buf, interaction_, body, output, inner),
       inner,
-      result_buf,
-      acc_buf,
-      body,
+      std::move(result_buf),
+      std::move(acc_buf),
+      std::move(body),
       *this);
 }
 

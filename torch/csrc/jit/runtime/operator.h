@@ -231,10 +231,10 @@ struct TORCH_API Operator {
       std::vector<Argument> returns,
       AliasAnalysisKind alias_analysis) {
     auto result = FunctionSchema(
-        name,
-        overload_name,
-        arguments,
-        returns,
+        std::move(name),
+        std::move(overload_name),
+        std::move(arguments),
+        std::move(returns),
         /*is_vararg*/ false,
         /*is_varret*/ false);
     result.setAliasAnalysis(alias_analysis);

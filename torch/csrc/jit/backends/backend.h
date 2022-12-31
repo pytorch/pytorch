@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/backends/backend_interface.h>
 #include <torch/custom_class.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace {
@@ -15,8 +17,8 @@ inline c10::FunctionSchema getIsAvailableSchema() {
   c10::FunctionSchema preprocessor_schema(
       "is_available",
       /*overload_name=*/"",
-      /*arguments=*/{self},
-      /*returns=*/{available});
+      /*arguments=*/{std::move(self)},
+      /*returns=*/{std::move(available)});
   return preprocessor_schema;
 }
 
@@ -29,13 +31,14 @@ inline c10::FunctionSchema getCompileSchema() {
   auto any_dict_ty =
       c10::DictType::create(c10::StringType::get(), c10::AnyType::get());
   c10::Argument method_compile_spec("method_compile_spec", any_dict_ty);
-  c10::Argument handles("handles", any_dict_ty);
+  c10::Argument handles("handles", std::move(any_dict_ty));
 
   c10::FunctionSchema compile_schema(
       "compile",
       /*overload_name=*/"",
-      /*arguments=*/{self, mod, method_compile_spec},
-      /*returns=*/{handles});
+      /*arguments=*/
+      {std::move(self), std::move(mod), std::move(method_compile_spec)},
+      /*returns=*/{std::move(handles)});
   return compile_schema;
 }
 
@@ -45,12 +48,12 @@ inline c10::FunctionSchema getExecuteSchema() {
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument handle("handle", c10::AnyType::get());
   c10::Argument input("input", any_list_ty);
-  c10::Argument output("output", any_list_ty);
+  c10::Argument output("output", std::move(any_list_ty));
   return c10::FunctionSchema(
       "execute",
       /*overload_name=*/"",
-      /*arguments=*/{self, handle, input},
-      /*returns=*/{output});
+      /*arguments=*/{std::move(self), std::move(handle), std::move(input)},
+      /*returns=*/{std::move(output)});
 }
 
 template <typename TBackendInterface>

@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 
@@ -103,7 +104,7 @@ void createPropNodeForIfBlock(
 
   // uncomment for debugging
   // opt_pn->i_(Symbol::attr("propagate"), 1);
-  opt_pn->setCallback(optional_profiler);
+  opt_pn->setCallback(std::move(optional_profiler));
 }
 
 // loop counter is implicit in the loop body outputs, we need to make
@@ -128,7 +129,7 @@ void traceLoopCounter(Node* n, ProfilingRecord* pr, TracingData& td) {
 
   // uncomment for debugging
   // opt_pn->i_(Symbol::attr("loop_counter"), 1);
-  opt_pn->setCallback(optional_profiler);
+  opt_pn->setCallback(std::move(optional_profiler));
 }
 
 // Similar to how we propagate the mappings for If nodes, we need to propagate
@@ -168,7 +169,7 @@ static void traceLoop(Node* n, ProfilingRecord* pr, TracingData& td) {
 
     // uncomment for debugging
     // opt_pn->i_(Symbol::attr("loop_entry"), 1);
-    opt_pn->setCallback(optional_profiler);
+    opt_pn->setCallback(std::move(optional_profiler));
   }
 
   {
@@ -208,7 +209,7 @@ static void traceLoop(Node* n, ProfilingRecord* pr, TracingData& td) {
 
     // uncomment for debugging
     // opt_pn->i_(Symbol::attr("loop_exit"), 1);
-    opt_pn->setCallback(optional_profiler);
+    opt_pn->setCallback(std::move(optional_profiler));
   }
 }
 

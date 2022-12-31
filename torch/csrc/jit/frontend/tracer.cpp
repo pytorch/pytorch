@@ -25,6 +25,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -514,7 +515,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     getTracingState()->force_outplace = force_outplace;
 
     // Invoke the traced function
-    auto out_stack = traced_fn(inputs);
+    auto out_stack = traced_fn(std::move(inputs));
 
     // Exit a trace, treating 'out_stack' as the outputs of the trace.  These
     // are the variables whose values will be computed upon subsequent

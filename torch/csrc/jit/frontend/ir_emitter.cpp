@@ -42,6 +42,7 @@
 #include <climits>
 #include <set>
 #include <stack>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -422,7 +423,7 @@ struct Environment {
       }
       auto value_store_type =
           annotated_type ? annotated_type : as_simple_value->type();
-      insertStore(name, loc, as_simple_value, value_store_type);
+      insertStore(name, loc, as_simple_value, std::move(value_store_type));
     } else {
       value_table[name] = std::move(value);
     }
@@ -744,7 +745,7 @@ struct to_ir {
       // it exists or set it to none
       if (def_stack_.back().merged_return_type_ == nullptr) {
         def_stack_.back().merged_return_type_ =
-            decl_ret != nullptr ? decl_ret : NoneType::get();
+            decl_ret != nullptr ? std::move(decl_ret) : NoneType::get();
       }
     }
   }
@@ -889,7 +890,8 @@ struct to_ir {
     // placeholder return value. This is needed so that closures & graphs
     // are correctly typed.
     auto placeholder_return =
-        graph->insertNode(graph->createUninitialized(ret_type))->output();
+        graph->insertNode(graph->createUninitialized(std::move(ret_type)))
+            ->output();
     block->registerOutput(placeholder_return);
     return Argument("", def_stack_.back().merged_return_type_);
   }
@@ -1076,8 +1078,8 @@ struct to_ir {
     // body and containing scope of a loop).
     if (declared_return_type == AnyType::get() &&
         actual_return->type() != AnyType::get()) {
-      actual_return =
-          graph->insertUncheckedCast(actual_return, declared_return_type);
+      actual_return = graph->insertUncheckedCast(
+          actual_return, std::move(declared_return_type));
     }
 
     graph->insertNode(graph->create(prim::ReturnStmt, {actual_return}, 0));
@@ -1177,9 +1179,9 @@ struct to_ir {
     if (const auto optional_type = lhs_value->type()->cast<OptionalType>()) {
       Refinement present(name, optional_type->getElementType());
       if (tok == TK_IS) {
-        return RefinementSet({}, {present});
+        return RefinementSet({}, {std::move(present)});
       } else { // TK_ISNOT
-        return RefinementSet({present}, {});
+        return RefinementSet({std::move(present)}, {});
       }
     }
     if (const auto union_type = lhs_value->type()->cast<UnionType>()) {
@@ -1192,9 +1194,9 @@ struct to_ir {
         all_present.push_back(std::move(present));
       }
       if (tok == TK_IS) {
-        return RefinementSet({}, all_present);
+        return RefinementSet({}, std::move(all_present));
       } else { // TK_ISNOT
-        return RefinementSet(all_present, {});
+        return RefinementSet(std::move(all_present), {});
       }
     }
     return RefinementSet();
@@ -1251,7 +1253,7 @@ struct to_ir {
               {});
           auto refinements = RefinementSet(findIsNoneRefinements(
               cond_op.lhs(), lhs_val, cond_op.rhs(), rhs_val, expr.kind()));
-          return CondValue(cond_value, refinements, c10::nullopt);
+          return CondValue(cond_value, std::move(refinements), c10::nullopt);
         }
       } break;
       default: {
@@ -1604,7 +1606,7 @@ struct to_ir {
 
       NamedValue self = NamedValue(loc, "self", list_value);
       NamedValue input = NamedValue(loc, "", out);
-      emitBuiltinCall(loc, *graph, aten::append, {input}, {}, self);
+      emitBuiltinCall(loc, *graph, aten::append, {std::move(input)}, {}, self);
     };
     emitFor(targets_list, itrs, loc, emit_body);
     popFrame();
@@ -1775,7 +1777,11 @@ struct to_ir {
       NamedValue input_k = NamedValue(loc, "", k);
       NamedValue input_v = NamedValue(loc, "", v);
       emitBuiltinCall(
-          loc, *graph, aten::_set_item, {self, input_k, input_v}, {});
+          loc,
+          *graph,
+          aten::_set_item,
+          {std::move(self), std::move(input_k), std::move(input_v)},
+          {});
     };
     emitFor(targets_list, itrs, loc, emit_body);
     popFrame();
@@ -2223,7 +2229,8 @@ struct to_ir {
     }
     if (obj.kind() == TK_VAR && unified_true) {
       std::string ident = Var(obj).name().name();
-      true_refinements = {Refinement(ident, unified_true)};
+      true_refinements = {
+          Refinement(std::move(ident), std::move(unified_true))};
     }
 
     // Get a single type for the true and false branches
@@ -2233,10 +2240,12 @@ struct to_ir {
     }
     if (obj.kind() == TK_VAR && unified_false) {
       std::string ident = Var(obj).name().name();
-      false_refinements = {Refinement(ident, unified_false)};
+      false_refinements = {
+          Refinement(std::move(ident), std::move(unified_false))};
     }
 
-    refinement = RefinementSet(true_refinements, false_refinements);
+    refinement = RefinementSet(
+        std::move(true_refinements), std::move(false_refinements));
 
     bool is_statically_false = isinstance_types.empty();
 
@@ -2333,9 +2342,9 @@ struct to_ir {
         // we create Tuple literal to wrap those target exprs for assignments
         if (target_exprs.size() > 1) {
           Expr tl = TupleLiteral::create(range, target_exprs);
-          target_exprs = List<Expr>::create(range, {tl});
+          target_exprs = List<Expr>::create(range, {std::move(tl)});
         }
-        emitExprsAssign(target_exprs, {sv}, range, /*n_binders=*/1);
+        emitExprsAssign(target_exprs, {std::move(sv)}, range, /*n_binders=*/1);
       }
       emit_body();
       popFrame();
@@ -2526,7 +2535,7 @@ struct to_ir {
     auto apply = Apply::create(
         stmt.range(),
         callee,
-        List<Expr>::create(stmt.range(), {message}),
+        List<Expr>::create(stmt.range(), {std::move(message)}),
         List<Attribute>::create(stmt.range(), {}));
 
     List<Stmt> false_branch =
@@ -2702,7 +2711,7 @@ struct to_ir {
 
       // x += y is equivalent to x = x.__iadd__(y) or x = x.__add__(y) if
       // __iadd__ is not present
-      return MethodValue(lhs, magic_method_name)
+      return MethodValue(lhs, std::move(magic_method_name))
           .call(stmt.range(), method, {rhs}, {}, 0)
           ->asValue(stmt.range(), method);
     } else {
@@ -3087,7 +3096,7 @@ struct to_ir {
             v.range(),
             v.name().name(),
             std::move(rhs_sugared_val),
-            /*annotated_type=*/type);
+            /*annotated_type=*/std::move(type));
       } break;
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), rhs);
@@ -3318,7 +3327,8 @@ struct to_ir {
     auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
-      return emitApplySpecialForm(special_form->form(), apply, sv, type_hint);
+      return emitApplySpecialForm(
+          special_form->form(), apply, std::move(sv), type_hint);
     }
     auto args = getNamedValues(apply.inputs(), true);
     auto kwargs = emitAttributes(apply.attributes());
@@ -3375,7 +3385,7 @@ struct to_ir {
               type->expect<UnionType>()->canHoldType(*NoneType::get()))) &&
             expr->type()->isSubtypeOf(*NoneType::get())) {
           Node* none = graph->createNone();
-          none->output()->setType(type);
+          none->output()->setType(std::move(type));
           graph->insertNode(none);
           expr = none->output();
         }
@@ -3394,7 +3404,7 @@ struct to_ir {
         // avoid generating nested unchecked_casts because they are already
         // inserted during serialization
         if (v->node()->kind() != prim::unchecked_cast || *v->type() != *type) {
-          v = graph->insertUncheckedCast(v, type);
+          v = graph->insertUncheckedCast(v, std::move(type));
         }
         return std::make_shared<SimpleValue>(v);
       } break;
@@ -3424,8 +3434,9 @@ struct to_ir {
       case prim::Uninitialized: {
         checkApplyNumInputs(apply, 1);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
-        auto out = graph->insertNode(graph->createUninitialized(type))
-                       ->setSourceRange(apply.range());
+        auto out =
+            graph->insertNode(graph->createUninitialized(std::move(type)))
+                ->setSourceRange(apply.range());
         return std::make_shared<SimpleValue>(out->output());
       }
       case prim::TupleConstruct: {
@@ -3694,7 +3705,7 @@ struct to_ir {
     environment_stack->setSugaredVar(
         apply.range(),
         iter_name,
-        iter_input,
+        std::move(iter_input),
         /*annotated_type=*/nullptr);
 
     const std::string& elem_name = createTempName("$_elem");
@@ -3922,7 +3933,7 @@ struct to_ir {
       }
       auto ll_values = List<Expr>::create(apply.range(), zipped);
       auto ll = ListLiteral::create(apply.range(), ll_values);
-      auto expr_list = List<Expr>::create(apply.range(), {ll});
+      auto expr_list = List<Expr>::create(apply.range(), {std::move(ll)});
       // Change `apply` to a new Apply node holding a list of
       // tuples
       apply = Apply::create(
@@ -3952,7 +3963,7 @@ struct to_ir {
       }
       auto expr_list = List<Expr>::create(apply.range(), {exprs});
       auto ll = ListLiteral::create(apply.range(), expr_list);
-      auto new_inputs = List<Expr>::create(apply.range(), {ll});
+      auto new_inputs = List<Expr>::create(apply.range(), {std::move(ll)});
       auto new_kwargs = List<Attribute>::create(apply.range(), {});
       apply =
           Apply::create(apply.range(), apply.callee(), new_inputs, new_kwargs);
@@ -3978,7 +3989,7 @@ struct to_ir {
     environment_stack->setSugaredVar(
         apply.range(),
         iter_name,
-        iter_input,
+        std::move(iter_input),
         /*annotated_type=*/nullptr);
 
     auto dc = DictComp::create(apply.range(), key, value, target, iter);
@@ -4118,7 +4129,7 @@ struct to_ir {
       }
     }
     Value* node_output =
-        fork_node->output()->setType(FutureType::create(out_type));
+        fork_node->output()->setType(FutureType::create(std::move(out_type)));
     return std::make_shared<SimpleValue>(node_output);
   }
 
@@ -4246,7 +4257,7 @@ struct to_ir {
       throw ErrorReport(apply)
           << rpc_op.toDisplayString() << " is not supported in TorchScript!'";
     }
-    rpc_node_output->setType(output_type);
+    rpc_node_output->setType(std::move(output_type));
     return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
@@ -4634,7 +4645,7 @@ struct to_ir {
       } break;
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
-        return emitListLiteral(ll, type_hint);
+        return emitListLiteral(std::move(ll), type_hint);
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
@@ -4643,7 +4654,7 @@ struct to_ir {
       } break;
       case TK_DICT_LITERAL: {
         auto dc = DictLiteral(tree);
-        return emitDictLiteral(dc, type_hint);
+        return emitDictLiteral(std::move(dc), type_hint);
       } break;
       case TK_LIST_COMP: {
         auto lc = ListComp(tree);
@@ -5476,7 +5487,7 @@ void CompilationUnit::define_hooks(
         hook_def.decl().params()[0].ident().name(), self->getClassType());
     arguments.insert(
         arguments.end(), schema.arguments().begin(), schema.arguments().end());
-    return schema.cloneWithArguments(arguments);
+    return schema.cloneWithArguments(std::move(arguments));
   };
 
   // define hooks

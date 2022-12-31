@@ -14,6 +14,8 @@
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -521,7 +523,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
       std::move(positional_inputs),
       std::move(return_types),
       std::move(return_field_names),
-      schema_name};
+      std::move(schema_name)};
 }
 
 MatchedSchema matchSchema(
@@ -636,7 +638,7 @@ static Value* packOutputs(
     named_tuple =
         TupleType::createNamed(c10::nullopt, field_names.value(), types);
   }
-  return g.insertNode(g.createTuple(values, named_tuple))->output();
+  return g.insertNode(g.createTuple(values, std::move(named_tuple)))->output();
 }
 
 // Given a successful match between operator schema and symbol, emit a node

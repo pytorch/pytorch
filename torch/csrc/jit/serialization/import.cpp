@@ -39,6 +39,7 @@
 #include <fstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -167,7 +168,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       // TODO: Remove once [serialization type tags] is landed
       restoreAccurateTypeTags(
           input, set_state.getSchema().arguments().at(1).type());
-      set_state({obj, input});
+      set_state({obj, std::move(input)});
       postSetStateValidate(obj);
       return obj;
     } else {
@@ -320,7 +321,7 @@ Module parse_and_initialize_jit_module(
       jit_files,
       jit_constants,
       static_cast<int32_t>(mobilem.bytecode_version()));
-  m.set_delete_memory(data);
+  m.set_delete_memory(std::move(data));
   return m;
 }
 
@@ -360,7 +361,8 @@ Module import_ir_module(
   std::shared_ptr<char> data;
   size_t size = 0;
   std::tie(data, size) = get_stream_content(in);
-  return _load_jit_module_from_bytes(data, size, cu, device, extra_files);
+  return _load_jit_module_from_bytes(
+      std::move(data), size, std::move(cu), device, extra_files);
 }
 
 // For reading unified serialization format from torch.Package.
@@ -375,7 +377,7 @@ Module import_ir_module(
       std::move(reader),
       /* pickle_dir_prefix = */ ".data/ts_code/" + ts_id + "/",
       /* tensor_dir_prefix = */ ".data/",
-      storage_context);
+      std::move(storage_context));
   ExtraFilesMap extra_files;
   return deserializer.deserialize(device, extra_files);
 }
@@ -407,7 +409,8 @@ Module import_ir_module(
   std::shared_ptr<char> data;
   size_t size = 0;
   std::tie(data, size) = get_file_content(filename.c_str());
-  return _load_jit_module_from_bytes(data, size, cu, device, extra_files);
+  return _load_jit_module_from_bytes(
+      std::move(data), size, std::move(cu), device, extra_files);
 }
 
 Module import_ir_module(
@@ -428,7 +431,11 @@ Module import_ir_module(
     bool load_debug_files) {
   std::shared_ptr<ReadAdapterInterface> rai_shared = std::move(rai);
   return import_ir_module(
-      cu, rai_shared, device, extra_files, load_debug_files);
+      std::move(cu),
+      std::move(rai_shared),
+      device,
+      extra_files,
+      load_debug_files);
 }
 
 Module import_ir_module(
@@ -509,7 +516,8 @@ Module _load_jit_module_from_bytes(
   auto format = getFileFormat(data.get());
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-      return parse_and_initialize_jit_module(data, size, extra_files, device);
+      return parse_and_initialize_jit_module(
+          std::move(data), size, extra_files, device);
     }
     case FileFormat::ZipFileFormat: {
       auto rai = std::make_unique<MemoryReadAdapter>(data.get(), size);
@@ -534,7 +542,7 @@ static IValue recreateObject(IValue ivalue, TypeResolver resolver) {
     auto classtype_old = obj->type();
     auto newtype = resolver(*classtype_old->name());
     size_t n = classtype_old->numAttributes();
-    auto newobj = c10::ivalue::Object::create(newtype, n);
+    auto newobj = c10::ivalue::Object::create(std::move(newtype), n);
     for (const auto i : c10::irange(n)) {
       newobj->setSlot(i, recreateObject(obj->getSlot(i), resolver));
     }
@@ -559,7 +567,7 @@ static IValue recreateObject(IValue ivalue, TypeResolver resolver) {
     for (const auto& ival : ivalue.toTuple()->elements()) {
       res.push_back(recreateObject(ival, resolver));
     }
-    return c10::ivalue::Tuple::create(res);
+    return c10::ivalue::Tuple::create(std::move(res));
   }
   // Leaf types are returned verbatim.
   return ivalue;
@@ -588,7 +596,7 @@ Module jitModuleFromSourceAndConstants(
     return c10::StrongTypePtr(compilation_unit, std::move(cls));
   };
   auto newIvalue = recreateObject(ivalue, type_resolver).toObject();
-  Module m(newIvalue);
+  Module m(std::move(newIvalue));
   rewriteQuantizedConvForBC(m);
   return m;
 }

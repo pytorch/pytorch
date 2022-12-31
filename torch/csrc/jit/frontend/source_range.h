@@ -8,6 +8,7 @@
 #include <memory>
 #include <numeric>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -196,7 +197,7 @@ struct TORCH_API Source {
     if (copies_str == COPIES_STRING) {
       std::shared_ptr<std::string> allocated_str =
           std::make_shared<std::string>(text_view.data(), text_view.size());
-      text_view_ = StringCordView({*allocated_str}, {allocated_str});
+      text_view_ = StringCordView({*allocated_str}, {std::move(allocated_str)});
     } else {
       text_view_ = StringCordView({text_view}, {});
     }

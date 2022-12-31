@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -296,7 +297,8 @@ void registerBoundedSchema(
       schema_string, lower_bound_function_name, reused_functions, module);
   auto upper_graph = genShapeComputeFn(
       schema_string, upper_bound_function_name, reused_functions, module);
-  cached_bounded_schema_to_graph[schema_string] = {lower_graph, upper_graph};
+  cached_bounded_schema_to_graph[schema_string] = {
+      std::move(lower_graph), std::move(upper_graph)};
 }
 
 void loadModule(const CompilationUnit& module) {

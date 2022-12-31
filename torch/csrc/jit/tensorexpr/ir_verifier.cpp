@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -32,34 +34,34 @@ void verifyBitwiseOp(NodePtr<D> v, IRVerifier* verifier) {
 
 void IRVerifier::visit(AndPtr v) {
   verifyBitwiseOp(v, this);
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(OrPtr v) {
   verifyBitwiseOp(v, this);
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(XorPtr v) {
   verifyBitwiseOp(v, this);
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(LshiftPtr v) {
   verifyBitwiseOp(v, this);
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(RshiftPtr v) {
   verifyBitwiseOp(v, this);
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(ModPtr v) {
   if (!v->dtype().is_integral() && !v->dtype().is_floating_point()) {
     throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
   }
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(CompareSelectPtr v) {
@@ -69,14 +71,14 @@ void IRVerifier::visit(CompareSelectPtr v) {
   if (v->lhs()->dtype() != v->rhs()->dtype()) {
     throw malformed_ir("bad dtype in CompareSelect");
   }
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(RampPtr v) {
   if (v->stride()->dtype() != v->base()->dtype()) {
     throw malformed_ir("Bad stride in Ramp");
   }
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(LoadPtr v) {
@@ -102,7 +104,7 @@ void IRVerifier::visit(LoadPtr v) {
     throw malformed_ir("Index scalar dtype is not Int or Long!");
   }
 
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(IfThenElsePtr v) {
@@ -115,7 +117,7 @@ void IRVerifier::visit(IfThenElsePtr v) {
   if (v->true_value()->dtype() != v->false_value()->dtype()) {
     throw malformed_ir("Bad dtype in IfThenElse");
   }
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(IntrinsicsPtr v) {
@@ -123,7 +125,7 @@ void IRVerifier::visit(IntrinsicsPtr v) {
     if (v->dtype().scalar_type() != c10::kInt) {
       throw malformed_ir("bad dtype in intrinsic arg");
     }
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
     return;
   }
   // TODO: add a check for OpArgCount and op_type
@@ -132,7 +134,7 @@ void IRVerifier::visit(IntrinsicsPtr v) {
       throw malformed_ir("bad dtype in intrinsic arg");
     }
   }
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(StorePtr v) {
@@ -161,7 +163,7 @@ void IRVerifier::visit(StorePtr v) {
     throw malformed_ir("buf and value dtype mismatch in Store");
   }
 
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(ForPtr v) {
@@ -174,7 +176,7 @@ void IRVerifier::visit(ForPtr v) {
   } else if (!v->body()) {
     throw malformed_ir("invalid Body in For loop");
   }
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(BlockPtr v) {
@@ -183,11 +185,11 @@ void IRVerifier::visit(BlockPtr v) {
       throw malformed_ir("Broken child-parent link inside a Block");
     }
   }
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void IRVerifier::visit(ExternalCallPtr v) {
-  IRVisitor::visit(v);
+  IRVisitor::visit(std::move(v));
 }
 
 void verify(StmtPtr s) {

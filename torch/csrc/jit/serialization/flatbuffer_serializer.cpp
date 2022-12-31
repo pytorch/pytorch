@@ -305,7 +305,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
     schema_offset =
         CreateFBSchema(fbb, schema.arguments(), schema.returns(), type_printer);
     auto classtype = schema.arguments()[0].type()->cast<ClassType>();
-    class_index = storeClassTypeAndGetIndex(fbb, classtype);
+    class_index = storeClassTypeAndGetIndex(fbb, std::move(classtype));
   }
 
   auto debug_info_offset =
@@ -539,7 +539,7 @@ uint32_t FlatbufferSerializer::storeClassTypeAndGetIndex(
     return iter->second;
   }
 
-  auto offset = classTypeToFB(fbb, class_ptr);
+  auto offset = classTypeToFB(fbb, std::move(class_ptr));
   uint32_t res = obj_types_offset_.size();
   obj_types_offset_.push_back(offset);
   qn_to_serialized_values_[type_str] = res;
@@ -561,7 +561,7 @@ flatbuffers::Offset<mobile::serialization::Object> FlatbufferSerializer::
   auto getstate = type->findMethod("__getstate__");
   auto setstate = type->findMethod("__setstate__");
   if (getstate && setstate) {
-    auto state = (*getstate)({obj});
+    auto state = (*getstate)({std::move(obj)});
     state_index = storeIValueAndGetIndex(fbb, state);
     auto func_index = qn_to_serialized_values_.find(qn);
     if (func_index != qn_to_serialized_values_.end()) {
@@ -576,7 +576,7 @@ flatbuffers::Offset<mobile::serialization::Object> FlatbufferSerializer::
     attrs = fbb.CreateVector(tuple_index);
   }
 
-  uint32_t type_index = storeClassTypeAndGetIndex(fbb, type);
+  uint32_t type_index = storeClassTypeAndGetIndex(fbb, std::move(type));
   return CreateObject(fbb, type_index, state_index, attrs, setstate_func_index);
 }
 

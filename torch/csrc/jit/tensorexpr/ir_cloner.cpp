@@ -6,6 +6,8 @@
 
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -53,43 +55,43 @@ static ExprPtr mutate_binary_op(
 }
 
 ExprPtr IRCloner::mutate(AddPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRCloner::mutate(SubPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRCloner::mutate(MulPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRCloner::mutate(DivPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRCloner::mutate(ModPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRCloner::mutate(AndPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRCloner::mutate(OrPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRCloner::mutate(XorPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRCloner::mutate(LshiftPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRCloner::mutate(RshiftPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRCloner::mutate(MaxPtr v) {
@@ -352,8 +354,10 @@ StmtPtr IRCloner::mutate(CondPtr v) {
   auto condition_new = v->condition()->accept_mutator(this);
   StmtPtr true_old = v->true_stmt();
   StmtPtr false_old = v->false_stmt();
-  StmtPtr true_new = true_old ? true_old->accept_mutator(this) : true_old;
-  StmtPtr false_new = false_old ? false_old->accept_mutator(this) : false_old;
+  StmtPtr true_new =
+      true_old ? true_old->accept_mutator(this) : std::move(true_old);
+  StmtPtr false_new =
+      false_old ? false_old->accept_mutator(this) : std::move(false_old);
   return alloc<Cond>(condition_new, true_new, false_new);
 }
 

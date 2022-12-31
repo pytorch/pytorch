@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <cstddef>
 #include <sstream>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -213,7 +214,7 @@ std::stringstream update_bytecode_version(
       storage_context);
   write_archive_current(
       writer_bytecode,
-      bytecode_tuple,
+      std::move(bytecode_tuple),
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
@@ -358,11 +359,11 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   };
 
   // write `bytecode` archive
-  writeArchiveV4(writer, kArchiveNameBytecode, bytecode_tuple);
+  writeArchiveV4(writer, kArchiveNameBytecode, std::move(bytecode_tuple));
   // write `constants` archive
   auto constants_tuple =
       c10::ivalue::Tuple::create(std::move(constants_values));
-  writeArchiveV4(writer, kArchiveNameConstants, constants_tuple);
+  writeArchiveV4(writer, kArchiveNameConstants, std::move(constants_tuple));
   return ouput_model_stream;
 }
 

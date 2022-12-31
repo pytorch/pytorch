@@ -156,7 +156,7 @@ py::class_<ModuleType, Extra...> add_module_bindings(
                   reinterpret_cast<THPDevice*>(object.ptr())->device,
                   non_blocking);
             } else {
-              module.to(detail::py_object_to_dtype(object), non_blocking);
+              module.to(detail::py_object_to_dtype(std::move(object)), non_blocking);
             }
           },
           py::arg("dtype_or_device"),
@@ -167,13 +167,13 @@ py::class_<ModuleType, Extra...> add_module_bindings(
              py::object dtype,
              bool non_blocking) {
               if (device.is_none()) {
-                module.to(detail::py_object_to_dtype(dtype), non_blocking);
+                module.to(detail::py_object_to_dtype(std::move(dtype)), non_blocking);
               } else if (dtype.is_none()) {
-                module.to(detail::py_object_to_device(device), non_blocking);
+                module.to(detail::py_object_to_device(std::move(device)), non_blocking);
               } else {
                 module.to(
-                    detail::py_object_to_device(device),
-                    detail::py_object_to_dtype(dtype),
+                    detail::py_object_to_device(std::move(device)),
+                    detail::py_object_to_dtype(std::move(dtype)),
                     non_blocking);
               }
           },

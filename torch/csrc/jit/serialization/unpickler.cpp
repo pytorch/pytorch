@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -401,7 +402,7 @@ PickleOpCode Unpickler::readInstruction() {
           start > 0 && start <= stack_.size(),
           "Parsing error: wrong start index for stack_");
       auto list_ivalue = stack_.at(start - 1);
-      readList(list_ivalue);
+      readList(std::move(list_ivalue));
     } break;
     case PickleOpCode::LIST: {
       IValue list_ivalue = c10::impl::GenericList(AnyType::get());
@@ -526,9 +527,9 @@ PickleOpCode Unpickler::readInstruction() {
       at::Tensor tensor;
       if (options.backend() == c10::Backend::QuantizedCPU) {
         tensor = at::_empty_affine_quantized({}, options, 0, 0)
-                     .set_(storage, 0, {}, {});
+                     .set_(std::move(storage), 0, {}, {});
       } else {
-        tensor = at::empty({0}, options).set_(storage);
+        tensor = at::empty({0}, options).set_(std::move(storage));
       }
 
       if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
@@ -776,7 +777,7 @@ void Unpickler::readGlobal(
       globals_.emplace_back([this, type] {
         auto val = stack_.back();
         stack_.pop_back();
-        auto obj = obj_loader_(type, val);
+        auto obj = obj_loader_(type, std::move(val));
         stack_.emplace_back(std::move(obj));
       });
     }
@@ -963,8 +964,8 @@ void Unpickler::rebuildRRef() {
     rref = ctx.getOrCreateRRef(rrefForkData, type.type_);
     ctx.notifyOwnerAndParentOfFork(
         rrefForkData.forkId_, rrefForkData.parent_, rref);
-    stack_.emplace_back(
-        c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref));
+    stack_.emplace_back(c10::static_intrusive_pointer_cast<c10::RRefInterface>(
+        std::move(rref)));
   });
   stack_.emplace_back(int64_t(globals_.size() - 1));
   return;

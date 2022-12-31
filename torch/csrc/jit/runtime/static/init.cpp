@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
+#include <utility>
+
 // This number is a heuristic determined with pytorch/benchmark
 #define DEFAULT_FUSION_SIZE 4
 
@@ -62,7 +64,7 @@ void initStaticModuleBindings(PyObject* module) {
                   torch::jit::toIValue(kv.second, c10::AnyType::get());
             }
             c10::IValue ret = self(arg_ivalues, kwarg_ivalues);
-            return toPyObject(ret);
+            return toPyObject(std::move(ret));
           })
       .def(
           "benchmark",
@@ -75,7 +77,10 @@ void initStaticModuleBindings(PyObject* module) {
             std::unordered_map<std::string, c10::IValue> kwarg_ivalues{
                 kwargs.begin(), kwargs.end()};
             self.runtime().benchmark(
-                {arg_ivalues}, {kwarg_ivalues}, warmup_runs, main_runs);
+                {std::move(arg_ivalues)},
+                {std::move(kwarg_ivalues)},
+                warmup_runs,
+                main_runs);
           })
       .def(
           "benchmark_individual_ops",
@@ -88,7 +93,10 @@ void initStaticModuleBindings(PyObject* module) {
             std::unordered_map<std::string, c10::IValue> kwarg_ivalues{
                 kwargs.begin(), kwargs.end()};
             return self.runtime().benchmark_individual_ops(
-                {arg_ivalues}, {kwarg_ivalues}, warmup_runs, main_runs);
+                {std::move(arg_ivalues)},
+                {std::move(kwarg_ivalues)},
+                warmup_runs,
+                main_runs);
           })
       .def(
           "runAsync",
@@ -114,7 +122,9 @@ void initStaticModuleBindings(PyObject* module) {
           });
   m.def(
        "_jit_to_static_module",
-       [](std::shared_ptr<torch::jit::Graph> g) { return StaticModule(g); })
+       [](std::shared_ptr<torch::jit::Graph> g) {
+         return StaticModule(std::move(g));
+       })
       .def(
           "_jit_to_static_module",
           [](const torch::jit::Module& module) { return StaticModule(module); })
@@ -126,14 +136,14 @@ void initStaticModuleBindings(PyObject* module) {
 
             Method method = module.get_method("forward");
             auto graph = method.graph();
-            fuseStaticSubgraphs(graph, min_size);
+            fuseStaticSubgraphs(std::move(graph), min_size);
           },
           py::arg("module"),
           py::arg("min_size") = DEFAULT_FUSION_SIZE)
       .def(
           "_fuse_to_static_module",
           [](std::shared_ptr<torch::jit::Graph> g, size_t min_size) {
-            fuseStaticSubgraphs(g, min_size);
+            fuseStaticSubgraphs(std::move(g), min_size);
           },
           py::arg("graph"),
           py::arg("min_size") = DEFAULT_FUSION_SIZE);

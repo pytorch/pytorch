@@ -6,6 +6,8 @@
 
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -102,19 +104,19 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   TORCH_API void visit(AddPtr v) override {
-    visit_binary_op(v);
+    visit_binary_op(std::move(v));
   }
   TORCH_API void visit(SubPtr v) override {
-    visit_binary_op(v);
+    visit_binary_op(std::move(v));
   }
   TORCH_API void visit(MulPtr v) override {
-    visit_binary_op(v);
+    visit_binary_op(std::move(v));
   }
   TORCH_API void visit(DivPtr v) override {
-    visit_binary_op(v);
+    visit_binary_op(std::move(v));
   }
   TORCH_API void visit(ModPtr v) override {
-    visit_binary_op(v);
+    visit_binary_op(std::move(v));
   }
   TORCH_API void visit(MaxPtr v) override {
     visit_binary_op(v, v->propagate_nans());
@@ -124,19 +126,19 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   TORCH_API void visit(AndPtr v) override {
-    visit_binary_op(v);
+    visit_binary_op(std::move(v));
   }
   TORCH_API void visit(OrPtr v) override {
-    visit_binary_op(v);
+    visit_binary_op(std::move(v));
   }
   TORCH_API void visit(XorPtr v) override {
-    visit_binary_op(v);
+    visit_binary_op(std::move(v));
   }
   TORCH_API void visit(LshiftPtr v) override {
-    visit_binary_op(v);
+    visit_binary_op(std::move(v));
   }
   TORCH_API void visit(RshiftPtr v) override {
-    visit_binary_op(v);
+    visit_binary_op(std::move(v));
   }
 
   void visit(CompareSelectPtr v) override {
@@ -1019,9 +1021,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     if (v->op_type() == kIsNan) {
       auto inp_dtype = v->params().at(0)->dtype().scalar_type();
       if (inp_dtype == ScalarType::Float) {
-        visit_intrinsics_helper<int, float>(v);
+        visit_intrinsics_helper<int, float>(std::move(v));
       } else if (inp_dtype == ScalarType::Double) {
-        visit_intrinsics_helper<int, double>(v);
+        visit_intrinsics_helper<int, double>(std::move(v));
       } else if (inp_dtype == ScalarType::Half) {
         throw unsupported_dtype(); // TODO
       } else if (inp_dtype == ScalarType::BFloat16) {
@@ -1295,7 +1297,7 @@ void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
 }
 
 void SimpleIREvaluator::bindVar(VarPtr v, ExprPtr e) {
-  impl_->bindVar(v, impl_->evaluateExpr(e));
+  impl_->bindVar(std::move(v), impl_->evaluateExpr(std::move(e)));
 }
 
 InterpValue SimpleIREvaluator::value() const {
@@ -1304,7 +1306,7 @@ InterpValue SimpleIREvaluator::value() const {
 
 c10::optional<int64_t> evalInt(ExprPtr e) {
   try {
-    return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(e)))
+    return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(std::move(e))))
         .value<int64_t>();
   } catch (std::runtime_error& err) {
     return c10::nullopt;

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/python_print.h>
 
 #include <algorithm>
+#include <utility>
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
@@ -1708,7 +1709,8 @@ c10::optional<std::string> printType(
   }
   auto namedType = type.cast<c10::NamedType>();
   if (namedType && namedType->name()) {
-    return type_name_uniquer.getUniqueName(namedType).qualifiedName();
+    return type_name_uniquer.getUniqueName(std::move(namedType))
+        .qualifiedName();
   }
   return c10::nullopt;
 }

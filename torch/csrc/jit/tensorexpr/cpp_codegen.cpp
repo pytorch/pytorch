@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
@@ -349,7 +350,7 @@ void CppPrinter::visit(LetPtr v) {
 
 void CppPrinter::visit(VarPtr v) {
   if (v->dtype().lanes() == 1) {
-    os() << name_manager()->get_unique_name(v);
+    os() << name_manager()->get_unique_name(std::move(v));
   } else {
     os() << *vector_vars_.at(v);
   }

@@ -190,7 +190,7 @@ int64_t registerFusion(const Node* fusion_group) {
   // runs some code under no-fusions mode and then runs some code with fusions
   // enabled, the second time around the returned spec from the cache should
   // be a valid spec (must have had upfrontCompilation run on it).
-  const auto key = store(graph);
+  const auto key = store(std::move(graph));
   const auto maybe_retrieved_spec = retrieve(key);
   AT_ASSERT(maybe_retrieved_spec);
   upfrontCompilation(**maybe_retrieved_spec);
@@ -288,11 +288,11 @@ std::shared_ptr<FusedKernel> compileKernel(
   return kernel_ctor(
       device.index(),
       name,
-      code,
+      std::move(code),
       input_desc,
-      output_desc,
-      chunk_desc,
-      concat_desc,
+      std::move(output_desc),
+      std::move(chunk_desc),
+      std::move(concat_desc),
       spec.hasRandom());
 }
 

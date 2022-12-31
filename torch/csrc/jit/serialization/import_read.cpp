@@ -1,6 +1,8 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -49,7 +51,7 @@ IValue readArchiveAndTensors(
       device,
       false,
       type_parser,
-      storage_context);
+      std::move(storage_context));
   unpickler.set_version(stream_reader.version());
   return unpickler.parse_ivalue();
 }

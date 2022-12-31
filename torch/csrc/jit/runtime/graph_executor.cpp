@@ -657,7 +657,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     if (!fallback) {
       auto graph_ = graph->copy();
       runRequiredPasses(graph_);
-      fallback = ExecutionPlan(graph_, function_name_);
+      fallback = ExecutionPlan(std::move(graph_), function_name_);
     }
     return fallback;
   }
@@ -771,7 +771,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     // Make sure there are no leftovers from any passes.
     EliminateDeadCode(opt_graph);
     GRAPH_DUMP("After compileSpec optimizations:", opt_graph);
-    return ExecutionPlan(opt_graph, function_name_);
+    return ExecutionPlan(std::move(opt_graph), function_name_);
   }
 
   ~GraphExecutorImpl() override = default;

@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace c10 {
@@ -195,7 +196,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
   }
   PyTorchStreamReader reader(std::move(rai));
   auto bytecode_values = get_bytecode_ivalues(reader);
-  return _get_model_ops_and_info(bytecode_values);
+  return _get_model_ops_and_info(std::move(bytecode_values));
 }
 
 /* A function to retrieve the root (top level) operators of a model and their
@@ -343,7 +344,10 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
       _get_mobile_model_contained_types(bytecode_values);
   uint64_t operator_version = _get_model_operator_version(reader);
   return ModelCompatibilityInfo{
-      model_bytecode_version, model_info, type_table, operator_version};
+      model_bytecode_version,
+      std::move(model_info),
+      std::move(type_table),
+      operator_version};
 }
 
 ModelCompatCheckResult is_compatible(

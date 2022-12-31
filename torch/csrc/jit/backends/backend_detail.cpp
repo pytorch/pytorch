@@ -10,6 +10,7 @@
 #include <memory>
 #include <stack>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -156,7 +157,7 @@ Module codegen_backend_module(
   TORCH_INTERNAL_ASSERT(cls);
   c10::intrusive_ptr<torch::CustomClassHolder> backend;
   loweredModule.register_attribute(
-      "__backend", cls, IValue::make_capsule(backend));
+      "__backend", std::move(cls), IValue::make_capsule(std::move(backend)));
 
   // This is the list of opaque backend handles returned by
   // backend.compile.
@@ -214,8 +215,8 @@ Module codegen_backend_module(
   TORCH_CHECK(debug_info_cls, "BackendDebugInfo class must be available.");
   loweredModule.register_attribute(
       "__backend_debug_info",
-      OptionalType::create(debug_info_cls),
-      IValue::make_capsule(backend_debug_info_class));
+      OptionalType::create(std::move(debug_info_cls)),
+      IValue::make_capsule(std::move(backend_debug_info_class)));
   static const auto create_backend_debug_info_ct = at::jit::CodeTemplate(R"(
             def __create_backend_debug_info(self):
                 self.__backend_debug_info = $backend_debug_info()

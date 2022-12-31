@@ -12,6 +12,7 @@
 
 #include <fmt/format.h>
 #include <stdexcept>
+#include <utility>
 
 using at::Scalar;
 using at::Tensor;
@@ -162,8 +163,8 @@ void prepare_and_call_rpc_op(
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
-    stack.emplace_back(
-        c10::static_intrusive_pointer_cast<c10::RRefInterface>(rrefPtr));
+    stack.emplace_back(c10::static_intrusive_pointer_cast<c10::RRefInterface>(
+        std::move(rrefPtr)));
   } else {
     throw std::runtime_error(
         c10::str(rpc_op, "() is not supported in TorchScript!'"));
@@ -180,11 +181,12 @@ RegisterOperators reg_rpc_ops(
            auto rref = pop(stack).toRRef();
            IValue res;
            if (rref->isOwner()) {
-             res =
-                 c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
-                     ->getValue();
+             res = c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(
+                       std::move(rref))
+                       ->getValue();
            } else {
-             res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
+             res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(
+                       std::move(rref))
                        ->toHere(timeout);
            }
            push(stack, std::move(res));
@@ -197,9 +199,9 @@ RegisterOperators reg_rpc_ops(
            TORCH_CHECK(
                rref->isOwner(),
                "Can't call RRef.local_value() on a non-owner RRef.");
-           IValue res =
-               c10::static_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
-                   ->getValue();
+           IValue res = c10::static_intrusive_pointer_cast<dist_rpc::OwnerRRef>(
+                            std::move(rref))
+                            ->getValue();
            push(stack, std::move(res));
          },
          aliasAnalysisFromSchema()),

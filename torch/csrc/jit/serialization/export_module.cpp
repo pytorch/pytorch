@@ -36,6 +36,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -247,10 +248,10 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto register_size = static_cast<int>(mobile_code.register_size_);
 
   auto codeTable = Table(
-      {{"instructions", to_tuple(instructions)},
-       {"operators", to_tuple(operators)},
+      {{"instructions", to_tuple(std::move(instructions))},
+       {"operators", to_tuple(std::move(operators))},
        {"constants", to_tuple(mobile_code.constants_)},
-       {"types", to_tuple(types)},
+       {"types", to_tuple(std::move(types))},
        {"register_size", register_size}});
 
   // schema
@@ -258,7 +259,8 @@ std::pair<IValue, IValue> getFunctionTuple(
   auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
     auto namedType = t.cast<c10::NamedType>();
     if (namedType && namedType->name()) {
-      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+      return type_name_uniquer_.getUniqueName(std::move(namedType))
+          .qualifiedName();
     }
     return c10::nullopt;
   };
@@ -293,7 +295,7 @@ std::pair<IValue, IValue> getFunctionTuple(
           {"default_value", arg.default_value()},
       }));
     }
-    return to_tuple(argTables);
+    return to_tuple(std::move(argTables));
   };
   auto schemaTable = Table({
       {"arguments", makeArgTuple(schema.arguments())},
@@ -312,7 +314,8 @@ std::pair<IValue, IValue> getFunctionTuple(
   } else {
     qn = func.qualname().qualifiedName();
   }
-  auto bytecode_vals = to_tuple({qn, codeTable, schemaTable});
+  auto bytecode_vals =
+      to_tuple({qn, std::move(codeTable), std::move(schemaTable)});
 
   c10::optional<IValue> debug_info_vals;
   // module debug info
@@ -325,7 +328,7 @@ std::pair<IValue, IValue> getFunctionTuple(
       c10::ivalue::Tuple::create(mobile_code.debug_handles_);
   auto function_debug_info =
       Table({{"function_debug_handles", module_debug_tuple}});
-  debug_info_vals = to_tuple({qn, function_debug_info});
+  debug_info_vals = to_tuple({std::move(qn), std::move(function_debug_info)});
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
@@ -468,7 +471,7 @@ void ScriptModuleSerializer::serialize(
       constant_table_.begin(), constant_table_.end());
   if (bytecode_format) {
     writeArchive(
-        c10::ivalue::Tuple::create(ivalue_constants),
+        c10::ivalue::Tuple::create(std::move(ivalue_constants)),
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
@@ -477,7 +480,7 @@ void ScriptModuleSerializer::serialize(
     writeByteCode(module, save_mobile_debug_info);
   } else {
     writeArchive(
-        c10::ivalue::Tuple::create(ivalue_constants),
+        c10::ivalue::Tuple::create(std::move(ivalue_constants)),
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/");
@@ -754,7 +757,8 @@ c10::optional<std::string> type_printer(
   }
   auto namedType = type.cast<c10::NamedType>();
   if (namedType && namedType->name()) {
-    return type_name_uniquer.getUniqueName(namedType).qualifiedName();
+    return type_name_uniquer.getUniqueName(std::move(namedType))
+        .qualifiedName();
   }
   return c10::nullopt;
 }
@@ -805,7 +809,7 @@ void ScriptModuleSerializer::serialize_unified_format(
   std::vector<IValue> ivalue_constants(
       constant_table_.begin(), constant_table_.end());
   writeArchive(
-      c10::ivalue::Tuple::create(ivalue_constants),
+      c10::ivalue::Tuple::create(std::move(ivalue_constants)),
       "constants",
       archive_dir,
       /*tensor_dir=*/".data/",

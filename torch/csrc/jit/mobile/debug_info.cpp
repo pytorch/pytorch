@@ -9,6 +9,8 @@
 
 #include <c10/util/string_view.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -33,7 +35,7 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
   std::string module_info;
   if (!callstack_ptr) {
     // If not cs then top level node
-    entries.emplace_back(StackEntry{prev_function_name, range});
+    entries.emplace_back(StackEntry{std::move(prev_function_name), range});
     return {std::move(entries), std::move(module_info)};
   } else {
     while (callstack_ptr) {
@@ -54,8 +56,8 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
         module_info.append(".UNKNOWN_INSTANCE(UNKNOWN_TYPE)");
       }
       // Now add source range info to stack
-      entries.emplace_back(
-          StackEntry{prev_function_name, callstack_ptr->source_range()});
+      entries.emplace_back(StackEntry{
+          std::move(prev_function_name), callstack_ptr->source_range()});
       prev_function_name = callstack_ptr->function_name();
       // Function name appended here
       // It is renamed to prev_function_name because for StackEntry
@@ -69,7 +71,7 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
         callstack_ptr = c10::intrusive_ptr<InlinedCallStack>();
       }
     }
-    entries.emplace_back(StackEntry{prev_function_name, range});
+    entries.emplace_back(StackEntry{std::move(prev_function_name), range});
     return {std::move(entries), std::move(module_info)};
   }
 }

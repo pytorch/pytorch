@@ -170,7 +170,7 @@ class BinaryOpNode : public ExprNode<Op> {
     if (expr->dtype() == dst_dtype) {
       return expr;
     }
-    return Cast::make(dst_dtype, ExprHandle(expr)).node();
+    return Cast::make(dst_dtype, ExprHandle(std::move(expr))).node();
   }
 
   ExprPtr lhs_;

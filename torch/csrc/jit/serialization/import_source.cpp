@@ -8,6 +8,7 @@
 #include <torch/custom_class.h>
 
 #include <regex>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -590,7 +591,7 @@ void SourceImporterImpl::importClass(
   }
 
   cu_->register_type(class_type);
-  const auto self = SimpleSelf(class_type);
+  const auto self = SimpleSelf(std::move(class_type));
   // TODO (this will include the version number later)
   cu_->define(
       qualified_classname,

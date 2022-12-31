@@ -1,4 +1,5 @@
 #include <stack>
+#include <utility>
 
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -71,13 +72,14 @@ void hoistConvPackedParams(
   }
 
   // copy the packed params
-  rootModule.register_attribute(newName, packedParams.type(), packedParams);
+  rootModule.register_attribute(
+      newName, packedParams.type(), std::move(packedParams));
 
   // change target module to rootModule
   getConvPackedParamsNode->replaceInput(0, rootModuleAsValue);
 
   // change attribute name to new name
-  getConvPackedParamsNode->s_(Symbol::attr("name"), newName);
+  getConvPackedParamsNode->s_(Symbol::attr("name"), std::move(newName));
 }
 
 void HoistConvPackedParams(script::Module& m) {

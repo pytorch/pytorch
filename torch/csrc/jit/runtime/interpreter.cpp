@@ -798,7 +798,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         python_class_name = jit_exception->getPythonClassName();
       }
       handleError(
-          e, (bool)jit_exception, not_implemented_error, python_class_name);
+          e,
+          (bool)jit_exception,
+          not_implemented_error,
+          std::move(python_class_name));
       return false;
     }
   }
@@ -830,7 +833,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
       // save the original exception's message when creating a new JITException
-      throw JITException(ss.str(), python_class_name, e.what());
+      throw JITException(ss.str(), std::move(python_class_name), e.what());
     } else if (not_implemented_error) {
       throw c10::NotImplementedError(
           ss.str(),
@@ -979,7 +982,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       Node* node = frame.function->instructions_source_[pc];
       if (node->callstack()) {
         for (const auto& p : (*node->callstack())->vec()) {
-          entries.emplace_back(StackEntry{previous_fn_name, std::get<1>(p)});
+          entries.emplace_back(
+              StackEntry{std::move(previous_fn_name), std::get<1>(p)});
           previous_fn_name = std::get<0>(p)->name();
         }
       }

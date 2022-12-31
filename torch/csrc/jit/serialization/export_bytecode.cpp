@@ -289,10 +289,10 @@ IValue convertMobileFunctionToCodeTable(
 
   auto register_size = static_cast<int>(code.register_size_);
   auto codeTable = Table(
-      {{"instructions", to_tuple(instructions)},
-       {"operators", to_tuple(operators)},
+      {{"instructions", to_tuple(std::move(instructions))},
+       {"operators", to_tuple(std::move(operators))},
        {"constants", to_tuple(code.constants_)},
-       {"types", to_tuple(types)},
+       {"types", to_tuple(std::move(types))},
        {"register_size", register_size}});
 
   return codeTable;
@@ -387,7 +387,7 @@ mobile::Module jitModuleToMobile(
     mcu->register_function(std::move(mobile_func));
   }
 
-  mobile::Module m(module._ivalue(), mcu);
+  mobile::Module m(module._ivalue(), std::move(mcu));
   m.setHasDebugHandles(true);
   BackendDebugInfoMapType backend_debug_info_map;
   getBackendDebugInfoMap(module, backend_debug_info_map);

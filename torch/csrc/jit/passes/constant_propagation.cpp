@@ -15,6 +15,8 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -41,7 +43,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     case prim::TupleConstruct: {
       auto tt = n->output()->type()->expect<TupleType>();
       if (tt->name()) {
-        namedTupleConstruct(stack, tt, n->inputs().size());
+        namedTupleConstruct(stack, std::move(tt), n->inputs().size());
       } else {
         tupleConstruct(stack, n->inputs().size());
       }

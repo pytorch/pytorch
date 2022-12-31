@@ -1,5 +1,7 @@
 #include <ATen/ScalarOps.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
+
+#include <utility>
 namespace torch {
 namespace jit {
 
@@ -29,7 +31,7 @@ void raiseExceptionWithMessage(Stack& stack) {
   std::string message;
   pop(stack, message);
 
-  throw JITException(message, qualified_class_name);
+  throw JITException(message, std::move(qualified_class_name));
 }
 
 void is(Stack& stack) {
@@ -112,7 +114,9 @@ void toPrimDType(Stack& stack) {
       pop(stack).toOptional<at::ScalarType>();
   c10::optional<c10::Device> device = c10::nullopt;
   at::Tensor self = pop(stack).toTensor();
-  push(stack, to_dispatch(self, device, scalarType, non_blocking, copy));
+  push(
+      stack,
+      to_dispatch(std::move(self), device, scalarType, non_blocking, copy));
 }
 
 void dim(Stack& stack) {
@@ -192,7 +196,14 @@ void toList(Stack& stack) {
   size_t element_size = t.element_size();
   char* data = static_cast<char*>(t.data_ptr());
   auto result = tensorToListRecursive(
-      data, 0, dim, out_ty, t.scalar_type(), sizes, strides, element_size);
+      data,
+      0,
+      dim,
+      std::move(out_ty),
+      t.scalar_type(),
+      sizes,
+      strides,
+      element_size);
   push(stack, std::move(result));
 }
 

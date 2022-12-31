@@ -176,7 +176,13 @@ std::vector<at::Tensor> constructTensors(
     std::vector<std::pair<size_t, QIData>> qdata) {
   c10::optional<std::vector<std::pair<size_t, QIData>>> opt = std::move(qdata);
   return constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, opt);
+      bufs_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      std::move(opt));
 }
 
 std::vector<at::Tensor> constructTensors2(
@@ -293,7 +299,7 @@ std::vector<at::Tensor> constructTensors2(
       buf_dims,
       buf_strides,
       buf_dtypes,
-      opt,
+      std::move(opt),
       bufs_out_num);
 }
 
@@ -964,7 +970,13 @@ void nnc_aten_quantized_cat(
     qdata.emplace_back(i + 1u, QIData{qscale, qzero, qdtype});
   }
   auto tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, qdata);
+      bufs_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      std::move(qdata));
   const int64_t dim = extra_args[3 * in_bufs_num + 0];
   auto qxs = c10::List<at::Tensor>(
       std::vector<at::Tensor>(tensors.begin() + 1, tensors.end()));
@@ -996,7 +1008,13 @@ void nnc_aten_upsample_nearest2d(
           at::toQIntType(static_cast<c10::ScalarType>(x_qdtype))}}};
   }
   auto tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, qdata);
+      bufs_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      std::move(qdata));
   auto x = tensors[1];
 
   int64_t output_size_h = extra_args[3];
@@ -1045,7 +1063,7 @@ void nnc_aten_upsample_nearest2d_out(
       buf_dims,
       buf_strides,
       buf_dtypes,
-      qdata,
+      std::move(qdata),
       bufs_out_num);
   auto x = tensors[1];
 

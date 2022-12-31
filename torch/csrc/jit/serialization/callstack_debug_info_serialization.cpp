@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -54,7 +56,7 @@ c10::IValue InlinedCallStackSerializer::serialize(
   } else {
     elements.emplace_back("FunctionName_UNKNOWN");
   }
-  c10::IValue serialized_cs = c10::ivalue::Tuple::create(elements);
+  c10::IValue serialized_cs = c10::ivalue::Tuple::create(std::move(elements));
   serialized_inlined_callstack_[cs_ptr] = serialized_cs;
   return serialized_cs;
 }
@@ -77,8 +79,8 @@ c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
   }
   // Module instance info is serialized as
   // {type name, instance name}
-  serialized_module_instance_info_[key_val] =
-      c10::ivalue::Tuple::create({module_type_name, module_instance_name});
+  serialized_module_instance_info_[key_val] = c10::ivalue::Tuple::create(
+      {std::move(module_type_name), std::move(module_instance_name)});
   return serialized_module_instance_info_[key_val];
 }
 
@@ -161,7 +163,7 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
     cs_ptr = c10::make_intrusive<InlinedCallStack>(
         nullptr, source_range, module_instance_info);
   }
-  cs_ptr->set_function_name(function_name);
+  cs_ptr->set_function_name(std::move(function_name));
   cached_inlined_callstacks_[tup] = cs_ptr;
   // Invoking move constructor
   // It is not clear if copy-ellision can happen since
@@ -205,7 +207,7 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
     instance_name = instance_name + "(" + type_name + ")";
   }
   cached_module_instance_info_[tup] =
-      ModuleInstanceInfo(type_ptr, instance_name);
+      ModuleInstanceInfo(std::move(type_ptr), std::move(instance_name));
   return cached_module_instance_info_[tup];
 }
 

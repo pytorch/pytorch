@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -223,10 +225,10 @@ ExprHandle fast_log(const ExprHandle& v) {
   };
 
   auto t = FloatImm::make(0.2392828464508056640625);
-  t = mlaf(t, x2, 0.28518211841583251953125);
-  t = mlaf(t, x2, 0.400005877017974853515625);
-  t = mlaf(t, x2, 0.666666686534881591796875);
-  t = mlaf(t, x2, 2.0);
+  t = mlaf(std::move(t), x2, 0.28518211841583251953125);
+  t = mlaf(std::move(t), x2, 0.400005877017974853515625);
+  t = mlaf(std::move(t), x2, 0.666666686534881591796875);
+  t = mlaf(t, std::move(x2), 2.0);
   x = x * t + FloatImm::make(0.693147180559945286226764) * e;
 
   auto zero = FloatImm::make(0);
@@ -250,14 +252,14 @@ ExprHandle log_vml(const ExprHandle& v) {
   x = bitcast<float>(x) - 1.0f;
 
   auto t = FloatImm::make(-0.12891686f);
-  t = mlaf(x, t, 0.139844373f);
-  t = mlaf(x, t, -0.121842608f);
-  t = mlaf(x, t, 0.140058696f);
-  t = mlaf(x, t, -0.16680488f);
-  t = mlaf(x, t, 0.200104058f);
-  t = mlaf(x, t, -0.249997973f);
-  t = mlaf(x, t, 0.333332151f);
-  t = mlaf(x, t, -0.5f);
+  t = mlaf(x, std::move(t), 0.139844373f);
+  t = mlaf(x, std::move(t), -0.121842608f);
+  t = mlaf(x, std::move(t), 0.140058696f);
+  t = mlaf(x, std::move(t), -0.16680488f);
+  t = mlaf(x, std::move(t), 0.200104058f);
+  t = mlaf(x, std::move(t), -0.249997973f);
+  t = mlaf(x, std::move(t), 0.333332151f);
+  t = mlaf(x, std::move(t), -0.5f);
   t = x * t;
   t = x * t + x;
 
@@ -518,7 +520,7 @@ bool Buf::is_cont_with(int cur_dim, int adjacent_dim) const {
       return res;
 
     // For symbolic shape
-    auto mul_node = to<Mul>(cur_stride);
+    auto mul_node = to<Mul>(std::move(cur_stride));
     if (!mul_node) {
       return false;
     }

@@ -7,6 +7,8 @@
 
 #include <c10/core/CPUAllocator.h>
 
+#include <utility>
+
 
 namespace at { namespace native {
 
@@ -130,7 +132,7 @@ static inline void checkSetStorage(Tensor& result, Storage storage, T storage_of
                 "Attempted to set the storage of a tensor on device \"", result.storage().device(),
                 "\" to a storage on different device \"", storage.device(),
                 "\".  This is no longer allowed; the devices must match.");
-    result.unsafeGetTensorImpl()->set_storage_keep_dtype(storage);
+    result.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
   }
 
   // storageOffset

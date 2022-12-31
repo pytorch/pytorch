@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -395,7 +397,7 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
             ->output();
     // TODO this needs to go in `m`s compilation unit
     auto cu = std::make_shared<CompilationUnit>();
-    auto fn = cu->create_function(QualifiedName("anon"), graph);
+    auto fn = cu->create_function(QualifiedName("anon"), std::move(graph));
     auto ret = StrongFunctionPtr(std::move(cu), fn);
 
     std::vector<NamedValue> ctx_inputs = {close_context};
@@ -451,7 +453,7 @@ SugaredValuePtr SimpleValue::getitem(
     // type_hint.
     if (class_type->is_module() && type_hint) {
       auto res = g.insert(prim::ModuleContainerIndex, {val, idx}, {}, loc);
-      res->setType(type_hint);
+      res->setType(std::move(type_hint));
       return std::make_shared<SimpleValue>(res);
     }
 
@@ -755,7 +757,7 @@ std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
   auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
       enum_type_, it->first, it->second);
   return std::make_shared<SimpleValue>(
-      m.graph()->insertConstant(IValue(enum_holder), loc));
+      m.graph()->insertConstant(IValue(std::move(enum_holder)), loc));
 }
 
 SugaredValuePtr SugaredEnumClass::iter(

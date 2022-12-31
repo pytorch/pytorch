@@ -16,6 +16,7 @@
 #include <functional>
 #include <sstream>
 #include <tuple>
+#include <utility>
 
 namespace at {
 
@@ -481,7 +482,7 @@ inline Tensor sum_to(
     Tensor tensor,
     const c10::SymIntArrayRef shape,
     bool always_return_non_view = false) {
-  return _sum_to(tensor, shape, always_return_non_view);
+  return _sum_to(std::move(tensor), shape, always_return_non_view);
 }
 
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
@@ -490,7 +491,7 @@ inline Tensor sum_to(
     Tensor tensor,
     const IntArrayRef shape,
     bool always_return_non_view = false) {
-  return _sum_to(tensor, shape, always_return_non_view);
+  return _sum_to(std::move(tensor), shape, always_return_non_view);
 }
 
 static inline bool is_expandable_to(

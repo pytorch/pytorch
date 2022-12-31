@@ -18,6 +18,7 @@
 #endif
 
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -96,13 +97,13 @@ class ConcatLinearLayers {
         return constant_as<Tensor>(n->namedInput("weight")).value();
       });
       Tensor cat_weight = at::cat(weight_list, /*dim=*/0);
-      Value* cat_weight_value = graph_->insertConstant(cat_weight);
+      Value* cat_weight_value = graph_->insertConstant(std::move(cat_weight));
 
       auto bias_list = c10::fmap(compatible_layers, [](Node* n) {
         return constant_as<Tensor>(n->namedInput("bias")).value();
       });
       Tensor cat_bias = at::cat(bias_list, /*dim=*/0);
-      Value* cat_bias_value = graph_->insertConstant(cat_bias);
+      Value* cat_bias_value = graph_->insertConstant(std::move(cat_bias));
 
       auto tensor_input = base_node->inputs().at(0);
       std::vector<Value*> linear_in = {

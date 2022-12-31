@@ -462,7 +462,7 @@ void sort_op(Stack& stack) {
     } else {
       comparator = c10::getLessThanComparator(g_list.get(0));
     }
-    std::sort(g_list.begin(), g_list.end(), comparator);
+    std::sort(g_list.begin(), g_list.end(), std::move(comparator));
   }
 
   if (copy_return_list) {

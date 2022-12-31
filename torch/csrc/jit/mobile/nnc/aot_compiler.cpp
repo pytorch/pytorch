@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <fstream>
+#include <utility>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -176,7 +177,7 @@ std::unique_ptr<Function> compileMethod(
     out_spec.push_back(output);
   }
   func->set_output_specs(out_spec);
-  func->set_sym_shape_positions(findSymbolicShapePositions(kernel));
+  func->set_sym_shape_positions(findSymbolicShapePositions(std::move(kernel)));
 
   return func;
 }
@@ -210,10 +211,15 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     }
   }
   kernel = std::make_shared<tensorexpr::TensorExprKernel>(TensorExprKernel(
-      g, kernel_func_name, {}, symbolic_ind, false, symbolic_strides));
+      g,
+      kernel_func_name,
+      {},
+      symbolic_ind,
+      false,
+      std::move(symbolic_strides)));
 
   const std::string compiled_assembly = kernel->getCodeText();
-  auto func = compileMethod(kernel, method_name, sizes, types);
+  auto func = compileMethod(std::move(kernel), method_name, sizes, types);
   return std::make_pair(std::move(func), compiled_assembly);
 }
 
