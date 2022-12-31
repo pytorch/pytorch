@@ -217,7 +217,7 @@ class AliasDb {
   void analyzeImpl(Node* node);
   void analyzeIf(Node* node);
   void analyzeLoop(Node* node);
-  void analyzeSubgraph(Node* node, std::shared_ptr<Graph> subgraph);
+  void analyzeSubgraph(Node* node, const std::shared_ptr<Graph>& subgraph);
   void analyzeSubgraph(Node* node);
   void analyzeCreator(Node* node);
   void analyzeExtractor(Node* node);

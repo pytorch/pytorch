@@ -936,7 +936,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
           "Skipping setting following error on the Future since "
           "it is already marked completed (this is not necessarily "
           "an error):\n",
-          tryRetrieveErrorMessageInternal(eptr));
+          tryRetrieveErrorMessageInternal(std::move(eptr)));
       if (eptr_) {
         msg += c10::str(
             ", \nOriginal exception:\n",

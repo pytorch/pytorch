@@ -1741,7 +1741,7 @@ Node* Graph::createTuple(at::ArrayRef<Value*> values, TupleTypePtr tuple_type) {
   }
   auto n = create(prim::TupleConstruct, values);
 
-  n->output()->setType(tuple_type);
+  n->output()->setType(std::move(tuple_type));
   return n;
 }
 
@@ -1946,7 +1946,7 @@ Value* Graph::insertFunctionCall(
     const MatchedSchema& matched) {
   std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
-                           ->s_(attr::name, func_name)
+                           ->s_(attr::name, std::move(func_name))
                            ->output()
                            ->setType(FunctionType::create(callee));
   std::vector<Value*> inputs = {fn_constant};
@@ -2048,14 +2048,14 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    c10::optional<ModuleInstanceInfo> m_info);
+    const c10::optional<ModuleInstanceInfo>& m_info);
 
 void inlineCallStackOfBlock(
     Block* b,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    c10::optional<ModuleInstanceInfo> m_info) {
+    const c10::optional<ModuleInstanceInfo>& m_info) {
   for (auto n : b->nodes()) {
     inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
   }
@@ -2066,7 +2066,7 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    c10::optional<ModuleInstanceInfo> m_info) {
+    const c10::optional<ModuleInstanceInfo>& m_info) {
   auto new_node_cs = new_node->callstack();
 
   InlinedCallStack* raw_callstack_ptr =
@@ -2110,19 +2110,20 @@ std::vector<Value*> inlineCallTo(
     auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
     if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
       module_instance_info = c10::make_optional(ModuleInstanceInfo(
-          class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
+          std::move(class_type_ptr),
+          to_replace->input(0)->node()->s(attr::name)));
     } else if (
         to_replace->owningGraph()->inputs().size() > 0 &&
         to_replace->input(0) == to_replace->owningGraph()->inputs()[0]) {
       // This CallMethod must correspond to method of the same object
       // to which this graph belongs.
-      module_instance_info =
-          c10::make_optional(ModuleInstanceInfo(class_type_ptr, "SELF"));
+      module_instance_info = c10::make_optional(
+          ModuleInstanceInfo(std::move(class_type_ptr), "SELF"));
     } else {
       // Not sure if it is possible to come here ever.
       // TODO: Remove this else. Or add assert
-      module_instance_info = c10::make_optional(
-          ModuleInstanceInfo(class_type_ptr, "INSTANCE_NAME_UNKNOWN"));
+      module_instance_info = c10::make_optional(ModuleInstanceInfo(
+          std::move(class_type_ptr), "INSTANCE_NAME_UNKNOWN"));
     }
   }
 

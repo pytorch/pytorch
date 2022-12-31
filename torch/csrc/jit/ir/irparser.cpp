@@ -14,6 +14,7 @@
 #endif
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -334,7 +335,7 @@ void IRParser::parseAttr(Node* n) {
         n->ival_(Symbol::attr(attrname), IValue(is));
         break;
       case AttributeKind::tys:
-        n->tys_(Symbol::attr(attrname), tys);
+        n->tys_(Symbol::attr(attrname), std::move(tys));
         break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
@@ -516,7 +517,7 @@ void IRParser::parseOperator(Block* b) {
         // TODO: support?
         if (!schema_return_type->hasFreeVariables() &&
             !v.type->isSubtypeOf(*schema_return_type)) {
-          throw ErrorReport(source_range)
+          throw ErrorReport(std::move(source_range))
               << "Annotated type " << v.type->repr_str()
               << " does not match schema type "
               << schema_return_type->repr_str() << " for operator " << *schema;
