@@ -40,6 +40,7 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     get_native_backend_config,
 )
+from torch.ao.quantization.observer import _is_activation_post_process
 from .graph_module import (
     QuantizedGraphModule,
     _is_observed_module,
@@ -62,7 +63,6 @@ from torch.ao.quantization.utils import (
 )
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
-    is_activation_post_process,
 )
 from torch.ao.quantization.stubs import DeQuantStub
 from .custom_config import (
@@ -574,7 +574,7 @@ def _maybe_get_observer_for_node(
     for maybe_obs_node, _ in node.users.items():
         if maybe_obs_node.op == 'call_module':
             maybe_obs = modules[str(maybe_obs_node.target)]
-            if is_activation_post_process(maybe_obs):
+            if _is_activation_post_process(maybe_obs):
                 return maybe_obs
     return None
 
@@ -647,7 +647,8 @@ def convert_weighted_module(
         modules: Dict[str, torch.nn.Module],
         observed_node_names: Set[str],
         node_name_to_qconfig: Dict[str, QConfigAny],
-        backend_config: BackendConfig):
+        backend_config: BackendConfig,
+        is_decomposed: bool = False):
     """ Convert a weighted module to reference quantized module in the model
     If the QConfig of a QAT module is not set, the module will still be converted to
     a float module.
@@ -703,7 +704,7 @@ def convert_weighted_module(
 
     # TODO: move this to the reference quantized module
     # weight_qparams or weight_qparams dict
-    wq_or_wq_dict = {}
+    wq_or_wq_dict = {"is_decomposed": is_decomposed}
     if isinstance(float_module, torch.nn.RNNCellBase):
         weight_post_process_ih = qconfig.weight()  # type: ignore[union-attr, operator]
         weight_post_process_hh = qconfig.weight()  # type: ignore[union-attr, operator]
@@ -711,10 +712,10 @@ def convert_weighted_module(
         weight_post_process_hh(float_module.weight_hh)
         weight_qparams_ih = get_qparam_dict(weight_post_process_ih)
         weight_qparams_hh = get_qparam_dict(weight_post_process_hh)
-        wq_or_wq_dict = {
+        wq_or_wq_dict.update({
             "weight_ih": weight_qparams_ih,
             "weight_hh": weight_qparams_hh,
-        }
+        })
     elif isinstance(float_module, torch.nn.LSTM):
         # format for wq_or_wq_dict (flattened attributes):
         # {"weight_ih_l0_scale": ..., "weight_ih_l0_qscheme": ..., ...}
@@ -735,7 +736,7 @@ def convert_weighted_module(
         # In the future, we should require the user to calibrate the model after calling prepare
         # Issue: https://github.com/pytorch/pytorch/issues/73941
         weight_post_process(float_module.weight)  # type: ignore[operator]
-        wq_or_wq_dict = get_qparam_dict(weight_post_process)
+        wq_or_wq_dict.update(get_qparam_dict(weight_post_process))
 
     # We use the same reference module for all modes of quantization: static, dynamic, weight_only
     # root_module_to_quantized_reference_module: module mapping from root (floating point) module class
@@ -1002,7 +1003,7 @@ def convert(
         elif node.op == "call_module":
             mod = _get_module(node, modules)
             assert mod is not None
-            if is_activation_post_process(mod):
+            if _is_activation_post_process(mod):
                 observed_node = node.args[0]
                 if observed_node in statically_quantized_custom_module_nodes:
                     _replace_observer_or_dequant_stub_with_dequantize_node(node, model.graph)
@@ -1030,7 +1031,7 @@ def convert(
                    type_before_parametrizations(mod[0]) not in root_module_classes:  # type: ignore[index]
                     continue
                 convert_weighted_module(
-                    node, modules, observed_node_names, node_name_to_qconfig, backend_config)
+                    node, modules, observed_node_names, node_name_to_qconfig, backend_config, is_decomposed)
             elif type_before_parametrizations(mod) in custom_module_classes:
                 convert_custom_module(
                     node, model.graph, modules, custom_module_class_mapping,

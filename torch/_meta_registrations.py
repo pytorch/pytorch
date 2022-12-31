@@ -1654,12 +1654,12 @@ def meta_select(self, dim, index):
 
 @register_meta(aten.select_scatter.default)
 def meta_select_scatter(self, src, dim, index):
-    return torch.empty_like(self)
+    return utils.clone_preserve_strides(self)
 
 
 @register_meta(aten.slice_scatter.default)
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
-    return torch.empty_like(self)
+    return utils.clone_preserve_strides(self)
 
 
 # TODO: Deduplicate this with canonicalize_dim
@@ -2012,9 +2012,191 @@ def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
     return self
 
 
+def multiply_integers(vs):
+    r = 1
+    for v in vs:
+        r *= v
+    return r
+
+
+def upsample_common_check(input_size, output_size, num_spatial_dims):
+    check(
+        len(output_size) == num_spatial_dims,
+        lambda: f"It is expected output_size equals to {num_spatial_dims}, but got size {len(output_size)}",
+    )
+    expected_input_dims = num_spatial_dims + 2  # N, C, ...
+    check(
+        len(input_size) == expected_input_dims,
+        lambda: f"It is expected input_size equals to {expected_input_dims}, but got size {len(input_size)}",
+    )
+
+    check(
+        all([s > 0 for s in input_size[2:]]) and all([s > 0 for s in output_size]),
+        lambda: f"Input and output sizes should be greater than 0, but got "
+        f"input size {input_size} and output size {output_size}",
+    )
+
+    nbatch, channels = input_size[:2]
+    return (nbatch, channels, *output_size)
+
+
+@register_meta(aten.upsample_nearest1d.default)
+def upsample_nearest1d(input, output_size, scales=None):
+    check(
+        input.numel() != 0 or multiply_integers(input.size()[1:]),
+        lambda: "Non-empty 3D data tensor expected but got a tensor with sizes {input.size()}",
+    )
+    full_output_size = upsample_common_check(
+        input.size(), output_size, num_spatial_dims=1
+    )
+    return input.new_empty(full_output_size).to(
+        memory_format=utils.suggest_memory_format(input)
+    )
+
+
+@register_meta(aten.upsample_nearest2d.default)
+def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
+    check(
+        input.numel() != 0 or multiply_integers(input.size()[1:]),
+        lambda: "Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
+    )
+    full_output_size = upsample_common_check(
+        input.size(), output_size, num_spatial_dims=2
+    )
+    output = input.new_empty(full_output_size)
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(input)
+
+    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
+    _, n_channels, _, _ = input.shape
+    if input.device.type == "cuda" and n_channels < 4:
+        memory_format = torch.contiguous_format
+
+    output = output.contiguous(memory_format=memory_format)
+
+    return output
+
+
+@register_meta(aten.upsample_nearest3d.default)
+def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_w=None):
+    check(
+        input.numel() != 0 or multiply_integers(input.size()[1:]),
+        lambda: "Non-empty 5D data tensor expected but got a tensor with sizes {input.size()}",
+    )
+    full_output_size = upsample_common_check(
+        input.size(), output_size, num_spatial_dims=3
+    )
+    return input.new_empty(full_output_size).to(
+        memory_format=utils.suggest_memory_format(input)
+    )
+
+
 @register_meta([aten.sort.default, aten.sort.stable])
 def meta_sort(self, stable=None, dim=-1, descending=False):
     return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+
+
+def rnn_cell_checkSizes(
+    input_gates, hidden_gates, input_bias, hidden_bias, factor, prev_hidden
+):
+    check(input_gates.ndim == 2, lambda: f"{input_gates.ndim} != 2")
+    check(
+        input_gates.shape == hidden_gates.shape,
+        lambda: f"{input_gates.shape} != {hidden_gates.shape}",
+    )
+    gates_size = input_gates.size(1)
+    if input_bias is not None:
+        check(input_bias.ndim == 1, lambda: f"{input_bias.ndim} != 1")
+        check(
+            input_bias.numel() == gates_size,
+            lambda: f"{input_bias.numel()} != {gates_size}",
+        )
+        check(
+            input_bias.shape == hidden_bias.shape,
+            lambda: f"{input_bias.shape} != {hidden_bias.shape}",
+        )
+    check(prev_hidden.ndim == 2, lambda: f"{prev_hidden.ndim} != 2")
+    expected_prev_hidden_numel = input_gates.size(0) * gates_size // factor
+    check(
+        prev_hidden.numel() == expected_prev_hidden_numel,
+        lambda: f"{prev_hidden.numel()} != {input_gates.size(0)} * {gates_size} // {factor} (aka {expected_prev_hidden_numel})",
+    )
+    check(
+        all(
+            x.device == input_gates.device
+            for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
+        ),
+        lambda: "expected all inputs to be same device",
+    )
+
+
+@register_meta(aten._thnn_fused_lstm_cell.default)
+def _thnn_fused_lstm_cell_meta(
+    input_gates, hidden_gates, cx, input_bias=None, hidden_bias=None
+):
+    rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, 4, cx)
+    workspace = torch.empty_like(input_gates, memory_format=torch.contiguous_format)
+    hy = torch.empty_like(cx, memory_format=torch.contiguous_format)
+    cy = torch.empty_like(cx, memory_format=torch.contiguous_format)
+    return (hy, cy, workspace)
+
+
+@register_meta(aten._cudnn_rnn.default)
+def _cudnn_rnn(
+    input,
+    weight,
+    weight_stride0,
+    weight_buf,
+    hx,
+    cx,
+    mode,
+    hidden_size,
+    proj_size,
+    num_layers,
+    batch_first,
+    dropout,
+    train,
+    bidirectional,
+    batch_sizes,
+    dropout_state,
+):
+
+    is_input_packed = len(batch_sizes) != 0
+    if is_input_packed:
+        seq_length = len(batch_sizes)
+        mini_batch = batch_sizes[0]
+        batch_sizes_sum = input.shape[0]
+    else:
+        seq_length = input.shape[1] if batch_first else input.shape[0]
+        mini_batch = input.shape[0] if batch_first else input.shape[1]
+        batch_sizes_sum = -1
+
+    num_directions = 2 if bidirectional else 1
+    out_size = proj_size if proj_size != 0 else hidden_size
+    if is_input_packed:
+        out_shape = [batch_sizes_sum, out_size * num_directions]
+    else:
+        out_shape = (
+            [mini_batch, seq_length, out_size * num_directions]
+            if batch_first
+            else [seq_length, mini_batch, out_size * num_directions]
+        )
+    output = input.new_empty(out_shape)
+
+    cell_shape = [num_layers * num_directions, mini_batch, hidden_size]
+    if cx is None:
+        cy = torch.empty(0, device=input.device)
+    else:
+        cy = cx.new_empty(cell_shape)
+
+    hy = hx.new_empty([num_layers * num_directions, mini_batch, out_size])
+
+    # TODO: Query cudnnGetRNNTrainingReserveSize (expose to python)
+    reserve_shape = 0 if train else 0
+    reserve = input.new_empty(reserve_shape, dtype=torch.uint8)
+
+    return output, hy, cy, reserve, weight_buf
 
 
 def zero_numel_check_dims(self, dim, fn_name):
@@ -2074,6 +2256,38 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     if len(topKSize) > 0:
         topKSize[dim] = k
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
+
+
+legacy_contiguous_memory_format = torch.contiguous_format
+
+
+# From aten/src/ATen/native/cuda/RNN.cu
+def checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace):
+    defined_grad = grad_hy if grad_hy is not None else grad_cy
+    check(defined_grad.dim() == 2, lambda: "")
+    exp_size = defined_grad.size()
+    if grad_hy is not None:
+        check(grad_hy.size() == exp_size, lambda: "")
+    if grad_cy is not None:
+        check(grad_cy.size() == exp_size, lambda: "")
+    check(cx.size() == exp_size, lambda: "")
+    check(cy.size() == exp_size, lambda: "")
+    check(workspace.dim() == 2, lambda: "")
+    check(workspace.numel() == exp_size[0] * exp_size[1] * 4, lambda: "")
+
+
+# From aten/src/ATen/native/cuda/RNN.cu
+@register_meta(aten._thnn_fused_lstm_cell_backward_impl.default)
+def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has_bias):
+    if grad_hy is None and grad_cy is None:
+        return None, None, None
+    checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace)
+    grad_gates = torch.empty_like(
+        workspace, memory_format=legacy_contiguous_memory_format
+    )
+    grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
+    grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
+    return grad_gates, grad_cx, grad_bias
 
 
 # We must also trigger meta registrations from PrimTorch ref

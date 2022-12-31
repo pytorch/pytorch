@@ -2,6 +2,7 @@
 #include <ATen/native/group_norm.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/accumulate.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -83,6 +84,11 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
 
   TORCH_CHECK(X.is_contiguous(memory_format));
 
+  bool mixed_type = is_mixed_type(X, gamma, beta);
+  if (mixed_type) {
+    check_mixed_data_type(X, gamma, beta);
+  }
+
   Tensor Y = at::native::empty_like(
       X,
       c10::nullopt /* dtype */,
@@ -90,8 +96,9 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
       memory_format);
-  Tensor mean = at::empty({N, group}, X.options());
-  Tensor rstd = at::empty({N, group}, X.options());
+  const auto dtype = param_scalar_type(X, mixed_type);
+  Tensor mean = at::empty({N, group}, X.options().dtype(dtype));
+  Tensor rstd = at::empty({N, group}, X.options().dtype(dtype));
   GroupNormKernel(
       X.device().type(), X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
   return std::make_tuple(Y, mean, rstd);
@@ -113,6 +120,11 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
       at::borrow_from_optional_tensor(gamma_opt);
   const Tensor& gamma = *gamma_maybe_owned;
 
+  bool mixed_type = is_mixed_type(X, mean, rstd);
+  if (mixed_type) {
+    check_mixed_data_type(X, mean, rstd);
+  }
+
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
@@ -123,7 +135,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         c10::nullopt /* layout */,
         c10::nullopt /* device */,
         c10::nullopt /* pin_memory */,
-        at::MemoryFormat::Contiguous);
+        X.suggest_memory_format());
   }
   if (grad_input_mask[1]) {
     dgamma = at::native::empty_like(

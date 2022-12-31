@@ -111,6 +111,13 @@ class BaseSchedulerNode:
                 result[id(use.node)] = use
         self.users = list(result.values())
 
+    def set_last_usage(
+        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
+    ):
+        used_buffers = self.used_buffer_names()
+        used_buffers = {mutation_real_name.get(k, k) for k in used_buffers}
+        self.last_usage = used_buffers - future_used_buffers
+
     def get_aliases(self):
         return self.node.get_alias_names()
 
@@ -365,7 +372,7 @@ class SchedulerNode(BaseSchedulerNode):
     def mark_run(self):
         self.allocate()
 
-    def codegen(self, index_vars):
+    def ranges_from_index_vars(self, index_vars):
         sizes = self._sizes
         assert sum(map(len, sizes)) == sum(map(len, index_vars))
         var_ranges = dict(
@@ -374,6 +381,10 @@ class SchedulerNode(BaseSchedulerNode):
                 itertools.chain.from_iterable(sizes),
             )
         )
+        return var_ranges
+
+    def codegen(self, index_vars):
+        var_ranges = self.ranges_from_index_vars(index_vars)
         try:
             with V.set_ops_handler(
                 SimplifyIndexing(V.get_ops_handler(), var_ranges)
@@ -457,6 +468,19 @@ class FusedSchedulerNode(BaseSchedulerNode):
         return (
             f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
         )
+
+    def set_last_usage(
+        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
+    ):
+        # Set self.last_usage using the global information
+        # This will be used for inter-kernel optimisations
+        super().set_last_usage(future_used_buffers, mutation_real_name)
+        # Set self.last_usage on the snodes
+        # This will be used for optimisations within the kernel
+        future_used_buffers = set()
+        for node in reversed(self.snodes):
+            node.set_last_usage(future_used_buffers, mutation_real_name)
+            future_used_buffers.update(node.last_usage)
 
     @cache_on_self
     def used_buffer_names(self) -> Set[str]:
@@ -997,7 +1021,7 @@ class Scheduler:
 
     def compute_last_usage(self):
         """
-        Populate node.last_usage
+        Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
         """
 
         future_used_buffers = set()
@@ -1005,10 +1029,8 @@ class Scheduler:
             future_used_buffers.add(node_name)
 
         for node in reversed(self.nodes):
-            used_buffers = node.used_buffer_names()
-            used_buffers = {self.mutation_real_name.get(k, k) for k in used_buffers}
-            node.last_usage = used_buffers - future_used_buffers
-            future_used_buffers.update(used_buffers)
+            node.set_last_usage(future_used_buffers, self.mutation_real_name)
+            future_used_buffers.update(node.last_usage)
 
     def free_buffers(self):
         """Free any buffers that are no longer needed"""
@@ -1119,6 +1141,16 @@ class Scheduler:
                     or node.is_template()
                 ):
                     self.flush()
+                if device != self.current_device:
+                    if device.type == "cuda":
+                        if self.current_device and self.current_device.type == "cuda":
+                            V.graph.wrapper_code.codegen_cuda_device_guard_exit()
+                        assert device.index is not None, "device should have an index"
+                        V.graph.wrapper_code.codegen_cuda_device_guard_enter(
+                            device.index
+                        )
+                    elif self.current_device and self.current_device.type == "cuda":
+                        V.graph.wrapper_code.codegen_cuda_device_guard_exit()
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)

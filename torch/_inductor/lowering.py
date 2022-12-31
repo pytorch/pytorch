@@ -10,6 +10,7 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch import _prims_common
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -962,36 +963,6 @@ def register_onednn_fusion_ops():
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
             return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
 
-        @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
-        def convolution_transpose_unary(
-            x: TensorBox,
-            weight: TensorBox,
-            bias: TensorBox,
-            padding,
-            output_padding,
-            stride,
-            dilation,
-            groups,
-            attr,
-            scalars,
-            algorithm,
-        ):
-            return TensorBox.create(
-                ir.ConvolutionTransposeUnary.create(
-                    x,
-                    weight,
-                    bias,
-                    padding,
-                    output_padding,
-                    stride,
-                    dilation,
-                    groups,
-                    attr,
-                    scalars,
-                    algorithm,
-                )
-            )
-
         if torch._C.has_mkl:
 
             @register_lowering(torch.ops.mkl._mkl_linear)
@@ -1237,7 +1208,6 @@ make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_bilinear2d_backward, require_dense)
-
 
 add_layout_constraint(aten.convolution, constrain_to_fx_strides)
 
@@ -1883,6 +1853,7 @@ def index(x, indices):
     )
 
 
+# Note [Decompositions as Inductor Lowerings]
 # This is moved from decomposition to lowering because this decomp introduced
 # mutation in the graph, which is bad for Aot Autograd. Aot Autograd runs dead
 # code elimination and common subexpression elimination optimizations, which
@@ -1890,9 +1861,33 @@ def index(x, indices):
 # https://github.com/pytorch/torchdynamo/issues/1235.
 # Moving such reinplacing type of decomps to lowering ensures that AotAutograd
 # gets good graphs.
+# A better long term solution would be to functionalize all decompositions.
+# That would let us use these decompositions "normally",
+# instead of forcing them to be lowerings.
 @register_lowering([aten.index_put])
 def index_put(x, indices, values, accumulate=False):
     return index_put_(clone(x), indices, values, accumulate)
+
+
+# See Note [Decompositions as Inductor Lowerings]
+# We don't want the decomp to do type promotion implicitly;
+# It will try to convert index (int64) to a float-like type.
+@register_lowering([aten.index_add], type_promotion_kind=None)
+def index_add(x, dim, index, tensor, *, alpha=1):
+    return index_add_(clone(x), dim, index, tensor, alpha=alpha)
+
+
+# See Note [Decompositions as Inductor Lowerings]
+# We don't want the decomp to do type promotion implicitly;
+# It will try to convert index (int64) to a float-like type.
+@register_lowering([aten.index_add_], type_promotion_kind=None)
+def index_add_(x, dim, index, tensor, *, alpha=1):
+    dim = _prims_common.canonicalize_dims(len(x.get_size()), dim)
+    if alpha != 1:
+        tensor = mul(tensor, alpha)
+    idx = (None,) * dim + (index,)
+    index_put_(x, idx, tensor, accumulate=True)
+    return x
 
 
 def index_put_as_masked_fill(self, indices, value, accumulate):
@@ -3622,6 +3617,11 @@ register_pointwise(
 
 register_pointwise(
     aten.expm1,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+register_pointwise(
+    aten.tanh,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 

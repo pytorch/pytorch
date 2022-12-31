@@ -4,6 +4,12 @@ import sys
 # add some debug printouts
 debug = False
 
+# Whether to disable a progress bar for autotuning
+disable_progress = True
+
+# Whether to enable printing the source code for each future
+verbose_progress = False
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -92,9 +98,6 @@ dynamo_import = inductor_import.replace("inductor", "dynamo")
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
-
-# Pad input tensors in dimension N and M of bmm to leverage Tensor Cores in NVIDIA GPUs
-shape_padding_bmm = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING_BMM", "1") == "1"
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"

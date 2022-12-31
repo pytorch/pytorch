@@ -13,8 +13,12 @@ import traceback
 import collections
 import textwrap
 import logging
-from torch import SymInt, SymFloat
-from torch._guards import ShapeGuard
+
+# NB: The sym_* functions are used via getattr() and must be imported here.
+from torch import SymInt, SymFloat, sym_float, sym_int  # noqa: F401
+from torch._guards import ShapeGuard, Source
+
+log = logging.getLogger(__name__)
 
 try:
     import sympy  # type: ignore[import]
@@ -24,12 +28,11 @@ try:
 except ImportError:
     HAS_SYMPY = False
 
-aten = torch.ops.aten  # type: ignore[has-type]
+aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "sym_int", "sym_float", "FloorDiv", "guard_int", "wrap_node",
-    "sym_sqrt",
+    "SymDispatchMode", "FloorDiv", "guard_int", "wrap_node",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -101,34 +104,11 @@ def guard_int(a):
     assert isinstance(a, int)
     return a
 
-def sym_float(a):
-    if isinstance(a, SymFloat):
-        return a
-    elif hasattr(a, '__sym_float__'):
-        return a.__sym_float__()
-    return float(a)
-
 # Drop in replacement for math.sqrt
 def sym_sqrt(a):
     if hasattr(a, '__sym_sqrt__'):
         return a.__sym_sqrt__()
     return math.sqrt(a)
-
-# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
-# directly usable, but this has a more relaxed type signature for mypy
-# (mypy requires SupportFloat which is too strict)
-def sym_floor(a):
-    return math.floor(a)  # type: ignore[type]
-
-def sym_ceil(a):
-    return math.ceil(a)  # type: ignore[type]
-
-def sym_int(a):
-    if isinstance(a, SymInt):
-        return a
-    elif isinstance(a, SymFloat):
-        return sym_floor(a) if a > 0 else sym_ceil(a)
-    return int(a)
 
 def to_node(self, num):
     if isinstance(num, (SymInt, SymFloat)):
@@ -151,6 +131,9 @@ def fx_placeholder_vals(gm):
 # WILL check for duck sizing.
 def eval_guards(gm, *args):
     return gm.shape_env.evaluate_guards_for_args(fx_placeholder_vals(gm), args)
+
+def bind_symbols(gm, *args):
+    return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
 
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
@@ -201,11 +184,11 @@ class SymNode:
         return self.str()
 
     # These methods are metaprogrammed in below
-    def sym_int(self) -> "SymNode":
-        ...
+    def sym_int(self) -> "SymNode":  # noqa: F811
+        raise AssertionError("should have been overridden")
 
-    def sym_float(self) -> "SymNode":
-        ...
+    def sym_float(self) -> "SymNode":  # noqa: F811
+        raise AssertionError("should have been overridden")
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
@@ -338,7 +321,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr, other_expr)
         except Exception:
-            logging.warning(f"failed to eval {method}({expr}, {other_expr})")
+            log.warning(f"failed to eval {method}({expr}, {other_expr})")
             raise
         out = sympy.expand(out)
         pytype: Type
@@ -367,7 +350,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr)
         except Exception:
-            logging.warning(f"failed to eval {method}({expr})")
+            log.warning(f"failed to eval {method}({expr})")
             raise
         out = sympy.expand(out)
         pytype: Type
@@ -449,16 +432,16 @@ def _lru_cache(fn, maxsize=None):
 if HAS_SYMPY:
     # This stub exists so we can easily add metadata to sympy symbols
     # NB: This inherits from Dummy, not Symbol, because Symbols with the same
-    # name get interned.  This is bad for us as we want the metadata (snames)
+    # name get interned.  This is bad for us as we want the metadata
     # to vary across different invocations and not leak.
     class Symbol(sympy.Dummy):
-        __slots__: List[str] = ['snames', 'stack']
-        snames: List[str]
+        __slots__: List[str] = ['sources', 'stack']
+        sources: List[Source]
         stack: Optional[str]
 
         def __new__(cls, *args, **kwargs):
             self = super().__new__(cls, *args, **kwargs)
-            self.snames = []
+            self.sources = []
             self.stack = None
             return self
 
@@ -467,14 +450,19 @@ if HAS_SYMPY:
         def __init__(
             self,
             symbol_to_source,
+            source_ref,
         ):
             super().__init__()
             self.symbol_to_source = symbol_to_source
+            self.source_ref = source_ref
 
         def _print_Symbol(self, expr) -> str:
             assert isinstance(expr, Symbol), str(type(expr))
-            assert expr in self.symbol_to_source, f"{expr} (could be from {expr.snames}) not in {self.symbol_to_source}"
-            return self.symbol_to_source[expr][0]
+            assert expr in self.symbol_to_source, (
+                f"{expr} (could be from {[s.name() for s in expr.sources]}) "
+                f"not in {self.symbol_to_source}"
+            )
+            return self.source_ref(self.symbol_to_source[expr][0])
 
 
 
@@ -514,13 +502,19 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, *, sname: str):
+    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, source: Source):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-        size = [self.create_symbol(val, sname=f"{sname}.size({i})") for i, val in enumerate(ex.size())]
+        from torch._dynamo.source import TensorPropertySource, TensorProperty
+
+        size = [
+            self.create_symbol(
+                val, TensorPropertySource(source, TensorProperty.SIZE, i)
+            ) for i, val in enumerate(ex.size())
+        ]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
@@ -548,7 +542,10 @@ class ShapeEnv(object):
                         if stride[i] is None
                     ]
                 )
-                stride[i] = self.create_symbol(val, sname=f"{sname}.stride({i})")
+                stride[i] = self.create_symbol(
+                    val,
+                    TensorPropertySource(source, TensorProperty.STRIDE, i)
+                )
         assert all(x is not None for x in stride)
         sym_size = [self.create_symintnode(i) for i in size]
         sym_stride = []
@@ -557,7 +554,10 @@ class ShapeEnv(object):
             # we computed
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(stride_expr))
-        sym_storage_offset = self.create_symintnode(self.create_symbol(ex.storage_offset(), sname=f"{sname}.storage_offset()"))
+        sym_storage_offset = self.create_symintnode(self.create_symbol(
+            ex.storage_offset(),
+            TensorPropertySource(source, TensorProperty.STORAGE_OFFSET)
+        ))
         return sym_size, sym_stride, sym_storage_offset
 
     def create_symintnode(self, sym: "sympy.Expr"):
@@ -576,14 +576,15 @@ class ShapeEnv(object):
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
     # simplified
-    def create_symbol(self, val: int, *, sname: str) -> "sympy.Expr":
-        assert isinstance(sname, str), f"{type(sname)} {sname}"
+    def create_symbol(self, val: int, source: Source) -> "sympy.Expr":
+        assert isinstance(source, Source), f"{type(source)} {source}"
 
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
 
         if val < 0:
-            return -self.create_symbol(-val, sname=f"-{sname}")
+            from torch._dynamo.source import NegateSource
+            return -self.create_symbol(-val, NegateSource(source))
 
         # Now attempt to duck size this value
         # TODO: Use site has to duck size
@@ -599,7 +600,7 @@ class ShapeEnv(object):
         # the same symint
         r = self.duck_int(val)
         if isinstance(r, Symbol):
-            r.snames.append(sname)
+            r.sources.append(source)
         return r
 
     # Given a concrete integer value, return the duck sized symbol associated
@@ -623,7 +624,8 @@ class ShapeEnv(object):
     # on if the guards evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
-    def codegen_guards(self, placeholders, sources):
+    def codegen_guards(self, placeholders, sources,
+                       source_ref=lambda n: n.name()):
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -683,6 +685,8 @@ class ShapeEnv(object):
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
+        from torch._dynamo.source import NegateSource, TensorPropertySource, TensorProperty
+
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
         input_guards = []
@@ -707,21 +711,25 @@ class ShapeEnv(object):
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                 elif isinstance(-s, sympy.Symbol):
-                    symbol_to_source[-s].append(f"-{source}")
+                    symbol_to_source[-s].append(NegateSource(source))
 
                 input_guards.append((source, s))
             else:
                 input_guards.append((source, sympy.Integer(val)))
 
         for t, source in zip(placeholders, sources):
+            assert isinstance(source, Source)
             if t is None:
                 continue
-            # TODO: size(i)/stride(i) more efficient
+            if isinstance(t, SymInt):
+                track_symint(source, t)
+                continue
+            assert isinstance(t, torch.Tensor)
             for i, s in enumerate(t.size()):
-                track_symint(f"{source}.size()[{i}]", s)
+                track_symint(TensorPropertySource(source, TensorProperty.SIZE, i), s)
             for i, s in enumerate(t.stride()):
-                track_symint(f"{source}.stride()[{i}]", s)
-            track_symint(f"{source}.storage_offset()", t.storage_offset())
+                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s)
+            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
@@ -729,11 +737,15 @@ class ShapeEnv(object):
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
         for source, expr in input_guards:
-            sexpr = ShapeGuardPrinter(symbol_to_source).doprint(expr)
             # Small optimization
-            if source == sexpr:
+            if (
+                isinstance(expr, Symbol) and
+                expr in symbol_to_source and
+                source == symbol_to_source[expr][0]
+            ):
                 continue
-            exprs.append(f"{source} == {sexpr}")
+            sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
+            exprs.append(f"{source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
@@ -742,9 +754,9 @@ class ShapeEnv(object):
                 continue
             g = self.simplify(g)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
+                exprs.append(ShapeGuardPrinter(symbol_to_source, source_ref).doprint(g))
             except Exception:
-                logging.warning(f"Failing guard allocated at:\n{tb}")
+                log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
 
         # 3. Every symbol must not be equal to 0/1
@@ -752,7 +764,7 @@ class ShapeEnv(object):
             assert sources
             # We must assert that each symbol is not zero or one, as we make
             # negative inferences on shape variables
-            exprs.append(f"{sources[0]} != 0 and {sources[0]} != 1")
+            exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
         if exprs:
             return " and ".join(exprs)
@@ -760,12 +772,60 @@ class ShapeEnv(object):
             return "True"
 
     def evaluate_guards_for_args(self, placeholders, args):
+        from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        code = self.codegen_guards(placeholders, arg_names)
+        code = self.codegen_guards(placeholders, [GlobalSource(a) for a in arg_names])
         return eval(code, {}, dict(zip(arg_names, args)))
 
+    def bind_symbols(self, placeholders, args):
+        # Given a paired list of placeholders (fake tensors with
+        # symbolic sizes) and concrete arguments (regular tensors
+        # with real sizes), returns a dictionary mapping each
+        # symbol to its real value.  So for example, if you
+        # have a placeholder with size (s0, s1), binding
+        # (2, 4) to it will give you {s0: 2, s1: 4}.  This is
+        # not guaranteed to bind ALL symbols in the ShapeEnv;
+        # we can't bind a symbol if it doesn't occur in any placeholder,
+        # and symbols that already have replacements won't get bindings.
+
+        # This is a little duplicative with evaluate_guards but
+        # it's different enough that it seemed cleanest to make
+        # another copy.  This assumes the guards are already checked,
+        # though if it's cheap we'll check for shenanigans
+        bindings: Dict[sympy.Symbol, int] = {}
+
+        def bind_symint(arg, val):
+            if isinstance(val, SymInt):
+                s = val.node.expr
+
+                if isinstance(s, sympy.Symbol):
+                    if s in bindings:
+                        assert bindings[s] == arg, f"{bindings[s]} != {arg}"
+                    else:
+                        bindings[s] = arg
+                elif isinstance(-s, sympy.Symbol):
+                    if -s in bindings:
+                        assert bindings[-s] == -arg, f"{bindings[-s]} != {-arg}"
+                    else:
+                        bindings[-s] = -arg
+
+        for t, arg in zip(placeholders, args):
+            if t is None:
+                continue
+            if isinstance(t, SymInt):
+                bind_symint(arg, t)
+                continue
+            assert isinstance(t, torch.Tensor)
+            for i, s in enumerate(t.size()):
+                bind_symint(arg.size(i), s)
+            for i, s in enumerate(t.stride()):
+                bind_symint(arg.stride(i), s)
+            bind_symint(arg.storage_offset(), t.storage_offset())
+
+        return bindings
+
     def get_nontrivial_guards(self):
-        return [self.simplify(guard) for guard, _ in self.guards if self._maybe_evaluate_static(guard) is None]
+        return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard.expr) is None]
 
     def format_guards(self, verbose=False):
         def format_tb(tb):
@@ -773,7 +833,7 @@ class ShapeEnv(object):
                 return ""
             return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
 
-        return '\n'.join(f" - {guard}{format_tb(tb)}" for guard, tb in self.guards)
+        return '\n'.join(f" - {guard.expr}{format_tb(guard.stack)}" for guard in self.guards)
 
     def get_shape_groups(self):
         shape_groups = collections.defaultdict(list)
@@ -915,7 +975,7 @@ class ShapeEnv(object):
                     pass
             return
         except RecursionError:
-            raise RuntimeError(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+            log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):
@@ -947,5 +1007,6 @@ class ShapeEnv(object):
             elif concrete_val is sympy.false:
                 self.guards.append(ShapeGuard(sympy.Not(expr), stack))
             else:
-                self.guards.append(ShapeGuard(sympy.Eq(expr, concrete_val), stack))
+                self.guards.append(
+                    ShapeGuard(sympy.Eq(expr, concrete_val), stack))  # type: ignore[arg-type]
         return concrete_val

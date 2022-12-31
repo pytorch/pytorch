@@ -30,10 +30,12 @@ def _prepare_input_validate(
         func (Callable): Same input function with validation logic added.
 
     Example::
+        >>> # xdoctest: +SKIP(failing)
         >>> @_prepare_input_validate
         >>> def make_input_shard_1d(args, kwargs):
         >>>   ...
         >>>
+        >>> # xdoctest: +SKIP(failing)
         >>> input = torch.rand(...)
         >>> dtensor = make_input_shard_1d(input, device_mesh, 1)
         >>> # This will call '_prepare_input_validate' first
@@ -71,14 +73,18 @@ def _prepare_output_validate(
     Inject common validation logics for _prepare_output funcs via this
     decorator, including verifying that output needs to be a DTensor
     and only 1D Device Mesh is passed in.
+
     Example::
+        >>> # xdoctest: +SKIP(failing)
         >>> @_prepare_output_validate
         >>> def make_output_shard_1d(args, kwargs):
         >>>   ...
         >>>
+        >>> # xdoctest: +SKIP(failing)
         >>> dt = distribute(tensor, device_mesh, [Shard(0)])
         >>> make_output_shard_1d(dt, device_mesh, 1)
         >>> # This will call '_prepare_output_validate' first
+
     Args:
         _prepare_output_func (Callable): The func we want to inject the
             validation into.
