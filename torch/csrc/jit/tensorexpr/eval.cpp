@@ -311,7 +311,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       typename std::enable_if<std::is_same<
           decltype(detail::bin_op_deducer(std::declval<D>())),
           void>::value>::type* = nullptr>
-  void visit_binary_op(NodePtr<D> v, bool option = false) {
+  void visit_binary_op(const NodePtr<D>& v, bool option = false) {
     v->lhs()->accept(this);
     InterpValue lhs_v = value_;
     v->rhs()->accept(this);
@@ -1304,7 +1304,7 @@ InterpValue SimpleIREvaluator::value() const {
   return impl_->value();
 }
 
-c10::optional<int64_t> evalInt(ExprPtr e) {
+c10::optional<int64_t> evalInt(const ExprPtr& e) {
   try {
     return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(std::move(e))))
         .value<int64_t>();

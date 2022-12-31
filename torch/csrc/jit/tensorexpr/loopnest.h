@@ -49,7 +49,7 @@ class TORCH_API LoopNest {
   std::vector<ForPtr> getLoopStmtsFor(BufPtr) const;
   std::vector<ForPtr> getLoopStmtsFor(StmtPtr) const;
   StmtPtr getLoopBodyFor(const Tensor&) const;
-  StmtPtr getLoopBodyFor(BufPtr) const;
+  StmtPtr getLoopBodyFor(const BufPtr&) const;
 
   // Returns the For stmt indexed by 'indices' in the 'root' For stmt.
   //'indices' indicates the path to the returned loop from 'root' in AST, e.g.,
@@ -120,7 +120,7 @@ class TORCH_API LoopNest {
   // introduces new variables to avoid duplication.
   static StmtPtr sanitizeNames(StmtPtr s);
 
-  bool computeInline(StmtPtr s);
+  bool computeInline(const StmtPtr& s);
   bool computeInline(const BufPtr& b);
   void inlineIntermediateBufs(bool allow_duplicated_work);
 

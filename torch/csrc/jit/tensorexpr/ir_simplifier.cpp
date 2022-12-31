@@ -145,11 +145,11 @@ void Polynomial::sort() {
 }
 
 void MaxTerm::uniquefy() {
-  std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
+  std::sort(variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
     return hasher_.hash(std::move(a)) < hasher_.hash(std::move(b));
   });
   auto it = std::unique(
-      variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
+      variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
         return hasher_.hash(std::move(a)) == hasher_.hash(std::move(b));
       });
   variables_.resize(std::distance(variables_.begin(), it));
@@ -171,11 +171,11 @@ void MaxTerm::uniquefy() {
 }
 
 void MinTerm::uniquefy() {
-  std::sort(variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
+  std::sort(variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
     return hasher_.hash(std::move(a)) < hasher_.hash(std::move(b));
   });
   auto it = std::unique(
-      variables_.begin(), variables_.end(), [&](ExprPtr a, ExprPtr b) {
+      variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
         return hasher_.hash(std::move(a)) == hasher_.hash(std::move(b));
       });
   variables_.resize(std::distance(variables_.begin(), it));
@@ -2493,7 +2493,7 @@ BlockPtr TermExpander::fuseConditions(BlockPtr v) {
   return alloc<Block>(stmts);
 }
 
-StmtPtr TermExpander::fuseSyncThreads(BlockPtr block) {
+StmtPtr TermExpander::fuseSyncThreads(const BlockPtr& block) {
   // only really first if highest level Block.
   bool first = block->get_parent() == nullptr;
   SyncThreadsPtr last = nullptr;

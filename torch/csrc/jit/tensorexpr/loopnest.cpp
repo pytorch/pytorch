@@ -257,7 +257,7 @@ class Vectorizer : public IRMutator {
     }
 
     var_ = var;
-    start_ = immLike(std::move(start), *start_imm);
+    start_ = immLike(start, *start_imm);
     lanes_ = *stop_imm;
 
     StmtPtr new_body = body->accept_mutator(this);
@@ -944,7 +944,7 @@ bool LoopNest::computeInline(const BufPtr& b) {
   return true;
 }
 
-bool LoopNest::computeInline(StmtPtr s) {
+bool LoopNest::computeInline(const StmtPtr& s) {
   auto s_store = to<Store>(std::move(s));
   if (s_store == nullptr) {
     // Could not find buffer producer to inline
@@ -1249,7 +1249,7 @@ class IfThenElseReplacer : public IRCloner {
 //   * sets `compared_value` to `expr`, and
 //   * returns true.
 bool isConditionOptimizable(
-    ExprPtr condition,
+    const ExprPtr& condition,
     VarPtr* cond_var,
     ExprPtr* compared_value) {
   auto cs = to<CompareSelect>(std::move(condition));
@@ -2680,7 +2680,7 @@ StmtPtr LoopNest::getLoopBodyFor(const Tensor& t) const {
   return getLoopBodyFor(t.buf());
 }
 
-StmtPtr LoopNest::getLoopBodyFor(BufPtr buf) const {
+StmtPtr LoopNest::getLoopBodyFor(const BufPtr& buf) const {
   auto writes = WritesToBuf::find(root_stmt_, std::move(buf));
 
   // special case for reduction Tensors, ignore the initializer if it's the only

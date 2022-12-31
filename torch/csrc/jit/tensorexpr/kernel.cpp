@@ -1414,7 +1414,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
           if (size != 1) {
             auto stride = strides[stride_index];
             index = absolute_position /
-                ExprHandle(immLike(std::move(absolute_position), stride));
+                ExprHandle(immLike(absolute_position, stride));
             absolute_position = absolute_position %
                 ExprHandle(immLike(absolute_position, stride));
           }

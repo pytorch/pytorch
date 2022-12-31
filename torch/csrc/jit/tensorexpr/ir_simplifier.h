@@ -256,7 +256,7 @@ class Polynomial : public ExprNode<Polynomial> {
 
 class RoundOff : public BinaryOpNode<RoundOff> {
  public:
-  RoundOff(ExprPtr lhs, ExprPtr rhs)
+  RoundOff(const ExprPtr& lhs, const ExprPtr& rhs)
       : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kOther) {}
 };
 
@@ -539,7 +539,7 @@ class TORCH_API TermExpander : public PolynomialBase {
 
   // Override to enable condition fusing.
   BlockPtr fuseConditions(BlockPtr v);
-  StmtPtr fuseSyncThreads(BlockPtr block);
+  StmtPtr fuseSyncThreads(const BlockPtr& block);
   StmtPtr mutate(BlockPtr v) override;
 };
 
