@@ -162,8 +162,8 @@ class BinaryOpNode : public ExprNode<Op> {
             // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
             BinaryOpDtype(lhs_v->dtype(), rhs_v->dtype(), ret_type),
             expr_type),
-        lhs_(CastIfNeeded(lhs_v, ExprNode<Op>::dtype())),
-        rhs_(CastIfNeeded(rhs_v, ExprNode<Op>::dtype())) {}
+        lhs_(CastIfNeeded(std::move(lhs_v), ExprNode<Op>::dtype())),
+        rhs_(CastIfNeeded(std::move(rhs_v,) ExprNode<Op>::dtype())) {}
 
  private:
   static ExprPtr CastIfNeeded(ExprPtr expr, Dtype dst_dtype) {
@@ -442,9 +442,9 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
     return lanes_;
   }
 
-  Ramp(const ExprPtr& base, ExprPtr stride, int lanes)
+  Ramp(ExprPtr base, ExprPtr stride, int lanes)
       : ExprNodeBase(Dtype(base->dtype(), lanes)),
-        base_(base),
+        base_(std::move(base)),
         stride_(std::move(stride)),
         lanes_(lanes) {}
 
@@ -564,10 +564,10 @@ class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
     return ExprHandle(alloc<IfThenElse>(c.node(), t.node(), f.node()));
   }
 
-  IfThenElse(ExprPtr c, const ExprPtr& t, ExprPtr f)
+  IfThenElse(ExprPtr c, ExprPtr t, ExprPtr f)
       : ExprNodeBase(t->dtype()),
         condition_(std::move(c)),
-        true_(t),
+        true_(std::move(t)),
         false_(std::move(f)) {}
 
  private:
@@ -653,14 +653,14 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   CompareSelect(
       ExprPtr lhs,
       ExprPtr rhs,
-      const ExprPtr& ret_val1,
+      ExprPtr ret_val1,
       ExprPtr ret_val2,
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased)
       : ExprNodeBase(ret_val1->dtype()),
         lhs_(std::move(lhs)),
         rhs_(std::move(rhs)),
-        ret_val1_(ret_val1),
+        ret_val1_(std::move(ret_val1)),
         ret_val2_(std::move(ret_val2)),
         compare_op_(cmp_op),
         bias_(bias) {}
@@ -842,9 +842,9 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Intrinsics(IntrinsicsOp op_type, const ExprPtr& v1)
+  Intrinsics(IntrinsicsOp op_type, ExprPtr v1)
       : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype())),
-        params_({v1}),
+        params_({std::move(v1)}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 1) {
       throw malformed_input("bad arg count in Intrinsics");
@@ -852,9 +852,9 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Intrinsics(IntrinsicsOp op_type, const ExprPtr& v1, const ExprPtr& v2)
+  Intrinsics(IntrinsicsOp op_type, ExprPtr v1, ExprPtr v2)
       : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype(), v2->dtype())),
-        params_({v1, v2}),
+        params_({std::move(v1), std::move(v2)}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 2) {
       throw malformed_input("bad arg count in Intrinsics");
