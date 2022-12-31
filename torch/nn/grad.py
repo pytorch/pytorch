@@ -21,8 +21,8 @@ def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
 
     Examples::
 
-        >>> input = torch.randn(1,1,3, requires_grad=True)
-        >>> weight = torch.randn(1,1,1, requires_grad=True)
+        >>> input = torch.randn(1, 1, 3, requires_grad=True)
+        >>> weight = torch.randn(1, 1, 1, requires_grad=True)
         >>> output = F.conv1d(input, weight)
         >>> grad_output = torch.randn(output.shape)
         >>> grad_input = torch.autograd.grad(output, input, grad_output)
@@ -51,8 +51,8 @@ def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
 
     Examples::
 
-        >>> input = torch.randn(1,1,3, requires_grad=True)
-        >>> weight = torch.randn(1,1,1, requires_grad=True)
+        >>> input = torch.randn(1, 1, 3, requires_grad=True)
+        >>> weight = torch.randn(1, 1, 1, requires_grad=True)
         >>> output = F.conv1d(input, weight)
         >>> grad_output = torch.randn(output.shape)
         >>> # xdoctest: +SKIP
@@ -84,8 +84,8 @@ def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
 
     Examples::
 
-        >>> input = torch.randn(1,1,3,3, requires_grad=True)
-        >>> weight = torch.randn(1,1,1,2, requires_grad=True)
+        >>> input = torch.randn(1, 1, 3, 3, requires_grad=True)
+        >>> weight = torch.randn(1, 1, 1, 2, requires_grad=True)
         >>> output = F.conv2d(input, weight)
         >>> grad_output = torch.randn(output.shape)
         >>> grad_input = torch.autograd.grad(output, input, grad_output)
@@ -114,8 +114,8 @@ def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
 
     Examples::
 
-        >>> input = torch.randn(1,1,3,3, requires_grad=True)
-        >>> weight = torch.randn(1,1,1,2, requires_grad=True)
+        >>> input = torch.randn(1, 1, 3, 3, requires_grad=True)
+        >>> weight = torch.randn(1, 1, 1, 2, requires_grad=True)
         >>> output = F.conv2d(input, weight)
         >>> grad_output = torch.randn(output.shape)
         >>> # xdoctest: +SKIP
