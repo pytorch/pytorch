@@ -600,7 +600,7 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "temporarily disabled for async")
     def test_cublas_workspace_explicit_allocation(self):
         a = torch.randn(7, 7, device='cuda', requires_grad=False)
         default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8
