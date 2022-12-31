@@ -945,40 +945,40 @@ def load_store_only_kernel(cls):
 
 @load_store_only_kernel
 class CppTile2DKernel(CppVecKernel):
-    def __init__(self, args, num_threads, tiling_factor, outer_tiling_depth):
+    def __init__(self, args, num_threads, tiling_factor, outer_tiling_idx):
         super().__init__(args, num_threads, tiling_factor)
-        self.outer_tiling_depth = outer_tiling_depth
+        self.outer_tiling_idx = outer_tiling_idx
         self.load_contig_inner_most: Dict[str, bool] = {}
 
     def transform_tile2d_index(self, index, offset=0):
         assert self.is_stride1_at(self.itervars[-1], index) or self.is_stride1_at(
-            self.itervars[self.outer_tiling_depth], index
+            self.itervars[self.outer_tiling_idx], index
         )
         assert not self.is_invariant_under(
             self.itervars[-1], index
-        ) and not self.is_invariant_under(self.itervars[self.outer_tiling_depth], index)
+        ) and not self.is_invariant_under(self.itervars[self.outer_tiling_idx], index)
         # Scale the stride1 dim
         if self.is_stride1_at(self.itervars[-1], index):
-            non_contig_depth = self.outer_tiling_depth
-            contig_depth = len(self.itervars) - 1
+            non_contig_idx = self.outer_tiling_idx
+            contig_idx = len(self.itervars) - 1
         else:
-            non_contig_depth = len(self.itervars) - 1
-            contig_depth = self.outer_tiling_depth
+            non_contig_idx = len(self.itervars) - 1
+            contig_idx = self.outer_tiling_idx
         new_index = self.scale_index_with_offset(
-            index, self.tiling_factor, itervar_idx=contig_depth
+            index, self.tiling_factor, itervar_idx=contig_idx
         )
         new_index = self.scale_index_with_offset(
-            new_index, self.tiling_factor, itervar_idx=non_contig_depth, offset=offset
+            new_index, self.tiling_factor, itervar_idx=non_contig_idx, offset=offset
         )
-        return new_index, contig_depth, non_contig_depth
+        return new_index, contig_idx, non_contig_idx
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
         expanded_index = sympy.expand(index)
-        offset = sympy.symbols(f"{self.itervars[self.outer_tiling_depth]}_inner")
-        new_index, contig_depth, non_contig_depth = self.transform_tile2d_index(
+        offset = sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
+        new_index, contig_idx, non_contig_idx = self.transform_tile2d_index(
             expanded_index
         )
         new_index_with_offset, *_ = self.transform_tile2d_index(expanded_index, offset)
@@ -986,13 +986,13 @@ class CppTile2DKernel(CppVecKernel):
         assert new_index_with_offset != expanded_index
 
         # Make sure the tmp tile buffer is contiguous along inner-most itervar
-        if contig_depth == len(self.itervars) - 1:
+        if contig_idx == len(self.itervars) - 1:
             expr = (
                 f"TILE2D_COPY(__place_holder__ + {offset} * {self.tiling_factor}, {var} + {cexpr(new_index_with_offset)}, "
                 f"{offset}, {self.tiling_factor})"
             )
         else:
-            ld_src = f"{cexpr(self.stride_at(self.itervars[non_contig_depth], expanded_index))}"
+            ld_src = f"{cexpr(self.stride_at(self.itervars[non_contig_idx], expanded_index))}"
             ld_dst = f"{self.tiling_factor}"
             expr = f"TILE2D_COPY_TRANSPOSE(__place_holder__, {var} + {cexpr(new_index)}, {ld_dst}, {ld_src})"
 
@@ -1017,8 +1017,8 @@ class CppTile2DKernel(CppVecKernel):
         assert mode is None
         # TODO(jgong5): assert the index is an affine expression on the itervars in concern
         expanded_index = sympy.expand(index)
-        offset = sympy.symbols(f"{self.itervars[self.outer_tiling_depth]}_inner")
-        new_index, contig_depth, non_contig_depth = self.transform_tile2d_index(
+        offset = sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
+        new_index, contig_idx, non_contig_idx = self.transform_tile2d_index(
             expanded_index
         )
         new_index_with_offset, *_ = self.transform_tile2d_index(expanded_index, offset)
@@ -1026,13 +1026,13 @@ class CppTile2DKernel(CppVecKernel):
         assert new_index_with_offset != expanded_index
 
         # TODO(jgong5): cache the transposed result for multiple use
-        if contig_depth == len(self.itervars) - 1:
+        if contig_idx == len(self.itervars) - 1:
             line = (
                 f"TILE2D_COPY({var} + {cexpr(new_index_with_offset)}, {value} + {offset} * {self.tiling_factor}, "
                 f"{offset}, {self.tiling_factor});"
             )
         else:
-            ld_dst = f"{cexpr(self.stride_at(self.itervars[non_contig_depth], expanded_index))}"
+            ld_dst = f"{cexpr(self.stride_at(self.itervars[non_contig_idx], expanded_index))}"
             ld_src = f"{self.tiling_factor}"
             line = f"TILE2D_COPY_TRANSPOSE({var} + {cexpr(new_index)}, {value}, {ld_dst}, {ld_src});"
 
@@ -1041,18 +1041,18 @@ class CppTile2DKernel(CppVecKernel):
 
 @load_store_only_kernel
 class CppTile2DTailKernel(CppKernel):
-    def __init__(self, args, num_threads, tiling_factor, outer_tiling_depth):
+    def __init__(self, args, num_threads, tiling_factor, outer_tiling_idx):
         super().__init__(args, num_threads)
-        self.outer_tiling_depth = outer_tiling_depth
+        self.outer_tiling_idx = outer_tiling_idx
         self.tiling_factor = tiling_factor
 
     def inner_itervar_name(self):
-        return f"{self.itervars[self.outer_tiling_depth]}_inner"
+        return f"{self.itervars[self.outer_tiling_idx]}_inner"
 
     def transform_tile2d_index_in_tail(self, index):
         inner = sympy.symbols(self.inner_itervar_name())
         new_index = self.scale_index_with_offset(
-            index, self.tiling_factor, itervar_idx=self.outer_tiling_depth, offset=inner
+            index, self.tiling_factor, itervar_idx=self.outer_tiling_idx, offset=inner
         )
         return new_index
 
@@ -1235,7 +1235,7 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
     def __init__(self, args, num_threads, tiling_factor):
         super().__init__(args, num_threads, tiling_factor)
         self.can_tile2d = True
-        self.outer_tiling_depth = -1
+        self.outer_tiling_idx = -1
 
     def check_can_tile2d(self, name: str, index: sympy.Expr):
         if not self.can_tile2d:
@@ -1247,18 +1247,18 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
             return
         # check contiguity from any of the outer loops
         has_stride1 = False
-        for depth, itervar in enumerate(self.itervars):
+        for loop_idx, itervar in enumerate(self.itervars):
             if self.is_stride1_at(itervar, index):
                 # only support 2d tile now
-                if depth < len(self.itervars) - 1:
+                if loop_idx < len(self.itervars) - 1:
                     if (
-                        self.outer_tiling_depth >= 0
-                        and self.outer_tiling_depth != depth
+                        self.outer_tiling_idx >= 0
+                        and self.outer_tiling_idx != loop_idx
                     ):
                         self.can_tile2d = False
                         return
                     else:
-                        self.outer_tiling_depth = depth
+                        self.outer_tiling_idx = loop_idx
                 has_stride1 = True
         if not has_stride1:
             self.can_tile2d = False
@@ -1373,7 +1373,7 @@ class CppKernelProxy(CppKernel):
                     node.run(vars, ())
 
         scalar_kernel = codegen_kernel(CppKernel)
-        inner_most_depth = len(scalar_kernel.itervars) - 1
+        inner_most_idx = len(scalar_kernel.itervars) - 1
         self.call_ranges = scalar_kernel.call_ranges
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
@@ -1401,7 +1401,7 @@ class CppKernelProxy(CppKernel):
 
             if vec_checker.simd_vec:
                 main_loop, tail_loop = self.loop_nest.split_with_tiling(
-                    inner_most_depth, factor=tiling_factor
+                    inner_most_idx, factor=tiling_factor
                 )
                 main_loop.set_kernel(codegen_kernel(CppVecKernel, tiling_factor))
                 tail_loop.set_kernel(scalar_kernel)
@@ -1414,21 +1414,21 @@ class CppKernelProxy(CppKernel):
                 # as 4(128bits).
                 tail_loop.simd_nelements = tiling_factor // 2
             elif tile2d_checker.can_tile2d:
-                outer_tiling_depth = tile2d_checker.outer_tiling_depth
-                assert outer_tiling_depth < inner_most_depth
+                outer_tiling_idx = tile2d_checker.outer_tiling_idx
+                assert outer_tiling_idx < inner_most_idx
                 outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
-                    outer_tiling_depth, factor=tiling_factor
+                    outer_tiling_idx, factor=tiling_factor
                 )
                 outer_tail_loop.set_kernel(scalar_kernel)
                 inner_main_loop, inner_tail_loop = outer_main_loop.split_with_tiling(
-                    inner_most_depth - outer_tiling_depth, factor=tiling_factor
+                    inner_most_idx - outer_tiling_idx, factor=tiling_factor
                 )
                 inner_main_loop.set_kernel(
-                    codegen_kernel(CppTile2DKernel, tiling_factor, outer_tiling_depth)
+                    codegen_kernel(CppTile2DKernel, tiling_factor, outer_tiling_idx)
                 )
                 inner_tail_loop.set_kernel(
                     codegen_kernel(
-                        CppTile2DTailKernel, tiling_factor, outer_tiling_depth
+                        CppTile2DTailKernel, tiling_factor, outer_tiling_idx
                     )
                 )
 
@@ -1767,9 +1767,9 @@ class LoopNestWithSplit:
         root: List[LoopLevel] = []
         levels: List[LoopLevel] = root
         loop: LoopLevel = None
-        for depth, (var, size) in enumerate(zip(itervars, ranges)):
+        for loop_idx, (var, size) in enumerate(zip(itervars, ranges)):
             loop = LoopLevel(var, size, parent=loop)
-            if depth >= reduction_depth:
+            if loop_idx >= reduction_depth:
                 loop.reduction_var_map = kernel.reduction_var_map.copy()
             levels.append(loop)
             levels = loop.inner
