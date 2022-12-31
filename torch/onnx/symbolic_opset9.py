@@ -434,16 +434,6 @@ def _determine_division_output_type(
         other, _type_utils.JitScalarType.UNDEFINED
     )
 
-    # FIXME(justinchuby): This is a hack to fix the type for scalars.
-    # Python scalars are typed float64 even when the default dtype is float32.
-    # Specifically, the torch vision fasterrcnn_resnet50_fpn model has an op
-    # NonMaxSuppression that can only take float32 inputs. We should fix
-    # https://github.com/pytorch/vision/blob/657c0767c5ca5564c8b437ac44263994c8e01352/
-    # torchvision/ops/_register_onnx_ops.py#L22
-    # by adding cast nodes to float32.
-    if other_type == _type_utils.JitScalarType.DOUBLE:
-        other_type = _type_utils.JitScalarType.FLOAT
-
     if (
         self_type != _type_utils.JitScalarType.UNDEFINED
         and other_type != _type_utils.JitScalarType.UNDEFINED
