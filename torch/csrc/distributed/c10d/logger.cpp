@@ -49,8 +49,8 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   return output << loggerInfo;
 }
 
-Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
-  reducer_ = reducer;
+Logger::Logger(std::shared_ptr<c10d::Reducer> reducer)
+    : reducer_(std::move(reducer)) {
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
 }
 
