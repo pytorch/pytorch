@@ -11,7 +11,7 @@ from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW, skipIfTorchDynamo
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta, ops)
+    (instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
     foreach_reduce_op_db)
@@ -445,11 +445,8 @@ class TestForeach(TestCase):
             torch._foreach_add_(tensors, 1)
             self.assertEqual(res, tensors)
 
-    @ops(foreach_binary_op_db, dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @ops(foreach_binary_op_db, dtypes=OpDTypes.supported)
     def test_binary_op_scalar_with_overlapping_tensors(self, device, dtype, op):
-        if dtype not in op.supported_dtypes(device):
-            raise unittest.SkipTest(f"Unsupported dtype for {op.name} on {device}: {dtype}")
-
         foreach_op, ref = op.method_variant, op.ref
         tensors = [torch.ones(1, 1, device=device, dtype=dtype).expand(2, 1, 3)]
 
@@ -481,11 +478,8 @@ class TestForeach(TestCase):
         self.assertIsNone(runtime_error)
 
     @skipIfTorchDynamo("Different error msgs, TODO")
-    @ops(foreach_binary_op_db, dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @ops(foreach_binary_op_db, dtypes=OpDTypes.supported)
     def test_binary_op_list_error_cases(self, device, dtype, op):
-        if dtype not in op.supported_dtypes(device):
-            raise unittest.SkipTest(f"Unsupported dtype for {op.name} on {device}: {dtype}")
-
         foreach_op, foreach_op_, ref, ref_ = op.method_variant, op.inplace_variant, op.ref, op.ref_inplace
         tensors1 = []
         tensors2 = []
@@ -548,11 +542,8 @@ class TestForeach(TestCase):
 
     @skipMeta
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
-    @ops(foreach_binary_op_db, dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @ops(foreach_binary_op_db, dtypes=OpDTypes.supported)
     def test_binary_op_list_slow_path(self, device, dtype, op):
-        if dtype not in op.supported_dtypes(device):
-            raise unittest.SkipTest(f"Unsupported dtype for {op.name} on {device}: {dtype}")
-
         # note(mkozuki): why `n_expected_cudaLaunchKernels=0`?
         # In this test, foreach functions don't go through fast path,
         # but as there is only one tensor in each list of tensors,
