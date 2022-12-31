@@ -388,7 +388,7 @@ struct TORCH_API SharedParserData {
   }
 
   // Make an exception ignoring comments for type annotation comments
-  bool isTypeComment(StringCordView str, size_t pos) {
+  bool isTypeComment(const StringCordView& str, size_t pos) {
     const std::string type_string = "# type:";
     if (str.size() < pos + type_string.length()) {
       return false;

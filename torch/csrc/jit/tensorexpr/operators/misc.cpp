@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -160,7 +162,7 @@ ExprHandle demoteOutput(
   return e;
 }
 
-c10::optional<TensorInfo> getTensorInfo(BufHandle b) {
+c10::optional<TensorInfo> getTensorInfo(const BufHandle& b) {
   std::vector<int64_t> dims;
   for (auto dim : b.dims()) {
     auto val = intValue(dim.node());
@@ -181,7 +183,7 @@ ExprHandle clamp(
 }
 
 static bool isOne(ExprHandle e) {
-  auto const& n = intValue(e);
+  auto const& n = intValue(std::move(e));
   if (!n) {
     return false;
   }
@@ -239,7 +241,7 @@ std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
 
 std::vector<ExprHandle> broadcastShapes(
     std::vector<std::vector<ExprHandle>> shapes) {
-  return broadcastShapesImpl(shapes).first;
+  return broadcastShapesImpl(std::move(shapes)).first;
 }
 
 std::vector<ExprHandle> broadcastShapes(
@@ -271,7 +273,7 @@ ExprHandle scalarOrConstant(const ArgValue& v) {
   return constant(v);
 }
 
-ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes) {
+ExprHandle broadcast(const BufHandle& b, const std::vector<ExprHandle>& axes) {
   return b.load(computeIndicesToBroadcast(axes, b.dims()));
 }
 
@@ -361,7 +363,7 @@ Tensor computeTranspose(
   // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
   if (A.ndim() <= 1) {
     return Compute(
-        "aten_transpose", outputShape, [&](std::vector<VarHandle> axes) {
+        "aten_transpose", outputShape, [&](const std::vector<VarHandle>& axes) {
           TORCH_INTERNAL_ASSERT(
               axes.size() <= 1,
               buildErrorMessage("Invalid axes size in transpose"));
@@ -569,7 +571,7 @@ Tensor computeCatWoConditionals(
 
   auto gen_code_for_input = [&](const BufHandle& inp,
                                 size_t inp_pos,
-                                ExprPtr concat_dim_size,
+                                const ExprPtr& concat_dim_size,
                                 const std::vector<ExprHandle>& dims) {
     std::vector<VarPtr> for_vars(dims.size());
     std::vector<ExprPtr> load_indices(dims.size());

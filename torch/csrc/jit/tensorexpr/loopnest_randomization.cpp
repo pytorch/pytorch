@@ -81,7 +81,7 @@ std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
   return std::make_tuple(selected_objects, selected_indices);
 }
 
-int find_factor(ForPtr loop) {
+int find_factor(const ForPtr& loop) {
   // Find valid factors
   ExprPtr loop_stop = loop->stop();
   auto loop_imm = intValue(loop_stop);
@@ -108,7 +108,7 @@ std::string join(std::vector<T> indices, char sep = ',') {
   return s;
 }
 
-std::string join(std::vector<std::string> indices, char sep = ',') {
+std::string join(const std::vector<std::string>& indices, char sep = ',') {
   std::string s = "";
   for (const auto& index : indices) {
     s += index + sep;

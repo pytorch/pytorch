@@ -137,13 +137,14 @@ struct TORCH_API Object {
   }
 
   const std::vector<Property> get_properties() const {
-    return c10::fmap(type()->properties(), [&](ClassType::Property prop) {
-      c10::optional<Method> setter = c10::nullopt;
-      if (prop.setter) {
-        setter = Method(_ivalue(), prop.setter);
-      }
-      return Property{prop.name, Method(_ivalue(), prop.getter), setter};
-    });
+    return c10::fmap(
+        type()->properties(), [&](const ClassType::Property& prop) {
+          c10::optional<Method> setter = c10::nullopt;
+          if (prop.setter) {
+            setter = Method(_ivalue(), prop.setter);
+          }
+          return Property{prop.name, Method(_ivalue(), prop.getter), setter};
+        });
   }
 
   c10::optional<Method> find_method(const std::string& basename) const;

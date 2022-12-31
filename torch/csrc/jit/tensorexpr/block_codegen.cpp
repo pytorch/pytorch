@@ -44,7 +44,7 @@ bool BlockAnalysis::areBufsInMap(const std::unordered_set<BufPtr>& bufs) const {
   return true;
 }
 
-BufPtr BlockAnalysis::getMultiDimBuf(BufPtr buf) const {
+BufPtr BlockAnalysis::getMultiDimBuf(const BufPtr& buf) const {
   auto input_ = map_input_to_tensor_bufs_.find(buf->name_hint());
   if (input_ != map_input_to_tensor_bufs_.end()) {
     return input_->second;
@@ -53,7 +53,7 @@ BufPtr BlockAnalysis::getMultiDimBuf(BufPtr buf) const {
   }
 }
 
-std::string BlockAnalysis::getInputName(BufPtr buf) const {
+std::string BlockAnalysis::getInputName(const BufPtr& buf) const {
   auto input_ = map_input_to_tensor_bufs_.find(buf->name_hint());
   if (input_ != map_input_to_tensor_bufs_.end()) {
     return input_->second->name_hint();

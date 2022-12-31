@@ -4,6 +4,7 @@
 #include <cstring>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <c10/macros/Macros.h>
@@ -163,7 +164,7 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
     call(args);
   }
 
-  void bindVar(VarPtr v, ExprPtr e);
+  void bindVar(const VarPtr& v, const ExprPtr& e);
   InterpValue value() const;
 
  private:
@@ -311,14 +312,14 @@ c10::optional<int64_t> evalInt(ExprPtr e);
 
 // Substitutes the given vars with their corresponding expressions in the input
 // expression.
-inline ExprPtr Substitute(ExprPtr expr, const VarMapping& var_mapping) {
+inline ExprPtr Substitute(const ExprPtr& expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return expr->accept_mutator(&var_sub);
 }
 
 // Substitutes the given vars with their corresponding expressions in the input
 // statement.
-inline StmtPtr Substitute(StmtPtr stmt, const VarMapping& var_mapping) {
+inline StmtPtr Substitute(const StmtPtr& stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
 }
@@ -327,7 +328,9 @@ inline StmtPtr Substitute(StmtPtr stmt, const VarMapping& var_mapping) {
 // their corresponding expressions in the clone.
 // NOTE: This works because cloning reuses variables and does not create new
 // ones, and `VarMapping` input has variables as the key.
-inline ExprPtr SubstituteInClone(ExprPtr expr, const VarMapping& var_mapping) {
+inline ExprPtr SubstituteInClone(
+    const ExprPtr& expr,
+    const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return Expr::clone(expr)->accept_mutator(&var_sub);
 }
@@ -336,7 +339,9 @@ inline ExprPtr SubstituteInClone(ExprPtr expr, const VarMapping& var_mapping) {
 // their corresponding expressions in the clone.
 // NOTE: This works because cloning reuses variables and does not create new
 // ones, and `VarMapping` input has variables as the key.
-inline StmtPtr SubstituteInClone(StmtPtr stmt, const VarMapping& var_mapping) {
+inline StmtPtr SubstituteInClone(
+    const StmtPtr& stmt,
+    const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return Stmt::clone(stmt)->accept_mutator(&var_sub);
 }

@@ -15,7 +15,7 @@ namespace tensorexpr {
 class TORCH_API Tensor {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Tensor(BufPtr buf, const std::vector<VarPtr>& args, ExprPtr body)
+  Tensor(BufPtr buf, const std::vector<VarPtr>& args, const ExprPtr& body)
       : buf_(std::move(buf)) {
     stmt_ = constructStmt(args, body, {}, {});
   }
@@ -28,7 +28,7 @@ class TORCH_API Tensor {
       const std::vector<VarPtr>& args,
       const std::vector<ExprPtr>& reduce_dims,
       const std::vector<VarPtr>& reduce_args,
-      ExprPtr body)
+      const ExprPtr& body)
       : buf_(std::move(buf)) {
     stmt_ = constructStmt(args, body, reduce_dims, reduce_args);
   }
@@ -64,7 +64,7 @@ class TORCH_API Tensor {
  private:
   StmtPtr constructStmt(
       const std::vector<VarPtr>& args,
-      ExprPtr body,
+      const ExprPtr& body,
       const std::vector<ExprPtr>& reduce_dims,
       const std::vector<VarPtr>& reduce_args) const;
 
@@ -160,8 +160,8 @@ Tensor Reduce(
   // copy
   if (reduce_vars.empty()) {
     ExprHandle body = Reducer::getReduceBody(body_func, vars);
-    BufHandle func_result =
-        Buf::make(func_name, dims, body.dtype(), c10::nullopt, strides);
+    BufHandle func_result = Buf::make(
+        func_name, dims, body.dtype(), c10::nullopt, std::move(strides));
     return Tensor(func_result, vars, body);
   }
 
@@ -217,7 +217,7 @@ Tensor Reduce(
       dims,
       strides,
       reducer,
-      [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
+      [&](ParameterList& p) { return ExprHandle(reducer.initializer()); },
       body_func,
       reduce_dims);
 }

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
@@ -278,17 +279,17 @@ void CppPrinter::visit(ExternalCallPtr v) {
 
   emitIndent();
   os() << "void* buf_ptrs[]{";
-  for_buf([&](const BufPtr b) { os() << *b->base_handle(); });
+  for_buf([&](const BufPtr& b) { os() << *b->base_handle(); });
   os() << "};" << std::endl;
 
   emitIndent();
   os() << "int64_t buf_ranks[]{";
-  for_buf([&](const BufPtr b) { os() << b->ndim(); });
+  for_buf([&](const BufPtr& b) { os() << b->ndim(); });
   os() << "};" << std::endl;
 
   emitIndent();
   os() << "int64_t buf_dims[]{";
-  for_buf([&](const BufPtr buf) {
+  for_buf([&](const BufPtr& buf) {
     for (size_t i = 0; i < buf->ndim(); i++) {
       if (i > 0) {
         os() << ", ";
@@ -300,7 +301,7 @@ void CppPrinter::visit(ExternalCallPtr v) {
 
   emitIndent();
   os() << "int8_t buf_dtypes[]{";
-  for_buf([&](const BufPtr buf) {
+  for_buf([&](const BufPtr& buf) {
     os() << static_cast<int>(buf->dtype().scalar_type());
   });
   os() << "};" << std::endl;
@@ -360,7 +361,7 @@ CppCodeGen::CppCodeGen(
     const std::vector<BufferArg>& buffer_args,
     at::Device device,
     const std::string& kernel_func_name)
-    : CodeGen(stmt, buffer_args, device, kernel_func_name) {
+    : CodeGen(std::move(stmt), buffer_args, device, kernel_func_name) {
   init();
 }
 

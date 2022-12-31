@@ -29,31 +29,31 @@ TORCH_API Tensor conv2d_depthwise(
     BufHandle weight,
     BufHandle bias,
     ExprHandle N,
-    ExprHandle C,
+    const ExprHandle& C,
     ExprHandle H,
     ExprHandle W,
     ExprHandle K,
-    ExprHandle CperG,
-    ExprHandle R,
-    ExprHandle S,
+    const ExprHandle& CperG,
+    const ExprHandle& R,
+    const ExprHandle& S,
     ExprHandle stride,
     ExprHandle pad,
-    ExprHandle groups);
+    const ExprHandle& groups);
 
 TORCH_API Tensor conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     ExprHandle N,
-    ExprHandle C,
+    const ExprHandle& C,
     ExprHandle H,
     ExprHandle W,
     ExprHandle K,
-    ExprHandle CperG,
-    ExprHandle R,
-    ExprHandle S,
+    const ExprHandle& CperG,
+    const ExprHandle& R,
+    const ExprHandle& S,
     ExprHandle stride,
     ExprHandle pad,
-    ExprHandle groups);
+    const ExprHandle& groups);
 
 bool conv2dIsSupported(
     const TensorInfo& input,

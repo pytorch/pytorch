@@ -20,6 +20,8 @@
 #include <torch/csrc/jit/tensorexpr/loopnest_randomization.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
+#include <utility>
+
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
@@ -202,7 +204,7 @@ c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   }
   return TensorInfo{*concrete_sizes, dtype};
 }
-std::vector<int64_t> _pair_int(IValue v) {
+std::vector<int64_t> _pair_int(const IValue& v) {
   if (v.isIntList()) {
     return v.toIntVector();
   } else {
@@ -392,7 +394,7 @@ bool matmulIsSupported(const torch::jit::Node* node) {
 } // namespace jit
 } // namespace torch
 
-static at::ScalarType tensorType(BufPtr b) {
+static at::ScalarType tensorType(const BufPtr& b) {
   return static_cast<at::ScalarType>(b->dtype().scalar_type());
 }
 
@@ -670,7 +672,7 @@ bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
 // indices where none would be needed, which would significantly complicate
 // vectorization.
 void fuseAllLoops(StmtPtr st) {
-  auto block = to<tensorexpr::Block>(st);
+  auto block = to<tensorexpr::Block>(std::move(st));
   if (block == nullptr) {
     return;
   }
@@ -709,7 +711,7 @@ void fuseAllLoops(StmtPtr st) {
 }
 
 // Compute the trip count of a loop if it is a constant.
-c10::optional<int64_t> tripCount(ForPtr loop) {
+c10::optional<int64_t> tripCount(const ForPtr& loop) {
   auto tc = IRSimplifier::simplify(
       cast<int64_t>(ExprHandle(loop->stop()) - ExprHandle(loop->start())));
   if (auto val = to<LongImm>(tc.node())) {
@@ -789,7 +791,7 @@ static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
 }
 
 StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
-  torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
+  torch::jit::tensorexpr::LoopNest l(std::move(st), bufOutputs_);
   LoopNest::sanitizeNames(l.root_stmt());
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
   int64_t random_tr_seed = randomTransformsRequested();
@@ -1059,7 +1061,8 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
     auto strides = stride_input[0] == StrideInput::TENSOR_CONT
         ? make_contiguous_strides(inputTensorDims)
         : make_channels_last_strides(inputTensorDims);
-    return fmap(strides, [&](ExprPtr stride) { return ExprHandle(stride); });
+    return fmap(
+        strides, [&](ExprPtr stride) { return ExprHandle(std::move(stride)); });
   }
 
   inputTensorStrides.resize(rank);
@@ -1862,7 +1865,7 @@ void TensorExprKernel::recompile() {
 
 TensorExprKernel::TensorExprKernel(
     const std::shared_ptr<Graph>& subgraph,
-    const std::string& kernel_func_name,
+    std::string kernel_func_name,
     std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings,
     std::vector<int64_t> symbolic_shape_inputs,
     bool pre_alloc /*= false*/,
@@ -1874,7 +1877,7 @@ TensorExprKernel::TensorExprKernel(
       symbolic_shape_inputs_(std::move(symbolic_shape_inputs)),
       custom_lowerings_(std::move(custom_lowerings)),
       pre_alloc_(pre_alloc),
-      kernel_func_name_(kernel_func_name),
+      kernel_func_name_(std::move(kernel_func_name)),
       symbolic_strides_(std::move(symbolic_strides)) {
   optimizeOwningGraph();
 

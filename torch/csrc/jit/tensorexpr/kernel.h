@@ -10,6 +10,8 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -50,7 +52,7 @@ ExprHandle tensorOrConstant(
 
 int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size);
 
-ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
+ExprHandle broadcast(const BufHandle& b, const std::vector<ExprHandle>& axes);
 
 ExprHandle constant(const ArgValue& v);
 
@@ -123,7 +125,7 @@ class TORCH_API TensorExprKernel {
   //      - a flag to control pre-allocation of buffers.
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
-      const std::string& kernel_func_name,
+      std::string kernel_func_name,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
       std::vector<int64_t> symbolic_shape_inputs = {},
@@ -144,10 +146,10 @@ class TORCH_API TensorExprKernel {
       : TensorExprKernel(
             subgraph,
             SubgraphUtils::generateNameForGraph(subgraph),
-            custom_lowerings,
-            symbolic_shape_inputs,
+            std::move(custom_lowerings),
+            std::move(symbolic_shape_inputs),
             pre_alloc,
-            symbolic_strides) {}
+            std::move(symbolic_strides)) {}
 
   void run(Stack& stack) const;
   void runFast(

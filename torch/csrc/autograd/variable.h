@@ -765,7 +765,7 @@ inline Variable make_variable(
       } else {
         data_impl_copy->set_autograd_meta(nullptr);
       }
-      return Variable(data_impl_copy);
+      return Variable(std::move(data_impl_copy));
     }
   }
   return Variable();

@@ -42,7 +42,7 @@ TORCH_API NNCLoweringFunction getStandardLoweringFor(const std::string& op);
 struct RegisterNNCLoweringsFunction {
   RegisterNNCLoweringsFunction(
       const std::vector<std::string>& schemas,
-      NNCLoweringFunction fn);
+      const NNCLoweringFunction& fn);
 };
 
 } // namespace tensorexpr

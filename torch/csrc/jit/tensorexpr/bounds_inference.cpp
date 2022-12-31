@@ -10,6 +10,8 @@
 
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -72,7 +74,7 @@ BoundsInfo mergeTensorAccesses(
   return ret;
 }
 
-std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
+std::unordered_map<VarPtr, BufPtr> getAllBufs(const StmtPtr& s) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(s);
@@ -82,7 +84,7 @@ std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
   return varToBuf;
 }
 
-std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
+std::unordered_map<VarPtr, BufPtr> getAllBufs(const ExprPtr& e) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(e);
@@ -92,7 +94,7 @@ std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
   return varToBuf;
 }
 
-BoundsInfo inferBounds(StmtPtr s, bool distinctAccessKinds) {
+BoundsInfo inferBounds(const StmtPtr& s, bool distinctAccessKinds) {
   auto varToBuf = getAllBufs(s);
 
   MemDependencyChecker checker;
@@ -104,7 +106,7 @@ BoundsInfo inferBounds(StmtPtr s, bool distinctAccessKinds) {
 
 BoundsInfo getInferredBounds(
     MemDependencyChecker& analyzer,
-    StmtPtr s,
+    const StmtPtr& s,
     bool distinctAccessKinds) {
   return mergeTensorAccesses(
       analyzer.accessesWithin(s), getAllBufs(s), distinctAccessKinds);
@@ -112,7 +114,7 @@ BoundsInfo getInferredBounds(
 
 BoundsInfo getInferredBounds(
     MemDependencyChecker& analyzer,
-    ExprPtr e,
+    const ExprPtr& e,
     bool distinctAccessKinds) {
   return mergeTensorAccesses(
       analyzer.accessesWithin(e), getAllBufs(e), distinctAccessKinds);
@@ -213,7 +215,7 @@ BoundSet convertBounds(
 
 BoundSet convertBounds(
     BoundsInfo& bounds,
-    BufPtr buf,
+    const BufPtr& buf,
     TensorAccessKind filter = kMutate) {
   auto it = bounds.find(buf);
   if (it == bounds.end()) {
@@ -225,8 +227,8 @@ BoundSet convertBounds(
 
 HazardKind getPotentialHazards(
     MemDependencyChecker& analyzer,
-    StmtPtr A,
-    StmtPtr B) {
+    const StmtPtr& A,
+    const StmtPtr& B) {
   BoundsInfo aBounds = getInferredBounds(analyzer, A, true);
   BoundsInfo bBounds = getInferredBounds(analyzer, B, true);
 
@@ -344,8 +346,8 @@ bool hasConflictingOverlap(
 
 bool hasConflictingOverlap(
     analysis::MemDependencyChecker& analyzer,
-    StmtPtr A,
-    StmtPtr B) {
+    const StmtPtr& A,
+    const StmtPtr& B) {
   BoundsInfo aBounds = getInferredBounds(analyzer, A, true);
   BoundsInfo bBounds = getInferredBounds(analyzer, B, true);
   return hasConflictingOverlap(aBounds, bBounds);
@@ -353,8 +355,8 @@ bool hasConflictingOverlap(
 
 bool isOverlapping(
     analysis::MemDependencyChecker& analyzer,
-    StorePtr S1,
-    StorePtr S2) {
+    const StorePtr& S1,
+    const StorePtr& S2) {
   BoundsInfo s1Bounds = getInferredBounds(analyzer, S1, true);
   BoundsInfo s2Bounds = getInferredBounds(analyzer, S2, true);
   return hasConflictingOverlap(s1Bounds, s2Bounds, kStore, kStore);
@@ -362,8 +364,8 @@ bool isOverlapping(
 
 bool isOverlapping(
     analysis::MemDependencyChecker& analyzer,
-    StorePtr S,
-    LoadPtr L) {
+    const StorePtr& S,
+    const LoadPtr& L) {
   BoundsInfo sBounds = getInferredBounds(analyzer, S, true);
   BoundsInfo lBounds = getInferredBounds(analyzer, L, true);
   return hasConflictingOverlap(sBounds, lBounds, kStore, kLoad);

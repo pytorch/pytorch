@@ -47,7 +47,7 @@ Load::Load(Dtype dtype, BufPtr buf, std::vector<ExprPtr> indices)
   castIndicesToInts(indices_);
 }
 
-Load::Load(BufPtr buf, const std::vector<ExprPtr>& indices)
+Load::Load(const BufPtr& buf, const std::vector<ExprPtr>& indices)
     : Load(ChooseDtype(buf->dtype(), dtypeOfIndices(indices)), buf, indices) {}
 
 ExprHandle Load::make(
@@ -264,7 +264,7 @@ std::vector<VarHandle> VarVectorToVarHandleVector(
   return result;
 }
 
-bool immediateIsNegative(ExprPtr e) {
+bool immediateIsNegative(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() < 0;                 \
@@ -274,7 +274,7 @@ bool immediateIsNegative(ExprPtr e) {
   return false;
 }
 
-bool immediateIsPositive(ExprPtr e) {
+bool immediateIsPositive(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() > 0;                 \
@@ -284,7 +284,7 @@ bool immediateIsPositive(ExprPtr e) {
   return false;
 }
 
-bool immediateIsZero(ExprPtr e) {
+bool immediateIsZero(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() == 0;                \

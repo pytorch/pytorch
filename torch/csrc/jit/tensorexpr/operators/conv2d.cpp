@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -104,16 +106,16 @@ Tensor conv2d_depthwise_dynamic(
     BufHandle weight,
     const InitFunc& init_func,
     ExprHandle N,
-    ExprHandle C,
+    const ExprHandle& C,
     ExprHandle H,
     ExprHandle W,
     ExprHandle K,
-    ExprHandle CperG,
-    ExprHandle R,
-    ExprHandle S,
+    const ExprHandle& CperG,
+    const ExprHandle& R,
+    const ExprHandle& S,
     ExprHandle stride,
     ExprHandle pad,
-    ExprHandle groups) {
+    const ExprHandle& groups) {
   TORCH_INTERNAL_ASSERT(input.ndim() == 4);
   TORCH_INTERNAL_ASSERT(weight.ndim() == 4);
 
@@ -122,7 +124,7 @@ Tensor conv2d_depthwise_dynamic(
 
   return Reduce(
       "conv2d_depthwise",
-      {N, K, OH, OW},
+      {std::move(N), std::move(K), OH, OW},
       c10::nullopt, // TODO
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
@@ -160,7 +162,8 @@ Tensor conv2d_depthwise(
   auto init_func = [&](const std::vector<VarHandle>& v) {
     return bias.load(v[1]);
   };
-  return conv2d_depthwise_static(input, weight, init_func, stride, pad, groups);
+  return conv2d_depthwise_static(
+      std::move(input), std::move(weight), init_func, stride, pad, groups);
 }
 
 Tensor conv2d_depthwise(
@@ -172,7 +175,8 @@ Tensor conv2d_depthwise(
   auto init_func = [](const std::vector<VarHandle>& v) {
     return ExprHandle(Sum().initializer());
   };
-  return conv2d_depthwise_static(input, weight, init_func, stride, pad, groups);
+  return conv2d_depthwise_static(
+      std::move(input), std::move(weight), init_func, stride, pad, groups);
 }
 
 Tensor conv2d_depthwise(
@@ -180,34 +184,34 @@ Tensor conv2d_depthwise(
     BufHandle weight,
     BufHandle bias,
     ExprHandle N,
-    ExprHandle C,
+    const ExprHandle& C,
     ExprHandle H,
     ExprHandle W,
     ExprHandle K,
-    ExprHandle CperG,
-    ExprHandle R,
-    ExprHandle S,
+    const ExprHandle& CperG,
+    const ExprHandle& R,
+    const ExprHandle& S,
     ExprHandle stride,
     ExprHandle pad,
-    ExprHandle groups) {
+    const ExprHandle& groups) {
   assert_dims_constant(bias);
   auto init_func = [&](const std::vector<VarHandle>& v) {
     return bias.load(v[1]);
   };
   return conv2d_depthwise_dynamic(
-      input,
-      weight,
+      std::move(input),
+      std::move(weight),
       init_func,
-      N,
+      std::move(N),
       C,
-      H,
-      W,
-      K,
+      std::move(H),
+      std::move(W),
+      std::move(K),
       CperG,
       R,
       S,
-      stride,
-      pad,
+      std::move(stride),
+      std::move(pad),
       groups);
 }
 
@@ -215,33 +219,33 @@ Tensor conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     ExprHandle N,
-    ExprHandle C,
+    const ExprHandle& C,
     ExprHandle H,
     ExprHandle W,
     ExprHandle K,
-    ExprHandle CperG,
-    ExprHandle R,
-    ExprHandle S,
+    const ExprHandle& CperG,
+    const ExprHandle& R,
+    const ExprHandle& S,
     ExprHandle stride,
     ExprHandle pad,
-    ExprHandle groups) {
+    const ExprHandle& groups) {
   auto init_func = [](const std::vector<VarHandle>& v) {
     return ExprHandle(Sum().initializer());
   };
   return conv2d_depthwise_dynamic(
-      input,
-      weight,
+      std::move(input),
+      std::move(weight),
       init_func,
-      N,
+      std::move(N),
       C,
-      H,
-      W,
-      K,
+      std::move(H),
+      std::move(W),
+      std::move(K),
       CperG,
       R,
       S,
-      stride,
-      pad,
+      std::move(stride),
+      std::move(pad),
       groups);
 }
 

@@ -357,14 +357,14 @@ StmtPtr IRCloner::mutate(CondPtr v) {
   return alloc<Cond>(condition_new, true_new, false_new);
 }
 
-StmtPtr Stmt::clone(StmtPtr s) {
+StmtPtr Stmt::clone(const StmtPtr& s) {
   IRCloner cloner;
   StmtPtr cloned = s->accept_mutator(&cloner);
   set_parent(cloned, nullptr);
   return cloned;
 }
 
-ExprPtr Expr::clone(ExprPtr e) {
+ExprPtr Expr::clone(const ExprPtr& e) {
   IRCloner cloner;
   return e->accept_mutator(&cloner);
 }

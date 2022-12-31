@@ -73,7 +73,7 @@ struct TORCH_API Operator {
   };
 
  public:
-  Operator(c10::OperatorHandle opHandle, Operation operation)
+  Operator(const c10::OperatorHandle& opHandle, Operation operation)
       : op_(c10::make_left<C10Operator, JitOnlyOperator>(
             C10Operator{opHandle, std::move(operation)})) {}
 
@@ -96,10 +96,10 @@ struct TORCH_API Operator {
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
             c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
                 varArgSchemaWithName(
-                    name,
-                    overload_name,
-                    arguments,
-                    returns,
+                    std::move(name),
+                    std::move(overload_name),
+                    std::move(arguments),
+                    std::move(returns),
                     alias_analysis)),
             c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
@@ -231,10 +231,10 @@ struct TORCH_API Operator {
       std::vector<Argument> returns,
       AliasAnalysisKind alias_analysis) {
     auto result = FunctionSchema(
-        name,
-        overload_name,
-        arguments,
-        returns,
+        std::move(name),
+        std::move(overload_name),
+        std::move(arguments),
+        std::move(returns),
         /*is_vararg*/ false,
         /*is_varret*/ false);
     result.setAliasAnalysis(alias_analysis);

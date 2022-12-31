@@ -202,11 +202,11 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   bool dependsDirectly(ExprPtr A, StmtPtr B);
 
   // Returns true of the output depends directly on a write contained in B.
-  bool dependsDirectly(BufPtr output, StmtPtr B);
+  bool dependsDirectly(const BufPtr& output, StmtPtr B);
 
   // Returns true if a read in A depends directly on the provided input.
-  bool dependsDirectly(StmtPtr A, BufPtr input);
-  bool dependsDirectly(ExprPtr A, BufPtr input);
+  bool dependsDirectly(StmtPtr A, const BufPtr& input);
+  bool dependsDirectly(ExprPtr A, const BufPtr& input);
 
   // Outputs/inputs cannot depend directly.
 
@@ -220,14 +220,14 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   bool dependsIndirectly(ExprPtr A, StmtPtr B);
 
   // Returns true of the output depends indirectly on a write contained in B.
-  bool dependsIndirectly(BufPtr output, StmtPtr B);
+  bool dependsIndirectly(const BufPtr& output, StmtPtr B);
 
   // Returns true if a read in A depends indirectly on the provided input.
-  bool dependsIndirectly(StmtPtr A, BufPtr input);
-  bool dependsIndirectly(ExprPtr A, BufPtr input);
+  bool dependsIndirectly(StmtPtr A, const BufPtr& input);
+  bool dependsIndirectly(ExprPtr A, const BufPtr& input);
 
   // returns true if the output uses any load of the input.
-  bool dependsIndirectly(BufPtr output, BufPtr input);
+  bool dependsIndirectly(const BufPtr& output, const BufPtr& input);
 
   // Returns true if the access A has a dependency chain to access B.
   bool dependsIndirectly(
@@ -235,21 +235,21 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
       const std::shared_ptr<AccessInfo>& B);
 
   // Returns the AccessInfo
-  std::shared_ptr<AccessInfo> accessFor(StmtPtr A) const;
-  std::shared_ptr<AccessInfo> accessFor(ExprPtr A) const;
+  std::shared_ptr<AccessInfo> accessFor(const StmtPtr& A) const;
+  std::shared_ptr<AccessInfo> accessFor(const ExprPtr& A) const;
 
   // Returns all AccessInfos.
   std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(
-      StmtPtr A) const;
+      const StmtPtr& A) const;
   // TODO: this will return only the AccessInfo for A. It's included for
   // completeness but be aware it wont return accesses used in the computation
   // of A.
   std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(
-      ExprPtr A) const;
+      const ExprPtr& A) const;
 
   // Accesses relating to input and output buffers.
-  std::shared_ptr<AccessInfo> input(BufPtr B) const;
-  std::shared_ptr<AccessInfo> output(BufPtr B) const;
+  std::shared_ptr<AccessInfo> input(const BufPtr& B) const;
+  std::shared_ptr<AccessInfo> output(const BufPtr& B) const;
 
   // Returns the full history of reads and writes.
   const std::vector<std::shared_ptr<AccessInfo>>& getHistory() const;
@@ -324,7 +324,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
 
   // Finds all accesses that are writes within the scope of v.
   // Writes cannot occur in Exprs, so this is a little simpler.
-  DependencySet getAllWritesWithin(StmtPtr v) {
+  DependencySet getAllWritesWithin(const StmtPtr& v) {
     DependencySet writes;
 
     // writes just Store currently.

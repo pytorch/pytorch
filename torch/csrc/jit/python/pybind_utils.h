@@ -150,7 +150,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   // The py::function cb arg must take a std::shared_ptr<PythonFutureWrapper>
   // (i.e., torch._C.Future) as the only argument. If the type mismatches, an
   // error will be thrown when waiting for the value of this returned Future.
-  std::shared_ptr<PythonFutureWrapper> then(py::function cb) {
+  std::shared_ptr<PythonFutureWrapper> then(const py::function& cb) {
     // We need this an additional layer of wrapper here to guard the
     // destruction of the py::function object. Because, the
     // Future owns a reference to the py::function in its callback
@@ -190,7 +190,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         PyObjectType::get()));
   }
 
-  void add_done_callback(py::function cb) {
+  void add_done_callback(const py::function& cb) {
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
     // NOLINTNEXTLINE(modernize-avoid-bind)
     fut->addCallback(std::bind(
@@ -855,7 +855,7 @@ inline py::object runAndInsertCall(
     Function& callee,
     const tuple_slice& args,
     const py::kwargs& kwargs,
-    c10::optional<IValue> self,
+    const c10::optional<IValue>& self,
     // Lambda that tells this function how to insert `callee` into the graph if
     // we're tracing.
     const std::function<Value*(Graph&, const MatchedSchema& match)>&
@@ -915,7 +915,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
     const py::object& callee,
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
-    const c10::QualifiedName qualname) {
+    const c10::QualifiedName& qualname) {
   std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);

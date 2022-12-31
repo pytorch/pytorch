@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -59,10 +61,10 @@ class TORCH_API HashProvider : public IRVisitor {
     return hashOf(e);
   }
 
-  bool cachedHash(ExprPtr e) {
+  bool cachedHash(const ExprPtr& e) {
     return exprToHash_.find(e) != exprToHash_.end();
   }
-  bool cachedHash(StmtPtr s) {
+  bool cachedHash(const StmtPtr& s) {
     return stmtToHash_.find(s) != stmtToHash_.end();
   }
 
@@ -121,7 +123,7 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
  private:
-  SimplifierHashType hashOf(ExprPtr e) {
+  SimplifierHashType hashOf(const ExprPtr& e) {
     auto it = exprToHash_.find(e);
     if (it != exprToHash_.end()) {
       return it->second;
@@ -137,7 +139,7 @@ class TORCH_API HashProvider : public IRVisitor {
     return hash;
   }
 
-  SimplifierHashType hashOf(StmtPtr s) {
+  SimplifierHashType hashOf(const StmtPtr& s) {
     auto it = stmtToHash_.find(s);
     if (it != stmtToHash_.end()) {
       return it->second;
@@ -175,7 +177,7 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
   void _hash_combine(SimplifierHashType& seed, ExprPtr e) {
-    _hash_combine(seed, hash(e));
+    _hash_combine(seed, hash(std::move(e)));
   }
 
   template <typename T, typename... Types>
@@ -187,14 +189,14 @@ class TORCH_API HashProvider : public IRVisitor {
     _hash_combine(seed, args...);
   }
 
-  void putHash(ExprPtr e, SimplifierHashType h) {
+  void putHash(const ExprPtr& e, SimplifierHashType h) {
     auto res = exprToHash_.emplace(e, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
       throw std::runtime_error("hash collision");
     }
   }
-  void putHash(StmtPtr s, SimplifierHashType h) {
+  void putHash(const StmtPtr& s, SimplifierHashType h) {
     auto res = stmtToHash_.emplace(s, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
@@ -243,7 +245,7 @@ class TORCH_API HashProvider : public IRVisitor {
     return te_hash(v2);
   }
 
-  size_t te_hash(std::string val) {
+  size_t te_hash(const std::string& val) {
     size_t hash{0};
     int64_t intval{0};
     int64_t s = val.size() - 1;

@@ -7,6 +7,8 @@
 
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -39,43 +41,43 @@ static ExprPtr mutate_binary_op(
 }
 
 ExprPtr IRMutator::mutate(AddPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRMutator::mutate(SubPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRMutator::mutate(MulPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRMutator::mutate(DivPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRMutator::mutate(ModPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRMutator::mutate(AndPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRMutator::mutate(OrPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRMutator::mutate(XorPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRMutator::mutate(LshiftPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRMutator::mutate(RshiftPtr v) {
-  return mutate_binary_op(v, this);
+  return mutate_binary_op(std::move(v), this);
 }
 
 ExprPtr IRMutator::mutate(MaxPtr v) {

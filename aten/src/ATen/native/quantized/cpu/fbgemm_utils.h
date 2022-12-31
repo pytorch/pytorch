@@ -33,7 +33,7 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
         col_offsets(std::move(col_offsets)),
         w_scale(std::move(w_scale)),
         w_zp(std::move(w_zp)),
-        q_scheme(std::move(q_scheme)) {}
+        q_scheme(q_scheme) {}
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
   c10::optional<at::Tensor> bias_;
   std::vector<int32_t> col_offsets;
@@ -165,10 +165,10 @@ struct TORCH_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeight(
       std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w,
       c10::optional<at::Tensor> bias,
-      torch::List<int64_t> stride,
-      torch::List<int64_t> padding,
-      torch::List<int64_t> output_padding,
-      torch::List<int64_t> dilation,
+      const torch::List<int64_t>& stride,
+      const torch::List<int64_t>& padding,
+      const torch::List<int64_t>& output_padding,
+      const torch::List<int64_t>& dilation,
       int64_t groups,
       uint8_t transpose,
       std::vector<int32_t> col_offsets,
@@ -178,10 +178,10 @@ struct TORCH_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       c10::QScheme q_scheme)
       : w(std::move(w)),
         bias(std::move(bias)),
-        stride_(std::move(stride)),
-        padding_(std::move(padding)),
-        output_padding_(std::move(output_padding)),
-        dilation_(std::move(dilation)),
+        stride_(stride),
+        padding_(padding),
+        output_padding_(output_padding),
+        dilation_(dilation),
         groups_(groups),
         transpose_(transpose),
         col_offsets(std::move(col_offsets)),

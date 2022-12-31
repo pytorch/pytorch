@@ -6,6 +6,8 @@
 
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -76,17 +78,17 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   ~SimpleIREvaluatorImpl() override = default;
 
-  void bindBuf(BufPtr buf, void* ptr) {
+  void bindBuf(const BufPtr& buf, void* ptr) {
     GRAPH_DEBUG("Binding ptr ", ptr, " with buf ", buf->name_hint());
     buffer_mapping_[buf] = ptr;
   }
-  void bindVar(VarPtr var, const InterpValue& val) {
+  void bindVar(const VarPtr& var, const InterpValue& val) {
     eval_context_[var] = val;
     GRAPH_DEBUG(
         "Binding value ", val.intValue(), " with var ", var->name_hint());
   }
 
-  InterpValue evaluateExpr(ExprPtr e) {
+  InterpValue evaluateExpr(const ExprPtr& e) {
     e->accept(this);
     return value_;
   }
@@ -392,7 +394,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   void visit_compare_select_op(
-      CompareSelectPtr v,
+      const CompareSelectPtr& v,
       CompareSelectOperation cmp_op) {
     v->lhs()->accept(this);
     InterpValue lhs_v = value_;
@@ -1245,7 +1247,7 @@ SimpleIREvaluator::SimpleIREvaluator(
     const std::vector<BufferArg>& buffer_args,
     at::Device device,
     const std::string& kernel_func_name)
-    : CodeGen(stmt, buffer_args, device, kernel_func_name) {
+    : CodeGen(std::move(stmt), buffer_args, device, kernel_func_name) {
   impl_ = std::make_unique<SimpleIREvaluatorImpl>();
   expand_intrinsics();
 }
@@ -1294,7 +1296,7 @@ void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
   }
 }
 
-void SimpleIREvaluator::bindVar(VarPtr v, ExprPtr e) {
+void SimpleIREvaluator::bindVar(const VarPtr& v, const ExprPtr& e) {
   impl_->bindVar(v, impl_->evaluateExpr(e));
 }
 
@@ -1304,7 +1306,7 @@ InterpValue SimpleIREvaluator::value() const {
 
 c10::optional<int64_t> evalInt(ExprPtr e) {
   try {
-    return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(e)))
+    return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(std::move(e))))
         .value<int64_t>();
   } catch (std::runtime_error& err) {
     return c10::nullopt;

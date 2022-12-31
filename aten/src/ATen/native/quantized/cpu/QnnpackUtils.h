@@ -37,7 +37,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
   PackedLinearWeightsQnnp(
       std::unique_ptr<qnnpack::PackBMatrix> w,
       at::Tensor orig_weight,
-      at::Tensor bias,
+      const at::Tensor& bias,
       c10::optional<double> input_scale,
       at::Tensor w_scales,
       std::vector<uint8_t>&& w_zps)
@@ -46,7 +46,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
         bias_(at::native::mobile::allocate_padded_contiguous_if_needed(
             bias, bias.suggest_memory_format())),
         per_channel_(this->orig_weight.qscheme() == at::kPerChannelAffine),
-        input_scale(std::move(input_scale)),
+        input_scale(input_scale),
         w_scales(std::move(w_scales)),
         w_zero_points(std::move(w_zps)) {}
 
@@ -114,10 +114,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       std::unique_ptr<qnnpack::PrePackConvWeights> w,
       at::Tensor orig_weight,
       at::Tensor bias,
-      torch::List<int64_t> stride,
-      torch::List<int64_t> padding,
-      torch::List<int64_t> output_padding,
-      torch::List<int64_t> dilation,
+      const torch::List<int64_t>& stride,
+      const torch::List<int64_t>& padding,
+      const torch::List<int64_t>& output_padding,
+      const torch::List<int64_t>& dilation,
       int64_t groups,
       bool transpose,
       c10::optional<double> input_scale,
@@ -128,10 +128,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       : w(std::move(w)),
         orig_weight(std::move(orig_weight)),
         bias(std::move(bias)),
-        stride_(std::move(stride)),
-        padding_(std::move(padding)),
-        output_padding_(std::move(output_padding)),
-        dilation_(std::move(dilation)),
+        stride_(stride),
+        padding_(padding),
+        output_padding_(output_padding),
+        dilation_(dilation),
         groups_(groups),
         transpose_(transpose),
         is_per_channel_(is_per_channel),

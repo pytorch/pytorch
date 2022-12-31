@@ -12,7 +12,7 @@ struct TensorInfo {
   std::vector<int64_t> dims;
   c10::ScalarType dtype;
 };
-c10::optional<TensorInfo> getTensorInfo(BufHandle b);
+c10::optional<TensorInfo> getTensorInfo(const BufHandle& b);
 
 int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size);
 
@@ -39,7 +39,7 @@ ExprHandle tensorOrConstant(
     const ArgValue& v,
     const std::vector<ExprHandle>& axes);
 ExprHandle scalarOrConstant(const ArgValue& v);
-ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
+ExprHandle broadcast(const BufHandle& b, const std::vector<ExprHandle>& axes);
 ExprHandle constant(const ArgValue& v);
 
 ExprHandle clamp(

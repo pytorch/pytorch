@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include <ATen/ATen.h>
 #include <torch/csrc/jit/resource_guard.h>
@@ -20,7 +21,7 @@ namespace tensorexpr {
 // A class that analyzes the given program relevant for Block backend.
 class BlockAnalysis : public IRVisitor {
  public:
-  bool is_buf_store_target(BufPtr buf) const {
+  bool is_buf_store_target(const BufPtr& buf) const {
     return store_targets_.count(buf) > 0;
   }
 
@@ -38,11 +39,11 @@ class BlockAnalysis : public IRVisitor {
 
   bool areBufsInMap(const std::unordered_set<BufPtr>& bufs) const;
 
-  BufPtr getMultiDimBuf(BufPtr buf) const;
+  BufPtr getMultiDimBuf(const BufPtr& buf) const;
 
-  std::string getInputName(BufPtr buf) const;
+  std::string getInputName(const BufPtr& buf) const;
 
-  std::string getFlatInputName(BufPtr buf) const {
+  std::string getFlatInputName(const BufPtr& buf) const {
     return getInputName(buf) + "_flat";
   }
 
@@ -111,7 +112,7 @@ class TORCH_API BlockCodeGen : public CodeGen {
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::Device(at::kCPU),
       const std::string& kernel_func_name = "func")
-      : CodeGen(stmt, buffer_args, device, kernel_func_name) {
+      : CodeGen(std::move(stmt), buffer_args, device, kernel_func_name) {
     Initialize();
   }
 

@@ -196,8 +196,8 @@ struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffine
       Tensor zero_points,
       int64_t axis)
       : PerChannelAffineQuantizer(scalar_type,
-        scales,
-        zero_points,
+        std::move(scales),
+        std::move(zero_points),
         axis) {}
 
   QScheme qscheme() const override {

@@ -190,12 +190,12 @@ void IRVerifier::visit(ExternalCallPtr v) {
   IRVisitor::visit(v);
 }
 
-void verify(StmtPtr s) {
+void verify(const StmtPtr& s) {
   IRVerifier verifier;
   s->accept(&verifier);
 }
 
-void verify(ExprPtr e) {
+void verify(const ExprPtr& e) {
   IRVerifier verifier;
   e->accept(&verifier);
 }

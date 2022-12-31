@@ -11,7 +11,10 @@ namespace jit {
 namespace tensorexpr {
 
 // Move the given user of `aten::cat` op to its inputs.
-Node* moveCatAfterUse(Node* cat, Node* user, std::shared_ptr<Graph> subgraph) {
+Node* moveCatAfterUse(
+    Node* cat,
+    Node* user,
+    const std::shared_ptr<Graph>& subgraph) {
   // Example IR:
   //   %1 = ...
   //   %2 = ...
@@ -139,7 +142,7 @@ bool doesCatPromoteTypes(Node* node) {
 //      - When the cat op promote types, the type of inputs to cat after moving
 //        it user needs to reflect the original type. This is currently not
 //        handled. TODO
-void moveCatOpToEnd(Node* cat, std::shared_ptr<Graph> subgraph) {
+void moveCatOpToEnd(Node* cat, const std::shared_ptr<Graph>& subgraph) {
   TORCH_INTERNAL_ASSERT(
       cat->kind() == aten::cat,
       buildErrorMessage("Graph node is not aten::cat."));
@@ -161,7 +164,7 @@ void moveCatOpToEnd(Node* cat, std::shared_ptr<Graph> subgraph) {
 
 // Moves the users of `aten::cat` ops to its inputs whenever possible
 // in the given subgraph.
-void moveCatOpsToEnd(std::shared_ptr<Graph> subgraph) {
+void moveCatOpsToEnd(const std::shared_ptr<Graph>& subgraph) {
   std::vector<Node*> cat_nodes;
   for (Node* n : subgraph->nodes()) {
     if (n->kind() == aten::cat) {

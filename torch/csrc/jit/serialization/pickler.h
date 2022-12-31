@@ -322,7 +322,7 @@ inline std::unordered_map<std::string, bool> getTensorMetadata(
 // Refer: getTensorMathdata
 inline void setTensorMetadata(
     const at::Tensor& t,
-    std::unordered_map<std::string, bool> metadata) {
+    const std::unordered_map<std::string, bool>& metadata) {
   for (auto& key_value_pair : metadata) {
     if (key_value_pair.first == "conj") {
       t._set_conj(true);
@@ -342,7 +342,7 @@ inline void setTensorMetadata(
 // NOTE: This overload is required by unpickler.cpp
 inline void setTensorMetadata(
     const at::Tensor& t,
-    c10::Dict<c10::IValue, c10::IValue> metadata_idict) {
+    const c10::Dict<c10::IValue, c10::IValue>& metadata_idict) {
   std::unordered_map<std::string, bool> metadata;
   for (auto& pair : metadata_idict) {
     auto key = *pair.key().toString();

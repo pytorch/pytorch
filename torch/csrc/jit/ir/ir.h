@@ -25,6 +25,7 @@
 #include <functional>
 #include <iostream>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 // Forward declare, the real meat is in python_ir.cpp
@@ -445,7 +446,7 @@ struct TORCH_API Node {
   c10::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }
-  void setCallStack(InlinedCallStackPtr cs) {
+  void setCallStack(const InlinedCallStackPtr& cs) {
     callstack_ = cs;
   }
 
@@ -1565,7 +1566,7 @@ struct TORCH_API ProfileIValueOp : public Node {
   }
 
   void setCallback(std::function<void(std::vector<IValue>&)> callback) {
-    callback_ = callback;
+    callback_ = std::move(callback);
   }
 
  private:

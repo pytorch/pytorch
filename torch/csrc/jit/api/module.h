@@ -268,7 +268,7 @@ struct TORCH_API Module : public Object {
   }
 
   void set_delete_memory(std::shared_ptr<char> delete_mem) {
-    mem_to_delete_ = delete_mem;
+    mem_to_delete_ = std::move(delete_mem);
   }
 
  private:
@@ -370,7 +370,7 @@ struct slot_iterator_impl {
   using SlotCursor = detail::SlotCursor;
   using value_type = typename Policy::value_type;
   slot_iterator_impl(
-      Module root,
+      const Module& root,
       bool recurse, // if true, do a depth-first search, otherwise, just look at
                     // slots of root
       bool return_module) // if true include root itself as the first thing
@@ -517,7 +517,7 @@ struct slot_list_impl {
     return *size_;
   }
 
-  slot_list_impl(Module module, bool recurse, bool return_module)
+  slot_list_impl(const Module& module, bool recurse, bool return_module)
       : module_(module),
         recurse_(recurse),
         return_module_(return_module),

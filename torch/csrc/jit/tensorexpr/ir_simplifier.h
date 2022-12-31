@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
+#include <utility>
+
 /* IR Simplification
  *
  * Simplfies expressions in two stages:
@@ -88,7 +90,7 @@ Dtype promoteTypesVar(ExprType e, Args... es) {
 // Uses the evaluator to fold an Expression with constant terms.
 // E.g. evaluateOp(Add(3, 4)) => 7.
 // Expr v must not have any unbound Vars.
-inline ExprPtr evaluateOp(ExprPtr v) {
+inline ExprPtr evaluateOp(const ExprPtr& v) {
   ExprHandle handle(v);
   ExprEval<SimpleIREvaluator> eval(handle);
 
@@ -121,7 +123,7 @@ class Term : public ExprNode<Term> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Term(HashProvider& hasher, ExprPtr s, std::vector<ExprPtr> v)
+  Term(HashProvider& hasher, const ExprPtr& s, std::vector<ExprPtr> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -133,7 +135,7 @@ class Term : public ExprNode<Term> {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Term(
       HashProvider& hasher,
-      ExprPtr s,
+      const ExprPtr& s,
       std::unordered_map<SimplifierHashType, ExprPtr> varmap)
       : ExprNodeBase(promoteTypesMap(s, varmap)), scalar_(s), hasher_(hasher) {
     for (auto& p : varmap) {
@@ -162,7 +164,7 @@ class Term : public ExprNode<Term> {
   HashProvider& hasher_;
 
   void addComponent() {}
-  void addComponent(ExprPtr e) {
+  void addComponent(const ExprPtr& e) {
     variables_.push_back(e);
   }
   template <class... Es>
@@ -190,7 +192,7 @@ class Polynomial : public ExprNode<Polynomial> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Polynomial(HashProvider& hasher, ExprPtr s, std::vector<TermPtr> v)
+  Polynomial(HashProvider& hasher, const ExprPtr& s, std::vector<TermPtr> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -213,7 +215,7 @@ class Polynomial : public ExprNode<Polynomial> {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Polynomial(
       HashProvider& hasher,
-      ExprPtr s,
+      const ExprPtr& s,
       std::unordered_map<SimplifierHashType, TermPtr> varmap)
       : ExprNodeBase(promoteTypesMap(s, varmap)), scalar_(s), hasher_(hasher) {
     for (auto& p : varmap) {
@@ -239,7 +241,7 @@ class Polynomial : public ExprNode<Polynomial> {
   ExprPtr scalar_;
   HashProvider& hasher_;
 
-  void addTerm(TermPtr t) {
+  void addTerm(const TermPtr& t) {
     variables_.push_back(t);
   }
   template <class... Ts>
@@ -255,7 +257,7 @@ class Polynomial : public ExprNode<Polynomial> {
 class RoundOff : public BinaryOpNode<RoundOff> {
  public:
   RoundOff(ExprPtr lhs, ExprPtr rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kOther) {}
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kOther) {}
 };
 
 class MaxTerm : public ExprNode<MaxTerm> {
@@ -272,7 +274,11 @@ class MaxTerm : public ExprNode<MaxTerm> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  MaxTerm(HashProvider& hasher, ExprPtr s, bool p, std::vector<ExprPtr> v)
+  MaxTerm(
+      HashProvider& hasher,
+      const ExprPtr& s,
+      bool p,
+      std::vector<ExprPtr> v)
       : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -302,7 +308,7 @@ class MaxTerm : public ExprNode<MaxTerm> {
   bool propagate_nans_;
 
   void addComponent() {}
-  void addComponent(ExprPtr e) {
+  void addComponent(const ExprPtr& e) {
     variables_.push_back(e);
   }
   template <class... Es>
@@ -329,7 +335,11 @@ class MinTerm : public ExprNode<MinTerm> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  MinTerm(HashProvider& hasher, ExprPtr s, bool p, std::vector<ExprPtr> v)
+  MinTerm(
+      HashProvider& hasher,
+      const ExprPtr& s,
+      bool p,
+      std::vector<ExprPtr> v)
       : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
         variables_(std::move(v)),
         scalar_(s),
@@ -359,7 +369,7 @@ class MinTerm : public ExprNode<MinTerm> {
   bool propagate_nans_;
 
   void addComponent() {}
-  void addComponent(ExprPtr e) {
+  void addComponent(const ExprPtr& e) {
     variables_.push_back(e);
   }
   template <class... Es>
@@ -407,7 +417,7 @@ class TORCH_API PolynomialBase : public IRMutator {
   StmtPtr mutate(ForPtr v) override;
 
   // Trivially factorize terms by GCD of scalar components.
-  TermPtr factorizePolynomial(PolynomialPtr poly);
+  TermPtr factorizePolynomial(const PolynomialPtr& poly);
 
   HashProvider& hasher() {
     return hasher_;
@@ -426,41 +436,41 @@ class TORCH_API PolynomialTransformer : public PolynomialBase {
   // combines the term with the existing and updates the map.
   void addOrUpdateTerm(
       std::unordered_map<SimplifierHashType, TermPtr>& varmap,
-      TermPtr term);
+      const TermPtr& term);
 
   // Add Polynomial expressions, combining Terms representing the same
   // variables.
-  ExprPtr addPolynomials(PolynomialPtr lhs, PolynomialPtr rhs);
+  ExprPtr addPolynomials(const PolynomialPtr& lhs, const PolynomialPtr& rhs);
 
   // Insert a new Term into the provided polynomial. If the new term has
   // common variables to an existing term it is combined.
-  ExprPtr insertTerm(PolynomialPtr poly, TermPtr term);
+  ExprPtr insertTerm(const PolynomialPtr& poly, const TermPtr& term);
 
   // Merge and simplify addition.
   ExprPtr mutate(AddPtr v) override;
 
   // Subtract one term from another, cancelling if necessary.
-  ExprPtr subTerms(TermPtr lhs, TermPtr rhs, bool negated);
+  ExprPtr subTerms(const TermPtr& lhs, TermPtr rhs, bool negated);
 
   // Subtract the RHS Polynomial from the LHS Polynomial, cancelling out where
   // possible.
-  ExprPtr subPolynomials(PolynomialPtr lhs, PolynomialPtr rhs);
+  ExprPtr subPolynomials(const PolynomialPtr& lhs, const PolynomialPtr& rhs);
 
   // Merge and simplify subtraction.
   ExprPtr mutate(SubPtr v) override;
 
   // Multiply two terms together, usually creating a new term with the variable
   // lists concatenated.
-  TermPtr mulTerms(TermPtr lhs, TermPtr rhs);
+  TermPtr mulTerms(const TermPtr& lhs, const TermPtr& rhs);
 
   // Multiply a Polynomial by a Term.
-  ExprPtr polyByTerm(PolynomialPtr poly, TermPtr term);
+  ExprPtr polyByTerm(const PolynomialPtr& poly, const TermPtr& term);
 
   // Match a rounding pattern and create a RoundOff if found.
-  ExprPtr isRoundOff(ExprPtr lhs, ExprPtr rhs);
+  ExprPtr isRoundOff(const ExprPtr& lhs, const ExprPtr& rhs);
 
   // Inserts a new component into a term, simplifying if possible.
-  ExprPtr insertIntoTerm(TermPtr term, ExprPtr expr);
+  ExprPtr insertIntoTerm(const TermPtr& term, const ExprPtr& expr);
 
   // Merge and simplify multiplication.
   ExprPtr mutate(MulPtr v) override;
@@ -543,9 +553,9 @@ class TORCH_API IRSimplifier {
 };
 
 // Flattens the buf and performs the simplifier on the flattened dims.
-ExprPtr buf_flat_size(BufPtr v);
+ExprPtr buf_flat_size(const BufPtr& v);
 // Returns true if expressions A and B can be simplified to an equal expression.
-TORCH_API bool exprEquals(ExprPtr A, ExprPtr B);
+TORCH_API bool exprEquals(const ExprPtr& A, const ExprPtr& B);
 
 } // namespace tensorexpr
 } // namespace jit

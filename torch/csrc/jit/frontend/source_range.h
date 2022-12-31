@@ -205,7 +205,7 @@ struct TORCH_API Source {
   }
 
   explicit Source(
-      StringCordView str,
+      const StringCordView& str,
       c10::optional<std::string> filename = c10::nullopt,
       size_t starting_line_no = 0,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
