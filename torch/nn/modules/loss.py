@@ -343,14 +343,14 @@ class GaussianNLLLoss(_Loss):
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
         >>> target = torch.randn(5, 2)
-        >>> var = torch.ones(5, 2, requires_grad=True) #heteroscedastic
+        >>> var = torch.ones(5, 2, requires_grad=True)  # heteroscedastic
         >>> output = loss(input, target, var)
         >>> output.backward()
 
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
         >>> target = torch.randn(5, 2)
-        >>> var = torch.ones(5, 1, requires_grad=True) #homoscedastic
+        >>> var = torch.ones(5, 1, requires_grad=True)  # homoscedastic
         >>> output = loss(input, target, var)
         >>> output.backward()
 
