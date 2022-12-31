@@ -578,6 +578,26 @@ class TestForeach(TestCase):
         self._binary_test(dtype, foreach_op, native_op, inputs, is_fastpath=False, is_inplace=False)
         self._binary_test(dtype, foreach_op_, native_op_, inputs, is_fastpath=False, is_inplace=True)
 
+    @ops(foreach_binary_op_db, dtypes=floating_types_and(torch.half, torch.bfloat16))
+    def test_binary_op_float_inf_nan(self, device, dtype, op):
+        inputs = (
+            [
+                torch.tensor([float('inf')], device=device, dtype=dtype),
+                torch.tensor([-float('inf')], device=device, dtype=dtype),
+                torch.tensor([float('nan')], device=device, dtype=dtype),
+                torch.tensor([float('nan')], device=device, dtype=dtype)
+            ],
+            [
+                torch.tensor([-float('inf')], device=device, dtype=dtype),
+                torch.tensor([float('inf')], device=device, dtype=dtype),
+                torch.tensor([float('inf')], device=device, dtype=dtype),
+                torch.tensor([float('nan')], device=device, dtype=dtype)
+            ],
+        )
+        op, ref, inplace_op, inplace_ref = self._get_funcs(op, 1)
+        self._binary_test(dtype, op, ref, inputs, True, False)
+        self._binary_test(dtype, inplace_op, inplace_ref, inputs, True, True)
+
     # note: Below three tests (postfixed with `_tensors_on_different_devices`)
     # checks whether foreach works with lists of tensors on different devices
     # but tensors of the same index are on the same device, e.g., ['cuda', 'cpu].
