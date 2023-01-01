@@ -292,9 +292,9 @@ auto handle_torch_function_no_python_arg_parser(
 
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  auto get_stack_len = [&]() {
-    return is_torch_function ? at::impl::PythonTorchFunctionTLS::stack_len()
-                             : c10::impl::TorchDispatchModeTLS::stack_len();
+  const auto is_mode_active = [&]() {
+    return is_torch_function ? at::impl::torch_function_mode_enabled()
+                             : c10::impl::dispatch_mode_enabled();
   };
 
   std::vector<std::unique_ptr<torch::overrides::StashTorchFunctionModeGuard>>
@@ -302,7 +302,7 @@ auto handle_torch_function_no_python_arg_parser(
   std::vector<std::unique_ptr<torch_dispatch_mode::StashTorchDispatchModeGuard>>
       td_g;
   while ((ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) &&
-         get_stack_len() > 0) {
+         is_mode_active()) {
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
     if (is_torch_function) {
