@@ -137,10 +137,7 @@ Tensor computeMean(
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
-          ResultBuf,
-          "nnc_aten_mean",
-          {std::move(InputBuf)},
-          extra_args));
+          ResultBuf, "nnc_aten_mean", {std::move(InputBuf)}, extra_args));
 }
 
 Tensor computeMax(
