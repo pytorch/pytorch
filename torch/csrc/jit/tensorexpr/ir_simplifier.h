@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
+#include <utility>
+
 /* IR Simplification
  *
  * Simplfies expressions in two stages:
@@ -167,7 +169,7 @@ class Term : public ExprNode<Term> {
   }
   template <class... Es>
   void addComponent(ExprPtr e, Es... es) {
-    addComponent(e);
+    addComponent(std::move(e));
     addComponent(es...);
   }
 
@@ -244,7 +246,7 @@ class Polynomial : public ExprNode<Polynomial> {
   }
   template <class... Ts>
   void addTerm(TermPtr t, Ts... ts) {
-    addTerm(t);
+    addTerm(std::move(t));
     addTerm(ts...);
   }
 
@@ -307,7 +309,7 @@ class MaxTerm : public ExprNode<MaxTerm> {
   }
   template <class... Es>
   void addComponent(ExprPtr e, Es... es) {
-    addComponent(e);
+    addComponent(std::move(e));
     addComponent(es...);
   }
 
@@ -364,7 +366,7 @@ class MinTerm : public ExprNode<MinTerm> {
   }
   template <class... Es>
   void addComponent(ExprPtr e, Es... es) {
-    addComponent(e);
+    addComponent(std::move(e));
     addComponent(es...);
   }
 

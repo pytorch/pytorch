@@ -24,7 +24,8 @@ T _maybe_wrap_dim(T dim, T dim_post_expr, bool wrap_scalar = true) {
     return dim;
   }
   // Check edge-cases out-of-line (wrapping scalars and out-of-bounds errors)
-  return c10::detail::maybe_wrap_dim_slow<T>(dim, dim_post_expr, wrap_scalar);
+  return c10::detail::maybe_wrap_dim_slow<T>(
+      std::move(dim), std::move(dim_post_expr), wrap_scalar);
 }
 
 inline int64_t maybe_wrap_dim(

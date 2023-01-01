@@ -16,6 +16,8 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
+#include <utility>
+
 template <>
 struct pybind11::detail::type_caster<torch::jit::tensorexpr::ArgValue>
     : public type_caster_base<torch::jit::tensorexpr::ArgValue> {};
@@ -265,8 +267,9 @@ void initTensorExprBindings(PyObject* module) {
             return Store::make(self, {i}, v);
           });
   py::class_<Tensor>(te, "Tensor")
-      .def(
-          py::init([](BufHandle& b, StmtPtr s) { return Tensor(b.node(), s); }))
+      .def(py::init([](BufHandle& b, StmtPtr s) {
+        return Tensor(b.node(), std::move(s));
+      }))
       .def(
           "load",
           [](Tensor& self, const std::vector<ExprHandle>& v) {
@@ -350,7 +353,8 @@ void initTensorExprBindings(PyObject* module) {
          const Reducer& reducer,
          Tensor buffer,
          const std::vector<ExprHandle>& reduce_args) {
-        return Reduce(func_name, dim_args, reducer, buffer, reduce_args);
+        return Reduce(
+            func_name, dim_args, reducer, std::move(buffer), reduce_args);
       },
       py::return_value_policy::reference);
 
@@ -426,7 +430,9 @@ void initTensorExprBindings(PyObject* module) {
           [](const VarHandle& var,
              const ExprHandle& start,
              const ExprHandle& stop,
-             StmtPtr body) { return For::make(var, start, stop, body); });
+             StmtPtr body) {
+            return For::make(var, start, stop, std::move(body));
+          });
 
   py::class_<Cond, Stmt, std::shared_ptr<Cond>>(te, "Cond")
       .def_static(
@@ -434,7 +440,8 @@ void initTensorExprBindings(PyObject* module) {
           [](const ExprHandle& condition,
              StmtPtr true_stmt,
              StmtPtr false_stmt) {
-            return Cond::make(condition, true_stmt, false_stmt);
+            return Cond::make(
+                condition, std::move(true_stmt), std::move(false_stmt));
           })
       .def("true_stmt", &Cond::true_stmt)
       .def("false_stmt", &Cond::false_stmt);
@@ -466,7 +473,9 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_loop_body_for",
-          [](const LoopNest& self, Tensor t) { return self.getLoopBodyFor(t); },
+          [](const LoopNest& self, Tensor t) {
+            return self.getLoopBodyFor(std::move(t));
+          },
           py::return_value_policy::reference)
       .def(
           "get_loop_body_for",
@@ -477,7 +486,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "get_loops_for",
           [](const LoopNest& self, Tensor t) {
-            return self.getLoopStmtsFor(t);
+            return self.getLoopStmtsFor(std::move(t));
           },
           py::return_value_policy::reference)
       .def(
@@ -489,7 +498,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "get_enclosing_loopnest",
           [](const LoopNest& self, StmtPtr s) {
-            return self.getEnclosingLoopNest(s);
+            return self.getEnclosingLoopNest(std::move(s));
           },
           py::return_value_policy::reference)
       .def(
@@ -509,24 +518,26 @@ void initTensorExprBindings(PyObject* module) {
           [](const LoopNest& self,
              ForPtr root,
              const std::vector<int>& indices) {
-            return self.getLoopAt(root, indices);
+            return self.getLoopAt(std::move(root), indices);
           },
           py::return_value_policy::reference)
       .def(
           "get_parent_loop",
-          [](const LoopNest& self, StmtPtr s) { return self.getParentLoop(s); },
+          [](const LoopNest& self, StmtPtr s) {
+            return self.getParentLoop(std::move(s));
+          },
           py::return_value_policy::reference)
       .def_static(
           "get_loop_stmts_in_loopnest",
           [](ForPtr f, size_t num) {
-            return LoopNest::getLoopStmtsInLoopNest(f, num);
+            return LoopNest::getLoopStmtsInLoopNest(std::move(f), num);
           },
           py::return_value_policy::reference)
       .def(
           "split_with_tail",
           [](ForPtr f, int factor) {
             ForPtr inner = nullptr, tail = nullptr;
-            LoopNest::splitWithTail(f, factor, &inner, &tail);
+            LoopNest::splitWithTail(std::move(f), factor, &inner, &tail);
             return std::make_tuple(inner, tail);
           },
           py::return_value_policy::reference)
@@ -534,7 +545,7 @@ void initTensorExprBindings(PyObject* module) {
           "split_with_mask",
           [](ForPtr f, int factor) {
             ForPtr inner = nullptr;
-            LoopNest::splitWithMask(f, factor, &inner);
+            LoopNest::splitWithMask(std::move(f), factor, &inner);
             return inner;
           },
           py::return_value_policy::reference)
@@ -542,7 +553,7 @@ void initTensorExprBindings(PyObject* module) {
           "slice_head",
           [](ForPtr f, int factor) {
             ForPtr head = nullptr, tail = nullptr;
-            LoopNest::sliceHead(f, factor, &head, &tail);
+            LoopNest::sliceHead(std::move(f), factor, &head, &tail);
             return std::make_tuple(head, tail);
           },
           py::return_value_policy::reference)
@@ -550,7 +561,7 @@ void initTensorExprBindings(PyObject* module) {
           "slice_tail",
           [](ForPtr f, int factor) {
             ForPtr head = nullptr, tail = nullptr;
-            LoopNest::sliceTail(f, factor, &head, &tail);
+            LoopNest::sliceTail(std::move(f), factor, &head, &tail);
             return std::make_tuple(head, tail);
           },
           py::return_value_policy::reference)
@@ -564,22 +575,24 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "tile",
           [](LoopNest& self, ForPtr x, ForPtr y, int x_factor, int y_factor) {
-            return self.tile(x, y, x_factor, y_factor);
+            return self.tile(std::move(x), std::move(y), x_factor, y_factor);
           },
           py::return_value_policy::reference)
       .def_static(
           "distribute_loop",
-          [](ForPtr f) { return LoopNest::distributeLoop(f); },
+          [](ForPtr f) { return LoopNest::distributeLoop(std::move(f)); },
           py::return_value_policy::reference)
       .def_static(
           "distribute_loop",
           [](ForPtr f, const std::unordered_set<StmtPtr>& pivots) {
-            return LoopNest::distributeLoop(f, pivots);
+            return LoopNest::distributeLoop(std::move(f), pivots);
           },
           py::return_value_policy::reference)
       .def_static(
           "distribute_loop_over_inner_loops",
-          [](ForPtr f) { return LoopNest::distributeLoopOverInnerLoops(f); },
+          [](ForPtr f) {
+            return LoopNest::distributeLoopOverInnerLoops(std::move(f));
+          },
           py::return_value_policy::reference)
       .def_static(
           "unsafe_fuse_loops",
@@ -608,7 +621,7 @@ void initTensorExprBindings(PyObject* module) {
           "fullUnroll",
           [](ForPtr f) {
             StmtPtr unrolled = nullptr;
-            LoopNest::fullUnroll(f, &unrolled);
+            LoopNest::fullUnroll(std::move(f), &unrolled);
             return unrolled;
           },
           py::return_value_policy::reference)
@@ -621,12 +634,12 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "vectorize",
-          [](ForPtr f) { LoopNest::vectorize(f); },
+          [](ForPtr f) { LoopNest::vectorize(std::move(f)); },
           py::return_value_policy::reference)
       .def_static(
           "compress_buffer",
           [](BufHandle& buf, StmtPtr stmt) {
-            return LoopNest::compressBuffer(buf.node(), stmt);
+            return LoopNest::compressBuffer(buf.node(), std::move(stmt));
           },
           py::return_value_policy::reference)
       .def_static(
@@ -634,17 +647,19 @@ void initTensorExprBindings(PyObject* module) {
           [](const BufHandle& producer,
              const std::string& name,
              StmtPtr consumer) {
-            std::pair<BufPtr, StmtPtr> ret =
-                LoopNest::cacheAccesses(producer.node(), name, consumer);
+            std::pair<BufPtr, StmtPtr> ret = LoopNest::cacheAccesses(
+                producer.node(), name, std::move(consumer));
             return std::make_pair(BufHandle(ret.first), ret.second);
           },
           py::return_value_policy::reference)
       .def_static(
           "compute_at",
-          [](StmtPtr s, ForPtr at) { LoopNest::computeAt(s, at); })
+          [](StmtPtr s, ForPtr at) {
+            LoopNest::computeAt(std::move(s), std::move(at));
+          })
       .def(
           "compute_inline",
-          [](LoopNest& self, StmtPtr s) { self.computeInline(s); },
+          [](LoopNest& self, StmtPtr s) { self.computeInline(std::move(s)); },
           py::return_value_policy::reference)
       .def(
           "compute_inline",
@@ -656,8 +671,8 @@ void initTensorExprBindings(PyObject* module) {
           "rfactor",
           [](StmtPtr s, ForPtr target_for) {
             BufPtr rfac_buf = nullptr;
-            LoopNest::rfactor(s, target_for, &rfac_buf);
-            return BufHandle(rfac_buf);
+            LoopNest::rfactor(std::move(s), std::move(target_for), &rfac_buf);
+            return BufHandle(std::move(rfac_buf));
           },
           py::return_value_policy::reference)
       .def(
@@ -696,7 +711,7 @@ void initTensorExprBindings(PyObject* module) {
 
   te.def(
       "simplify",
-      [](StmtPtr stmt) { return IRSimplifier::simplify(stmt); },
+      [](StmtPtr stmt) { return IRSimplifier::simplify(std::move(stmt)); },
       py::return_value_policy::reference);
 
   te.def(
@@ -889,7 +904,7 @@ void initTensorExprBindings(PyObject* module) {
           throw std::runtime_error("PyTorch not compiled with CUDA support!");
 #endif
         } else if (name == "ir_eval") {
-          cg = new SimpleIREvaluator(stmt, args);
+          cg = new SimpleIREvaluator(std::move(stmt), args);
         } else {
           throw std::runtime_error(
               "construct_codegen() expects 'llvm', 'cuda', or 'ir_eval'");

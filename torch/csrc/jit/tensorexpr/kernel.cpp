@@ -20,6 +20,8 @@
 #include <torch/csrc/jit/tensorexpr/loopnest_randomization.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
+#include <utility>
+
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
@@ -620,7 +622,7 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
           ExprHandleVectorToExprVector(biasShape),
           dtype);
       constants_.push_back({buf, bias_tensor.data_ptr()});
-      argInputs[2] = BufHandle(buf);
+      argInputs[2] = BufHandle(std::move(buf));
     }
   } else {
     for (auto inp : inputs) {
@@ -670,7 +672,7 @@ bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
 // indices where none would be needed, which would significantly complicate
 // vectorization.
 void fuseAllLoops(StmtPtr st) {
-  auto block = to<tensorexpr::Block>(st);
+  auto block = to<tensorexpr::Block>(std::move(st));
   if (block == nullptr) {
     return;
   }
@@ -789,7 +791,7 @@ static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
 }
 
 StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
-  torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
+  torch::jit::tensorexpr::LoopNest l(std::move(st), bufOutputs_);
   LoopNest::sanitizeNames(l.root_stmt());
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
   int64_t random_tr_seed = randomTransformsRequested();
@@ -1059,7 +1061,8 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
     auto strides = stride_input[0] == StrideInput::TENSOR_CONT
         ? make_contiguous_strides(inputTensorDims)
         : make_channels_last_strides(inputTensorDims);
-    return fmap(strides, [&](ExprPtr stride) { return ExprHandle(stride); });
+    return fmap(
+        strides, [&](ExprPtr stride) { return ExprHandle(std::move(stride)); });
   }
 
   inputTensorStrides.resize(rank);
@@ -1145,7 +1148,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       if (has_symbolic_shapes_) {
         auto desc = getSymbolicStrideDesc(input);
         contiguous_symbolic_tensor =
-            is_symbolic_cont(desc, memory_layout_policy_);
+            is_symbolic_cont(std::move(desc), memory_layout_policy_);
       }
 
       // Get input size and strides
@@ -1188,7 +1191,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       flat_size = IRSimplifier::simplify(flat_size);
       BufHandle inBuffer(
           "t" + input_name_map_[input],
-          {flat_size},
+          {std::move(flat_size)},
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
 
       result = Compute(
@@ -1326,7 +1329,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
       : at::MemoryFormat::ChannelsLast;
   // output is contiguous with specified memory format, no work to do
   if (buf->is_contiguous(memory_format)) {
-    return Tensor(buf, nullptr);
+    return Tensor(std::move(buf), nullptr);
   }
 
   TORCH_INTERNAL_ASSERT(
@@ -1371,7 +1374,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
   std::vector<int64_t> default_strides =
       TensorType::contiguousStridesOf(sizes, memory_format);
   if (!tt->strides().concrete_sizes()) {
-    return Tensor(buf, nullptr);
+    return Tensor(std::move(buf), nullptr);
   }
   TORCH_INTERNAL_ASSERT(
       tt->strides().concrete_sizes(),
@@ -1380,12 +1383,12 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
   // All Tensors in NNC are layed out in default, contiguous layout.
   // If the output is also default contiguous we don't need to do anything
   if (strides == default_strides) {
-    return Tensor(buf, nullptr);
+    return Tensor(std::move(buf), nullptr);
   }
   // If the tensor is not dense or overlaps, we have
   // no way of matching the profiled striding
   if (!denseAndNonOverlapping(sizes, strides)) {
-    return Tensor(buf, nullptr);
+    return Tensor(std::move(buf), nullptr);
   }
 
   auto dims = sizesForValue(v);

@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -81,7 +83,7 @@ void BlockAnalysis::visit(ForPtr v) {
     block_size_ = *intValue(block_size);
     v->body()->accept(this);
   } else {
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 }
 
@@ -143,7 +145,7 @@ void BlockPrinter::visit(ForPtr v) {
     PrintAdjustBuffers(buf_reads);
 
   } else {
-    IRPrinter::visit(v);
+    IRPrinter::visit(std::move(v));
   }
 }
 

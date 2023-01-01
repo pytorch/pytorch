@@ -4,6 +4,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -105,8 +107,9 @@ Tensor Compute(
     const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func) {
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args);
-  BufHandle buf = Buf::make(name, dims, body.dtype(), c10::nullopt, strides);
-  return Tensor(buf, args, body);
+  BufHandle buf =
+      Buf::make(name, dims, body.dtype(), c10::nullopt, std::move(strides));
+  return Tensor(std::move(buf), args, std::move(body));
 }
 Tensor Compute(
     const std::string& name,
@@ -126,8 +129,9 @@ Tensor Compute(
 
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0]);
-  BufHandle buf = Buf::make(name, dims, body.dtype(), c10::nullopt, strides);
-  return Tensor(buf, args, body);
+  BufHandle buf =
+      Buf::make(name, dims, body.dtype(), c10::nullopt, std::move(strides));
+  return Tensor(std::move(buf), args, std::move(body));
 }
 Tensor Compute(
     const std::string& name,
@@ -147,8 +151,9 @@ Tensor Compute(
   }
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0], args[1]);
-  BufHandle buf = Buf::make(name, dims, body.dtype(), c10::nullopt, strides);
-  return Tensor(buf, args, body);
+  BufHandle buf =
+      Buf::make(name, dims, body.dtype(), c10::nullopt, std::move(strides));
+  return Tensor(std::move(buf), args, std::move(body));
 }
 Tensor Compute(
     const std::string& name,
@@ -170,8 +175,9 @@ Tensor Compute(
   }
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0], args[1], args[2]);
-  BufHandle buf = Buf::make(name, dims, body.dtype(), c10::nullopt, strides);
-  return Tensor(buf, args, body);
+  BufHandle buf =
+      Buf::make(name, dims, body.dtype(), c10::nullopt, std::move(strides));
+  return Tensor(std::move(buf), args, std::move(body));
 }
 Tensor Compute(
     const std::string& name,
@@ -196,8 +202,9 @@ Tensor Compute(
   }
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0], args[1], args[2], args[3]);
-  BufHandle buf = Buf::make(name, dims, body.dtype(), c10::nullopt, strides);
-  return Tensor(buf, args, body);
+  BufHandle buf =
+      Buf::make(name, dims, body.dtype(), c10::nullopt, std::move(strides));
+  return Tensor(std::move(buf), args, std::move(body));
 }
 Tensor Compute(
     const std::string& name,
@@ -220,7 +227,7 @@ Tensor Reduce(
   return Reduce(
       name,
       dims,
-      strides,
+      std::move(strides),
       reducer,
       [&](ParameterList& p) { return buffer.load(p); },
       reduce_dims);
@@ -244,7 +251,7 @@ Tensor Reduce(
   return Reduce(
       name,
       dims,
-      strides,
+      std::move(strides),
       reducer,
       [&](ParameterList& p) { return tensor.load(p); },
       reduce_dims);
@@ -255,7 +262,8 @@ Tensor Reduce(
     const Reducer& reducer,
     Tensor tensor,
     const std::vector<ExprHandle>& reduce_dims) {
-  return Reduce(name, dims, c10::nullopt, reducer, tensor, reduce_dims);
+  return Reduce(
+      name, dims, c10::nullopt, reducer, std::move(tensor), reduce_dims);
 }
 
 } // namespace tensorexpr
