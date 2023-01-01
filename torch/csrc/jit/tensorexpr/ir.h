@@ -185,31 +185,31 @@ bool bin_op_deducer(...);
 
 class TORCH_API Add : public BinaryOpNode<Add> {
  public:
-  Add(const ExprPtr& lhs, const ExprPtr& rhs)
+  Add(ExprPtr lhs, ExprPtr rhs)
       : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kAdd) {}
 };
 
 class TORCH_API Sub : public BinaryOpNode<Sub> {
  public:
-  Sub(const ExprPtr& lhs, const ExprPtr& rhs)
+  Sub(ExprPtr lhs, ExprPtr rhs)
       : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kSub) {}
 };
 
 class TORCH_API Mul : public BinaryOpNode<Mul> {
  public:
-  Mul(const ExprPtr& lhs, const ExprPtr& rhs)
+  Mul(ExprPtr lhs, ExprPtr rhs)
       : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMul) {}
 };
 
 class TORCH_API Div : public BinaryOpNode<Div> {
  public:
-  Div(const ExprPtr& lhs, const ExprPtr& rhs)
+  Div(ExprPtr lhs, ExprPtr rhs)
       : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kDiv) {}
 };
 
 class TORCH_API Mod : public BinaryOpNode<Mod> {
  public:
-  Mod(const ExprPtr& lhs, const ExprPtr& rhs)
+  Mod(ExprPtr lhs, ExprPtr rhs)
       : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMod) {}
 };
 
@@ -232,31 +232,31 @@ class BitwiseOpNode : public BinaryOpNode<Op> {
 
 class TORCH_API And : public BitwiseOpNode<And> {
  public:
-  And(const ExprPtr& lhs, const ExprPtr& rhs)
+  And(ExprPtr lhs, ExprPtr rhs)
       : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kAnd) {}
 };
 
 class TORCH_API Or : public BitwiseOpNode<Or> {
  public:
-  Or(const ExprPtr& lhs, const ExprPtr& rhs)
+  Or(ExprPtr lhs, ExprPtr rhs)
       : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kOr) {}
 };
 
 class TORCH_API Xor : public BitwiseOpNode<Xor> {
  public:
-  Xor(const ExprPtr& lhs, const ExprPtr& rhs)
+  Xor(ExprPtr lhs, ExprPtr rhs)
       : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kXor) {}
 };
 
 class TORCH_API Lshift : public BitwiseOpNode<Lshift> {
  public:
-  Lshift(const ExprPtr& lhs, const ExprPtr& rhs)
+  Lshift(ExprPtr lhs, ExprPtr rhs)
       : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kLshift) {}
 };
 
 class TORCH_API Rshift : public BitwiseOpNode<Rshift> {
  public:
-  Rshift(const ExprPtr& lhs, const ExprPtr& rhs)
+  Rshift(ExprPtr lhs, ExprPtr rhs)
       : BitwiseOpNode(std::move(lhs), std::move(rhs), IRNodeType::kRshift) {}
 };
 
@@ -267,7 +267,7 @@ class Max : public BinaryOpNode<Max> {
   bool propagate_nans_;
 
  public:
-  Max(const ExprPtr& lhs, const ExprPtr& rhs, bool propagate_nans)
+  Max(ExprPtr lhs, ExprPtr rhs, bool propagate_nans)
       : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMax),
         propagate_nans_(propagate_nans) {}
 
@@ -291,7 +291,7 @@ class Min : public BinaryOpNode<Min> {
   bool propagate_nans_;
 
  public:
-  Min(const ExprPtr& lhs, const ExprPtr& rhs, bool propagate_nans)
+  Min(ExprPtr lhs, ExprPtr rhs, bool propagate_nans)
       : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMin),
         propagate_nans_(propagate_nans) {}
 
