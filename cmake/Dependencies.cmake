@@ -124,9 +124,9 @@ if(MSVC)
 endif(MSVC)
 
 # ---[ Threads
-include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-if(TARGET caffe2::Threads)
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::Threads)
+find_package(Threads REQUIRED)
+if(TARGET Threads::Threads)
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
 else()
   message(FATAL_ERROR
       "Cannot find threading library. Caffe2 requires Threads to compile.")
