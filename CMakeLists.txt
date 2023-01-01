@@ -477,14 +477,6 @@ if(MSVC)
     # Turn off warnings on Windows.  In an ideal world we'd be warning
     # clean on Windows too, but this is too much work for our
     # non-Windows developers.
-    #
-    # NB: Technically, this is not necessary if CMP0092 was applied
-    # properly, but only cmake >= 3.15 has this policy, so we nail
-    # it one more time just be safe.
-    #
-    # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
-    # moment only CMP0092 is enough to prevent those warnings too.
-    string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
 
     # Turn off warnings (Windows build is currently is extremely warning
     # unclean and the warnings aren't telling us anything useful.)
