@@ -142,7 +142,7 @@ endif()
 # a third party library (like Protobuf), mention it in the comment as
 # "THIRD_PARTY_NAME related"
 # From https://docs.microsoft.com/en-us/cpp/error-messages/compiler-warnings/
-if(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   add_compile_options(
       ##########################################
       # Protobuf related. Cannot remove.
