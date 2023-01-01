@@ -68,7 +68,7 @@ class TORCH_API Expr : public std::enable_shared_from_this<Expr> {
    * All sub-expressions inside the given expressions are also cloned. Note
    * that the variables are not deep-copied since they are immutable.
    */
-  static ExprPtr clone(const ExprPtr& s);
+  static ExprPtr clone(ExprPtr s);
 
  protected:
   std::shared_ptr<Expr> getptr() {
