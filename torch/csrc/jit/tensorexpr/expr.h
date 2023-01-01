@@ -244,7 +244,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
             std::move(qzero)) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Buf(const VarPtr& var,
+  Buf(VarPtr var,
       std::vector<ExprPtr> dims,
       Dtype dtype,
       ExprPtr initializer = nullptr,

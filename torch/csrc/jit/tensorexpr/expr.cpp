@@ -406,7 +406,7 @@ std::vector<ExprPtr> make_channels_last_strides(
 }
 
 Buf::Buf(
-    const VarPtr& var,
+    VarPtr var,
     std::vector<ExprPtr> dims,
     Dtype dtype,
     ExprPtr initializer,
@@ -414,7 +414,7 @@ Buf::Buf(
     ExprPtr qscale,
     ExprPtr qzero)
     : ExprNodeBase(dtype, kPrimitive),
-      base_handle_(var),
+      base_handle_(std::move(var)),
       dims_(std::move(dims)),
       strides_(
           strides
@@ -423,7 +423,7 @@ Buf::Buf(
       initializer_(std::move(initializer)),
       qscale_(std::move(qscale)),
       qzero_(std::move(qzero)) {
-  TORCH_CHECK(var);
+  TORCH_CHECK(base_handle_);
 }
 
 BufHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
