@@ -1047,8 +1047,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
         with PoliteMode() as mode:
             a.abs()
 
-        self.assertEqual(mode.pre_count, 1)
-        self.assertEqual(mode.post_count, 0)
+        self.assertEqual(mode.pre_count, 2)
+        self.assertEqual(mode.post_count, 1)
         self.assertEqual(sub_count, 1)
 
 
@@ -1057,8 +1057,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             with PoliteMode() as mode2:
                 a.abs()
 
-        self.assertEqual(mode1.pre_count, 1)
-        self.assertEqual(mode2.pre_count, 1)
+        self.assertEqual(mode1.pre_count, 2)
+        self.assertEqual(mode2.pre_count, 2)
         self.assertEqual(sub_count, 1)
 
     def test_nesting_across_instances(self):

@@ -297,17 +297,22 @@ auto handle_torch_function_no_python_arg_parser(
                              : c10::impl::TorchDispatchModeTLS::stack_len();
   };
 
-  at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
-  at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
-  if (get_stack_len() > 0) {
+  std::vector<std::unique_ptr<torch::overrides::StashTorchFunctionModeGuard>>
+      tf_g;
+  std::vector<std::unique_ptr<torch_dispatch_mode::StashTorchDispatchModeGuard>>
+      td_g;
+  while ((ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) &&
+         get_stack_len() > 0) {
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
     if (is_torch_function) {
-      tf_g.emplace();
-      mode_obj = tf_g->get_cur_mode()->ptr(getPyInterpreter());
+      tf_g.push_back(
+          std::make_unique<torch::overrides::StashTorchFunctionModeGuard>());
+      mode_obj = tf_g.back()->get_cur_mode()->ptr(getPyInterpreter());
     } else {
-      td_g.emplace();
-      mode_obj = td_g->get_cur_mode()->ptr(getPyInterpreter());
+      td_g.push_back(
+          std::make_unique<torch_dispatch_mode::StashTorchDispatchModeGuard>());
+      mode_obj = td_g.back()->get_cur_mode()->ptr(getPyInterpreter());
     }
     py::object torch_function =
         PyObject_FastGetAttrString(mode_obj, torch_function_name_str);
@@ -348,19 +353,10 @@ auto handle_torch_function_no_python_arg_parser(
       throw python_error();
     }
   }
-  if (ret.ptr() == Py_NotImplemented) {
-    // recurse!
-    return handle_torch_function_no_python_arg_parser(
-        overloaded_args,
-        args,
-        kwargs,
-        func_name,
-        torch_api_function,
-        module_name,
-        torch_function_name);
-  }
+  tf_g.clear();
+  td_g.clear();
 
-  if (ret.ptr() == nullptr) {
+  if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
     for (auto& arg : overloaded_args) {
       // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
       py::object torch_function =
