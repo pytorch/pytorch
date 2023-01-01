@@ -137,7 +137,7 @@ Tensor computeMean(
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
-          std::move(ResultBuf),
+          ResultBuf,
           "nnc_aten_mean",
           {std::move(InputBuf)},
           extra_args));
@@ -161,7 +161,7 @@ Tensor computeMax(
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
-          std::move(ResultBuf),
+          ResultBuf,
           "nnc_aten_max_red",
           {std::move(InputBuf)},
           {max_dim, (int64_t)keep_dim}));
@@ -183,7 +183,7 @@ Tensor computeAdaptiveAvgPool2d(
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
-          std::move(ResultBuf),
+          ResultBuf,
           "nnc_aten_adaptive_avg_pool2d",
           {c10::get<BufHandle>(inputs[0])},
           c10::fmap<ExprHandle>(out_size_param)));
