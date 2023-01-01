@@ -8,7 +8,6 @@
 #include <memory>
 #include <numeric>
 #include <unordered_map>
-#include <utility>
 
 namespace torch {
 namespace jit {
@@ -197,7 +196,7 @@ struct TORCH_API Source {
     if (copies_str == COPIES_STRING) {
       std::shared_ptr<std::string> allocated_str =
           std::make_shared<std::string>(text_view.data(), text_view.size());
-      text_view_ = StringCordView({*allocated_str}, {std::move(allocated_str)});
+      text_view_ = StringCordView({*allocated_str}, {allocated_str});
     } else {
       text_view_ = StringCordView({text_view}, {});
     }
@@ -301,8 +300,8 @@ struct TORCH_API Source {
 // A SourceRange is a reference to subset of a Source, specified by `start` and
 // `end` byte offsets into the source text.
 struct TORCH_API SourceRange {
-  SourceRange(std::shared_ptr<Source> source_view_, size_t start_, size_t end_)
-      : source_view_(std::move(source_view_)), start_(start_), end_(end_) {
+  SourceRange(std::shared_ptr<Source> source_view, size_t start_, size_t end_)
+      : source_view_(std::move(source_view)), start_(start_), end_(end_) {
     if (source_view_) {
       start_iter_ = source_view_->text_str().iter_for_pos(start_);
     }

@@ -605,7 +605,7 @@ bool LoopNest::vectorize(ForPtr f) {
   Vectorizer v;
   StmtPtr new_f = nullptr;
   new_f = Stmt::clone(f);
-  normalize(to<For>(std::move(new_f)));
+  normalize(to<For>(new_f));
   new_f = FlattenIndexes(std::move(new_f));
   new_f = v.vectorize(to<For>(new_f));
   if (!v.success()) {

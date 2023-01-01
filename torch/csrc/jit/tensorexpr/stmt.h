@@ -265,7 +265,7 @@ class TORCH_API Block : public StmtNode<Block> {
 
     StmtPtr p1_p = std::move(p1);
     while (p1_p) {
-      if (BlockPtr b = to<Block>(std::move(p1_p))) {
+      if (BlockPtr b = to<Block>(p1_p)) {
         if (b) {
           enclosing.insert(b);
         }
@@ -275,7 +275,7 @@ class TORCH_API Block : public StmtNode<Block> {
 
     StmtPtr p2_p = std::move(p2);
     while (p2_p) {
-      if (BlockPtr b = to<Block>(std::move(p2_p))) {
+      if (BlockPtr b = to<Block>(p2_p)) {
         if (enclosing.count(b) != 0) {
           return b;
         }
