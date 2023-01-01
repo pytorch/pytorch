@@ -24,13 +24,22 @@ class BaseListVariable(VariableTracker):
         }[obj]
 
     def __init__(
-        self, items: List[VariableTracker], recursively_contains=None, **kwargs
+        self,
+        items: List[VariableTracker],
+        recursively_contains=None,
+        regen_guards=True,
+        **kwargs,
     ):
         super(BaseListVariable, self).__init__(
             recursively_contains=recursively_contains, **kwargs
         )
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
+
+        # Sometimes, we know that we have passed in the guards from the items in the list
+        if regen_guards:
+            self.guards.update(VariableTracker.propagate(items)["guards"])
+
         self.items: List[VariableTracker] = items
 
     def _as_proxy(self):
@@ -159,11 +168,15 @@ class ListVariable(BaseListVariable):
             assert not kwargs
             (arg,) = args
             new_rec_contains = self.recursively_contains.union(arg.recursively_contains)
-            new_rec_contains.add(arg.mutable_local)
+            if arg.mutable_local is not None:
+                new_rec_contains.add(arg.mutable_local)
             tx.replace_all(
                 self,
                 ListVariable(
-                    self.items + [arg], recursively_contains=new_rec_contains, **options
+                    self.items + [arg],
+                    recursively_contains=new_rec_contains,
+                    regen_guards=False,
+                    **options,
                 ),
             )
             return ConstantVariable(None)
@@ -179,6 +192,7 @@ class ListVariable(BaseListVariable):
                 self,
                 ListVariable(
                     list(self.items) + list(arg.unpack_var_sequence(tx)),
+                    regen_guards=False,
                     **options,
                 ),
             )
@@ -189,7 +203,7 @@ class ListVariable(BaseListVariable):
             items.insert(idx.as_python_constant(), value)
             return tx.replace_all(
                 self,
-                ListVariable(items, **options),
+                ListVariable(items, regen_guards=False, **options),
             )
         elif name == "pop" and self.mutable_local:
             assert not kwargs
@@ -197,14 +211,14 @@ class ListVariable(BaseListVariable):
             result = items.pop(*[a.as_python_constant() for a in args])
             tx.replace_all(
                 self,
-                ListVariable(items, **options),
+                ListVariable(items, regen_guards=False, **options),
             )
             return result
         elif name == "clear" and self.mutable_local:
             assert not kwargs and not args
             return tx.replace_all(
                 self,
-                ListVariable([], **options),
+                ListVariable([], regen_guards=False, **options),
             )
         elif (
             name == "__setitem__"
@@ -219,7 +233,7 @@ class ListVariable(BaseListVariable):
                 items[key.as_python_constant()] = list(value.items)
             else:
                 items[key.as_python_constant()] = value
-            result = ListVariable(items, **options)
+            result = ListVariable(items, regen_guards=False, **options)
             return tx.replace_all(self, result)
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -359,7 +373,6 @@ class SizeVariable(TupleVariable):
                 "call_function",
                 _dynamo_get_item_lambda,
                 *proxy_args_kwargs([self, arg], {}),
-                current_tx=tx,
             )
             items = self.items[index]
 
@@ -491,6 +504,7 @@ class ListIteratorVariable(VariableTracker):
             self.items,
             self.index + 1,
             mutable_local=MutableLocal(),
+            recursively_contains=self.recursively_contains,
             **VariableTracker.propagate([self]),
         )
 

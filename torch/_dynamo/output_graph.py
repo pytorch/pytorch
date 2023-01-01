@@ -7,20 +7,40 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Set,
+    Tuple,
+    Union,
+)
+
+from typing_extensions import Protocol
 
 import torch.nn
 from torch import fx
+from torch._guards import (
+    Checkpointable,
+    Guard,
+    GuardsCheckpointState,
+    tracing,
+    TracingContext,
+)
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed
+from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, LocalSource, Source
+from .source import ConstantSource, is_constant_source, LocalSource, ShapeEnvSource
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,
@@ -31,7 +51,8 @@ from .utils import (
     format_graph_tabular,
     same,
 )
-from .variables.builder import VariableBuilder, wrap_fx_proxy
+from .variables.base import VariableTracker
+from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     DynamicShapeVariable,
@@ -41,6 +62,49 @@ from .variables.tensor import (
 )
 
 log = logging.getLogger(__name__)
+
+
+# TODO: I think this accepts int arguments too
+class CompiledFn(Protocol):
+    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+        ...
+
+
+CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
+
+
+class OutputGraphState(NamedTuple):
+    graphargs: List[GraphArg]
+    tracked_fakes: List[TrackedFake]
+    guard_state: GuardsCheckpointState
+    nn_modules: Optional[Dict[str, torch.nn.Module]]
+    side_effects: SideEffects
+    timestamp: int
+    name_to_input: OrderedDict[str, Optional[fx.Proxy]]
+
+    def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
+        for k in self._fields:
+            if k == "guard_state":
+                r = self.guard_state.diff(other.guard_state)
+                if r is not None:
+                    return r
+                continue
+            elif k == "side_effects":
+                r = self.side_effects.diff(other.side_effects)
+                if r is not None:
+                    return r
+                continue
+
+            sv = getattr(self, k)
+            ov = getattr(other, k)
+            if sv != ov:
+                return f"{prefix}{k} mismatch: {sv} != {ov}"
+        return None
+
+    # Back compat .guards api
+    @property
+    def guards(self):
+        return self.guard_state.dynamo_guards
 
 
 @functools.lru_cache(None)
@@ -66,7 +130,7 @@ def _get_gen_rand_values_fn(random_calls):
 class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
 
-    def __init__(self, nn_modules: dict):
+    def __init__(self, nn_modules: Dict[str, torch.nn.Module]):
         super(FakeRootModule, self).__init__()
         for k, v in nn_modules.items():
             setattr(self, k, v)
@@ -75,30 +139,18 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
-def wrap_compiler_fn(compiler_fn):
-    """WrapperBackend if config.verify_correctness is True"""
-    if config.verify_correctness:
-        # wrap backend if verify_correctness is True
-        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
-
-        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
-        return wrapper_backend_compiler_fn
-
-    return compiler_fn
-
-
 class WrapperBackend:
-    def __init__(self, backend=None):
-        self.backend = backend
+    def __init__(self, backend: CompilerFn, original_example_inputs):
+        self.backend: CompilerFn = backend
+        self.original_example_inputs = original_example_inputs
 
     @property
     def example_inputs(self):
         return clone_inputs(self.original_example_inputs)
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
 
         self.restore = checkpoint_params(gm)
-        self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
         self.candidate = self.backend(copy_gm, self.original_example_inputs)
@@ -128,7 +180,7 @@ class WrapperBackend:
             self.restore()
 
 
-class OutputGraph(fx.Tracer):
+class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
@@ -138,38 +190,66 @@ class OutputGraph(fx.Tracer):
         self,
         f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
-        compiler_fn: Callable,
+        compiler_fn: CompilerFn,
         root_tx,
     ):
         super(OutputGraph, self).__init__()
-
-        # Mutable state checkpointed by copy_graphstate()
         self.graph = torch.fx.Graph()
-        self.graphargs = []
-        self.guards = set()
-        self.nn_modules = dict()
+        self.graphargs: List[GraphArg] = []
+        fake_mode = torch._subclasses.FakeTensorMode(
+            throw_on_data_dependent_ops=True,
+            shape_env=ShapeEnv() if config.dynamic_shapes else None,
+        )
+        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        if config.dynamic_shapes:
+            # Register a SHAPE_ENV guard to make sure we setup shape guards
+            # that show up in ShapeEnv
+            self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
+        # tracked_fakes says where any tensor that was wrapped to fake came
+        # from.  It is similar to GraphArg, in that all GraphArgs will get
+        # will get added to TrackedFakes, but TrackedFakes also contains
+        # GraphArgs that got pruned, and things like Tensor attributes which
+        # aren't explicit graph inputs.  Used by shape guard
+        self.tracked_fakes: List[TrackedFake] = []
+        # Although we prune unused graphargs before sending graphs to
+        # compilers, we may have legitimately triggered shape guards
+        # on "unused" inputs that we must keep track of.  So after
+        # remove_unused_graphargs is called, orig_graphargs and
+        # graphargs no longer alias; orig_graphargs is the original
+        # graphargs, and graphargs is the pruned list.  Guard creation
+        # should use original graphargs.
+        self.orig_graphargs: List[GraphArg] = self.graphargs
+        self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
-        self.output_instructions = []
+        self.output_instructions: List[Instruction] = []
+        # used to track nodes that are added between calls of copy_graphstate
+        # and restore_graphstate
+        self.timestamp = 0
         # Node => computed real value (see utils.get_real_value)
-        self.real_value_cache = {}
+        self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
 
         # Not checkpointed
-        self.compiler_fn = compiler_fn
+        self.compiler_fn: CompilerFn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
-        self.cleanups = []
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+        self._current_tx: List[InstructionTranslatorBase] = []
+        self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
         self.initial_random_state = ()
-        self.unspec_variable_map = {}
-        self.shape_env = ShapeEnv() if config.dynamic_shapes else None
-        self.tensor_id_to_sym_shape_ref = {}
-        self.intermediary_symbols = {}
+        self.unspec_variable_map: Dict[
+            str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
+        ] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
-        self.name_to_input = collections.OrderedDict()
+        self.name_to_input: OrderedDict[
+            str, Optional[fx.Proxy]
+        ] = collections.OrderedDict()
 
     @property
     def output(self):
@@ -179,36 +259,64 @@ class OutputGraph(fx.Tracer):
     def fake_mode(self):
         return self.root_tx.fake_mode
 
-    def copy_graphstate(self):
+    @property
+    def shape_env(self):
+        return self.tracing_context.fake_mode.shape_env
+
+    @property
+    def guards(self) -> Set[Guard]:
+        return self.tracing_context.guards_context.dynamo_guards
+
+    def push_tx(self, tx):
+        self._current_tx.append(tx)
+
+    def pop_tx(self):
+        return self._current_tx.pop()
+
+    @property
+    def current_tx(self):
+        return self.root_tx if not self._current_tx else self._current_tx[-1]
+
+    def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
-        graph_nodes = set(self.graph.nodes)
-        return (
-            graph_nodes,
+        assert self.nn_modules is not None
+        guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
+        state = OutputGraphState(
             list(self.graphargs),
-            set(self.guards),
+            list(self.tracked_fakes),
+            guards_graph_state,
             dict(self.nn_modules),
             self.side_effects.clone(),
+            self.timestamp,
+            self.name_to_input.copy(),
         )
+        self.timestamp += 1
+        return state
 
-    def restore_graphstate(self, state):
+    def restore_graphstate(self, state: OutputGraphState):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
-            graph_nodes,
             self.graphargs,
-            self.guards,
+            self.tracked_fakes,
+            guards_state,
             self.nn_modules,
             self.side_effects,
+            self.timestamp,
+            self.name_to_input,
         ) = state
+        self.tracing_context.guards_context.restore_graphstate(guards_state)
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
+        removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
-            if node not in graph_nodes:
+            if node.meta["creation_timestamp"] > self.timestamp:
                 # Erasing node alone does not remove the meta information
                 # So, remove the help tensor explicitly
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
-                self.graph.erase_node(node)
+                self.remove_node(node)
                 self.real_value_cache.pop(node, None)
-                self.name_to_input.pop(node.name, None)
+                removed_nodes += 1
+        log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -259,21 +367,25 @@ class OutputGraph(fx.Tracer):
             )
 
     def register_attr_or_module(
-        self, target: Union[torch.nn.Module, torch.Tensor, Any], *names, **options
+        self,
+        target: Union[torch.nn.Module, torch.Tensor, Any],
+        *names,
+        **options,
     ):
         if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
-        source: Source = options.get("source", None)
+        assert "source" in options
+        source = options["source"]
         if isinstance(target, torch.Tensor):
-            if source:
+            if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
                 return wrap_fx_proxy(
-                    self,
+                    self.root_tx,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=target,
                     **options,
@@ -293,7 +405,6 @@ class OutputGraph(fx.Tracer):
             # Attrs that are tenors and symints and such need to be migrated to have their
             # own storage
             # alas, this is like this for now
-            self.intermediary_symbols.update({target.get_pyobj().expr: None})
 
             def wrap_name(module_key):
                 return DynamicShapeVariable.create(
@@ -313,6 +424,7 @@ class OutputGraph(fx.Tracer):
                     target
                 )
 
+        assert self.nn_modules is not None
         for k, v in self.nn_modules.items():
             if v is target:
                 # it already exists
@@ -348,6 +460,8 @@ class OutputGraph(fx.Tracer):
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
 
+        log.debug(f"COMPILING GRAPH due to {reason}")
+
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
 
@@ -356,11 +470,14 @@ class OutputGraph(fx.Tracer):
 
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
+        assert self.nn_modules is not None
         root = FakeRootModule(self.nn_modules)
 
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
-        val_to_names = collections.OrderedDict()
+        val_to_names: OrderedDict[
+            VariableTracker, List[str]
+        ] = collections.OrderedDict()
         if stack_values:
             val_to_names[stack_values[-1]] = list()
         for k, v in tx.symbolic_locals.items():
@@ -471,12 +588,11 @@ class OutputGraph(fx.Tracer):
         counters["stats"]["calls_captured"] += ncalls
         counters["stats"]["fusions_possible"] += ncalls - 1
 
-        if config.dynamic_propagation:
-            # free a bit of memory
-            for node in self.graph.nodes:
-                if "example_value" in node.meta:
-                    del node.meta["example_value"]
-            self.real_value_cache.clear()
+        # free a bit of memory
+        for node in self.graph.nodes:
+            if "example_value" in node.meta:
+                del node.meta["example_value"]
+        self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
@@ -484,7 +600,8 @@ class OutputGraph(fx.Tracer):
         name = unique_id("__compiled_fn")
 
         assert_no_fake_params_or_buffers(gm)
-        compiled_fn = self.call_user_compiler(gm)
+        with tracing(self.tracing_context):
+            compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -492,10 +609,15 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.INFO:
+            if config.log_level <= logging.INFO and config.output_code:
+                graph_str = (
+                    gm.print_readable()
+                    if config.output_graph_code
+                    else format_graph_tabular(gm.graph)
+                )
                 log.log(
-                    logging.CODE,
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
+                    logging.INFO,
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
                 )
         except ImportError:
             log.warning(
@@ -508,7 +630,7 @@ class OutputGraph(fx.Tracer):
         cg.make_call_generated_code(name)
         return cg.get_instructions()
 
-    def call_user_compiler(self, gm):
+    def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         try:
             name = (
                 self.compiler_fn.__name__
@@ -517,9 +639,45 @@ class OutputGraph(fx.Tracer):
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiler_fn = self.compiler_fn
+            # WrapperBackend needs real inputs, for now, to verify correctness
             if config.verify_correctness:
-                compiler_fn = wrap_compiler_fn(compiler_fn)
-            compiled_fn = compiler_fn(gm, self.example_inputs())
+                compiler_fn = WrapperBackend(compiler_fn, self.example_inputs())
+
+            # NOTE: [Real Tensors in Accuracy Evaluation]
+            #
+            # Today, tensors are passed to backends as fake at compile time. See the .fake_example_inputs()
+            # call to compiler_fn below. At runtime, backends use real tensors.
+            #
+            # This should be a strong invariant we hold across all backends,
+            # and generally, it is. However, for accuracy evaluation, we need real tensors at compile time,
+            # for now, due to the unfortunate setup described below.
+            #
+            # Due to the nature of how we invoke comparison as a backend in two different ways:
+            #
+            # (1) Less bad, but still worth rewriting, WrapperBackend above, which takes
+            # real inputs for its ctor. see the config.verify_correctnes above.
+            #
+            # (2) More bad, and very worth rewriting, the minifier installs accuracy comparison as
+            # a true backend, and therefore needs to be compiled with real inputs. This is made trickier
+            # by the fact that the minifier will spawn new processes during minification. As such, we have
+            # created a global flag, MINIFIER_SPAWNED, that should be set IF AND ONLY IF this run was spawned
+            # as part of accuracy minification. This flag is not a contract, and ideally will not be here long.
+            #
+            # The longer term PoR is to:
+            # (A) Rewrite the minifier accuracy evaluation and verify_correctness code to share the same
+            # correctness and accuracy logic, so as not to have two different ways of doing the same thing.
+            #
+            # (B) Refactor minifier accuracy backend to do its comparison fully at runtime, so as not to need to
+            # pass real tensors to it at compile time.
+            is_top_level_minifying = (
+                config.repro_after is not None and config.repro_level == 4
+            )
+            if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifying:
+                compiled_fn = compiler_fn(gm, self.example_inputs())
+            elif config.DO_NOT_USE_legacy_non_fake_example_inputs:
+                compiled_fn = compiler_fn(gm, self.example_inputs())
+            else:
+                compiled_fn = compiler_fn(gm, self.fake_example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
@@ -527,19 +685,31 @@ class OutputGraph(fx.Tracer):
             raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
-    def example_inputs(self):
+    def fake_example_inputs(self) -> List[torch.Tensor]:
+        result = []
+        for arg in self.graphargs:
+            example = arg.get_fake_examples()
+            if example is not None:
+                result.extend(example)
+            else:
+                # Fallback, in case fake_tensor was not set
+                # Particularly for graph args that are not tensors
+                result.extend(arg.get_examples())
+        return result
+
+    def example_inputs(self) -> List[torch.Tensor]:
         result = []
         for arg in self.graphargs:
             result.extend(arg.get_examples())
         return result
 
-    def remove_unused_graphargs(self):
+    def remove_unused_graphargs(self) -> None:
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
                 if node.op == "get_attr":
-                    self.graph.erase_node(node)
+                    self.remove_node(node)
                 elif node.op == "call_function" and node.target is operator.getitem:
-                    self.graph.erase_node(node)
+                    self.remove_node(node)
 
         expanded_graphargs = []
         for arg in self.graphargs:
@@ -552,15 +722,15 @@ class OutputGraph(fx.Tracer):
 
         for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
             if arg.uses == 0:
+                log.debug(f"REMOVE UNUSED GRAPHARG {arg.source.name()}")
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
-                self.graph.erase_node(node)
+                self.remove_node(node)
                 self.real_value_cache.pop(node, None)
-                self.name_to_input.pop(node.name, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
-    def add_output_instructions(self, prefix: List[Instruction]):
+    def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
         We call this on the creation of a new compiled subgraph that is inserted
         before user code.
@@ -568,10 +738,10 @@ class OutputGraph(fx.Tracer):
         self.output_instructions.extend(prefix)
         self.should_exit = True
 
-    def install_global(self, name, value):
+    def install_global(self, name, value) -> None:
         self.cleanups.append(CleanupHook.create(self.root_globals, name, value))
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
 
@@ -602,14 +772,13 @@ class OutputGraph(fx.Tracer):
         name=None,
         type_expr=None,
         proxy_factory_fn=None,
-        current_tx=None,
     ):
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
         )
 
         # append stack trace to fx node
-        tx = current_tx if current_tx else self.root_tx
+        tx = self.current_tx
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
@@ -620,10 +789,22 @@ class OutputGraph(fx.Tracer):
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
 
-        msgs = traceback.StackSummary.from_list(frame_summaries).format()
+        # official from_list stub doesn't have new-style type
+        msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
 
         # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
         nn_module_stack_str = f"Module stack: {nn_module_stack}\n"
         rv.node.stack_trace = nn_module_stack_str + " | ".join(msgs)
 
         return rv
+
+    def create_node(self, *args, **kwargs):
+        node = super().create_node(*args, **kwargs)
+        node.meta["creation_timestamp"] = self.timestamp
+        return node
+
+    # Note: we did not override erase_node since
+    # we call self.graph.erase_node elsewhere
+    def remove_node(self, node):
+        self.graph.erase_node(node)
+        self.name_to_input.pop(node.name, None)

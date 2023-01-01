@@ -18,6 +18,7 @@ from ..utils import sympy_product, sympy_subs, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
+    CppWrapperKernelArgs,
     DeferredIndentedBuffer,
     ExprPrinter,
     IndentedBuffer,
@@ -38,6 +39,20 @@ DTYPE_TO_CPP = {
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
 }
+
+DTYPE_TO_ATEN = {
+    torch.float32: "at::ScalarType::Float",
+    torch.float64: "at::ScalarType::Double",
+    torch.float16: "at::ScalarType::Half",
+    torch.int64: "at::ScalarType::Long",
+    torch.int32: "at::ScalarType::Int",
+    torch.int16: "at::ScalarType::Short",
+    torch.int8: "at::ScalarType::Char",
+    torch.uint8: "at::ScalarType::Byte",
+    torch.bool: "at::ScalarType::Bool",
+    torch.bfloat16: "at::ScalarType::BFloat16",
+}
+
 INDEX_TYPE = "long"
 
 RTYPE_TO_CPP = {
@@ -209,6 +224,10 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.exp()"
 
     @staticmethod
+    def erf(x):
+        return f"{x}.erf()"
+
+    @staticmethod
     def sqrt(x):
         return f"{x}.sqrt()"
 
@@ -343,6 +362,14 @@ class CppVecOverrides(OpOverrides):
         assert dtype in [torch.bool], f"{__name__} does not support {dtype}"
         return f"({x})"
 
+    @staticmethod
+    def expm1(x):
+        return f"{x}.expm1()"
+
+    @staticmethod
+    def log1p(x):
+        return f"{x}.log1p()"
+
 
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
@@ -380,6 +407,18 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def rsqrt(x):
         return f"1 / std::sqrt({x})"
+
+    @staticmethod
+    def log1p(x):
+        return f"std::log1p({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"std::expm1({x})"
+
+    @staticmethod
+    def tanh(x):
+        return f"std::tanh({x})"
 
     @staticmethod
     def signbit(x):
@@ -729,6 +768,7 @@ class CppVecKernel(CppKernel):
         assert codecache.pick_vec_isa()
         self.simd_nelements = codecache.pick_vec_isa().nelements()
         self.reduction_omp_dec: Dict[str, str] = {}
+        self.var_vec_buf_map: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
     def is_single_step_var(self, var: sympy.Symbol, index: sympy.Expr):
@@ -761,13 +801,16 @@ class CppVecKernel(CppKernel):
             line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
         else:
             if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
-                g_tmp_buf = f"g_tmp_buffer_{var}"
                 nelements = codecache.pick_vec_isa().nelements()
-                self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
+                if var not in self.var_vec_buf_map:
+                    self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
+                    self.loads.writeline(
+                        f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
+                    )
                 self.loads.writeline(
-                    f"flag_to_float({var} + {cexpr(new_index)}, {g_tmp_buf}, {nelements});"
+                    f"flag_to_float({var} + {cexpr(new_index)}, {self.var_vec_buf_map[var]}, {nelements});"
                 )
-                line = f"at::vec::Vectorized<float>::loadu({g_tmp_buf})"
+                line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
 
@@ -1208,10 +1251,18 @@ class CppKernelProxy(CppKernel):
 class CppScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.kernel_group = KernelGroup()
+        self.get_kernel_group()
 
     def group_fn(self, sizes):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
+
+    def get_kernel_group(self):
+        from .wrapper import CppWrapperCodeGen
+
+        if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
+            self.kernel_group = CppWrapperKernelGroup()
+        else:
+            self.kernel_group = KernelGroup()
 
     @staticmethod
     def can_fuse_horizontal(node1, node2):
@@ -1335,9 +1386,12 @@ class CppScheduling:
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, None)
 
+    def codegen_sync(self):
+        pass
+
     def flush(self):
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
-        self.kernel_group = KernelGroup()
+        self.get_kernel_group()
 
 
 class KernelGroup:
@@ -1368,8 +1422,9 @@ class KernelGroup:
             return
 
         kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
-        arg_defs, call_args = self.args.cpp_argdefs()
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
+        arg_types = ",".join(arg_types)
         code = BracesBuffer()
         # TODO: support kernel profile on other platforms
         enable_kernel_profile = (
@@ -1380,9 +1435,11 @@ class KernelGroup:
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
             if enable_kernel_profile:
+                graph_id = V.graph.graph_id
+                prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
                 code.writelines(
                     [
-                        f'RECORD_FUNCTION("{kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
                     ]
                 )
             for old, new in self.args.aliases():
@@ -1399,11 +1456,15 @@ class KernelGroup:
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
         wrapper.define_kernel(kernel_name, codecache_str)
-
+        wrapper.load_kernel(kernel_name, code, arg_types)
         # generate the code to call this
-        wrapper.writeline(
-            "{}({})".format(kernel_name, ", ".join(call_args)),
-        )
+        wrapper.generate_kernel_call(kernel_name, call_args)
+
+
+class CppWrapperKernelGroup(KernelGroup):
+    def __init__(self):
+        super().__init__()
+        self.args = CppWrapperKernelArgs()
 
 
 class WorkSharing:

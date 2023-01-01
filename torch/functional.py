@@ -159,7 +159,7 @@ def split(
 
     Example::
 
-        >>> a = torch.arange(10).reshape(5,2)
+        >>> a = torch.arange(10).reshape(5, 2)
         >>> a
         tensor([[0, 1],
                 [2, 3],
@@ -172,7 +172,7 @@ def split(
          tensor([[4, 5],
                  [6, 7]]),
          tensor([[8, 9]]))
-        >>> torch.split(a, [1,4])
+        >>> torch.split(a, [1, 4])
         (tensor([[0, 1]]),
          tensor([[2, 3],
                  [4, 5],
@@ -267,18 +267,18 @@ def einsum(*args: Any) -> Tensor:
 
     Examples::
 
-        >>> # trace
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # trace
         >>> torch.einsum('ii', torch.randn(4, 4))
         tensor(-1.2104)
 
-        >>> # diagonal
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # diagonal
         >>> torch.einsum('ii->i', torch.randn(4, 4))
         tensor([-0.1034,  0.7952, -0.2433,  0.4545])
 
-        >>> # outer product
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # outer product
         >>> x = torch.randn(5)
         >>> y = torch.randn(4)
         >>> torch.einsum('i,j->ij', x, y)
@@ -288,10 +288,10 @@ def einsum(*args: Any) -> Tensor:
                 [ 0.1713, -0.4291, -0.5802,  0.7350],
                 [ 0.5704, -1.4290, -1.9323,  2.4480]])
 
-        >>> # batch matrix multiplication
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
-        >>> As = torch.randn(3,2,5)
-        >>> Bs = torch.randn(3,5,4)
+        >>> # batch matrix multiplication
+        >>> As = torch.randn(3, 2, 5)
+        >>> Bs = torch.randn(3, 5, 4)
         >>> torch.einsum('bij,bjk->bik', As, Bs)
         tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
                 [-1.6706, -0.8097, -0.8025, -2.1183]],
@@ -302,8 +302,8 @@ def einsum(*args: Any) -> Tensor:
                 [[ 2.8153,  1.8787, -4.3839, -1.2112],
                 [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
-        >>> # with sublist format and ellipsis
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # with sublist format and ellipsis
         >>> torch.einsum(As, [..., 0, 1], Bs, [..., 1, 2], [..., 0, 2])
         tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
                 [-1.6706, -0.8097, -0.8025, -2.1183]],
@@ -320,9 +320,9 @@ def einsum(*args: Any) -> Tensor:
         torch.Size([2, 3, 5, 4])
 
         >>> # equivalent to torch.nn.functional.bilinear
-        >>> A = torch.randn(3,5,4)
-        >>> l = torch.randn(2,5)
-        >>> r = torch.randn(2,4)
+        >>> A = torch.randn(3, 5, 4)
+        >>> l = torch.randn(2, 5)
+        >>> r = torch.randn(2, 4)
         >>> torch.einsum('bn,anm,bm->ba', l, A, r)
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
@@ -1253,7 +1253,7 @@ def atleast_1d(*tensors):
         tensor([1.])
         >>> x = torch.tensor(0.5)
         >>> y = torch.tensor(1.)
-        >>> torch.atleast_1d((x,y))
+        >>> torch.atleast_1d((x, y))
         (tensor([0.5000]), tensor([1.]))
     """
     # This wrapper exists to support variadic args.
@@ -1282,7 +1282,7 @@ def atleast_2d(*tensors):
         tensor(1.)
         >>> torch.atleast_2d(x)
         tensor([[1.]])
-        >>> x = torch.arange(4).view(2,2)
+        >>> x = torch.arange(4).view(2, 2)
         >>> x
         tensor([[0, 1],
                 [2, 3]])
@@ -1291,7 +1291,7 @@ def atleast_2d(*tensors):
                 [2, 3]])
         >>> x = torch.tensor(0.5)
         >>> y = torch.tensor(1.)
-        >>> torch.atleast_2d((x,y))
+        >>> torch.atleast_2d((x, y))
         (tensor([[0.5000]]), tensor([[1.]]))
     """
     # This wrapper exists to support variadic args.
@@ -1320,7 +1320,7 @@ def atleast_3d(*tensors):
         tensor(0.5000)
         >>> torch.atleast_3d(x)
         tensor([[[0.5000]]])
-        >>> y = torch.arange(4).view(2,2)
+        >>> y = torch.arange(4).view(2, 2)
         >>> y
         tensor([[0, 1],
                 [2, 3]])
@@ -1337,7 +1337,7 @@ def atleast_3d(*tensors):
         tensor([[[1]]])
         >>> x = torch.tensor(0.5)
         >>> y = torch.tensor(1.)
-        >>> torch.atleast_3d((x,y))
+        >>> torch.atleast_3d((x, y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
     """
     # This wrapper exists to support variadic args.
@@ -1384,7 +1384,7 @@ else:
         pass
 
 
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
+def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     .. warning::
@@ -1464,15 +1464,15 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         tensor(4.)
         >>> torch.norm(b, float('inf'))
         tensor(4.)
-        >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
+        >>> c = torch.tensor([[ 1, 2, 3], [-1, 1, 4]] , dtype=torch.float)
         >>> torch.norm(c, dim=0)
         tensor([1.4142, 2.2361, 5.0000])
         >>> torch.norm(c, dim=1)
         tensor([3.7417, 4.2426])
         >>> torch.norm(c, p=1, dim=1)
         tensor([6., 6.])
-        >>> d = torch.arange(8, dtype= torch.float).reshape(2,2,2)
-        >>> torch.norm(d, dim=(1,2))
+        >>> d = torch.arange(8, dtype=torch.float).reshape(2, 2, 2)
+        >>> torch.norm(d, dim=(1, 2))
         tensor([ 3.7417, 11.2250])
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
@@ -1604,6 +1604,7 @@ def chain_matmul(*matrices, out=None):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> a = torch.randn(3, 4)
         >>> b = torch.randn(4, 5)
@@ -1720,7 +1721,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
                 [ 3,  3,  3]], dtype=torch.int32)
         >>> A_LU, pivots, info = torch.lu(A, get_infos=True)
         >>> if info.nonzero().size(0) == 0:
-        ...   print('LU factorization succeeded for all samples!')
+        ...     print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
     # If get_infos is True, then we don't need to check for errors and vice versa

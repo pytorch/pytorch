@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import functools
-import logging
 import os
 import random
 import unittest
@@ -21,7 +20,6 @@ from torch._inductor.utils import has_triton
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     import_transformers_or_skip,
@@ -103,8 +101,8 @@ def get_hf_bert(rank):
     # in a multiprocessing test
     try:
         from transformers import BertConfig, AutoModelForMaskedLM
-    except ImportError:
-        raise unittest.SkipTest("Unable to import transformers")
+    except ImportError as e:
+        raise unittest.SkipTest("Unable to import transformers") from e
 
     batch_size, max_length, config, device = 4, 512, BertConfig(), f"cuda:{rank}"
     model = AutoModelForMaskedLM.from_config(config).to(device)
@@ -181,7 +179,7 @@ def run_hf_bert_ddp(self, model, inputs, backend):
     opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
     self.assertTrue(same(correct_results, opt_results))
 
-class TestFakeDistributedSingleProc(TestCase):
+class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -195,6 +193,18 @@ class TestFakeDistributedSingleProc(TestCase):
         model, inputs = get_hf_bert(0)
         model = FakeDDP(model)
         run_hf_bert_ddp(self, model, inputs, "aot_eager")
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_issue90375(self):
+        class Model(nn.Module):
+            def forward(self):
+                return torch.randn(3) * torch.randn(3)
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch._dynamo.optimize("aot_eager")(model)
+        opt_model()
 
 
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
@@ -379,7 +389,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
                 },
             )
         )
-        cls._exit_stack.enter_context(patch.object(config, "log_level", logging.DEBUG))
         cls.rank = 0
         cls.device = f"cuda:{cls.rank}"
         cls.device_ids = None if "cuda" in cls.device else [cls.rank]
@@ -560,6 +569,12 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
             for p_id in b.param_ids:
                 self.assertFalse(p_id in parameter_ids_to_ignore)
 
+    def test_fsdp_orig_params_assert(self):
+        # Test with basic FSDP wrapping (outer wrap around whole model)
+        m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
+        fsdp_m = FSDP(m, use_orig_params=False)
+        fsdp_m = torch._dynamo.optimize()(fsdp_m)
+        self.assertRaisesRegex(AssertionError, "Dynamo only supports FSDP with use_orig_params=True", fsdp_m, inputs)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -1,8 +1,10 @@
 # Owner(s): ["module: dynamo"]
 import copy
-import unittest
 
 import torch
+
+import torch._dynamo.test_case
+import torch._dynamo.testing
 
 try:
     from .test_torchxla_util import maybe_skip_torchxla_test
@@ -104,6 +106,8 @@ def make_reuse_graph_test(module_class, niter=100):
             xla_inputs_copy = copy.deepcopy(xla_inputs)
 
             expected = xla_module(*xla_inputs)
+            # make sure above lazy computation is executed.
+            xm.mark_step()
 
             actual = optimized_mod(*xla_inputs_copy)
 
@@ -117,15 +121,21 @@ def make_reuse_graph_test(module_class, niter=100):
             # to handle inplace updates.
             if not allclose(xla_inputs, xla_inputs_copy):
                 print(
-                    f"Incorrect updated arguments at iter {i}. expected\n{rand_args}, actual\n{rand_args_copy}"
+                    f"Incorrect updated arguments at iter {i}. expected\n{xla_inputs}, actual\n{xla_inputs_copy}"
                 )
                 self.assertTrue(False)
 
     return test_wrapper
 
 
-class TorchXLAReuseGraphTest(unittest.TestCase):
+class TorchXLAReuseGraphTest(torch._dynamo.test_case.TestCase):
     test_basic = make_reuse_graph_test(BasicModule)
     test_matmul = make_reuse_graph_test(MatmulModule)
     test_linear = make_reuse_graph_test(LinearModule)
     test_inplace_update = make_reuse_graph_test(ModuleInplaceUpdate)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

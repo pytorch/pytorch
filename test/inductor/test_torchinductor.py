@@ -2,10 +2,12 @@
 import contextlib
 import dataclasses
 import functools
+import glob
 import importlib
 import itertools
 import os
 import random
+import shutil
 import sys
 import typing
 import unittest
@@ -41,7 +43,9 @@ try:
     import torch._inductor.config
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
-    from torch._inductor import codecache, config, metrics
+    from torch._inductor import codecache, config, metrics, test_operators
+    from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
+    from torch._inductor.codegen.triton import texpr
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.overrides import (
@@ -49,6 +53,7 @@ try:
         linear_transpose,
         permute_linear_fusion,
         permute_matmul_fusion,
+        sink_cat_after_pointwise,
         transpose_linear,
         transpose_matmul,
     )
@@ -63,12 +68,16 @@ except (ImportError, AssertionError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
+    raise unittest.SkipTest("requires sympy/functorch/filelock") from e
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
+HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_multigpu = functools.partial(
+    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+)
 
 torch._inductor.config.triton.autotune = False  # too slow
 
@@ -141,13 +150,18 @@ def chain_passes(*passes: PassFunc) -> PassFunc:
     return parent_pass
 
 
-def count_call_function(module: torch.fx.GraphModule, target_op: Any) -> int:
+def count_call(module: torch.fx.GraphModule, op: str, target_op: Any) -> int:
     return sum(
-        [
-            1 if (n.op == "call_function" and n.target == target_op) else 0
-            for n in module.graph.nodes
-        ]
+        [1 if (n.op == op and n.target == target_op) else 0 for n in module.graph.nodes]
     )
+
+
+def count_call_function(module: torch.fx.GraphModule, target_op: Any) -> int:
+    return count_call(module, "call_function", target_op)
+
+
+def count_call_method(module: torch.fx.GraphModule, target_op: Any) -> int:
+    return count_call(module, "call_method", target_op)
 
 
 class TestCase(TorchTestCase):
@@ -226,6 +240,14 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
+def clone_preserve_strides(x):
+    if not isinstance(x, torch.Tensor):
+        return x
+    buffer = torch.as_strided(x, (x.storage().size(),), (1,), 0).clone()
+    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+    return out
+
+
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
 def check_model(
     self: TestCase,
@@ -246,7 +268,7 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    ref_inputs = example_inputs
+    ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
     original_lowp_dtype = torch.half
@@ -326,6 +348,16 @@ def check_model(
             rtol=rtol,
             equal_nan=True,
             exact_dtype=exact_dtype,
+        )
+        # In case of input mutations, check that inputs are the same
+        self.assertEqual(
+            ref_inputs,
+            example_inputs,
+            atol=atol,
+            rtol=rtol,
+            equal_nan=True,
+            # our testing sometimes uses higher precision inputs for the reference
+            exact_dtype=False,
         )
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
@@ -501,7 +533,12 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
         )
-
+        # if there are negative terms in ModularIndexing base, we cannot replace it with IndexingDiv
+        expr = ModularIndexing(i1 - 15, 1, 64)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges),
+            ModularIndexing(i1 - 15, 1, 64),
+        )
         # small terms should be kept if the rest is not guaranteed to be divisible
         self.assertEqual(
             sizevars.simplify_with_ranges(IndexingDiv(r3 + i2 + i1, 32), var_ranges),
@@ -529,6 +566,14 @@ class TestIndexingSimplification(TorchTestCase):
         # the same things happens with symbolic divisor
         self.assertEqual(
             ModularIndexing(i0 + i1 * i2 * r3, i2, r3), ModularIndexing(i0, i2, r3)
+        )
+
+        # if there are negative terms, we cannot optimize away zero terms due to https://github.com/openai/triton/issues/619
+        self.assertEqual(
+            ModularIndexing(-i0 + i1 * 20, 2, 10), ModularIndexing(-i0 + i1 * 20, 2, 10)
+        )
+        self.assertEqual(
+            ModularIndexing(-15 + i1 * 20, 2, 10), ModularIndexing(-15 + i1 * 20, 2, 10)
         )
 
         # Constant fold from divisor into base
@@ -724,6 +769,44 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_forced_buffer_realize(self):
+        # Test torch._test_inductor_realize forces a buffer to be realized
+        def fn(a):
+            b = test_operators.realize(a * 2)
+            return (b * 2,)
+
+        self.common(fn, (torch.randn(10),))
+        self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
+
+    def test_scheduler_vertical_fusion1(self):
+        realize = test_operators.realize
+
+        def fn(sa, ct, p):
+            # From torchbench.pyhpc_equation_of_state
+            v17 = -3.087032500374211e-7
+            v18 = -1.988366587925593e-8
+            v19 = -1.061519070296458e-11
+            v20 = 1.550932729220080e-10
+            t15 = realize(v19 * ct)
+            t19 = realize(v17 + ct * (v18 + t15) + v20 * sa)
+            t20 = realize(1.0 / t19)
+            t128 = realize(t19 * p)
+            return t20 + t128
+
+        self.common(
+            fn,
+            (
+                torch.randn(204, 204, 26),
+                torch.randn(204, 204, 26),
+                torch.randn(26),
+            ),
+        )
+        self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count,
+            1 if self.device == "cuda" else 3,
+        )
 
     def test_sum1(self):
         def fn(a, b):
@@ -1404,8 +1487,28 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_shape_prop_torch_ones(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, attention_scores):
+                extended_attention_mask = torch.ones(
+                    8, 1, 1, 512, device=attention_scores.device
+                )
+                attention_scores = attention_scores + extended_attention_mask
+
+                return attention_scores
+
+        mod = Model().eval()
+        with torch.no_grad():
+            self.common(
+                mod,
+                (torch.randn(8, 12, 512, 512),),
+            )
+
     # For gpu path, there has a accurcy issue,
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv  bn test")
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_bn_fuse(self):
         input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
         conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -1459,6 +1562,88 @@ class CommonTemplate:
                         mod,
                         (v,),
                     )
+
+    # For gpu path, there has a accurcy issue,
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
+    def test_conv_functional_bn_fuse(self):
+        # Define a BatchNorm using functional BN.
+        class BatchNorm(torch.nn.BatchNorm2d):
+            def __init__(
+                self,
+                num_features,
+                eps=1e-5,
+                momentum=0.1,
+                affine=True,
+                track_running_stats=True,
+                device=None,
+                dtype=None,
+            ):
+                factory_kwargs = {"device": device, "dtype": dtype}
+                super(BatchNorm, self).__init__(
+                    num_features,
+                    eps=eps,
+                    momentum=momentum,
+                    affine=affine,
+                    track_running_stats=track_running_stats,
+                    **factory_kwargs,
+                )
+
+            def forward(self, x):
+                if self.momentum is None:
+                    exponential_average_factor = 0.0
+                else:
+                    exponential_average_factor = self.momentum
+
+                if self.training and self.track_running_stats:
+                    # TODO: if statement only here to tell the jit to skip emitting this when it is None
+                    if self.num_batches_tracked is not None:  # type: ignore[has-type]
+                        self.num_batches_tracked = self.num_batches_tracked + 1  # type: ignore[has-type]
+                        if self.momentum is None:  # use cumulative moving average
+                            exponential_average_factor = 1.0 / float(
+                                self.num_batches_tracked
+                            )
+                        else:  # use exponential moving average
+                            exponential_average_factor = self.momentum
+                if self.training:
+                    bn_training = True
+                else:
+                    bn_training = (self.running_mean is None) and (
+                        self.running_var is None
+                    )
+                x = F.batch_norm(
+                    x,
+                    # If buffers are not to be tracked, ensure that they won't be updated
+                    self.running_mean
+                    if not self.training or self.track_running_stats
+                    else None,
+                    self.running_var
+                    if not self.training or self.track_running_stats
+                    else None,
+                    self.weight,
+                    self.bias,
+                    bn_training,
+                    exponential_average_factor,
+                    self.eps,
+                )
+                return x
+
+        v = torch.randn(1, 3, 556, 56, dtype=torch.float32)
+        mod = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                3,
+                64,
+                kernel_size=3,
+                dilation=1,
+                groups=1,
+                bias=True,
+            ),
+            BatchNorm(64),
+        ).eval()
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
 
     @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
     def test_conv2d_packed(self):
@@ -1532,13 +1717,13 @@ class CommonTemplate:
             def __init__(
                 self,
                 binary_fn,
+                unary_fn,
                 in_channels,
                 out_channels,
                 dilation,
                 groups,
                 padding,
                 bias,
-                has_relu,
                 **kwargs,
             ):
                 super(M, self).__init__()
@@ -1563,17 +1748,17 @@ class CommonTemplate:
                     )
                 )
                 self.binary_fn = binary_fn
-                self.relu = torch.nn.ReLU() if has_relu else torch.nn.Identity()
+                self.unary_fn = unary_fn
 
             def forward(self, x):
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
-                return self.relu(self.binary_fn(x1, x2))
+                return self.unary_fn(self.binary_fn(x1, x2))
 
         test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(
             binary_list,
-            [True, False],
+            unary_list[:2],
             [True, False],
             [1, 3],
             [1, 2],
@@ -1584,7 +1769,7 @@ class CommonTemplate:
 
         for (
             binary_fn,
-            has_relu,
+            unary_fn,
             bias,
             kernel_size,
             dilation,
@@ -1597,13 +1782,13 @@ class CommonTemplate:
             x_shape = (1, iC, 112, 112)
             mod = M(
                 binary_fn,
+                unary_fn,
                 iC,
                 oC,
                 dilation,
                 groups,
                 padding,
                 bias,
-                has_relu,
                 kernel_size=kernel_size,
             ).eval()
             mod = mod.to(memory_format=memory_format)
@@ -1826,6 +2011,15 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
             check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
+
+    @requires_multigpu()
+    def test_multi_gpu_device(self):
+        def fn(x, y):
+            r = torch.ops.aten.div(x, y)
+            r = r.to("cuda:1")
+            return 2 * r
+
+        self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
     def test_unbind(self):
         def fn(a):
@@ -2594,6 +2788,10 @@ class CommonTemplate:
             fn,
             (torch.randn([8, 16]),),
         )
+        self.common(
+            fn,
+            (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+        )
 
     def test_cat_upcasting(self):
         def fn(arg4_1, slice_7):
@@ -2674,6 +2872,34 @@ class CommonTemplate:
             fn,
             (torch.randn([64]),),
         )
+
+    def test_expm1(self):
+        def fn(x):
+            return torch.expm1(x), torch.expm1(x) * 2
+
+        for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            self.common(
+                fn,
+                (torch.randn([64]).to(dtype=dtype),),
+            )
+            self.common(
+                fn,
+                (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
+            )
+
+    def test_log1p(self):
+        def fn(x):
+            return torch.log1p(x), torch.log1p(x) * 2
+
+        for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            self.common(
+                fn,
+                (torch.randn([64]).to(dtype=dtype),),
+            )
+            self.common(
+                fn,
+                (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
+            )
 
     def test_flip(self):
         def fn(x):
@@ -2875,6 +3101,39 @@ class CommonTemplate:
                 torch.tensor([[0, 0, 2, 2]], dtype=torch.int64),
             ),
         )
+
+    def test_index3(self):
+        def fn(x, ia, ib):
+            return (x[:, ia, None, ib, 0],)
+
+        self.common(
+            fn,
+            (
+                torch.randn(3, 4, 4, 4, 3),
+                torch.tensor([0, 2, 1], dtype=torch.int64),
+                torch.tensor([0, 2, 1], dtype=torch.int64),
+            ),
+        )
+
+    def test_output_strides(self):
+        def fn(x):
+            y = x.permute(0, 2, 3, 1).contiguous()
+            torch._dynamo.graph_break()
+            return y.view(-1, 4)
+
+        inp = torch.rand([4, 4, 4, 4], device=self.device)
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+
+        self.assertEqual(fn(inp), fn_opt(inp))
+        self.assertEqual(fn(inp).stride(), fn_opt(inp).stride())
+
+        # no redundant copy
+        def foo(x):
+            return x[0:2:2].T[3:].squeeze(0)
+
+        foo_opt = torch._dynamo.optimize("inductor")(foo)
+        out = foo_opt(inp)
+        self.assertEqual(inp.storage(), out.storage())
 
     def test_index_select(self):
         def fn(a, b):
@@ -4677,6 +4936,50 @@ class CommonTemplate:
             [torch.randn((4, 2)), torch.randn((4))],
         )
 
+    @patch.object(config, "profiler_mark_wrapper_call", True)
+    def test_profiler_mark_wrapper_call(self):
+        from torch.profiler import profile
+
+        @torch._dynamo.optimize("inductor", nopython=True)
+        def fn(a, b):
+            return a + b
+
+        a = torch.rand((100,))
+        b = torch.rand((100,))
+        with profile() as prof:
+            fn(a, b)
+        assert "inductor_wrapper_call" in (
+            e.name for e in prof.profiler.function_events
+        )
+
+    @patch.object(config, "cpp_wrapper", True)
+    @unittest.skipIf(HAS_CUDA, "cpp_wrapper only supports cpu")
+    def test_cpp_wrapper(self):
+        device = "cpu"
+        for name in [
+            "test_as_strided",  # buffer reuse
+            "test_bitwise",  # int32
+            "test_bmm1",
+            "test_bmm2",
+            "test_cat",  # alias
+            "test_linear1",
+            "test_linear2",
+            "test_lowmem_dropout1",  # None as output
+            "test_mm_views",
+            "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
+            "test_reduction1",  # Reduction
+            "test_relu",  # multiple inputs
+            "test_silu",  # single input, single output
+            "test_sum_dtype",  # float64
+            "test_sum_int",  # bool, int64, int8, uint8
+            "test_transpose",  # multiple outputs, buffer clear
+        ]:
+            test_name = f"{name}_{device}"
+            assert hasattr(self, test_name), "undefined function"
+            func = getattr(self, test_name)
+            assert callable(func), "not a callable"
+            func()
+
 
 if HAS_CPU:
 
@@ -4912,6 +5215,61 @@ if HAS_CPU:
                 assert same(real_out, compiled_out, equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count >= 1
 
+        def test_load_same_bool_tensor_twice(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a, b):
+                x = torch.masked_fill(a, b, -33.0)
+                y = torch.masked_fill(a, b, -33.0)
+                return x, y
+
+            value = torch.randn((2, 17))
+            mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8).to(torch.bool)
+            fn(value, mask)
+
+        def test_cpu_vec_cosim(self):
+            cpp_vec_op_list = []
+            cpp_op_list = []
+
+            for k, v in CppVecOverrides.__dict__.items():
+                if isinstance(v, staticmethod):
+                    cpp_vec_op_list.append(k)
+            for k, v in CppOverrides.__dict__.items():
+                if isinstance(v, staticmethod):
+                    cpp_op_list.append(k)
+
+            diff = [
+                "index_expr",
+                "signbit",
+                "isinf",
+                "mod",
+                "masked",
+                "randn",
+                "isnan",
+                "rand",
+            ]
+            union = {*cpp_vec_op_list, *diff}
+            self.assertTrue(set(cpp_op_list).issubset(union))
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_new_vec_op_cpu_only(self):
+            def fn(x):
+                return (torch.log1p(torch.expm1(torch.erf(x))),)
+
+            x = torch.randn((2, 9))
+            x[0, 0] = torch.nan
+            x[1, -1] = torch.nan
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                traced = make_fx(fn)(x)
+                compiled = compile_fx_inner(traced, [x])
+                assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
@@ -4999,7 +5357,7 @@ if HAS_CPU:
                 traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 1
+                assert metrics.generated_cpp_vec_kernel_count == 0
 
                 torch._dynamo.reset()
                 metrics.reset()
@@ -5026,7 +5384,12 @@ if HAS_CPU:
             b = torch.rand((100,))
             with profile() as prof:
                 fn(a, b)
-            assert "kernel_cpp_0" in (e.name for e in prof.profiler.function_events)
+
+            kernel_profile_events = []
+            for e in prof.profiler.function_events:
+                if "kernel_cpp_0" in e.name:
+                    kernel_profile_events.append(e.name)
+            assert len(kernel_profile_events) > 0
 
 
 if HAS_CUDA:
@@ -5049,6 +5412,21 @@ if HAS_CUDA:
             self.common(
                 fn, (torch.randn(2, 3, 10, 5, 6, device="cuda")[:, :, 2::2, :, :],)
             )
+
+        def test_sink_cat_after_pointwise(self):
+            class TestModule(torch.nn.Module):
+                def forward(self, x, y):
+                    return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+
+            trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
+            inputs = [
+                torch.randn(8, 8, device="cuda"),
+                torch.randn(8, 8, device="cuda"),
+            ]
+            module = TestModule()
+            traced = trace_func(module, inputs)
+            self.assertTrue(torch.allclose(module(*inputs), traced(*inputs)))
+            self.assertEqual(count_call_method(traced, "tanh"), 2)
 
         def test_linear_permute_fusion(self):
             class TestModule(torch.nn.Module):
@@ -5073,6 +5451,70 @@ if HAS_CUDA:
             self.assertEqual(num_linear_transpose, 1)
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
+
+        @patch.object(config, "permute_fusion", True)
+        def test_permute_fusion(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, view, reshape_2):
+                    permute = view.permute(0, 2, 1)
+                    view = None
+                    reshape = torch.reshape(permute, (-1, 642))
+                    bmm = torch.bmm(permute, reshape_2)
+                    return (bmm,)
+
+            args = [
+                ((1024, 642, 160), (102720, 160, 1), torch.float32, "cuda", True),
+                ((1024, 642, 20), (12840, 20, 1), torch.float32, "cuda", True),
+            ]
+            args = [
+                rand_strided(sh, st, dt, dev).requires_grad_(rg)
+                for (sh, st, dt, dev, rg) in args
+            ]
+
+            mod = Repro()
+            opt_mod = torch._dynamo.optimize("inductor")(mod)
+
+            ref = mod(*args)
+            res = opt_mod(*args)
+            self.assertTrue(same(ref, res))
+
+        @patch.object(config.triton, "autotune", True)
+        def test_inplace_add_alpha_autotune(self):
+            def fn(x, y):
+                aten.add_.Tensor(x, y, alpha=0.55)
+                return (x,)
+
+            x1 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x2 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x3 = torch.zeros(2, 3, 4, 10, device="cuda")
+            y = torch.randn(2, 3, 4, 10, device="cuda").to(
+                memory_format=torch.channels_last
+            )
+            fn_fx = make_fx(fn)(x1, y)
+            fn_compiled = compile_fx_inner(fn_fx, [x1, y])
+            fn(x2, y)
+            fn_compiled([x3, y])
+            assert same(x2, x3)
+
+        @patch.object(config.triton, "autotune", True)
+        def test_inplace_buffer_autotune(self):
+            def foo(x, y, z):
+                a = x @ y
+                return a.unsqueeze(0).unsqueeze(0) + z
+
+            x = torch.zeros(5, 5, device="cuda")
+            y = torch.zeros(5, 5, device="cuda")
+            z = torch.zeros(1, 1, 5, 5, device="cuda").to(
+                memory_format=torch.channels_last
+            )
+            self.common(
+                foo,
+                (x, y, z),
+                check_lowp=False,
+            )
 
         def test_permute_linear_fusion(self):
             class TestModule(torch.nn.Module):
@@ -5383,6 +5825,7 @@ if HAS_CUDA:
                         meta=meta,
                         configs=configs,
                         save_cache_hook=False,
+                        mutated_arg_names=["in_out_ptr0"],
                     )
 
                 return decorator
@@ -5476,6 +5919,22 @@ if HAS_CUDA:
             assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
+        counter = itertools.count(0)
+
+        class DebugDirManager(object):
+            def __init__(self):
+                self.id = next(TritonCodeGenTests.counter)
+                self.prev_debug_name = None
+
+            def __enter__(self):
+                self.prev_debug_name = torch._dynamo.config.debug_dir_root
+                self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
+                torch._dynamo.config.debug_dir_root = self.new_name
+
+            def __exit__(self, *args):
+                shutil.rmtree(self.new_name)
+                torch._dynamo.config.debug_dir_root = self.prev_debug_name
+
         from torch._inductor.triton_ops.autotune import CachingAutotuner
 
         class NoOpCompilerBackend:
@@ -5493,7 +5952,7 @@ if HAS_CUDA:
                 Instead, it transforms the fx graph so that its functions are
                 aten operations. It then saves this graph.
                 """
-                from functorch._src.aot_autograd import Interpreter
+                from torch._functorch.aot_autograd import Interpreter
                 from torch._inductor.decomposition import select_decomp_table
                 from torch._subclasses import FakeTensorMode
 
@@ -5557,6 +6016,123 @@ if HAS_CUDA:
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
+
+        @staticmethod
+        def run_and_get_triton_code(fn, args):
+            from torch._inductor.debug import DebugContext
+            from torch._inductor.virtualized import V
+
+            torch._dynamo.reset()
+
+            context = DebugContext()
+
+            with TritonCodeGenTests.DebugDirManager(), patch.object(
+                config.trace, "enabled", True
+            ), context, V.set_debug_handler(context):
+
+                dir_name = "/".join(context._path.split("/")[:-1]) + "/"
+                fil = dir_name + "*inference*"
+                existing_dirs = glob.glob(fil)
+
+                fn(*args)
+
+                assert context._path is not None
+
+                dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
+
+                assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
+
+                full_name = os.path.join(dir_dbg[0], "output_code.py")
+                with open(full_name, "r") as f:
+                    return f.read()
+
+        def test_optimize_indexing_dtype(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
+
+            fn_opt = torch._dynamo.optimize("inductor")(fn)
+            inps = [torch.randn(2, 4, 16, 16).cuda()]
+            code = self.run_and_get_triton_code(fn_opt, inps)
+            self.assertTrue("to(tl.int32)" in code)
+            self.assertFalse("to(tl.int64)" in code)
+
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_cant_optimize_compute(self):
+            def ones():
+                return torch.ones([4], device="cuda")
+
+            def suffix(inp):
+                return (inp.to(torch.int64) + 1).to(torch.float64)
+
+            ten = torch.rand([4], device="cuda")
+
+            for foo in (
+                lambda x: x + 2147483657,
+                lambda x: torch.where(x < 0, ones(), ones() - 2) * (-(2 ** (40))),
+                lambda x: x + ten,
+                lambda x: x + ten.sum(),
+            ):
+
+                def fn():
+                    return suffix(foo(ones()))
+
+                fn_opt = torch._dynamo.optimize("inductor")(fn)
+                code = self.run_and_get_triton_code(fn_opt, [])
+
+                # this cannot be optimized away, value too large
+                self.assertTrue("to(tl.int64)" in code)
+                self.assertEqual(fn_opt(), fn())
+
+        def test_optimize_compute(self):
+            def ones():
+                return torch.ones([4], device="cuda")
+
+            def suffix(inp):
+                return (inp.to(torch.int64) + 1).to(torch.float64)
+
+            for foo in (
+                lambda x: x + 500,
+                lambda x: torch.where(x < 0, ones(), ones() - 2) * (-(2 ** (20))),
+                lambda x: x / 30,
+            ):
+
+                def fn():
+                    return suffix(foo(ones()))
+
+                fn_opt = torch._dynamo.optimize("inductor")(fn)
+                code = self.run_and_get_triton_code(fn_opt, [])
+
+                # this can be optimized away, value too large
+                self.assertTrue("to(tl.int64)" not in code)
+                self.assertTrue("to(tl.int32)" in code)
+
+                self.assertEqual(fn_opt(), fn())
+
+
+class ExprPrinterTests(TestCase):
+    def test_print_pow(self):
+        s1 = sympy.Symbol("foo", integer=True)
+        s2 = sympy.Symbol("bar", integer=True)
+        s3 = sympy.Symbol("baz", integer=True)
+
+        cases = (
+            # expr, result
+            # Test exprs.
+            (
+                s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
+                "((-1)*(1/(((-1) + (2*foo))))) + (foo*(1/(((-1) + (2*foo)))))",
+            ),
+            (s1 / (s2 - s3), "foo*(1/((bar + ((-1)*baz))))"),
+            # Test Pow directly.
+            (sympy.Pow(s1 + s2, 0), "1"),  # note: simplified before _print_Pow
+            (sympy.Pow(s1 + s2, -3), "1/((bar + foo)*(bar + foo)*(bar + foo))"),
+            (sympy.Pow(s1 + s2, 2), "(bar + foo)*(bar + foo)"),
+        )
+
+        for expr, result in cases:
+            self.assertEqual(cexpr(expr), result)
+            self.assertEqual(texpr(expr), result)
 
 
 if __name__ == "__main__":

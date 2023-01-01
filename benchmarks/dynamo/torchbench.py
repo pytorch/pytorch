@@ -119,8 +119,7 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 }
 
 REQUIRE_COSINE_TOLERACE = {
-    # https://github.com/pytorch/torchdynamo/issues/556
-    "resnet50_quantized_qat",
+    # Just keeping it here even though its empty, if we need this in future.
 }
 
 # non-deterministic output / cant check correctness
@@ -180,6 +179,12 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_GPT2_large",
     "hf_T5_large",
     "timm_vision_transformer_large",
+}
+
+
+MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
+    "hf_GPT2": 2,
+    "pytorch_unet": 2,
 }
 
 
@@ -250,6 +255,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
+        # Control the memory footprint for few models
+        if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
+            batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
+
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
         extra_args = []
@@ -271,12 +280,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
-        if dynamic_shapes:
-            if not hasattr(benchmark, "get_dynamic_shapes_module"):
-                raise NotImplementedError("Dynamic Shapes not supported")
-            model, example_inputs = benchmark.get_dynamic_shapes_module()
-        else:
-            model, example_inputs = benchmark.get_module()
+        model, example_inputs = benchmark.get_module()
 
         # Models that must be in train mode while training
         if is_training and (not use_eval_mode or model_name in ONLY_TRAINING_MODE):
@@ -285,8 +289,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             model.eval()
         gc.collect()
         batch_size = benchmark.batch_size
-
-        self.init_optimizer(device, model.parameters())
 
         # Torchbench has quite different setup for yolov3, so directly passing
         # the right example_inputs
@@ -327,9 +329,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         tolerance = 1e-4
         cosine = self.args.cosine
         # Increase the tolerance for torch allclose
-        if self.args.float16:
+        if self.args.float16 or self.args.amp:
             return 1e-3, cosine
         if is_training and current_device == "cuda":
+            tolerance = 1e-3
             if name in REQUIRE_COSINE_TOLERACE:
                 cosine = True
             elif name in REQUIRE_HIGHER_TOLERANCE:
@@ -346,7 +349,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)

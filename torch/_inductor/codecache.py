@@ -21,6 +21,8 @@ from time import sleep, time
 from typing import Any, Callable, Dict, List
 
 import torch
+
+from torch.hub import _Faketqdm, tqdm
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
 
@@ -73,12 +75,17 @@ def code_hash(code):
     )
 
 
-def write(source_code, ext, extra=""):
+def get_code_path(source_code, ext, extra):
     basename = code_hash(source_code + extra)
     subdir = os.path.join(cache_dir(), basename[1:3])
+    path = os.path.join(subdir, f"{basename}.{ext}")
+    return basename, subdir, path
+
+
+def write(source_code, ext, extra=""):
+    basename, subdir, path = get_code_path(source_code, ext, extra)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    path = os.path.join(subdir, f"{basename}.{ext}")
     if not os.path.exists(path):
         # use a temp file for thread safety
         fd, tmp_path = tempfile.mkstemp(dir=subdir)
@@ -104,6 +111,9 @@ def cpp_compiler_search(search):
                 # gxx package is only available for Linux
                 # according to https://anaconda.org/conda-forge/gxx/
                 if sys.platform != "linux":
+                    continue
+                # Do not install GXX by default
+                if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
                     continue
                 from filelock import FileLock
 
@@ -312,13 +322,28 @@ def pick_vec_isa():
     return invalid_vec_isa
 
 
-def cpp_compile_command(
-    input,
-    output,
-    warning_all=True,
-    shared=True,
-    include_pytorch=False,
-    vec_isa: VecISA = invalid_vec_isa,
+def get_shared(shared=True):
+    return "-shared -fPIC" if shared else ""
+
+
+def get_warning_all_flag(warning_all=True):
+    return "-Wall" if warning_all else ""
+
+
+def cpp_flags():
+    return "-std=c++17 -Wno-unused-variable"
+
+
+def optimization_flags():
+    return "-march=native -O3 -ffast-math -fno-finite-math-only -fopenmp"
+
+
+def use_custom_generated_macros():
+    return "-D C10_USING_CUSTOM_GENERATED_MACROS"
+
+
+def get_include_and_linking_paths(
+    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa
 ):
     if sys.platform == "linux" and (
         include_pytorch
@@ -346,17 +371,29 @@ def cpp_compile_command(
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
+    return ipaths, lpaths, libs, macros
 
-    shared_lib = "-shared -fPIC" if shared else ""
-    warning_all_flag = "-Wall" if warning_all else ""
+
+def cpp_compile_command(
+    input,
+    output,
+    warning_all=True,
+    shared=True,
+    include_pytorch=False,
+    vec_isa: VecISA = invalid_vec_isa,
+):
+    ipaths, lpaths, libs, macros = get_include_and_linking_paths(
+        include_pytorch, vec_isa
+    )
+
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {input} {shared_lib} {warning_all_flag} -std=c++14 -Wno-unused-variable
+            {cpp_compiler()} {input} {get_shared(shared)} {get_warning_all_flag(warning_all)} {cpp_flags()}
             {ipaths} {lpaths} {libs} {macros}
-            -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
-            -D C10_USING_CUSTOM_GENERATED_MACROS
+            {optimization_flags()}
+            {use_custom_generated_macros()}
             -o{output}
         """,
     ).strip()
@@ -376,6 +413,13 @@ class CppCodeCache:
                 global _libgomp
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
                 return cdll.LoadLibrary(path)
+            if "failed to map segment from shared object" in str(e):
+                raise OSError(
+                    f"{e}.  The most common reason this may occur is if the /tmp folder "
+                    "is mounted with noexec (e.g., by default Docker mounts tmp file systems "
+                    "as noexec).  Please remount /tmp with exec enabled, or set another "
+                    "temporary directory with TORCHINDUCTOR_CACHE_DIR environment variable."
+                ) from e
             raise
 
     @classmethod
@@ -400,7 +444,7 @@ class CppCodeCache:
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
-                        raise exc.CppCompileError(cmd, e.output)
+                        raise exc.CppCompileError(cmd, e.output) from e
 
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
@@ -489,7 +533,7 @@ class TritonFuture:
 
 class AsyncCompile:
     def __init__(self):
-        self._context_keepalive = None
+        pass
 
     @staticmethod
     @functools.lru_cache(1)
@@ -560,7 +604,7 @@ class AsyncCompile:
         if hasattr(pool, "_start_queue_management_thread"):
             pool._start_queue_management_thread()
         else:
-            for i in range(config.compile_threads):
+            for _ in range(config.compile_threads):
                 pool._adjust_process_count()
             pool._start_executor_manager_thread()
         _compile_end()
@@ -579,9 +623,6 @@ class AsyncCompile:
 
     def triton(self, source_code):
         _compile_start()
-        if self._context_keepalive is None:
-            # Workaround `CUDA: Error- context is destroyed`
-            self._context_keepalive = torch.tensor([1], device="cuda")
 
         if config.compile_threads > 1:
             major, minor = torch.cuda.get_device_capability()
@@ -601,10 +642,26 @@ class AsyncCompile:
         return self.submit(task)
 
     def wait(self, scope: Dict[str, Any]):
+        num_kernels = len(
+            [
+                value
+                for key, value in scope.items()
+                if isinstance(value, (Future, TritonFuture))
+            ]
+        )
+        pbar = tqdm(
+            total=num_kernels,
+            desc="Inductor Compilation",
+            disable=config.disable_progress,
+            delay=0,
+        )
         if config.compile_threads > 1:
-            for key, result in list(scope.items()):
+            for key, result in scope.items():
+                if config.verbose_progress and not isinstance(pbar, _Faketqdm):
+                    pbar.set_postfix_str(key)
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
+                    pbar.update(1)
 
         _compile_end()
 

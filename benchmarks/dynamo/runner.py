@@ -1309,6 +1309,7 @@ if __name__ == "__main__":
     args.compilers = compilers
     args.devices = devices
     args.dtypes = dtypes
+    flag_compilers = list(set(flag_compilers) & set(compilers))
     args.flag_compilers = flag_compilers
     args.suites = suites
 
@@ -1340,6 +1341,13 @@ if __name__ == "__main__":
             parse_logs(
                 args, dtypes, suites, devices, compilers, flag_compilers, output_dir
             )
+            if not args.no_update_archive:
+                archive(
+                    output_dir,
+                    args.dashboard_archive_path,
+                    args.archive_name,
+                    dtypes[0],
+                )
 
     if args.update_dashboard:
         DashboardUpdater(args).update()
