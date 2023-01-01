@@ -1135,7 +1135,7 @@ bool containsAll(const std::vector<BufLoadOrStoreUse>& uses, BlockPtr b) {
 
 BlockPtr findParentBlock(StmtPtr s) {
   while (s) {
-    if (auto b = to<Block>(std::move(s))) {
+    if (auto b = to<Block>(s)) {
       return b;
     }
     s = s->get_parent();
@@ -2086,7 +2086,7 @@ void LoopNest::reorderAxis(ForPtr a, ForPtr b) {
   // Find relevant axes, store reversed.
   StmtPtr s = inner;
   while (s != outer) {
-    if (ForPtr f = to<For>(std::move(s))) {
+    if (ForPtr f = to<For>(s)) {
       internal_axes.push_back(f);
     }
 
@@ -2656,7 +2656,7 @@ std::vector<ForPtr> LoopNest::getLoopStmtsFor(StmtPtr s) const {
   std::vector<ForPtr> result;
 
   while (s) {
-    if (auto loop = to<For>(std::move(s))) {
+    if (auto loop = to<For>(s)) {
       result.push_back(loop);
     }
     s = s->get_parent();
