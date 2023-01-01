@@ -355,7 +355,7 @@ class TORCH_API BufHandle : public ExprHandle {
 
   explicit BufHandle(Dtype dtype) : ExprHandle(Buf::make("_", {}, dtype)) {}
 
-  explicit BufHandle(const BufPtr& node) : ExprHandle(node) {}
+  explicit BufHandle(BufPtr node) : ExprHandle(std::move(node)) {}
   BufPtr node() const {
     return static_to<Buf>(ExprHandle::node());
   }
@@ -422,7 +422,7 @@ class TORCH_API VarHandle : public ExprHandle {
   VarHandle(const std::string& name_hint, Dtype dtype)
       : ExprHandle(Var::make(name_hint, dtype)) {}
 
-  explicit VarHandle(const VarPtr& node) : ExprHandle(node) {}
+  explicit VarHandle(VarPtr node) : ExprHandle(std::move(node)) {}
 
   VarPtr node() const {
     return static_to<Var>(ExprHandle::node());
