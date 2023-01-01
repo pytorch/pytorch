@@ -136,6 +136,13 @@ def _parse_repo_info(github):
                 ref = 'master'
             else:
                 raise
+        except OSError as e:  # Accounting for timeout error such that the code loads from cache when there is no internet
+            for possible_ref in ['main', 'master']:
+                is_ref_in_cache = os.path.exists(
+                    f"{get_dir()}/{repo_owner}_{repo_name}_{possible_ref}")
+                ref = possible_ref if is_ref_in_cache else None
+            if ref == None:
+                raise
     return repo_owner, repo_name, ref
 
 
