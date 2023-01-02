@@ -1187,24 +1187,6 @@ if(USE_OPENMP)
   # OpenMP support?
   set(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
 
-  # macOS + GCC
-  if(APPLE AND CMAKE_COMPILER_IS_GNUCC)
-    exec_program(uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
-    string(REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
-    message(STATUS "macOS Darwin version: ${DARWIN_VERSION}")
-    if(DARWIN_VERSION GREATER 9)
-      set(APPLE_OPENMP_SUCKS 1)
-    endif(DARWIN_VERSION GREATER 9)
-    execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpversion
-      OUTPUT_VARIABLE GCC_VERSION)
-    if(APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
-      message(WARNING "Disabling OpenMP (unstable with this version of GCC). "
-        "Install GCC >= 4.6.2 or change your OS to enable OpenMP.")
-      add_compile_options(-Wno-unknown-pragmas)
-      set(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
-    endif()
-  endif()
-
   if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC"
     AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     message(STATUS "Setting OpenMP flags for clang-cl")
