@@ -122,7 +122,7 @@ struct C10_API PyInterpreter;
 // another word consider doing this!
 
 struct C10_API PyInterpreterVTable {
-  virtual ~PyInterpreterVTable() {}
+  virtual ~PyInterpreterVTable() = default;
 
   // Report the name of this interpreter
   virtual std::string name() const = 0;
