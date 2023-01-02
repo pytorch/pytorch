@@ -176,7 +176,7 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def truediv(a, b):
-        b = ValueRanges.warp(b)
+        b = ValueRanges.wrap(b)
         if 0 in b:
             return ValueRanges(-math.inf, math.inf)
         else:
@@ -188,7 +188,7 @@ class ValueRangeAnalysis(object):
         out = ValueRangeAnalysis.truediv(a, b)
         floor = sympy.functions.elementary.integers.floor
         ceil = sympy.functions.elementary.integers.ceiling
-        return ValueRanges(ceil(out.min), floor(out.max))
+        return ValueRanges(ceil(out.lower), floor(out.upper))
 
     @staticmethod
     def add(a, b):
