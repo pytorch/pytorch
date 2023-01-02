@@ -3,8 +3,6 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -74,7 +72,7 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
 
 bool isScalar(ExprHandle e) {
   auto n = e.node();
-  return n->isConstant() || to<Var>(std::move(n));
+  return n->isConstant() || to<Var>(n);
 }
 
 ExprHandle promoteHalfToFloat(const ExprHandle& e) {
@@ -171,8 +169,7 @@ c10::optional<TensorInfo> getTensorInfo(BufHandle b) {
     }
     dims.push_back(*val);
   }
-  return TensorInfo{
-      std::move(dims), static_cast<at::ScalarType>(b.dtype().scalar_type())};
+  return TensorInfo{dims, static_cast<at::ScalarType>(b.dtype().scalar_type())};
 }
 
 ExprHandle clamp(
@@ -236,13 +233,13 @@ std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
   auto res1 = broadcastShapesImpl(shapes[n - 2], shapes[n - 1]);
   shapes[n - 2] = res1.first;
   shapes.pop_back();
-  auto res2 = broadcastShapesImpl(std::move(shapes));
+  auto res2 = broadcastShapesImpl(shapes);
   return {res2.first, (res1.second || res2.second)};
 }
 
 std::vector<ExprHandle> broadcastShapes(
     std::vector<std::vector<ExprHandle>> shapes) {
-  return broadcastShapesImpl(std::move(shapes)).first;
+  return broadcastShapesImpl(shapes).first;
 }
 
 std::vector<ExprHandle> broadcastShapes(
@@ -547,8 +544,7 @@ Tensor computeCatWoConditionals(
       output_strides_expr);
   if (non_empty_inputs.size() == 0) {
     return Tensor(
-        std::move(output_buf),
-        alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
+        output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
   }
 
   int64_t concat_dim = c10::get<int64_t>(arg_dim);
@@ -615,11 +611,11 @@ Tensor computeCatWoConditionals(
       concat_dim_size = immLike(input_dims[norm_concat_dim], 0);
     }
     block->append_stmt(gen_code_for_input(
-        non_empty_inputs[i], i, std::move(concat_dim_size), input_dims));
+        non_empty_inputs[i], i, concat_dim_size, input_dims));
     concat_dim_size =
         alloc<Add>(concat_dim_size, input_dims[norm_concat_dim].node());
   }
-  return Tensor(std::move(output_buf), IRSimplifier::simplify(block));
+  return Tensor(output_buf, IRSimplifier::simplify(block));
 }
 
 Tensor computeCat(
@@ -702,7 +698,7 @@ Tensor computeEmbedding(
 
   StmtPtr s =
       ExternalCall::make(ResultBuf, "nnc_aten_embedding", {w, indices}, {});
-  return Tensor(ResultBuf.node(), std::move(s));
+  return Tensor(ResultBuf.node(), s);
 }
 
 } // namespace tensorexpr
