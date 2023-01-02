@@ -12,6 +12,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/Indexing.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/AccumulateType.h>
 #include <torch/library.h>
@@ -306,7 +307,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_){
                                                                                      name:nil];
           MPSGraphTensor *maskTensor = [mpsGraph castTensor:inputNotEqualToZeroTensor
                                                      toType:MPSDataTypeInt32
-                                                       name:nil];
+                                                       name:@"castToInt32"];
           MPSGraphTensor *indicesTensor = [mpsGraph cumulativeSumWithTensor:maskTensor
                                                                        axis:0
                                                                        name:nil];
