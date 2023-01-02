@@ -3362,33 +3362,33 @@ class TestVmapOperatorsOpInfo(TestCase):
 
             # Sample inputs check
             sample_inputs_op = {
-                                # Take too long
-                                "special.chebyshev_polynomial_t",
-                                "special.chebyshev_polynomial_u",
-                                "special.chebyshev_polynomial_v",
-                                "special.chebyshev_polynomial_w",
-                                "special.hermite_polynomial_he",
-                                "special.laguerre_polynomial_l",
-                                "special.legendre_polynomial_p",
-                                "special.shifted_chebyshev_polynomial_t",
-                                "special.shifted_chebyshev_polynomial_u",
-                                "special.shifted_chebyshev_polynomial_v",
-                                "special.shifted_chebyshev_polynomial_w",
-                                # Leads to Illegal Memory Access on CUDA
-                                # locally
-                                "fft.fft",
-                                "fft.fft2",
-                                "fft.fftn",
-                                "fft.hfft",
-                                "fft.hfft2",
-                                "fft.hfftn",
-                                "fft.ifft",
-                                "fft.ifft2",
-                                "fft.ifftn",
-                                "fft.ihfft",
-                                "fft.ihfft2",
-                                "fft.ihfftn",
-                                }
+                # Take too long with reference inputs
+                "special.chebyshev_polynomial_t",
+                "special.chebyshev_polynomial_u",
+                "special.chebyshev_polynomial_v",
+                "special.chebyshev_polynomial_w",
+                "special.hermite_polynomial_he",
+                "special.laguerre_polynomial_l",
+                "special.legendre_polynomial_p",
+                "special.shifted_chebyshev_polynomial_t",
+                "special.shifted_chebyshev_polynomial_u",
+                "special.shifted_chebyshev_polynomial_v",
+                "special.shifted_chebyshev_polynomial_w",
+                # Leads to Illegal Memory Access on CUDA
+                # locally
+                "fft.fft",
+                "fft.fft2",
+                "fft.fftn",
+                "fft.hfft",
+                "fft.hfft2",
+                "fft.hfftn",
+                "fft.ifft",
+                "fft.ifft2",
+                "fft.ifftn",
+                "fft.ihfft",
+                "fft.ihfft2",
+                "fft.ihfftn",
+            }
             if op.name in sample_inputs_op:
                 sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             else:
