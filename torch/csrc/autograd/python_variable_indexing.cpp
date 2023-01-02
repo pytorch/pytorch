@@ -86,13 +86,6 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
   return count;
 }
 
-[[noreturn]] static inline void invalid_index(PyObject* obj) {
-  throw IndexError(
-      "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
-      "Variables are valid indices (got %s)",
-      Py_TYPE(obj)->tp_name);
-}
-
 static inline Variable sequenceToVariable(
     c10::TensorOptions options,
     PyObject* seq) {
@@ -117,10 +110,12 @@ inline Variable valueToTensor(
   } else if (PyComplex_Check(value)) {
     scalar = Scalar(THPUtils_unpackComplexDouble(value));
   } else {
-    throw TypeError(
-        "can't assign a %s to a %s",
+    TORCH_CHECK_TYPE(
+        false,
+        "can't assign a ",
         Py_TYPE(value)->tp_name,
-        torch::utils::options_to_string(options).c_str());
+        " to a ",
+        torch::utils::options_to_string(options));
   }
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
@@ -246,7 +241,12 @@ static inline Variable applySlicing(
             auto idx = THPObjectPtr(PyNumber_Index(obj));
             if (!idx) {
               PyErr_Clear();
-              invalid_index(obj);
+              TORCH_CHECK_INDEX(
+                  false,
+                  "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
+                  "Variables are valid indices (got ",
+                  Py_TYPE(obj)->tp_name,
+                  ")");
             }
             if (is_tracing && THPVariable_Check(idx)) {
               recordSelectTrace(THPVariable_Unpack(idx));
@@ -430,9 +430,8 @@ void dispatch_set_item(
 // indexing is needed, it calls C++ `at::indexing::dispatch_index_put_`.
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
-  if (py_value == nullptr) {
-    throw TypeError("Tensor does not support deleting items");
-  }
+  TORCH_CHECK_TYPE(
+      py_value != nullptr, "Tensor does not support deleting items");
   if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
       (!THPVariable_CheckExact(py_value) &&
        check_has_torch_function(py_value))) {
@@ -442,11 +441,11 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   const auto& self_ = THPVariable_Unpack(self);
-  if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
-      self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
-      self_.layout() == kSparseBsc) {
-    throw TypeError("Cannot assign to a sparse tensor");
-  }
+  TORCH_CHECK_TYPE(
+      self_.layout() != kSparse && self_.layout() != kSparseCsr &&
+          self_.layout() != kSparseCsc && self_.layout() != kSparseBsr &&
+          self_.layout() != kSparseBsc,
+      "Cannot assign to a sparse tensor");
   OptionalDeviceGuard device_guard(device_of(self_));
   at::Device self_device = self_.device();
   Variable value;
