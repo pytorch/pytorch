@@ -109,22 +109,21 @@ void JitLoggingConfig::parse() {
 }
 
 bool is_enabled(const char* cfname, JitLoggingLevels level) {
-  //const auto& files_to_levels =
-  //    JitLoggingConfig::getInstance().getFilesToLevels();
-  //std::string fname{cfname};
-  //fname = c10::detail::StripBasename(fname);
-  //const auto end_index = fname.find_last_of('.') == std::string::npos
-  //    ? fname.size()
-  //    : fname.find_last_of('.');
-  //const auto fname_no_ext = fname.substr(0, end_index);
+  const auto& files_to_levels =
+      JitLoggingConfig::getInstance().getFilesToLevels();
+  std::string fname{cfname};
+  fname = c10::detail::StripBasename(fname);
+  const auto end_index = fname.find_last_of('.') == std::string::npos
+      ? fname.size()
+      : fname.find_last_of('.');
+  const auto fname_no_ext = fname.substr(0, end_index);
 
-  //const auto it = files_to_levels.find(fname_no_ext);
-  //if (it == files_to_levels.end()) {
-  //  return false;
-  //}
+  const auto it = files_to_levels.find(fname_no_ext);
+  if (it == files_to_levels.end()) {
+    return false;
+  }
 
-  //return level <= static_cast<JitLoggingLevels>(it->second);
-  return true;
+  return level <= static_cast<JitLoggingLevels>(it->second);
 }
 
 // Unfortunately, in `GraphExecutor` where `log_function` is invoked

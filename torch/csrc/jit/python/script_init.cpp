@@ -157,9 +157,6 @@ struct PythonResolver : public Resolver {
       return nullptr;
     }
 
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " resolveType name:" << name
-      << std::endl;
     auto annotation_type = py::module::import("torch.jit.annotations")
                                .attr("try_ann_to_type")(obj, loc);
     if (!annotation_type.is_none()) {
@@ -1811,9 +1808,6 @@ void initJitScriptBindings(PyObject* module) {
 
           const auto method_name =
               QualifiedName(classname, (*defs_it).name().name());
-          std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-            << " jit_compile class method_name:" << method_name.qualifiedName()
-            << std::endl;
           auto& method = cu->get_function(method_name);
           method.setSchema(getSchemaWithNameAndDefaults(
               defs_it->range(),

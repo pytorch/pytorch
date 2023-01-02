@@ -12,15 +12,14 @@ class TestAwait(JitTestCase):
         aw: Await[int] = torch.jit.awaitable(foo, 13)
         self.assertTrue(aw.fn()(*aw.args()) == torch.jit.awaitable_wait(aw))
         nw = torch.jit.awaitable_nowait(33)
-        print(f"XXX_NW_is_nowait:{nw.is_nowait()}")
-        print(f"XXX_NW_ARGS:{nw.args()}")
-        print(f"XXX_NW_FN:{nw.fn()}")
+        self.assertTrue(nw.is_nowait())
+        self.assertTrue(nw.args() == (33,))
 
     def test_await_type_python(self):
         def foo() -> Tensor:
             return torch.randn()
         awaits = torch.jit.annotate(List[Await[Tensor]], [])
-        awaits.append(Await[Tensor](foo))
+        awaits.append(torch.jit.awaitable(foo))
 
     def test_script(self):
         def delayed(z: int) -> int:
@@ -319,5 +318,20 @@ class TestAwait(JitTestCase):
         m = M()
         tracer = torch.fx.Tracer()
         g = tracer.trace(m)
-        print(f"XXX FX_AWAIT_GRAPH:{g}")
 
+    def test_await_isinstance(self):
+        def delayed(x: Tensor) -> Tensor:
+            return 2 * (x + 1)
+
+        @torch.jit.script
+        def main(x: Tensor) -> Tensor:
+            aw = torch.jit.awaitable(delayed, x)
+            assert isinstance(aw, torch.jit.Await)
+            return torch.jit.awaitable_wait(aw)
+
+        inp = torch.zeros(2)
+
+        sm = torch.jit.script(main)
+        out = main(inp)
+        script_out = sm(inp)
+        self.assertTrue(torch.allclose(script_out, out))

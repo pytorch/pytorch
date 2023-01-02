@@ -371,7 +371,8 @@ def try_ann_to_type(ann, loc):
     if is_future(ann):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
     if is_await(ann):
-        return AwaitType(try_ann_to_type(ann.__args__[0], loc))
+        elementType = try_ann_to_type(ann.__args__[0], loc) if hasattr(ann, "__args__") else AnyType.get()
+        return AwaitType(elementType)
     if ann is float:
         return FloatType.get()
     if ann is complex:

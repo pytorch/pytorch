@@ -243,17 +243,27 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 struct VISIBILITY_HIDDEN PythonAwaitWrapper
     : std::enable_shared_from_this<PythonAwaitWrapper> {
   explicit PythonAwaitWrapper(c10::intrusive_ptr<c10::ivalue::Await> aw)
-      : aw_(std::move(aw)) {}
+    : aw_(std::move(aw)) {}
+  // TODO: leave only ivalue::Await constructor, everything else move to init.cpp
+  explicit PythonAwaitWrapper(py::handle input) {
+    args_ = py::tuple(1u);
+    args_[0] = input;
+    auto type = PyObjectType::get();
+    aw_ = c10::make_intrusive<c10::ivalue::Await>(type);
+    aw_->markCompleted(toIValue(input, type));
+  }
 
   explicit PythonAwaitWrapper(py::function pyf, py::tuple args) {
-    pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pyf));
+    pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(
+        std::move(pyf));
     args_ = std::move(args);
     // TODO: pass to lambda by ref?
     std::function<IValue()> ival_func = [fg(pyfg_), args(args_)]() {
       pybind11::gil_scoped_acquire ag;
       return toIValue(fg->func_(*args), PyObjectType::get());
     };
-    aw_ = c10::make_intrusive<c10::ivalue::Await>(PyObjectType::get(), std::move(ival_func));
+    aw_ = c10::make_intrusive<c10::ivalue::Await>(
+        PyObjectType::get(), std::move(ival_func));
   }
 
   explicit PythonAwaitWrapper(const PythonAwaitWrapper&) = delete;
@@ -285,7 +295,12 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
     return args_;
   }
 
+  TypePtr type() {
+    return aw_->type();
+  }
+
   c10::intrusive_ptr<c10::ivalue::Await> aw_;
+  // Only for eager mode fx tracing
   std::shared_ptr<torch::jit::PythonFunctionGuard> pyfg_;
   py::tuple args_;
  private:
@@ -391,8 +406,6 @@ inline InferredType tryToInferType(py::handle input) {
   auto enum_type = py::module::import("enum").attr("Enum");
   py::bool_ isEnumValue = py::isinstance(input, enum_type);
   if (py::cast<bool>(isEnumValue)) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << std::endl;
     auto enum_class = input.attr("__class__");
     auto enum_type = py::cast<TypePtr>(
         py::module::import("torch.jit.annotations")

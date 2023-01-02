@@ -541,7 +541,6 @@ public:
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
   c10::intrusive_ptr<ivalue::Future> toFuture() const&;
 
-  // Future
   IValue(c10::intrusive_ptr<ivalue::Await> v);
   bool isAwait() const {
     return Tag::Await == tag;

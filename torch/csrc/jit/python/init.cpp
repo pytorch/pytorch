@@ -1844,10 +1844,10 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonAwaitWrapper, std::shared_ptr<PythonAwaitWrapper>>(
       m, "Await")
-      .def(py::init([]() {
-        return std::make_shared<PythonAwaitWrapper>(
-            c10::make_intrusive<c10::ivalue::Await>(PyObjectType::get()));
-      }))
+      //.def(py::init([]() {
+      //  return std::make_shared<PythonAwaitWrapper>(
+      //      c10::make_intrusive<c10::ivalue::Await>(PyObjectType::get()));
+      //}))
       .def(
           "wait",
           &PythonAwaitWrapper::wait,
@@ -1864,6 +1864,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "args",
           &PythonAwaitWrapper::args)
+      .def(
+          "type",
+          &PythonAwaitWrapper::type)
       .def(
           py::pickle(
               /* __getstate__ */
@@ -1920,33 +1923,13 @@ void initJITBindings(PyObject* module) {
       TORCH_CHECK(false, "Tracing for Await is not implemented yet");
     }
     return std::make_shared<PythonAwaitWrapper>(std::move(pyf), std::move(args_tup));
-    //// For non-tracing python keep overhead as small as possible, skipping type inference
-    //auto py_fg = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(py_f));
-    //// Copying args_tup into lambda
-    //std::function<IValue()> ival_func = [fg(std::move(py_fg)), args_tup]() {
-    //  pybind11::gil_scoped_acquire ag;
-    //  return toIValue(fg->func_(*args_tup), PyObjectType::get());
-    //};
-    //auto iv_aw = c10::make_intrusive<c10::ivalue::Await>(PyObjectType::get(), std::move(ival_func));
-    //auto py_aw = std::make_shared<PythonAwaitWrapper>(iv_aw);
-    //return py_aw;
   });
   m.def("awaitable_nowait", [](py::handle input) {
     if (jit::tracer::isTracing()) {
       // TODO: support tracing mode
-      //auto iv = toTypeInferredIValueOptional(input);
-      //c10::intrusive_ptr<c10::ivalue::Await> aw;
-      //if (iv) {
-      //  aw = c10::make_intrusive<c10::ivalue::Await>(iv->type());
-      //  aw->markCompleted(*iv);
-      //}
       TORCH_CHECK(false, "Tracing for Await is not implemented yet");
     }
-
-    auto type = PyObjectType::get();
-    auto aw = c10::make_intrusive<c10::ivalue::Await>(type);
-    aw->markCompleted(toIValue(input, type));
-    return std::make_shared<PythonAwaitWrapper>(aw);
+    return std::make_shared<PythonAwaitWrapper>(std::move(input));
   });
   m.def("awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {
     TORCH_CHECK(py_aw, "Await can't be None");

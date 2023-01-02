@@ -1041,14 +1041,8 @@ def is_future(ann) -> bool:
 
 
 def is_await(ann) -> bool:
-    #if ann is Await:
-    #    #if len(ann.__args__) == 0:
-    #    #    raise RuntimeError(
-    #    #        "Attempted to use Await without a "
-    #    #        "contained type. Please add a contained type, e.g. "
-    #    #        "Await[int]"
-    #    #    )
-    #    return True
+    if ann is Await:
+        return True
     return getattr(ann, "__origin__", None) is Await
 
 

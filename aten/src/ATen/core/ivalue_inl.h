@@ -1350,10 +1350,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
 struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
  private:
-  explicit Await(TypePtr type, std::function<IValue()> init_func)
-      : type_(std::move(type)), init_func_(init_func) {}
+  explicit Await(TypePtr elType, std::function<IValue()> init_func)
+      : elType_(std::move(elType)), type_(AwaitType::create(elType_)), init_func_(init_func) {}
 
-  explicit Await(TypePtr type) : type_(std::move(type)) {}
+  explicit Await(TypePtr elType) : elType_(std::move(elType)), type_(AwaitType::create(elType_)) {}
 
   friend c10::intrusive_ptr<Await>;
 
@@ -1395,6 +1395,10 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
       const Await& v);
 
   TypePtr elementType() const {
+    return elType_;
+  }
+
+  TypePtr type() {
     return type_;
   }
 
@@ -1407,6 +1411,7 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
   }
 
  private:
+  TypePtr elType_;
   TypePtr type_;
   std::vector<IValue> args_;
   std::function<IValue()> init_func_;
