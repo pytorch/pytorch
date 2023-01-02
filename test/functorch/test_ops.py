@@ -1238,6 +1238,7 @@ class TestOperators(TestCase):
         # All of the following are bugs and need to be fixed
         xfail('__getitem__', ''),
         xfail('index_put', ''),
+        xfail('index_fill', ''),  # AssertionError: Scalars are not close! https://github.com/pytorch/pytorch/pull/91534
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('masked_select'),

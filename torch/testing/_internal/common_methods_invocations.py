@@ -15005,6 +15005,11 @@ op_db: List[OpInfo] = [
                # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 1,
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad',
                             device_type='cpu', dtypes=[torch.float64]),
+               # torch.autograd.gradcheck.GradcheckError: While considering the imaginary part of complex outputs only,
+               # Jacobian mismatch for output 0 with respect to input 1
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_grad'),
+               # AssertionError: None mismatch: 1.0 is not None
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            sample_inputs_func=sample_inputs_index,
            reference_inputs_func=partial(sample_inputs_index, reference=True)),
@@ -15027,6 +15032,11 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           skips=(
+               # StopIteration
+               # https://github.com/pytorch/pytorch/pull/91534
+               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive',),
+           ),
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
@@ -15048,10 +15058,11 @@ op_db: List[OpInfo] = [
                             'TestNNCOpInfo',
                             'test_nnc_correctness',
                             dtypes=(torch.bool,)),
+               # https://github.com/pytorch/pytorch/pull/91534
+               # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure,
                             'TestJit',
-                            'test_variant_consistency_jit',
-                            dtypes=(torch.complex64,)),
+                            'test_variant_consistency_jit',),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_reduce',
@@ -20038,8 +20049,11 @@ python_ref_db = [
         # empty_strided
         supports_nvfuser=False,
         skips=(
+            # https://github.com/pytorch/pytorch/pull/91534
+            # introduced unexpected successes so comment out the xfail.
             # no _refs support for Tensor.__setitem__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
+            # DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        ),
     ),
     PythonRefInfo(
         "_refs.index_add",
