@@ -156,12 +156,12 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 #### Prerequisites
 If you are installing from source, you will need:
 - Python 3.7 or later (for Linux, Python 3.7.6+ or 3.8.1+ is needed)
-- A C++14 compatible compiler, such as clang
+- A C++17 compatible compiler, such as clang
 
 We highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
 If you want to compile with CUDA support, install the following (note that CUDA is not supported on macOS)
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 10.2 or above
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 11.0 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
@@ -219,7 +219,7 @@ git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
 git submodule sync
-git submodule update --init --recursive --jobs 0
+git submodule update --init --recursive
 ```
 
 #### Install PyTorch
@@ -234,7 +234,7 @@ python tools/amd_build/build_amd.py
 Install PyTorch
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-python setup.py install
+python setup.py develop
 ```
 
 Note that if you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
@@ -251,15 +251,12 @@ This is caused by `ld` from the Conda environment shadowing the system `ld`. You
 
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py develop
 ```
 
 **On Windows**
 
 Choose Correct Visual Studio Version.
-
-Sometimes there are regressions in new versions of Visual Studio, so
-it's best to use the same Visual Studio Version [16.8.5](https://github.com/pytorch/pytorch/blob/master/.circleci/scripts/vs_install.ps1) as Pytorch CI's.
 
 PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from
@@ -274,7 +271,7 @@ In this mode PyTorch computations will run on your CPU, not your GPU
 
 ```cmd
 conda activate
-python setup.py install
+python setup.py develop
 ```
 
 Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
@@ -315,7 +312,7 @@ for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 :: [Optional] If you want to override the CUDA host compiler
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
 
-python setup.py install
+python setup.py develop
 
 ```
 

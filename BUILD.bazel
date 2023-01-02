@@ -2,11 +2,11 @@ load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
-load("//third_party:substitution.bzl", "header_template_rule")
-load("//:tools/bazel.bzl", "rules")
-load("//tools/rules:cu.bzl", "cu_library")
-load("//tools/config:defs.bzl", "if_cuda")
-load("//:aten.bzl", "intern_build_aten_ops", "generate_aten")
+load("@pytorch//third_party:substitution.bzl", "header_template_rule")
+load("@pytorch//:tools/bazel.bzl", "rules")
+load("@pytorch//tools/rules:cu.bzl", "cu_library")
+load("@pytorch//tools/config:defs.bzl", "if_cuda")
+load("@pytorch//:aten.bzl", "intern_build_aten_ops", "generate_aten")
 load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON")
 load(":build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
 load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
@@ -1648,6 +1648,17 @@ cu_library(
     deps = [":torch_headers"],
 )
 
+torch_sources = ({
+    k: "" for k in (
+    libtorch_core_sources +
+    libtorch_distributed_sources +
+    torch_cpp_srcs +
+    libtorch_extra_sources +
+    jit_core_sources +
+    lazy_tensor_ts_sources +
+    GENERATED_AUTOGRAD_CPP)
+}).keys()
+
 cc_library(
     name = "torch",
     srcs = if_cuda(glob(
@@ -1657,11 +1668,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
-    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources + GENERATED_AUTOGRAD_CPP + [
-        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
-        "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
-        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
-    ],
+    )) + torch_sources,
     copts = TORCH_COPTS,
     defines = [
         "CAFFE2_NIGHTLY_VERSION=20200115",

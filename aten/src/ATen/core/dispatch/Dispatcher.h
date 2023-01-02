@@ -336,7 +336,7 @@ private:
  * to lookup a kernel for a certain set of arguments.
  */
 class TORCH_API OperatorHandle {
-  template <typename T> friend class std::hash;
+  template <typename T> friend struct std::hash;
 
 public:
   OperatorHandle(OperatorHandle&&) noexcept = default;
@@ -735,4 +735,4 @@ struct hash<c10::OperatorHandle> {
   }
 };
 
-} // hamespace std
+} // namespace std
