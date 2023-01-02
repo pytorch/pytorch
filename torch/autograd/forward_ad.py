@@ -11,6 +11,7 @@ __all__ = ["UnpackedDualTensor", "enter_dual_level", "exit_dual_level", "make_du
 # Global variable used to make the python API simpler to use
 _current_level = -1
 
+
 def enter_dual_level():
     r"""Function that can be used to enter a new forward grad level.
     This level can be used to make and unpack dual Tensors to compute
@@ -26,6 +27,7 @@ def enter_dual_level():
                            "is not valid. Make sure you did not modified it directly.")
     _current_level = new_level
     return new_level
+
 
 def exit_dual_level(*, level=None):
     r"""Function that can be used to exit a forward grad level.
@@ -44,6 +46,7 @@ def exit_dual_level(*, level=None):
     torch._C._exit_dual_level(level=level)
     _current_level = level - 1
 
+
 def make_dual(tensor, tangent, *, level=None):
     r"""Associates a tensor value with a forward gradient, the tangent, to create a
     "dual tensor", which is used to compute forward AD gradients.
@@ -60,9 +63,9 @@ def make_dual(tensor, tangent, *, level=None):
 
         >>> # xdoctest: +SKIP("Undefined variables")
         >>> with dual_level():
-        ...   inp = make_dual(x, v)
-        ...   out = f(inp)
-        ...   y, jvp = unpack_dual(out)
+        ...     inp = make_dual(x, v)
+        ...     out = f(inp)
+        ...     y, jvp = unpack_dual(out)
 
     Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
     for detailed steps on how to use this API.
@@ -104,10 +107,12 @@ def make_dual(tensor, tangent, *, level=None):
 
 _UnpackedDualTensor = namedtuple('_UnpackedDualTensor', ['primal', 'tangent'])
 
+
 class UnpackedDualTensor(_UnpackedDualTensor):
     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
     See :func:`unpack_dual` for more details."""
     pass
+
 
 def unpack_dual(tensor, *, level=None):
     r"""Unpacks a "dual tensor" to get both its Tensor value and its forward AD gradient.
@@ -121,10 +126,10 @@ def unpack_dual(tensor, *, level=None):
 
         >>> # xdoctest: +SKIP("Undefined variables")
         >>> with dual_level():
-        ...   inp = make_dual(x, x_t)
-        ...   out = f(inp)
-        ...   y, jvp = unpack_dual(out)
-        ...   jvp = unpack_dual(out).tangent
+        ...     inp = make_dual(x, x_t)
+        ...     out = f(inp)
+        ...     y, jvp = unpack_dual(out)
+        ...     jvp = unpack_dual(out).tangent
 
     Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
     for detailed steps on how to use this API.
@@ -138,6 +143,7 @@ def unpack_dual(tensor, *, level=None):
     primal, dual = torch._VF._unpack_dual(tensor, level=level)
 
     return UnpackedDualTensor(primal, dual)
+
 
 class dual_level(_DecoratorContextManager):
     r"""Context-manager that enables forward AD. All forward AD computation must
@@ -159,10 +165,10 @@ class dual_level(_DecoratorContextManager):
         >>> x = torch.tensor([1])
         >>> x_t = torch.tensor([1])
         >>> with dual_level():
-        ...   inp = make_dual(x, x_t)
-        ...   # Do computations with inp
-        ...   out = your_fn(inp)
-        ...   _, grad = unpack_dual(out)
+        ...     inp = make_dual(x, x_t)
+        ...     # Do computations with inp
+        ...     out = your_fn(inp)
+        ...     _, grad = unpack_dual(out)
         >>> grad is None
         False
         >>> # After exiting the level, the grad is deleted
@@ -181,3 +187,19 @@ class dual_level(_DecoratorContextManager):
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         exit_dual_level()
+
+# Private helper functions
+_is_fwd_grad_enabled = torch._C._is_fwd_grad_enabled
+
+# Private helper function to enable or disable fwd grad.
+# If you're a user and want to use this, please file an issue to discuss the use case.
+class _set_fwd_grad_enabled(_DecoratorContextManager):
+    def __init__(self, mode: bool) -> None:
+        self.prev = _is_fwd_grad_enabled()
+        torch._C._set_fwd_grad_enabled(mode)
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_fwd_grad_enabled(self.prev)

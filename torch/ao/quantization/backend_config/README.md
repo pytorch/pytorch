@@ -22,7 +22,19 @@ Instead of hardcoding the fusion mappings, float to reference quantized module m
 
 ## Pattern Specification
 
-The operator patterns used in BackendConfig are float modules, functional operators and pytorch operators specified in reverse order:
+The operator patterns used in BackendConfig are float modules, functional operators, pytorch operators, or a tuple combination of the above. For example:
+* torch.nn.Linear
+* torch.nn.functional.linear
+* torch.add
+* operator.add
+* (torch.nn.functional.linear, torch.nn.functional.relu)
+* (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU)
+
+Tuple patterns are treated as sequential patterns, and currently only tuples of 2 or 3 elements are supported.
+
+### Advanced Pattern Specification
+
+The above format should satisfy the vast majority of use cases. However, it does not handle more complex scenarios such as graph patterns. For these use cases, the BackendConfig API offers an alternative "reverse nested tuple" pattern format, enabled through `BackendPatternConfig()._set_pattern_complex_format(...)`. Note that this format is deprecated and will be replaced in a future version of PyTorch.
 ```
 operator = module_type | functional | torch op | native op | MatchAllNode
 Pattern = (operator, Pattern, Pattern, ...) | operator
@@ -49,15 +61,24 @@ The BackendConfig is comprised of a list of BackendPatternConfigs, each of which
 
 ```
 import torch
-from torch.ao.quantization.backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
-from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
+from torch.ao.quantization.backend_config import (
+    BackendConfig,
+    BackendPatternConfig,
+    DTypeConfig,
+    ObservationType,
+)
 
 weighted_int8_dtype_config = DTypeConfig(
     input_dtype=torch.quint8,
     output_dtype=torch.quint8,
     weight_dtype=torch.qint8,
-    bias_type=torch.float)
+    bias_dtype=torch.float)
 
+def fuse_conv2d_relu(is_qat, conv, relu):
+    """Return a fused ConvReLU2d from individual conv and relu modules."""
+    return torch.ao.nn.intrinsic.ConvReLU2d(conv, relu)
+
+# For quantizing Linear
 linear_config = BackendPatternConfig(torch.nn.Linear) \
     .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
     .add_dtype_config(weighted_int8_dtype_config) \
@@ -65,15 +86,25 @@ linear_config = BackendPatternConfig(torch.nn.Linear) \
     .set_qat_module(torch.ao.nn.qat.Linear) \
     .set_reference_quantized_module(torch.ao.nn.quantized.reference.Linear)
 
-conv_relu_config = BackendPatternConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
+# For fusing Conv2d + ReLU into ConvReLU2d
+conv_relu_config = BackendPatternConfig((torch.nn.Conv2d, torch.nn.ReLU)) \
     .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
     .add_dtype_config(weighted_int8_dtype_config) \
     .set_fused_module(torch.ao.nn.intrinsic.ConvReLU2d) \
-    .set_fuser_method(reverse_sequential_wrapper2(torch.ao.nn.intrinsic.ConvReLU2d))
+    .set_fuser_method(fuse_conv2d_relu)
+
+# For quantizing ConvReLU2d
+fused_conv_relu_config = BackendPatternConfig(torch.ao.nn.intrinsic.ConvReLU2d) \
+    .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
+    .add_dtype_config(weighted_int8_dtype_config) \
+    .set_root_module(torch.nn.Conv2d) \
+    .set_qat_module(torch.ao.nn.intrinsic.qat.ConvReLU2d) \
+    .set_reference_quantized_module(torch.ao.nn.quantized.reference.Conv2d)
 
 backend_config = BackendConfig("my_backend") \
     .set_backend_pattern_config(linear_config) \
-    .set_backend_pattern_config(conv_relu_config)
+    .set_backend_pattern_config(conv_relu_config) \
+    .set_backend_pattern_config(fused_conv_relu_config)
 ```
 
 ### Observer Insertion
@@ -99,7 +130,7 @@ Relevant APIs:
 * `_set_root_node_getter`
 * `_set_extra_inputs_getter`
 
-As an optimization, operator patterns such as (`torch.nn.ReLU`, `torch.nn.Linear`) may be fused into `nni.LinearReLU`. This is performed during the prepare phase according to the function specified in `set_fuser_method`, which replaces the pattern with the fused module. During the convert phase, these fused modules (identified by `set_fused_module`) will then be converted to the reference quantized versions of the modules.
+As an optimization, operator patterns such as (`torch.nn.Linear`, `torch.nn.ReLU`) may be fused into `nni.LinearReLU`. This is performed during the prepare phase according to the function specified in `set_fuser_method`, which replaces the pattern with the fused module. During the convert phase, these fused modules (identified by `set_fused_module`) will then be converted to the reference quantized versions of the modules.
 
 In FX graph mode quantization, we replace the corresponding nodes in the graph using two helper functions set by the user: `root_node_getter`, which returns the root node (typically the weighted module in the pattern like `torch.nn.Linear`) to replace the matched pattern in the graph, and `extra_inputs_getter`, which returns a list of extra input arguments that will be appended to the existing arguments of the fused module (copied over from the root node). See [this snippet](https://gist.github.com/jerryzh168/8bea7180a8ba3c279f2c9b050f2a69a6) for an example usage.
 
@@ -152,3 +183,7 @@ The user's QConfig may specify `quant_min` and `quant_max`, which are min and ma
 #### Scale range
 
 Similarly, the user's QConfig may specify a minimum value for the quantization scale (currently exposed as `eps` but will change in the future to better reflect the semantics). Here we set the lower bound for the `scale_min` to represent the limits of the backend. If a QConfig's min scale value falls below this limit, the QConfig will be treated as violating this constraint. Note that `scale_max_upper_bound` is currently not used, because there is no corresponding mechanism to enforce this on the observer yet.
+
+#### Fixed quantization parameters
+
+For ops with fixed quantization parameters such as `torch.nn.Sigmoid` or `torch.nn.Tanh`, the BackendConfig can specify the specific scale and zero point values as constraints on the input and output activations. The user's QConfigs for these ops must use `FixedQParamsObserver` or `FixedQParamsFakeQuantize` for their activations with matching scale and zero point values, otherwise these QConfigs will be ignored.

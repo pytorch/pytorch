@@ -6,15 +6,18 @@ import os
 import subprocess
 import tempfile
 
+from typing import Dict
+
 import numpy as np
 
 import torch
+from ..output_graph import CompilerFn
 
 from ..utils import identity
 from .subgraph import SubGraph
 
 log = logging.getLogger(__name__)
-BACKENDS = dict()
+BACKENDS: Dict[str, CompilerFn] = dict()
 _NP_DTYPE = {
     torch.float16: np.float16,
     torch.float32: np.float32,
@@ -53,9 +56,6 @@ def create_backend(fn):
             return fn(model, **kwargs)
         except KeyboardInterrupt:
             raise
-        except Exception:
-            log.exception(f"{fn.__name__} error")
-            return None
 
     BACKENDS[fn.__name__] = inner
     return inner
@@ -133,7 +133,7 @@ def static_runtime(subgraph):
 
 
 def onnxrt_common(subgraph, provider, onnx_filename=None):
-    import onnxruntime
+    import onnxruntime  # type: ignore[import]
 
     assert provider in onnxruntime.get_available_providers()
     session = onnxruntime.InferenceSession(
@@ -144,9 +144,9 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
     create_outputs = subgraph.empty_outputs_factory()
     is_cpu = subgraph.is_cpu
 
-    def _call(*args):
+    def _call(*initial_args):
         binding = session.io_binding()
-        args = [a.contiguous() for a in args]
+        args = [a.contiguous() for a in initial_args]
         for name, value in zip(input_names, args):
             dev = value.device
             binding.bind_input(
@@ -231,7 +231,7 @@ def onnxrt(subgraph):
 
 @functools.lru_cache(None)
 def _init_tensorflow():
-    import tensorflow as tf
+    import tensorflow as tf  # type: ignore[import]
 
     # prevent tensorflow from eating all the GPU memory
     gpus = tf.config.list_physical_devices("GPU")
@@ -242,8 +242,8 @@ def _init_tensorflow():
 
 @create_backend
 def onnx2tf(subgraph):
-    import onnx
-    from onnx_tf.backend import prepare
+    import onnx  # type: ignore[import]
+    from onnx_tf.backend import prepare  # type: ignore[import]
 
     tf = _init_tensorflow()
     filename = subgraph.filename("tensorflow")
@@ -256,8 +256,8 @@ def onnx2tf(subgraph):
         tf_module = tf.saved_model.load(filename)
         tf_module = tf.function(tf_module, jit_compile=True)
 
-    def run(*args):
-        args = [a.contiguous() for a in args]
+    def run(*i_args):
+        args = [a.contiguous() for a in i_args]
         with tf.device(device):
             outs = tf_module(
                 **{
@@ -295,7 +295,7 @@ def taso(subgraph):
 
 @create_backend
 def ipex(subgraph, **kwargs):
-    import intel_extension_for_pytorch as ipex
+    import intel_extension_for_pytorch as ipex  # type: ignore[import]
 
     inputs = subgraph.example_inputs
     model = subgraph.model
@@ -324,12 +324,20 @@ def fx2trt(subgraph, **kwargs):
         # TensorRT fails violently with an abort() on this
         return None
 
-    from torch_tensorrt.fx.fx2trt import InputTensorSpec, TRTInterpreter
-    from torch_tensorrt.fx.passes.lower_basic_pass import transform_setitem
-    from torch_tensorrt.fx.tools.trt_splitter import TRTSplitter, TRTSplitterSetting
-    from torch_tensorrt.fx.tracer.acc_tracer import acc_tracer
-    from torch_tensorrt.fx.trt_module import TRTModule
-    from torch_tensorrt.fx.utils import LowerPrecision
+    from torch_tensorrt.fx.fx2trt import (  # type: ignore[import]
+        InputTensorSpec,
+        TRTInterpreter,
+    )
+    from torch_tensorrt.fx.passes.lower_basic_pass import (  # type: ignore[import]
+        transform_setitem,
+    )
+    from torch_tensorrt.fx.tools.trt_splitter import (  # type: ignore[import]
+        TRTSplitter,
+        TRTSplitterSetting,
+    )
+    from torch_tensorrt.fx.tracer.acc_tracer import acc_tracer  # type: ignore[import]
+    from torch_tensorrt.fx.trt_module import TRTModule  # type: ignore[import]
+    from torch_tensorrt.fx.utils import LowerPrecision  # type: ignore[import]
 
     from .normalize import normalize_ir
 
@@ -417,7 +425,7 @@ def torch2trt(subgraph):
         # TensorRT fails violently with an abort() on this
         return None
 
-    from torch2trt import torch2trt
+    from torch2trt import torch2trt  # type: ignore[import]
 
     inputs = subgraph.example_inputs
     trt_mod = torch2trt(
@@ -439,45 +447,6 @@ def tensorrt(subgraph):
     if model is None:
         model = torch2trt(subgraph)
     return model
-
-
-@create_backend
-def onnx2tensorrt_alt(subgraph):
-    if subgraph.will_tensorrt_barf():
-        # TensorRT fails violently with an abort() on this
-        return None
-
-    import tensorrt as trt
-
-    from torch.fx.experimental.fx2trt.trt_module import TRTModule
-
-    inputs = subgraph.example_inputs
-
-    logger = trt.Logger(trt.Logger.ERROR)
-    builder = trt.Builder(logger)
-    config = builder.create_builder_config()
-    assert isinstance(inputs, (list, tuple))
-    inputs = tuple(inputs)
-    input_names = subgraph.input_names
-    output_names = subgraph.output_names
-    network = builder.create_network(
-        1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-    )
-    parser = trt.OnnxParser(network, logger)
-    success = parser.parse(open(subgraph.onnx_filename, "rb").read())
-    for idx in range(parser.num_errors):
-        print(parser.get_error(idx))
-    assert success
-
-    config.max_workspace_size = 1 << 25
-    config.set_flag(trt.BuilderFlag.STRICT_TYPES)
-    builder.max_batch_size = len(inputs[0])
-
-    engine = builder.build_engine(network, config)
-    assert engine
-
-    trt_mod = TRTModule(engine, input_names, output_names)
-    return subgraph.wrap_returns(trt_mod)
 
 
 @create_backend
@@ -548,22 +517,6 @@ def cudagraphs_inner(model, inputs, copy_outputs=True):
     return run
 
 
-@create_backend
-def aot_autograd(subgraph, **kwargs):
-    def _wrapped_bw_compiler(*args, **kwargs):
-        # stop TorchDynamo from trying to compile our generated backwards pass
-        return disable(disable(bw_compiler)(*args, **kwargs))
-
-    bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
-    kwargs["bw_compiler"] = _wrapped_bw_compiler
-
-    from functorch.compile import aot_module_simplified
-
-    from .. import disable
-
-    return aot_module_simplified(subgraph.model, **kwargs)
-
-
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
     if jit_mod is None:
         return None
@@ -631,9 +584,9 @@ def tvm_compile_inner(
     jit_mod, example_inputs, tuning_option=None, log_file=None, trials=20000, cuda=False
 ):
     try:
-        import tvm
-        from tvm import relay
-        from tvm.contrib import graph_executor
+        import tvm  # type: ignore[import]
+        from tvm import relay  # type: ignore[import]
+        from tvm.contrib import graph_executor  # type: ignore[import]
 
         shape_list = [(f"inp_{idx}", i.shape) for idx, i in enumerate(example_inputs)]
         mod, params = relay.frontend.from_pytorch(jit_mod, shape_list)
@@ -689,6 +642,12 @@ def tvm_compile_inner(
                         log_file
                     ), "TVM's meta_schedule requires a directory for storing log files."
                     work_dir = log_file
+                if not cuda:
+                    # meta_schedule needs num-cores to be specified
+                    # here we use the maximum core count
+                    target = tvm.target.Target(
+                        f"{llvm_target()} --num-cores {ms.utils.cpu_count(logical=False)}"
+                    )
                 # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
                 # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
                 database = ms.relay_integration.tune_relay(
@@ -727,15 +686,23 @@ def tvm_compile_inner(
                 return torch.from_numpy(nd_tensor.numpy())
             return torch.utils.dlpack.from_dlpack(nd_tensor.to_dlpack())
 
-        def exec_tvm(*args):
-            args = [a.contiguous() for a in args]
+        def to_tvm_tensor(torch_tensor):
+            """A helper function to transfer a torch.tensor to NDArray."""
+            if torch_tensor.dtype == torch.bool:
+                # same reason as above, fallback to numpy conversion which
+                # could introduce data copy overhead
+                return tvm.nd.array(torch_tensor.cpu().numpy())
+            return tvm.nd.from_dlpack(torch_tensor)
+
+        def exec_tvm(*i_args):
+            args = [a.contiguous() for a in i_args]
             for idx, arg in enumerate(args, 0):
                 if arg.dim() != 0:
                     if arg.requires_grad:
                         arg = arg.detach()
                     m.set_input(
                         f"inp_{idx}",
-                        tvm.nd.array(arg.numpy(), dev),
+                        to_tvm_tensor(arg),
                     )
             m.run()
             return [
@@ -785,42 +752,27 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
     return ltc_model
 
 
-@functools.lru_cache(None)
-def _init_torchxla():
-    global xm
-    try:
-        import torch_xla.core.xla_model as xm
-    except ModuleNotFoundError as e:
-        print(f"torchxla backend fails. Can not import {e.name}")
-        raise
-
-
 @create_backend
 def torchxla_trivial(subgraph):
-    _init_torchxla()
-
-    xla_dev = xm.xla_device()
-
-    xla_model = copy.deepcopy(subgraph.model).to(device=xla_dev)
-
-    def xla_model_wrapper(*inputs):
-        orig_device = inputs[0].device if len(inputs) > 0 else "cpu"
-        xla_inputs = tuple(inp.to(device=xla_dev) for inp in inputs)
-
-        xla_out = xla_model(*xla_inputs)
-        result = tuple(out.to(device=orig_device) for out in xla_out)
-        return result
-
-    return xla_model_wrapper
+    return subgraph.model
 
 
 @create_backend
 def torchxla_trace_once(subgraph):
     import torch._dynamo.optimizations.torchxla_integration as integration
 
+    compiled_graph = None
     model = subgraph.model
-    example_inputs = subgraph.example_inputs
-    return integration.extract_compiled_graph(model, example_inputs)
+
+    def fwd(*args):
+        nonlocal subgraph
+        nonlocal compiled_graph
+        if compiled_graph is None:
+            compiled_graph = integration.extract_compiled_graph(model, args)
+            del subgraph
+        return compiled_graph(*args)
+
+    return fwd
 
 
 def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):

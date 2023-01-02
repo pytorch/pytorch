@@ -68,7 +68,7 @@ struct ComplexHolder : c10::intrusive_ptr_target {
     ComplexHolder(c10::complex<T> c) {
       val = convert<decltype(val), c10::complex<T>>(c);
     }
-    ComplexHolder() {}
+    ComplexHolder() = default;
     c10::complex<double> val;
 };
 } // namespace ivalue
@@ -82,7 +82,7 @@ template <typename T>
 struct OptionalArray {
   c10::optional<std::vector<T>> list;
 
-  OptionalArray(){}
+  OptionalArray()= default;
   OptionalArray(std::vector<T> val) : list(std::move(val)) {}
 
   // Used when saving an argument for the backwards pass.
@@ -574,7 +574,8 @@ public:
     return Tag::SymInt == tag;
   }
 
-  c10::SymInt toSymInt() const;
+  c10::SymInt toSymInt() &&;
+  c10::SymInt toSymInt() const&;
 
   IValue(c10::SymFloat i) {
     if (i.is_symbolic()) {
@@ -590,7 +591,8 @@ public:
     return Tag::SymFloat == tag;
   }
 
-  c10::SymFloat toSymFloat() const;
+  c10::SymFloat toSymFloat() &&;
+  c10::SymFloat toSymFloat() const&;
 
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}

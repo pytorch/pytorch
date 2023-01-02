@@ -1,10 +1,12 @@
 import collections
 import contextlib
+import ctypes
 import warnings
 from typing import Any, Dict, Union, Tuple
 
 import torch
 from . import is_initialized, _get_device_index, _lazy_init
+from ._utils import _dummy_type
 
 from ._memory_viz import segments as _segments, memory as _memory
 
@@ -16,7 +18,13 @@ __all__ = ["caching_allocator_alloc", "caching_allocator_delete", "set_per_proce
            "reset_peak_memory_stats", "reset_max_memory_allocated", "reset_max_memory_cached",
            "memory_allocated", "max_memory_allocated", "memory_reserved", "max_memory_reserved",
            "memory_cached", "max_memory_cached", "memory_snapshot", "memory_summary", "list_gpu_processes",
-           "mem_get_info", "get_allocator_backend"]
+           "mem_get_info", "get_allocator_backend", "CUDAPluggableAllocator", "change_current_allocator"]
+
+
+if not hasattr(torch._C, '_cuda_CUDAAllocator'):
+    # Define dummy base classes
+    torch._C.__dict__['_cuda_CUDAAllocator'] = _dummy_type('_cuda_CUDAAllocator')
+
 
 def _host_allocator():
     _lazy_init()
@@ -61,7 +69,7 @@ def caching_allocator_alloc(size, device: Union[Device, int] = None, stream=None
     if not isinstance(stream, int):
         raise TypeError('Invalid type for stream argument, must be '
                         '`torch.cuda.Stream` or `int` representing a pointer '
-                        'to a exisiting stream')
+                        'to a existing stream')
     with torch.cuda.device(device):
         return torch._C._cuda_cudaCachingAllocator_raw_alloc(size, stream)
 
@@ -651,3 +659,66 @@ def get_allocator_backend() -> str:
         See :ref:`cuda-memory-management` for details on choosing the allocator backend.
     """
     return torch._C._cuda_getAllocatorBackend()
+
+class _CUDAAllocator:
+    r"""Wrapper over internal CUDA memory allocators.
+    """
+    def __init__(self, allocator: torch._C._cuda_CUDAAllocator):
+        self._allocator = allocator
+
+    def allocator(self):
+        return self._allocator
+
+
+class CUDAPluggableAllocator(_CUDAAllocator):
+    r"""CUDA memory allocator loaded from a so file.
+
+    Memory allocators are compiled in .so files and loaded dynamically using ctypes.
+    To change the active allocator use the :func:`torch.memory.cuda.change_current_allocator`
+    function.
+
+    Args:
+        path_to_so_file(str): Path in the filesystem to the `.so` file containing
+            the allocator functions
+        alloc_fn_name(str): Name of the function to perform the memory allocation
+            in the so file. The signature must be:
+            void* alloc_fn_name(ssize_t size, int device, cudaStream_t stream);
+        free_fn_name(str): Name of the function to perform the memory release
+            in the so file. The signature must be:
+            void free_fn_name(void* ptr, size_t size, cudaStream_t stream);
+
+    .. warning::
+        This is currently supported only in unix OSs
+
+    .. note::
+        See :ref:`cuda-memory-management` for details on creating and using a custom allocator
+    """
+    def __init__(self, path_to_so_file: str, alloc_fn_name: str, free_fn_name: str):
+        allocator = ctypes.CDLL(path_to_so_file)
+        alloc_fn = ctypes.cast(getattr(allocator, alloc_fn_name), ctypes.c_void_p).value
+        free_fn = ctypes.cast(getattr(allocator, free_fn_name), ctypes.c_void_p).value
+        assert alloc_fn is not None
+        assert free_fn is not None
+        self._allocator = torch._C._cuda_customAllocator(alloc_fn, free_fn)
+
+
+def change_current_allocator(allocator: _CUDAAllocator) -> None:
+    r"""Changes the currently used memory allocator to be the one provided.
+    If the current allocator has already been used/initialized, this function will error.
+
+
+    Args:
+        allocator (torch.cuda.memory._CUDAAllocator): allocator to be set as the active one.
+    .. note::
+        See :ref:`cuda-memory-management` for details on creating and using a custom allocator
+    """
+    torch._C._cuda_changeCurrentAllocator(allocator.allocator())
+
+
+def _get_current_allocator() -> _CUDAAllocator:
+    r"""Returns the allocator being currently used.
+
+    .. note::
+        See :ref:`cuda-memory-management` for details on creating and using a custom allocator
+    """
+    return _CUDAAllocator(torch._C._cuda_getAllocator())

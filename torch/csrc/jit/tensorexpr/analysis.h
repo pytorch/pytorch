@@ -160,7 +160,7 @@ class StmtsReadingBuf : public IRVisitor {
  private:
   bool readsBuffer(StmtPtr s) {
     auto loads = NodeFinder<Load>::find(s);
-    for (auto l : loads) {
+    for (const auto& l : loads) {
       if (l->buf() == target_) {
         return true;
       }
@@ -302,22 +302,22 @@ class BufLiveRange : public IRVisitor {
 
   bool hasBufReads(StmtPtr s) {
     auto loads1 = NodeFinder<Load>::find(s);
-    for (auto l : loads1) {
+    for (const auto& l : loads1) {
       if (l->buf() == buf_) {
         return true;
       }
     }
     auto loads2 = NodeFinder<ExternalCall>::find(s);
-    for (auto l : loads2) {
-      for (auto lb : l->buf_args()) {
+    for (const auto& l : loads2) {
+      for (const auto& lb : l->buf_args()) {
         if (lb == buf_) {
           return true;
         }
       }
     }
     auto loads3 = NodeFinder<ExternalCallWithAlloc>::find(s);
-    for (auto l : loads3) {
-      for (auto lb : l->buf_args()) {
+    for (const auto& l : loads3) {
+      for (const auto& lb : l->buf_args()) {
         if (lb == buf_) {
           return true;
         }
@@ -328,20 +328,20 @@ class BufLiveRange : public IRVisitor {
 
   bool hasBufWrites(StmtPtr s) {
     auto writes1 = NodeFinder<Store>::find(s);
-    for (auto w : writes1) {
+    for (const auto& w : writes1) {
       if (w->buf() == buf_) {
         return true;
       }
     }
     auto writes2 = NodeFinder<ExternalCall>::find(s);
-    for (auto w : writes2) {
+    for (const auto& w : writes2) {
       if (w->buf() == buf_) {
         return true;
       }
     }
     auto writes3 = NodeFinder<ExternalCallWithAlloc>::find(s);
-    for (auto w : writes3) {
-      for (auto wb : w->buf_out_args()) {
+    for (const auto& w : writes3) {
+      for (const auto& wb : w->buf_out_args()) {
         if (wb == buf_) {
           return true;
         }
@@ -360,8 +360,8 @@ class BufLiveRange : public IRVisitor {
     }
   }
 
-  void visit(BlockPtr v) {
-    for (StmtPtr s : *v) {
+  void visit(BlockPtr v) override {
+    for (const StmtPtr& s : *v) {
       curr_index_ += 1;
       findAccAndUpdateLiveRange(s);
     }

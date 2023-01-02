@@ -209,8 +209,8 @@ Tensor _nnpack_spatial_convolution(
       .height = (size_t)output.size(2),
   };
   const nnp_size output_subsample = {
-      .width = stride[1],
-      .height = stride[0],
+      .width = static_cast<std::size_t>(stride[1]),
+      .height = static_cast<std::size_t>(stride[0]),
   };
 
   const auto input_ = input.contiguous();

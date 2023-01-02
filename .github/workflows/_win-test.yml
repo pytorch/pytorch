@@ -74,18 +74,39 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
+      - name: Setup conda
+        shell: bash
+        run: |
+          # Windows conda is baked into the AMI at this location
+          CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
+
+          {
+            echo "CONDA_RUN=${CONDA} run --no-capture-output";
+            echo "CONDA_BUILD=${CONDA} run conda-build";
+            echo "CONDA_INSTALL=${CONDA} install";
+          } >> "${GITHUB_ENV}"
+
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            To forward remote desktop on your local machine ssh as follows:
+              ssh -L 3389:localhost:3389 %%username%%@%%hostname%%
+            And then change password using `passwd` command.
+
+            To start tests locally, change working folder to \actions-runner\_work\pytorch\pytorch\test,
+            Activate miniconda and Visual Studio environment and set PYTHON_PATH, by running:
+              call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+              set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
 
       - name: Start monitoring script
         id: monitor-script
         shell: bash
         run: |
-          python3 -m pip install psutil==5.9.1
-          python3 -m pip install pynvml==11.4.1
-          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          # Windows conda doesn't have python3 binary, only python, but it's python3
+          ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download PyTorch Build Artifacts
@@ -124,7 +145,8 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           PR_BODY: ${{ github.event.pull_request.body }}
           TORCH_CUDA_ARCH_LIST: "7.0"
-          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0'}}
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
+          PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
@@ -188,9 +210,8 @@ jobs:
         shell: bash
         run: |
           set -x
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          # Windows conda doesn't have python3 binary, only python, but it's python3
+          ${CONDA_RUN} python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win

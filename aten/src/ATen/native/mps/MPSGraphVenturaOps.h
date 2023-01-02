@@ -6,4 +6,15 @@
 - (MPSGraphTensor *)cumulativeSumWithTensor:(MPSGraphTensor *)tensor
                                        axis:(NSInteger)axis
                                        name:(NSString *)name;
+
+- (MPSGraphTensor *)sortWithTensor:(MPSGraphTensor *)tensor
+                                       axis:(NSInteger)axis
+                                       name:(NSString *)name;
+
+- (MPSGraphTensor *)argSortWithTensor:(MPSGraphTensor *)tensor
+                                       axis:(NSInteger)axis
+                                       name:(NSString *)name;
+
+- (MPSGraphTensor *)inverseOfTensor: (MPSGraphTensor *)tensor
+                                       name:(NSString *)name;
 @end

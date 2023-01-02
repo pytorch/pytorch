@@ -169,11 +169,33 @@ If full precision reductions are needed, users can disable reduced precision red
 
   torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
-To toggle the reduced precision reduction flags in C++, you can do
+To toggle the reduced precision reduction flags in C++, one can do
 
 .. code:: C++
 
   at::globalContext().setAllowFP16ReductionCuBLAS(false);
+
+.. _bf16reducedprecision:
+
+Reduced Precision Reduction in BF16 GEMMs
+-----------------------------------------
+
+A similar flag (as above) exists for BFloat16 GEMMs. Note that this switch is
+set to `False` by default for BF16 as we have observed numerical instability in
+PyTorch CI tests (e.g., test/test_matmul_cuda.py).
+
+If reduced precision reductions are not desired, users can disable reduced
+precision reductions in bf16 GEMMs with:
+
+.. code:: python
+
+  torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+
+To toggle the reduced precision reduction flags in C++, one can do
+
+.. code:: C++
+
+  at::globalContext().setAllowBF16ReductionCuBLAS(true);
 
 Asynchronous execution
 ----------------------
@@ -429,6 +451,66 @@ Available options:
 
 .. _CUDA's built-in asynchronous allocator:
     https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/
+
+.. _cuda-memory-custom-allocator:
+
+Using custom memory allocators for CUDA
+---------------------------------------
+
+It is possible to define allocators as simple functions in C/C++ and compile
+them as a shared library, the code below shows a basic allocator that just
+traces all the memory operations.
+
+.. code:: C++
+
+   #include <sys/types.h>
+   #include <cuda_runtime_api.h>
+   #include <iostream>
+   // Compile with g++ alloc.cc -o alloc.so -I/usr/local/cuda/include -shared -fPIC
+   extern "C" {
+   void* my_malloc(ssize_t size, int device, cudaStream_t stream) {
+      void *ptr;
+      cudaMalloc(&ptr, size);
+      std::cout<<"alloc "<<ptr<<size<<std::endl;
+      return ptr;
+   }
+
+   void my_free(void* ptr, ssize_t size, cudaStream_t stream) {
+      std::cout<<"free "<<ptr<< " "<<stream<<std::endl;
+      cudaFree(ptr);
+   }
+   }
+
+
+This can be used in python through the :class:`torch.cuda.memory.CUDAPluggableAllocator`.
+The user is responsible for supplying the path to the `.so` file and the name
+of the alloc/free functions that match the signatures specified above.
+
+.. code:: python
+
+   import torch
+
+   # Load the allocator
+   new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+       'alloc.so', 'my_malloc', 'my_free')
+   # Swap the current allocator
+   torch.cuda.memory.change_current_allocator(new_alloc)
+   # This will allocate memory in the device using the new allocator
+   b = torch.zeros(10, device='cuda')
+
+
+.. code:: python
+
+   import torch
+
+   # Do an initial memory allocator
+   b = torch.zeros(10, device='cuda')
+   # Load the allocator
+   new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+       'alloc.so', 'my_malloc', 'my_free')
+   # This will error since the current allocator was already instantiated
+   torch.cuda.memory.change_current_allocator(new_alloc)
+
 
 .. _cufft-plan-cache:
 
