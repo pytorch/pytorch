@@ -10,7 +10,7 @@ import torch
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
-from torch import Tensor
+from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import (
@@ -19,7 +19,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import guard_int, sym_float, sym_int
+from torch.fx.experimental.symbolic_shapes import guard_int
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -277,27 +277,20 @@ def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tens
     return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_output)
 
 
-@register_decomposition(aten.prelu_backward)
-@pw_cast_for_opmath
-def prelu_backward(
-    grad_output: Tensor, self: Tensor, weight: Tensor
+@register_decomposition(aten._prelu_kernel)
+def _prelu_kernel(self: Tensor, weight: Tensor) -> Tensor:
+    return torch.where(self > 0, self, weight * self)
+
+
+@register_decomposition(aten._prelu_kernel_backward)
+def _prelu_kernel_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    weight: Tensor,
 ) -> Tuple[Tensor, Tensor]:
-    # Logic is more complicated than I would like.  Basically, weight can either
-    # be a scalar or a vector of size [C], and in the forward pass it's
-    # broadcast against [N, C, ...]. So now, we need to do the corresponding
-    # reduction, which is harder than we'd like...
-    cur_weight = weight
-    for _ in range(2, grad_output.dim()):
-        cur_weight = cur_weight.unsqueeze(-1)
-    input_grad = torch.where(self > 0, grad_output, cur_weight * grad_output)
-    weight_grad_collector = torch.where(self > 0, 0.0, self * grad_output)
-    if len(self.shape) == 0:
-        out = weight_grad_collector.view(cur_weight.shape)
-    else:
-        out = weight_grad_collector.sum_to_size(cur_weight.shape)
-    while out.dim() > weight.dim():
-        out = out.squeeze(-1)
-    return (input_grad.view_as(self), out)
+    input_grad = torch.where(self > 0, grad_output, weight * grad_output)
+    weight_grad = torch.where(self > 0, 0.0, self * grad_output)
+    return (input_grad, weight_grad)
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)
@@ -2002,6 +1995,125 @@ def get_scale_value(scales, idx):
     if scales is None:
         return None
     return scales[idx]
+
+
+@register_decomposition(aten.upsample_nearest1d.vec)
+@aten.upsample_nearest1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.upsample_nearest1d.vec.py_impl(DispatchKey.Autograd)
+def upsample_nearest1d_vec(input, output_size, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale = get_scale_value(scale_factors, 0)
+
+    # NB: osize could be a list of float when scale_factors is float
+    # so we cannot redispatch to aten.upsample_nearest1d.default here
+    return upsample_nearest1d(input, osize, scale)
+
+
+@register_decomposition(aten.upsample_nearest2d.vec)
+@aten.upsample_nearest2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.upsample_nearest2d.vec.py_impl(DispatchKey.Autograd)
+def upsample_nearest2d_vec(input, output_size, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+
+    # NB: osize could be a list of float when scale_factors is float
+    # so we cannot redispatch to aten.upsample_nearest2d.default here
+    return upsample_nearest2d(input, osize, scale_h, scale_w)
+
+
+@register_decomposition(aten.upsample_nearest3d.vec)
+@aten.upsample_nearest3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.upsample_nearest3d.vec.py_impl(DispatchKey.Autograd)
+def upsample_nearest3d_vec(input, output_size, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_d = get_scale_value(scale_factors, 0)
+    scale_h = get_scale_value(scale_factors, 1)
+    scale_w = get_scale_value(scale_factors, 2)
+
+    # NB: osize could be a list of float when scale_factors is float
+    # so we cannot redispatch to aten.upsample_nearest3d.default here
+    return upsample_nearest3d(input, osize, scale_d, scale_h, scale_w)
+
+
+def _compute_upsample_nearest_indices(input, output_size):
+    # For each dim in output_size, compute the set of input indices used
+    # to produce the upsampled output.
+    indices = []
+    num_spatial_dims = len(output_size)
+    for d in range(num_spatial_dims):
+        # Math matches aten/src/ATen/native/cpu/UpSampleKernel.cpp
+        # Indices are computed as following:
+        # scale = isize / osize
+        # input_index = floor(output_index * scale)
+        # Same as OpenCV INTER_NEAREST
+        osize = sym_float(output_size[d])
+        output_indices = torch.arange(
+            sym_int(osize), dtype=input.dtype, device=input.device
+        )
+        isize = sym_float(input.shape[-num_spatial_dims + d])
+        scale = isize / osize
+        input_indices = torch.floor(output_indices * scale).to(torch.int64)
+        for _ in range(num_spatial_dims - 1 - d):
+            input_indices = input_indices.unsqueeze(-1)
+        indices.append(input_indices)
+    return tuple(indices)
+
+
+@register_decomposition(aten.upsample_nearest1d.default)
+@aten.upsample_nearest1d.default.py_impl(DispatchKey.Autograd)
+@pw_cast_for_opmath
+def upsample_nearest1d(
+    input: Tensor,
+    output_size: List[Union[int, float]],
+    scales: Optional[float] = None,
+) -> Tensor:
+    (l_indices,) = _compute_upsample_nearest_indices(input, output_size)
+    result = input[:, :, l_indices]
+    return result
+
+
+@register_decomposition(aten.upsample_nearest2d.default)
+@aten.upsample_nearest2d.default.py_impl(DispatchKey.Autograd)
+@pw_cast_for_opmath
+def upsample_nearest2d(
+    input: Tensor,
+    output_size: List[Union[int, float]],
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    h_indices, w_indices = _compute_upsample_nearest_indices(input, output_size)
+    result = input[:, :, h_indices, w_indices]
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(input)
+
+    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
+    _, n_channels, _, _ = input.shape
+    if input.device.type == "cuda" and n_channels < 4:
+        memory_format = torch.contiguous_format
+
+    result = result.contiguous(memory_format=memory_format)
+
+    return result
+
+
+@register_decomposition(aten.upsample_nearest3d.default)
+@aten.upsample_nearest3d.default.py_impl(DispatchKey.Autograd)
+@pw_cast_for_opmath
+def upsample_nearest3d(
+    input: Tensor,
+    output_size: List[Union[int, float]],
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
+        input, output_size
+    )
+    result = input[:, :, d_indices, h_indices, w_indices]
+
+    return result
 
 
 @register_decomposition(aten.upsample_bilinear2d.vec)
