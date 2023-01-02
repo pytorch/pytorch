@@ -981,7 +981,6 @@ def main():
         'typing_extensions',
         'sympy',
         'networkx',
-        'packaging'
     ]
 
     extras_require = {
