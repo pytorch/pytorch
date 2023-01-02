@@ -41,6 +41,7 @@ def contract(state_cls: Type[_State] = _State):
     ``func.state(module)``.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> import torch.nn as nn
         >>>
         >>> class MyModel(nn.Module):
@@ -146,12 +147,8 @@ def contract(state_cls: Type[_State] = _State):
                     )
 
             check_fqn(list(orig_named_params.keys()), list(new_named_params.keys()))
-            check_fqn(
-                list(orig_named_buffers.keys()), list(new_named_buffers.keys())
-            )
-            check_fqn(
-                list(orig_named_modules.keys()), list(new_named_modules.keys())
-            )
+            check_fqn(list(orig_named_buffers.keys()), list(new_named_buffers.keys()))
+            check_fqn(list(orig_named_modules.keys()), list(new_named_modules.keys()))
 
             # TODO: a stricter verification should also reject changing module
             # types and monkey-patching forward() method implementations.

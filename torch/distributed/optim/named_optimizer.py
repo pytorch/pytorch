@@ -33,6 +33,8 @@ class _NamedOptimizer(optim.Optimizer):
             `param_groups` to pass to optimizer if specified.
             The key of the inner map needs to be FQNs.
             Default: None
+        module (nn.Module): the module whose parameters to updated
+            by the optimizer.
         args: arguments to pass to the optimizer constructor.
         kwargs: arguments to pass to the optimizer constructor.
 
@@ -273,12 +275,12 @@ class _NamedOptimizer(optim.Optimizer):
             "add_param_group not supported yet and might be implemented soon."
         )
 
-    def _pre_load_state_dict(self, state_dict) -> None:
+    def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
             return FSDP._load_optim_state_dict_pre_hook(self.module, self._optimizer, state_dict)
         return state_dict
-    
-    def _post_state_dict(self, state_dict) -> None:
+
+    def _post_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
             FSDP._optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
         return state_dict

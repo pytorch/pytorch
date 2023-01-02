@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from . import _ddp
-from .contract import contract, _get_registry
+from .contract import _get_registry, contract
 
 
 @contract()
@@ -18,6 +18,7 @@ def replicate(
         module (torch.nn.Module): module to replicate
 
     Example::
+        >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
         >>> module = nn.Linear(3, 3)
         >>> replicate(module)
     """
@@ -40,7 +41,9 @@ class _ReplicateState:
     def mark_modules(self, *modules: nn.Module, **kwargs) -> None:
         for module in modules:
             if not _can_compose(module):
-                raise AssertionError("Cannot apply `replicate()` on a Module already managed by `fully_shard`")
+                raise AssertionError(
+                    "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
+                )
             self.modules.append(module)
             replicate.state(module)._distributed_state = self
             replicate.state(module)._params_collected = False
@@ -61,9 +64,7 @@ class _ReplicateState:
             replicate.state(module)._params_collected = True
 
         self._param_list.extend(
-            param
-            for param in module.parameters(recurse=False)
-            if param.requires_grad
+            param for param in module.parameters(recurse=False) if param.requires_grad
         )
         for child in module.children():
             self._recursive_collect_params(child)
@@ -76,13 +77,9 @@ class _ReplicateState:
         for module in self.modules:
             self._recursive_collect_params(module)
 
-        self._ddp = _ddp.DistributedDataParallel(
-            self._param_list, **self.kwargs
-        )
+        self._ddp = _ddp.DistributedDataParallel(self._param_list, **self.kwargs)
 
-    def forward_pre_hook(
-        self, module: nn.Module, input: Tuple[torch.Tensor]
-    ) -> None:
+    def forward_pre_hook(self, module: nn.Module, input: Tuple[torch.Tensor]) -> None:
         self.init_helper()
         self._ddp.pre_forward()
 
