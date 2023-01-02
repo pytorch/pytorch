@@ -52,7 +52,7 @@ Tensor& bincount_mps_impl(const Tensor& self,
           if (self.scalar_type() == kByte) {
             castedInputTensor = [mpsGraph castTensor:inputTensor
                                               toType:MPSDataTypeInt32
-                                                name:nil];
+                                                name:@"castInputTensor"];
           }
 
           MPSGraphTensor *outputTensor = [mpsGraph scatterWithDataTensor:scatterDataTensor
