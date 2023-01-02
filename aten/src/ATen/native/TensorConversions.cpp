@@ -1800,8 +1800,8 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
       values = self.values().flatten(0, 2);
 
-      // Not spanning across several rows produces coalesced results.
-      coalesced |= (blocksize[0] == 1);
+      // BSRs not spanning across several rows produces coalesced results.
+      coalesced |= (layout == kSparseBsr && blocksize[0] == 1);
     });
   return at::native::_sparse_coo_tensor_unsafe(indices, values, self.sizes())._coalesced_(coalesced);
 }
