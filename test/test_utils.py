@@ -24,6 +24,7 @@ import torch.cuda
 from torch.utils._pytree import tree_any, tree_all_only
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch import set_default_device
+from torch.utils._device import set_device
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
@@ -812,14 +813,13 @@ class TestDeviceUtils(TestCase):
         self.assertEqual(dev, torch.device('meta'))
 
     def test_decorator(self):
-        @torch.device('meta')
+        @set_device('meta')
         def f():
             return torch.empty(3, 3)
         self.assertEqual(f().device.type, 'meta')
 
-    # For more serious tests for this, check test_autograd.py test_set_grad_coroutines
     def test_decorator_generator(self):
-        @torch.device('meta')
+        @set_device('meta')
         def f():
             yield torch.empty(3, 3)
             yield torch.empty(3, 3)

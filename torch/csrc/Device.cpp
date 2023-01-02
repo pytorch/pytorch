@@ -231,7 +231,12 @@ PyTypeObject THPDeviceType = {
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
     (hashfunc)THPDevice_hash, /* tp_hash  */
-    THPDevice_call, /* tp_call */
+    // TODO: We're not sure if this is a good idea or not, because making
+    // torch.device callable means that it will start returning true
+    // for callable() queries, and that is unexpected.  We can always add
+    // this later, so for now, don't actually implement this
+    // THPDevice_call, /* tp_call */
+    nullptr, /* tp_call */
     (reprfunc)THPDevice_str, /* tp_str */
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
