@@ -4,12 +4,25 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
+from collections import OrderedDict
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    NoReturn,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+)
+
 import torch
 import torch.nn as nn
 from torch import Tensor
-from typing import List, Tuple
-from .named_members_polyfill import _named_parameters, _named_buffers
-import copy
+from .named_members_polyfill import _named_buffers, _named_parameters
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
@@ -40,52 +53,60 @@ def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
         _set_nested_attr(getattr(obj, names[0]), names[1:], value)
 
 
-def _get_nested_attr(obj: nn.Module, names: List[str]) -> None:
+def _get_nested_attr(obj: nn.Module, names: List[str]) -> Tensor:
     if len(names) == 1:
         return getattr(obj, names[0])
     else:
         return _get_nested_attr(getattr(obj, names[0]), names[1:])
 
 
-def raise_parameter_tying_error():
+def raise_parameter_tying_error() -> NoReturn:
     raise RuntimeError(
         "make_functional(module): we don't yet support models that "
         "do parameter tying (also sometimes known as weight sharing). "
         "Please try to rewrite your model by replacing all instances of the "
         "tied parameter with another and/or comment your support in "
-        "https://github.com/pytorch/functorch/issues/446")
+        "https://github.com/pytorch/functorch/issues/446"
+    )
 
 
-def create_names_map(named_params, tied_named_params):
+def create_names_map(
+    named_params: Union[Dict[str, Tensor], Iterable[Tuple[str, Tensor]]],
+    tied_named_params: Union[Dict[str, Tensor], Iterable[Tuple[str, Tensor]]],
+) -> Dict[str, List[List[str]]]:
     """
     named_params is a dictionary of tensors: {'A': A, 'B': B}
     tied_named_params is another dictionary of tensors {'A': A, 'B': B, 'B_tied': B}
     with potentially tied (or 'duplicated') tensors
 
     This function creates a mapping from the names in named_params to the
-    names in tied_named_params: {'A': ['A'], 'B': ['B', 'B_tied']}.
+    names in tied_named_params: {'A': [['A']], 'B': [['B'], ['B_tied']]}.
     """
-    named_params = {k: v for k, v in named_params}
-    tied_named_params = {k: v for k, v in tied_named_params}
+    named_params = OrderedDict(named_params)
+    tied_named_params = OrderedDict(tied_named_params)
 
     tensors_dict_keys = set(named_params.keys())
     tied_tensors_dict_keys = set(tied_named_params.keys())
     assert tensors_dict_keys.issubset(tied_tensors_dict_keys)
 
-    tensor_to_mapping = {}
+    tensor_to_mapping: Dict[Tensor, Tuple[str, List[List[str]]]] = OrderedDict()
     for key, tensor in named_params.items():
         tensor_to_mapping[tensor] = (key, [])
     for key, tensor in tied_named_params.items():
         assert tensor in tensor_to_mapping
         tensor_to_mapping[tensor][1].append(key.split('.'))
-    result = {key: value for key, value in tensor_to_mapping.values()}
-    return result
+    return OrderedDict(tensor_to_mapping.values())
 
 
-def _extract_members(mod: nn.Module, _named_members, named_members, subclass):
+def _extract_members(
+    mod: nn.Module,
+    _named_members: Callable[..., Iterable[Tuple[str, Tensor]]],
+    named_members: Callable[..., Iterable[Tuple[str, Tensor]]],
+    subclass: Callable[[Tensor], Tensor],
+) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[List[str]]]]:
     all_named_members = tuple(_named_members(mod, remove_duplicate=False))
-    named_members = tuple(named_members())
-    names_map = create_names_map(named_members, all_named_members)
+    unique_named_members = tuple(named_members())
+    names_map = create_names_map(unique_named_members, all_named_members)
 
     # Remove all the members in the model
     memo = {}
@@ -95,14 +116,16 @@ def _extract_members(mod: nn.Module, _named_members, named_members, subclass):
         replacement = memo[p]
         _set_nested_attr(mod, name.split("."), replacement)
 
-    if len(named_members) == 0:
+    if len(unique_named_members) == 0:
         names, params = (), ()
     else:
-        names, params = zip(*named_members)
+        names, params = zip(*unique_named_members)  # type: ignore[assignment]
     return params, names, names_map
 
 
-def extract_weights(mod: nn.Module):
+def extract_weights(
+    mod: nn.Module,
+) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[List[str]]]]:
     """
     This function removes all the Parameters from the model and
     return them as a tuple as well as their original attribute names.
@@ -114,11 +137,15 @@ def extract_weights(mod: nn.Module):
     return _extract_members(mod, _named_parameters, mod.named_parameters, nn.Parameter)
 
 
-def extract_buffers(mod: nn.Module):
+def extract_buffers(
+    mod: nn.Module,
+) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[List[str]]]]:
     return _extract_members(mod, _named_buffers, mod.named_buffers, lambda x: x)
 
 
-def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], as_params=False) -> None:
+def load_weights(
+    mod: nn.Module, names: Sequence[str], params: Sequence[Tensor], as_params: bool = False
+) -> None:
     """
     Reload a set of weights so that `mod` can be used again to perform a forward pass.
     Note that the `params` are regular Tensors (that can have history) and so are left
@@ -131,8 +158,10 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], a
         _set_nested_attr(mod, name.split("."), p)
 
 
-def _swap_state(mod: nn.Module, names_map: List[str], elems):
-    result = []
+def _swap_state(
+    mod: nn.Module, names_map: Dict[str, List[List[str]]], elems: Iterable[Tensor]
+) -> List[Tensor]:
+    result: List[Tensor] = []
     for (_, attr_names), elem in zip(names_map.items(), elems):
         for i, attr_name in enumerate(attr_names):
             if i == 0:
@@ -142,15 +171,20 @@ def _swap_state(mod: nn.Module, names_map: List[str], elems):
     return result
 
 
-def load_buffers(mod: nn.Module, names: List[str], buffers: Tuple[Tensor, ...], as_params=False) -> None:
+def load_buffers(
+    mod: nn.Module, names: Sequence[str], buffers: Sequence[Tensor], as_params: bool = False
+) -> None:
     for name, p in zip(names, buffers):
         _set_nested_attr(mod, name.split("."), p)
 
 
 def load_state(
-        model: nn.Module,
-        weights: List[Tensor], weight_names: List[str],
-        buffers=(), buffer_names=()):
+    model: nn.Module,
+    weights: Sequence[Tensor],
+    weight_names: Sequence[str],
+    buffers: Sequence[Tensor] = (),
+    buffer_names: Sequence[str] = (),
+) -> nn.Module:
     """load_state(model, weights, weight_names, buffers=(), buffer_names=()) -> model
 
     load_state takes `weights` and `buffers` and assigns them to the model.
@@ -246,18 +280,26 @@ class FunctionalModuleWithBuffers(nn.Module):
     This is the callable object returned by :func:`make_functional_with_buffers`.
     """
 
-    def __init__(self, stateless_model, param_names, buffer_names,
-                 param_names_map, buffer_names_map):
+    def __init__(
+        self,
+        stateless_model: nn.Module,
+        param_names: Tuple[str, ...],
+        buffer_names: Tuple[str, ...],
+        param_names_map: Dict[str, List[List[str]]],
+        buffer_names_map: Dict[str, List[List[str]]],
+    ) -> None:
         super(FunctionalModuleWithBuffers, self).__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
         self.buffer_names = buffer_names
 
-        self.all_names_map = dict(param_names_map)
+        self.all_names_map = OrderedDict(param_names_map)
         self.all_names_map.update(buffer_names_map)
 
     @staticmethod
-    def _create_from(model, disable_autograd_tracking=False):
+    def _create_from(
+        model: nn.Module, disable_autograd_tracking: bool = False
+    ) -> Tuple['FunctionalModuleWithBuffers', Tuple[Tensor, ...], Tuple[Tensor, ...]]:
         # TODO: We don't need to copy the model to create a stateless copy
         model_copy = copy.deepcopy(model)
         params, param_names, param_names_map = extract_weights(model_copy)
@@ -272,12 +314,13 @@ class FunctionalModuleWithBuffers(nn.Module):
             buffers,
         )
 
-    def forward(self, params, buffers, *args, **kwargs):
+    def forward(self, params: Iterable[Tensor], buffers: Iterable[Tensor], *args, **kwargs) -> Any:
         # Temporarily load the state back onto self.stateless_model
         old_state = _swap_state(
             self.stateless_model,
             self.all_names_map,
-            list(params) + list(buffers))
+            tuple(params) + tuple(buffers),
+        )
         try:
             return self.stateless_model(*args, **kwargs)
         finally:
@@ -290,14 +333,21 @@ class FunctionalModule(nn.Module):
     This is the callable object returned by :func:`make_functional`.
     """
 
-    def __init__(self, stateless_model, param_names, names_map):
+    def __init__(
+        self,
+        stateless_model: nn.Module,
+        param_names: Tuple[str, ...],
+        names_map: Dict[str, List[List[str]]],
+    ) -> None:
         super(FunctionalModule, self).__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
         self.names_map = names_map
 
     @staticmethod
-    def _create_from(model, disable_autograd_tracking=False):
+    def _create_from(
+        model: nn.Module, disable_autograd_tracking: bool = False
+    ) -> Tuple['FunctionalModule', Tuple[Tensor, ...]]:
         # TODO: We don't need to copy the model to create a stateless copy
         model_copy = copy.deepcopy(model)
         params, param_names, names_map = extract_weights(model_copy)
@@ -306,7 +356,7 @@ class FunctionalModule(nn.Module):
                 param.requires_grad_(False)
         return FunctionalModule(model_copy, param_names, names_map), params
 
-    def forward(self, params, *args, **kwargs):
+    def forward(self, params: Iterable[Tensor], *args, **kwargs) -> Any:
         # Temporarily load the state back onto self.stateless_model
         old_state = _swap_state(self.stateless_model, self.names_map, params)
         try:
@@ -316,7 +366,9 @@ class FunctionalModule(nn.Module):
             _swap_state(self.stateless_model, self.names_map, old_state)
 
 
-def make_functional(model: nn.Module, disable_autograd_tracking: bool = False):
+def make_functional(
+    model: nn.Module, disable_autograd_tracking: bool = False
+) -> Tuple[FunctionalModule, Tuple[Tensor, ...]]:
     """make_functional(model, disable_autograd_tracking=False) -> func, params
 
     Given a ``torch.nn.Module``, :func:`make_functional` extracts the state
@@ -380,7 +432,9 @@ def make_functional(model: nn.Module, disable_autograd_tracking: bool = False):
     return FunctionalModule._create_from(model, disable_autograd_tracking=disable_autograd_tracking)
 
 
-def make_functional_with_buffers(model: nn.Module, disable_autograd_tracking: bool = False):
+def make_functional_with_buffers(
+    model: nn.Module, disable_autograd_tracking: bool = False
+) -> Tuple[FunctionalModuleWithBuffers, Tuple[Tensor, ...], Tuple[Tensor, ...]]:
     """make_functional_with_buffers(model, disable_autograd_tracking=False) -> func, params, buffers
 
     Given a ``torch.nn.Module``, make_functional_with_buffers extracts the
@@ -437,13 +491,17 @@ def make_functional_with_buffers(model: nn.Module, disable_autograd_tracking: bo
     return FunctionalModuleWithBuffers._create_from(model, disable_autograd_tracking=disable_autograd_tracking)
 
 
-def transpose_stack(tuple_of_tuple_of_tensors):
+def transpose_stack(
+    tuple_of_tuple_of_tensors: Tuple[Tuple[Tensor, ...], ...]
+) -> Tuple[Tensor, ...]:
     tuple_of_tuple_of_tensors = tuple(zip(*tuple_of_tuple_of_tensors))
     results = tuple(torch.stack(shards).detach() for shards in tuple_of_tuple_of_tensors)
     return results
 
 
-def combine_state_for_ensemble(models):
+def combine_state_for_ensemble(
+    models: Sequence[nn.Module],
+) -> Tuple[FunctionalModuleWithBuffers, Tuple[Tensor, ...], Tuple[Tensor, ...]]:
     """combine_state_for_ensemble(models) -> func, params, buffers
 
     Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.
@@ -497,14 +555,18 @@ def combine_state_for_ensemble(models):
     return funcs[0], params, buffers
 
 
-def functional_init(model_class, ensemble_shape=(), device='cpu'):
+def functional_init(
+    model_class: Type[nn.Module],
+    ensemble_shape: Union[Tuple[()], Tuple[int]] = (),
+    device: torch.types.Device = 'cpu',
+):
     def wrapped(*args, **kwargs):
         if len(ensemble_shape) >= 2:
             raise ValueError('NYI: ensemble_shape with more than 1 element')
         if len(ensemble_shape) == 0:
             model = model_class(*args, **kwargs).to(device)
             return make_functional_deprecated_v1(model)
-        num_models = ensemble_shape[0]
+        num_models = ensemble_shape[0]  # type: ignore[misc]
         if num_models <= 0:
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC
@@ -515,17 +577,22 @@ def functional_init(model_class, ensemble_shape=(), device='cpu'):
         weights = tuple(zip(*weights))
         weights = tuple(torch.stack(shards).detach() for shards in weights)
         return weights, fn, names
+
     return wrapped
 
 
-def functional_init_with_buffers(model_class, ensemble_shape=(), device='cpu'):
+def functional_init_with_buffers(
+    model_class: Type[nn.Module],
+    ensemble_shape: Union[Tuple[()], Tuple[int]] = (),
+    device: torch.types.Device = 'cpu',
+):
     def wrapped(*args, **kwargs):
         if len(ensemble_shape) >= 2:
             raise ValueError('NYI: ensemble_shape with more than 1 element')
         if len(ensemble_shape) == 0:
             model = model_class(*args, **kwargs).to(device)
             return make_functional_deprecated_v1(model)
-        num_models = ensemble_shape[0]
+        num_models = ensemble_shape[0]  # type: ignore[misc]
         if num_models <= 0:
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC
@@ -540,4 +607,5 @@ def functional_init_with_buffers(model_class, ensemble_shape=(), device='cpu'):
         buffers = tuple(zip(*buffers))
         buffers = tuple(torch.stack(shards).detach() for shards in buffers)
         return weights, buffers, fn, weight_names, buffer_names
+
     return wrapped
