@@ -6,8 +6,6 @@
 
 #include <c10/util/irange.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -83,44 +81,44 @@ void visitBinaryOp(
 }
 
 void IRPrinter::visit(AddPtr v) {
-  visitBinaryOp(std::move(v), "+", this);
+  visitBinaryOp(v, "+", this);
 }
 
 void IRPrinter::visit(SubPtr v) {
-  visitBinaryOp(std::move(v), "-", this);
+  visitBinaryOp(v, "-", this);
 }
 
 void IRPrinter::visit(MulPtr v) {
-  visitBinaryOp(std::move(v), "*", this);
+  visitBinaryOp(v, "*", this);
 }
 
 void IRPrinter::visit(DivPtr v) {
-  visitBinaryOp(std::move(v), "/", this);
+  visitBinaryOp(v, "/", this);
 }
 
 void IRPrinter::visit(AndPtr v) {
-  visitBinaryOp(std::move(v), "&", this);
+  visitBinaryOp(v, "&", this);
 }
 
 void IRPrinter::visit(OrPtr v) {
-  visitBinaryOp(std::move(v), "|", this);
+  visitBinaryOp(v, "|", this);
 }
 
 void IRPrinter::visit(XorPtr v) {
-  visitBinaryOp(std::move(v), "^", this);
+  visitBinaryOp(v, "^", this);
 }
 
 void IRPrinter::visit(LshiftPtr v) {
-  visitBinaryOp(std::move(v), "<<", this);
+  visitBinaryOp(v, "<<", this);
 }
 
 void IRPrinter::visit(RshiftPtr v) {
-  visitBinaryOp(std::move(v), ">>", this);
+  visitBinaryOp(v, ">>", this);
 }
 
 void IRPrinter::visit(ModPtr v) {
   if (v->dtype().is_integral()) {
-    visitBinaryOp(std::move(v), "%", this);
+    visitBinaryOp(v, "%", this);
   } else if (v->dtype().is_floating_point()) {
     os() << "mod(" << *v->lhs() << ", " << *v->rhs() << ")";
   } else {
@@ -246,7 +244,7 @@ void IRPrinter::visit(BitCastPtr v) {
 }
 
 void IRPrinter::visit(VarPtr v) {
-  os() << name_manager_.get_unique_name(std::move(v));
+  os() << name_manager_.get_unique_name(v);
 }
 
 void IRPrinter::visit(BufPtr v) {

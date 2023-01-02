@@ -7,8 +7,6 @@
 
 #include <c10/util/irange.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -24,51 +22,51 @@ static void visit_binary_op(NodePtr<Op> v, IRVisitor* visitor) {
 }
 
 void IRVisitor::visit(AddPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(SubPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(MulPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(DivPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(ModPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(MaxPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(MinPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(AndPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(OrPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(XorPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(LshiftPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(RshiftPtr v) {
-  visit_binary_op(std::move(v), this);
+  visit_binary_op(v, this);
 }
 
 void IRVisitor::visit(CompareSelectPtr v) {

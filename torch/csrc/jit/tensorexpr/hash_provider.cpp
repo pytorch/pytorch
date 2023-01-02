@@ -4,8 +4,6 @@
 
 #include <c10/util/irange.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -145,7 +143,7 @@ void HashProvider::visit(CastPtr v) {
 
 void HashProvider::visit(VarPtr v) {
   CACHE_GUARD();
-  putHash(v, hash_combine("var", name_manager_.get_unique_name(std::move(v))));
+  putHash(v, hash_combine("var", name_manager_.get_unique_name(v)));
 }
 
 void HashProvider::visit(RampPtr v) {
@@ -282,14 +280,14 @@ void HashProvider::visit(CondPtr v) {
   StmtPtr false_stmt = v->false_stmt();
   condition->accept(this);
 
-  SimplifierHashType hash = hash_combine("cond", hashOf(std::move(condition)));
+  SimplifierHashType hash = hash_combine("cond", hashOf(condition));
   if (true_stmt) {
     true_stmt->accept(this);
-    hash = hash_combine(hash, hashOf(std::move(true_stmt)));
+    hash = hash_combine(hash, hashOf(true_stmt));
   }
   if (false_stmt) {
     false_stmt->accept(this);
-    hash = hash_combine(hash, hashOf(std::move(false_stmt)));
+    hash = hash_combine(hash, hashOf(false_stmt));
   }
 
   putHash(v, hash);

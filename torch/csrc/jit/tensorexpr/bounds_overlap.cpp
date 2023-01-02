@@ -3,8 +3,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -48,7 +46,7 @@ bool Bound::equals(const Bound& other) const {
 bool Bound::operator==(const Bound& other) const {
   if (equals(other)) {
     auto ret_expr = IRSimplifier::simplify(alloc<Sub>(start, end));
-    return mustBeZero(std::move(ret_expr));
+    return mustBeZero(ret_expr);
   }
 
   return false;
@@ -63,12 +61,12 @@ bool Bound::operator>=(const Bound& other) const {
     return true;
   }
   auto ret_expr = IRSimplifier::simplify(alloc<Sub>(start, other.end));
-  return mustBePositive(ret_expr) || mustBeZero(std::move(ret_expr));
+  return mustBePositive(ret_expr) || mustBeZero(ret_expr);
 }
 
 bool Bound::operator>(const Bound& other) const {
   auto ret_expr = IRSimplifier::simplify(alloc<Sub>(start, other.end));
-  return mustBePositive(std::move(ret_expr));
+  return mustBePositive(ret_expr);
 }
 
 bool Bound::operator<=(const Bound& other) const {
@@ -76,12 +74,12 @@ bool Bound::operator<=(const Bound& other) const {
     return true;
   }
   auto ret_expr = IRSimplifier::simplify(alloc<Sub>(end, other.start));
-  return mustBeNegative(ret_expr) || mustBeZero(std::move(ret_expr));
+  return mustBeNegative(ret_expr) || mustBeZero(ret_expr);
 }
 
 bool Bound::operator<(const Bound& other) const {
   auto ret_expr = IRSimplifier::simplify(alloc<Sub>(end, other.start));
-  return mustBeNegative(std::move(ret_expr));
+  return mustBeNegative(ret_expr);
 }
 
 OverlapKind boundOverlap(Bound a, Bound b) {
@@ -111,10 +109,10 @@ OverlapKind boundOverlap(Bound a, Bound b) {
   ExprPtr lowDiff = IRSimplifier::simplify(alloc<Sub>(a.start, b.end));
   ExprPtr highDiff = IRSimplifier::simplify(alloc<Sub>(b.start, a.end));
 
-  if (mustBePositive(std::move(lowDiff))) {
+  if (mustBePositive(lowDiff)) {
     return OverlapKind::NoOverlap;
   }
-  if (mustBePositive(std::move(highDiff))) {
+  if (mustBePositive(highDiff)) {
     return OverlapKind::NoOverlap;
   }
 
@@ -123,8 +121,8 @@ OverlapKind boundOverlap(Bound a, Bound b) {
 
   // If one side fully encloses the other, they're adjacent.
   if (diff_start->isConstant() && diff_end->isConstant()) {
-    int start = immediateAs<int>(std::move(diff_start));
-    int end = immediateAs<int>(std::move(diff_end));
+    int start = immediateAs<int>(diff_start);
+    int end = immediateAs<int>(diff_end);
     // If diff_start and diff_end have different signs they are enclosing.
     if (start <= 0 && end >= 0) {
       return OverlapKind::ContainedOrEqual;
@@ -243,7 +241,7 @@ OverlapKind overlaps(const IndexBounds& a, const IndexBounds& b) {
 std::vector<Bound> subtractBound(Bound a, Bound b) {
   OverlapKind overlap = boundOverlap(a, b);
   if (overlap == OverlapKind::NoOverlap) {
-    return {std::move(a)};
+    return {a};
   }
   if (overlap == OverlapKind::ContainedOrEqual) {
     return {};
@@ -254,7 +252,7 @@ std::vector<Bound> subtractBound(Bound a, Bound b) {
 
   if (a.start->isConstant() != b.start->isConstant() ||
       a.end->isConstant() != b.end->isConstant()) {
-    return {std::move(a)};
+    return {a};
   }
 
   ExprPtr lowDiff = IRSimplifier::simplify(alloc<Sub>(b.start, a.start));
@@ -287,7 +285,7 @@ std::vector<Bound> subtractBound(Bound a, Bound b) {
   if (!constantExtents) {
     // If we can't infer the bound lengths, there's no way to create a safe
     // subset. Just bail out.
-    return {std::move(a)};
+    return {a};
   }
 
   if (hasHead) {

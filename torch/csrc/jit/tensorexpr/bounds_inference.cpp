@@ -10,8 +10,6 @@
 
 #include <c10/util/irange.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -77,7 +75,7 @@ BoundsInfo mergeTensorAccesses(
 std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
-  auto bufs = NodeFinder<Buf>::find(std::move(s));
+  auto bufs = NodeFinder<Buf>::find(s);
   for (const auto& b : bufs) {
     varToBuf[b->base_handle()] = b;
   }
@@ -87,7 +85,7 @@ std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
 std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
-  auto bufs = NodeFinder<Buf>::find(std::move(e));
+  auto bufs = NodeFinder<Buf>::find(e);
   for (const auto& b : bufs) {
     varToBuf[b->base_handle()] = b;
   }
@@ -109,9 +107,7 @@ BoundsInfo getInferredBounds(
     StmtPtr s,
     bool distinctAccessKinds) {
   return mergeTensorAccesses(
-      analyzer.accessesWithin(s),
-      getAllBufs(std::move(s)),
-      distinctAccessKinds);
+      analyzer.accessesWithin(s), getAllBufs(s), distinctAccessKinds);
 }
 
 BoundsInfo getInferredBounds(
@@ -119,9 +115,7 @@ BoundsInfo getInferredBounds(
     ExprPtr e,
     bool distinctAccessKinds) {
   return mergeTensorAccesses(
-      analyzer.accessesWithin(e),
-      getAllBufs(std::move(e)),
-      distinctAccessKinds);
+      analyzer.accessesWithin(e), getAllBufs(e), distinctAccessKinds);
 }
 
 void printBoundsInfo(const BoundsInfo& v) {
@@ -233,8 +227,8 @@ HazardKind getPotentialHazards(
     MemDependencyChecker& analyzer,
     StmtPtr A,
     StmtPtr B) {
-  BoundsInfo aBounds = getInferredBounds(analyzer, std::move(A), true);
-  BoundsInfo bBounds = getInferredBounds(analyzer, std::move(B), true);
+  BoundsInfo aBounds = getInferredBounds(analyzer, A, true);
+  BoundsInfo bBounds = getInferredBounds(analyzer, B, true);
 
   BoundSet aWrites;
   BoundSet aReads;
@@ -352,8 +346,8 @@ bool hasConflictingOverlap(
     analysis::MemDependencyChecker& analyzer,
     StmtPtr A,
     StmtPtr B) {
-  BoundsInfo aBounds = getInferredBounds(analyzer, std::move(A), true);
-  BoundsInfo bBounds = getInferredBounds(analyzer, std::move(B), true);
+  BoundsInfo aBounds = getInferredBounds(analyzer, A, true);
+  BoundsInfo bBounds = getInferredBounds(analyzer, B, true);
   return hasConflictingOverlap(aBounds, bBounds);
 }
 

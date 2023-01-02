@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -90,7 +88,7 @@ bool AccessInfo::overlaps(const std::shared_ptr<AccessInfo>& other) {
     ExprPtr diff = alloc<Sub>(indices_[i], other_indices[i]);
     diff = IRSimplifier::simplify(diff);
 
-    if (diff->isConstant() && !immediateEquals(std::move(diff), 0)) {
+    if (diff->isConstant() && !immediateEquals(diff, 0)) {
       overlap = false;
       break;
     }
@@ -407,7 +405,7 @@ void RegisterizerAnalysis::visit(StorePtr v) {
 
   // If an identical access already exists, add this Store to it.
   if (candidateIt != bufAccesses.end()) {
-    candidateIt->second->addStore(std::move(v), currentScope_);
+    candidateIt->second->addStore(v, currentScope_);
     return;
   }
 
@@ -455,14 +453,13 @@ void RegisterizerAnalysis::visit(LoadPtr v) {
   auto candidateIt = bufAccesses.find(accessHash);
   if (candidateIt != bufAccesses.end()) {
     // found the right access, can just insert.
-    candidateIt->second->addLoad(
-        std::move(v), currentScope_, stmtStack_.front());
+    candidateIt->second->addLoad(v, currentScope_, stmtStack_.front());
     return;
   }
 
   std::shared_ptr<AccessInfo> info = std::make_shared<AccessInfo>(
       accessHash, v->buf(), v->indices(), accessOrder_++);
-  info->addLoad(std::move(v), currentScope_, stmtStack_.front());
+  info->addLoad(v, currentScope_, stmtStack_.front());
 
   bool alreadyOverlapped = false;
   // This new access may overlap an existing open access, in which case we need
@@ -674,14 +671,14 @@ StmtPtr RegisterizerReplacer::mutate(StorePtr v) {
   auto it = storeToAccess_.find(v);
   if (it == storeToAccess_.end()) {
     // This access cannot be registerized.
-    return IRMutator::mutate(std::move(v));
+    return IRMutator::mutate(v);
   }
 
   auto& info = it->second;
 
   ExprPtr new_val = v->value()->accept_mutator(this);
 
-  v->set_value(std::move(new_val));
+  v->set_value(new_val);
   v->set_buf(info->replacement().var_wrapper);
   v->set_indices({});
   return v;
