@@ -100,7 +100,6 @@ class AdamW(Optimizer):
             device = grad_scale.device
             grad_scale = _MultiDeviceReplicator(grad_scale)
             found_inf = _get_fp16AMP_params(optimizer=self, grad_scaler=grad_scaler, device=device)
-
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -115,7 +114,7 @@ class AdamW(Optimizer):
             if len(state) == 0:
                 state["step"] = (
                     torch.zeros((1,), dtype=torch.float, device=p.device)
-                    if self.defaults["capturable"]
+                    if self.defaults["capturable"] or self.defaults["fused"]
                     else torch.tensor(0.0)
                 )
                 # Exponential moving average of gradient values
