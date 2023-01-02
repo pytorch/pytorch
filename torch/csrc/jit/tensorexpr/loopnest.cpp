@@ -2801,7 +2801,7 @@ static std::vector<VarPtr> getOuterLoopIndexes(StmtPtr s) {
   std::vector<VarPtr> res;
   StmtPtr cur = std::move(s);
   while (cur) {
-    if (auto l = to<For>(std::move(cur))) {
+    if (auto l = to<For>(cur)) {
       res.push_back(l->var());
     }
     cur = cur->get_parent();
