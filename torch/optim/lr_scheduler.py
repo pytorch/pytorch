@@ -1704,14 +1704,14 @@ class OneCycleLR(LRScheduler):
 
         if step_num > self.total_steps:
             raise ValueError("Tried to step {} times. The specified number of total steps is {}"
-                             .format(step_num + 1, self.total_steps))
+                             .format(step_num, self.total_steps))
 
         for group in self.optimizer.param_groups:
             start_step = 0
             for i, phase in enumerate(self._schedule_phases):
                 end_step = phase['end_step']
                 if step_num <= end_step or i == len(self._schedule_phases) - 1:
-                    pct = (step_num - start_step) / (end_step - start_step)
+                    pct = (step_num - start_step) / (end_step - start_step + 1)
                     computed_lr = self.anneal_func(group[phase['start_lr']], group[phase['end_lr']], pct)
                     if self.cycle_momentum:
                         computed_momentum = self.anneal_func(group[phase['start_momentum']], group[phase['end_momentum']], pct)
