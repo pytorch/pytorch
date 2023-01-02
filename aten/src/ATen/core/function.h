@@ -101,7 +101,7 @@ struct TORCH_API Function {
     return false;
   }
 
-  virtual ~Function() {}
+  virtual ~Function() = default;
 };
 } // namespace jit
 } // namespace torch
