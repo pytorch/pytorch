@@ -991,11 +991,23 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
-    def test_linspace(self):
+    def test_linspace1(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x
 
         self.common(fn, (torch.randn(1, 7),))
+
+    def test_linspace2(self):
+        def fn(x):
+            return torch.linspace(0, 2, 1, device=x.device) + x
+
+        self.common(fn, (torch.randn(1, 1),))
+
+    def test_linspace3(self):
+        def fn(x):
+            return torch.linspace(0, 2, 0, device=x.device)
+
+        self.common(fn, (torch.Tensor([]),))
 
     def test_tensor1(self):
         def fn(x):
