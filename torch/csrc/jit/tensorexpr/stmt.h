@@ -333,7 +333,7 @@ class TORCH_API Store : public StmtNode<Store> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   void set_indices(std::vector<ExprPtr> indices) {
@@ -341,7 +341,7 @@ class TORCH_API Store : public StmtNode<Store> {
   }
 
   void set_value(ExprPtr value) {
-    value_ = value;
+    value_ = std::move(value);
   }
 
   static StorePtr make(
@@ -383,7 +383,7 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   explicit Allocate(BufPtr buf) : buf_(std::move(buf)) {}
@@ -414,11 +414,11 @@ class TORCH_API PlacementAllocate : public StmtNode<PlacementAllocate> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   void set_buf_to_reuse(BufPtr buf) {
-    buf_to_reuse_ = buf;
+    buf_to_reuse_ = std::move(buf);
   }
 
   explicit PlacementAllocate(BufPtr buf, BufPtr buf_to_reuse)
@@ -445,7 +445,7 @@ class TORCH_API Free : public StmtNode<Free> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   explicit Free(BufPtr buf) : buf_(std::move(buf)) {}
@@ -489,11 +489,11 @@ class TORCH_API Let : public StmtNode<Let> {
   }
 
   void set_var(VarPtr var) {
-    var_ = var;
+    var_ = std::move(var);
   }
 
   void set_val(ExprPtr val) {
-    val_ = val;
+    val_ = std::move(val);
   }
 
  private:
@@ -523,7 +523,7 @@ class TORCH_API Cond : public StmtNode<Cond> {
   }
 
   void set_condition(ExprPtr condition) {
-    condition_ = condition;
+    condition_ = std::move(condition);
   }
 
   void set_true_stmt(StmtPtr true_stmt) {
@@ -817,15 +817,15 @@ class TORCH_API For : public StmtNode<For> {
   }
 
   void set_start(ExprPtr start) {
-    start_ = start;
+    start_ = std::move(start);
   }
 
   void set_stop(ExprPtr stop) {
-    stop_ = stop;
+    stop_ = std::move(stop);
   }
 
   void set_var(VarPtr var) {
-    var_ = var;
+    var_ = std::move(var);
   }
 
  private:
@@ -870,7 +870,7 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   void set_indices(std::vector<ExprPtr> indices) {
@@ -878,7 +878,7 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
   }
 
   void set_value(ExprPtr value) {
-    value_ = value;
+    value_ = std::move(value);
   }
 
  private:
@@ -936,7 +936,7 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   void set_buf_args(std::vector<BufPtr> buf_args) {
