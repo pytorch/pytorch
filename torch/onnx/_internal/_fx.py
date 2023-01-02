@@ -413,6 +413,24 @@ def _export(
 
     decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
 
+    return decomposed_module
+
+
+def _export(
+    module: torch.fx.GraphModule,
+    *args,
+    decomposition_table: Dict[torch._ops.OpOverload, Callable] = None,
+    use_binary_format: bool = True,
+):
+    # Export FX graph to ONNX ModelProto.
+    if decomposition_table is None:
+        # Use default decomposition table.
+        decomposition_table = torch._decomp.decomposition_table
+    # Apply decomposition table to the input graph.
+    decomposed_module = make_fx(module, decomposition_table)(*args)
+
+    decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
+
     ts_graph, ts_initializers = _export_fx_to_ts(decomposed_module)
     # Export TorchScript graph to ONNX ModelProto.
     onnx_model = _ts_graph_to_onnx_model_in_protobuf(ts_graph, ts_initializers)
