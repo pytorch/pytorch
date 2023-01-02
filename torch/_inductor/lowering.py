@@ -1343,7 +1343,7 @@ def linspace(start, end, steps, *, dtype=None, device=None, pin_memory=False):
     assert not pin_memory
     dtype = dtype or torch.get_default_dtype()
 
-    step_size = (end - start) / (steps - 1)
+    step_size = (end - start) / (steps - 1) if steps > 1 else 0.
 
     def inner_fn(index):
         return ops.add(
