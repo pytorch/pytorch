@@ -26,10 +26,7 @@ struct ContextLinear final {
 
   ContextLinear() = delete;
 
-  ContextLinear(Operator&& o, int64_t o_channels) {
-    op = std::move(o);
-    output_channels = o_channels;
-  }
+  ContextLinear(Operator&& o, int64_t o_channels) : op(std::move(o)), output_channels(o_channels) {}
   static constexpr float kMin = -std::numeric_limits<float>::infinity();
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
