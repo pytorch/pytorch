@@ -305,6 +305,8 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
         return [pytree] * spec.num_leaves
     if isinstance(spec, LeafSpec):
         if isinstance(pytree, (list, tuple)):
+            if len(pytree) != 1:
+                return None
             return list(pytree)
         return [pytree]
     node_type = _get_node_type(pytree)
