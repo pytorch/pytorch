@@ -35,7 +35,7 @@ import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
-    'set_default_tensor_device',
+    'set_default_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
@@ -447,7 +447,7 @@ def is_storage(obj):
 
 _GLOBAL_DEVICE_CONTEXT = None
 
-def set_default_tensor_device(device):
+def set_default_device(device):
     """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
     does not affect factory function calls which are called with an explicit
     ``device`` argument.  Factory calls will be performed as if they
@@ -469,10 +469,10 @@ def set_default_tensor_device(device):
         >>> # xdoctest: +SKIP("requires cuda, changes global state")
         >>> torch.tensor([1.2, 3]).device
         device(type='cpu')
-        >>> torch.set_default_tensor_device('cuda')  # current device is 0
+        >>> torch.set_default_device('cuda')  # current device is 0
         >>> torch.tensor([1.2, 3]).device
         device(type='cuda', index=0)
-        >>> torch.set_default_tensor_device('cuda:1')
+        >>> torch.set_default_device('cuda:1')
         >>> torch.tensor([1.2, 3]).device
         device(type='cuda', index=1)
 

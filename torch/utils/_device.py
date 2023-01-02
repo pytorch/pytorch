@@ -1,5 +1,6 @@
 import torch
 from torch.overrides import TorchFunctionMode
+from torch.utils._contextlib import context_decorator
 import functools
 
 @functools.lru_cache(1)
@@ -24,6 +25,7 @@ def _device_constructors():
         torch.linspace,
         torch.logspace,
         torch.nested.nested_tensor,
+        # This function doesn't actually take a device argument
         # torch.normal,
         torch.ones,
         torch.rand,
@@ -48,15 +50,17 @@ def _device_constructors():
         torch.scalar_tensor,
     }
 
+# NB: This is directly called from C++ in torch/csrc/Device.cpp
 class DeviceContext(TorchFunctionMode):
     def __init__(self, device):
         self.device = torch.device(device)
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        if func in _device_constructors():
-            if kwargs.get('device') is None:
-                kwargs['device'] = self.device
-            return func(*args, **kwargs)
+        kwargs = kwargs or {}
+        if func in _device_constructors() and kwargs.get('device') is None:
+            kwargs['device'] = self.device
         return func(*args, **kwargs)
+
+# NB: This is directly called from C++ in torch/csrc/Device.cpp
+def device_decorator(device, func):
+    return context_decorator(lambda: device, func)

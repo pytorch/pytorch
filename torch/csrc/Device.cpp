@@ -189,6 +189,16 @@ PyObject* THPDevice_exit(PyObject* self, PyObject* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPDevice_call(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  py::object deco =
+      py::module::import("torch.utils._device").attr("device_decorator");
+  return deco(py::handle(self), *py::handle(args), **py::handle(kwargs))
+      .release()
+      .ptr();
+  END_HANDLE_TH_ERRORS
+}
+
 typedef PyObject* (*getter)(PyObject*, void*);
 
 // NB: If you edit these properties/methods, update torch/_C/__init__.pyi.in
@@ -221,7 +231,7 @@ PyTypeObject THPDeviceType = {
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
     (hashfunc)THPDevice_hash, /* tp_hash  */
-    nullptr, /* tp_call */
+    THPDevice_call, /* tp_call */
     (reprfunc)THPDevice_str, /* tp_str */
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */

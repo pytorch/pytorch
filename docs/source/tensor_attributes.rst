@@ -189,7 +189,7 @@ device tensors are allocated on:
 
 This context manager has no effect if a factory function is passed an explicit,
 non-None device argument.  To globally change the default device, see also
-:func:`torch.set_default_tensor_device`.
+:func:`torch.set_default_device`.
 
 .. note::
    The :class:`torch.device` argument in functions can generally be substituted with a string.
