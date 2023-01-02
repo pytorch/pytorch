@@ -11,13 +11,13 @@ import torch._C
 import torch._decomp
 import torch._dynamo
 import torch._ops
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+from torch._subclasses import fake_tensor
+from torch.fx.experimental import proxy_tensor
+from torch.fx.passes import fake_tensor_prop
 from torch.nn.utils import stateless
 from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
 from torch.onnx._internal import jit_utils, registration
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree
 
 
 def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, str]:
@@ -157,8 +157,8 @@ def _wrap_fx_args_as_ts_args(g, root, node, fx_name_to_ts_value):
 
 
 def _fill_tensor_types(ts_values, expected_values):
-    flat_ts_values, _ = tree_flatten(ts_values)
-    flat_expected_values, _ = tree_flatten(expected_values)
+    flat_ts_values, _ = _pytree.tree_flatten(ts_values)
+    flat_expected_values, _ = _pytree.tree_flatten(expected_values)
     for ts_value, expected_value in zip(flat_ts_values, flat_expected_values):
         ts_value.setType(torch._C.TensorType.create_from_tensor(expected_value))
 
@@ -184,23 +184,23 @@ def _export_fx_to_ts(fx_module_with_metadata):
     ts_name_to_real_tensor: Dict[
         str, Union[torch.Tensor, Tuple[torch._C.Value, ...]]
     ] = {}
-    #fx_module_with_metadata.print_readable()
+    # fx_module_with_metadata.print_readable()
     for node in fx_module_with_metadata.graph.nodes:
-        #print(f"Export {node}, {node.target}:")
-        #print(g)
+        # print(f"Export {node}, {node.target}:")
+        # print(g)
         if node.op == "placeholder":
             if node.meta["val"] is None:
-              # This input argument is None, which is mapped
-              # to a NULL value in TorchScript type system.
-              v = g.op("prim::Constant")
-              v.setType(torch._C.OptionalType.ofTensor())
+                # This input argument is None, which is mapped
+                # to a NULL value in TorchScript type system.
+                v = g.op("prim::Constant")
+                v.setType(torch._C.OptionalType.ofTensor())
             else:
-              # Input of graph.
-              v = g.addInput(node.name)
-              v.setType(torch._C.TensorType.create_from_tensor(node.meta["val"]))
-              assert (
-                  v is not None
-              ), f"Node creates None with target={node.target} and name={node.name}"
+                # Input of graph.
+                v = g.addInput(node.name)
+                v.setType(torch._C.TensorType.create_from_tensor(node.meta["val"]))
+                assert (
+                    v is not None
+                ), f"Node creates None with target={node.target} and name={node.name}"
             fx_name_to_ts_value[node.name] = v
         elif node.op == "call_function":
             # aten ops and other statless functions.
@@ -236,7 +236,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
                     v is not None
                 ), f"Node creates None with target={node.target}, name={node.name}, args={ts_args}"
                 # Assign type and shape obtained from FakeTensorProp.
-                #_fill_tensor_types(v, node.meta["val"])
+                # _fill_tensor_types(v, node.meta["val"])
                 # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                 # that case, v is a tuple of TorchScript values.
                 fx_name_to_ts_value[node.name] = v
@@ -302,7 +302,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
             else:
                 # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
                 # tensor, etc), we flatten the collection and register each element as output.
-                flat_args, _ = tree_flatten(node.args[0])
+                flat_args, _ = _pytree.tree_flatten(node.args[0])
                 for arg in flat_args:
                     assert isinstance(
                         arg, torch.fx.Node
@@ -340,29 +340,62 @@ def _export_fx_to_ts(fx_module_with_metadata):
             # TODO(wechi): Support get_attr, call_module, call_method.
             raise RuntimeError("Found node type not defined in torch.fx: " + node.op)
 
-    torch._C._jit_pass_onnx_scalar_type_analysis(
-        g, True, 14
-    )
+    torch._C._jit_pass_onnx_scalar_type_analysis(g, True, 14)
 
     return g, ts_name_to_real_tensor
 
 
 def _ts_graph_to_onnx_model_in_protobuf(ts_graph, ts_name_to_real_tensor):
     proto, _, _, _ = ts_graph._export_onnx(
-        ts_name_to_real_tensor,
-        ONNX_GLOBALS.export_onnx_opset_version,
-        {},
-        False,
-        torch.onnx.OperatorExportTypes.ONNX,
-        False,
-        False,
-        {},
-        True,
-        "",
-        {},
+        initializers=ts_name_to_real_tensor,
+        onnx_opset_version=ONNX_GLOBALS.export_onnx_opset_version,
+        dynamic_axes={},
+        defer_weight_export=False,
+        operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
+        strip_doc_string=False,
+        keep_initializers_as_inputs=False,
+        custom_opsets={},
+        add_node_names=True,
+        onnx_file_path="",
+        node_attr_to_name={},
     )
 
     return proto
+
+
+def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *args):
+    # Use this mode to
+    # 1. convert nn.Parameter's in nn.Module to FakeTensor
+    # 2. run FakeTensorProp
+    fake_tensor_mode = fake_tensor.FakeTensorMode()
+
+    def to_fake_tensor(x):
+        if isinstance(x, torch.Tensor) and not isinstance(x, fake_tensor.FakeTensor):
+            return fake_tensor_mode.from_tensor(x)
+        return x
+
+    # "args" are FakeTensor in FakeTensorProp so the parameters and buffers
+    # in model must be converted to FakeTensor as well.
+    fake_parameters_and_buffers = {
+        k: to_fake_tensor(v)
+        for k, v in itertools.chain(
+            decomposed_module.named_parameters(), decomposed_module.named_buffers()
+        )
+    }
+
+    # Shape inference via FakeTensorProp
+    with stateless._reparametrize_module(
+        decomposed_module, fake_parameters_and_buffers
+    ):
+        # Assign output types and shapes to each node.
+        # TODO(wechi): It's possible to get symbolic types (and shapes)
+        # for each node's output. Consider to set "tracing_mode=symbolic"
+        # when calling make_fx and then remove FakeTensorProp below.
+        fake_tensor_prop.FakeTensorProp(decomposed_module, fake_tensor_mode).propagate(
+            *args
+        )
+
+    return decomposed_module
 
 
 def _export(
@@ -376,34 +409,9 @@ def _export(
         # Use default decomposition table.
         decomposition_table = torch._decomp.decomposition_table
     # Apply decomposition table to the input graph.
-    decomposed_module = make_fx(module, decomposition_table)(*args)
+    decomposed_module = proxy_tensor.make_fx(module, decomposition_table)(*args)
 
-    # Use this mode to
-    # 1. convert nn.Parameter's in nn.Module to FakeTensor
-    # 2. run FakeTensorProp
-    fake_tensor_mode = FakeTensorMode()
-
-    def to_fake_tensor(x):
-        if isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor):
-            return fake_tensor_mode.from_tensor(x)
-        return x
-
-    # "args" are FakeTensor in FakeTensorProp so the parameters and buffers
-    # in model must be converted to FakeTensor as well.
-    fake_parameters_and_buffers = {
-        k: to_fake_tensor(v)
-        for k, v in itertools.chain(decomposed_module.named_parameters(), decomposed_module.named_buffers())
-    }
-
-    # Shape inference via FakeTensorProp
-    with stateless._reparametrize_module(
-        decomposed_module, fake_parameters_and_buffers
-    ):
-        # Assign output types and shapes to each node.
-        # TODO(wechi): It's possible to get symbolic types (and shapes)
-        # for each node's output. Consider to set "tracing_mode=symbolic"
-        # when calling make_fx and then remove FakeTensorProp below.
-        FakeTensorProp(decomposed_module, fake_tensor_mode).propagate(*args)
+    decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
 
     ts_graph, ts_initializers = _export_fx_to_ts(decomposed_module)
     # Export TorchScript graph to ONNX ModelProto.
@@ -445,12 +453,15 @@ def export(
 
 
 def export_without_kwargs(
-    fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool = True, **kwargs
+    fn: Union[torch.nn.Module, Callable],
+    *args,
+    use_binary_format: bool = True,
+    **kwargs,
 ):
     if isinstance(fn, torch.nn.Module):
-      signature = inspect.signature(fn.forward)
+        signature = inspect.signature(fn.forward)
     else:
-      signature = inspect.signature(fn)
+        signature = inspect.signature(fn)
 
     # We hope the input kwargs will be mapped to bound.args after binding.
     # If not, we will raise an error.
@@ -465,7 +476,7 @@ def export_without_kwargs(
             self.fn = fn
 
         def forward(self, *args):
-            result, _ = tree_flatten(self.fn(*args))
+            result, _ = _pytree.tree_flatten(self.fn(*args))
             return result
 
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
@@ -475,15 +486,18 @@ def export_without_kwargs(
     # TODO(wechi): There are several symbolic tracing mechanisms to convert
     # nn.Module to FX graph. We should choose the right one after they are
     # matured.
+
     class GraphCaptureCompiler:
         def __init__(self):
             self.captured_graph = None
-            self.captured_graph_count =  0
+            self.captured_graph_count = 0
+
         def compile(self, gm, _):
             assert self.captured_graph_count == 0
             self.captured_graph = gm
             self.captured_graph_count += 1
             return gm
+
     compiler = GraphCaptureCompiler()
     torch._dynamo.optimize(compiler.compile, nopython=True)(Wrapper(fn))(*bound_args)
     torch._dynamo.reset()

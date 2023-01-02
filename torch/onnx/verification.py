@@ -1784,6 +1784,7 @@ def find_mismatch(
 
         return graph_info
 
+
 @_beartype.beartype
 def verify_model_with_fx_to_onnx_exporter(
     model: Union[torch.nn.Module, Callable],
@@ -1801,9 +1802,9 @@ def verify_model_with_fx_to_onnx_exporter(
 
     # Make reference FX model.
     #
-    # We don't directly compare ONNX model with the original one because
-    # Dynamo's FX exporter (used inside ONNX exporter) folds kwargs into
-    # constants so the input schema is changed.
+    # We don't compare ONNX model with the original PyTorch model, but with FX model,
+    # because Dynamo's FX exporter (used inside ONNX exporter) folds kwargs into
+    # constants, the input schema is changed.
     # If we switch to another PyTorch-to-FX exporter in _fx._exporter_module
     # and _fx._exporter_function, this assumption could be broken. To fix,
     # please

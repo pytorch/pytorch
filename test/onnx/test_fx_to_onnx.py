@@ -1,5 +1,5 @@
 # Owner(s): ["module: onnx"]
-import onnx.checker
+import onnx
 import pytorch_test_common
 import torch
 from torch import nn
