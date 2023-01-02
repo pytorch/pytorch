@@ -257,7 +257,6 @@ endif()
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
   set(AT_MKL_SEQUENTIAL 0)
-  set(AT_MKL_MT 0)
   set(USE_BLAS 1)
   if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
@@ -270,10 +269,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(MKL_FOUND)
     if("${MKL_THREADING}" STREQUAL "SEQ")
       set(AT_MKL_SEQUENTIAL 1)
-    endif()
-    if(MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
-      add_definitions(-D_OPENMP_NOFORCE_MANIFEST)
-      set(AT_MKL_MT 1)
     endif()
     set(AT_MKL_ENABLED 1)
   endif()
@@ -1183,59 +1178,27 @@ if(USE_MPI)
 endif()
 
 # ---[ OpenMP
-if(USE_OPENMP)
-  # OpenMP support?
-  set(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
-
-  if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC"
-    AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-    message(STATUS "Setting OpenMP flags for clang-cl")
-    set(OpenMP_CXX_FLAGS "-Xclang -fopenmp")
-    set(OpenMP_C_FLAGS "-Xclang -fopenmp")
-    set(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-    set(OPENMP_FOUND ON CACHE BOOL "OpenMP Support found")
-    if(NOT MKL_FOUND)
-      execute_process(COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_version_output)
-      string(REGEX REPLACE ".*InstalledDir: ([^\n]+).*" "\\1" CLANG_BINDIR ${clang_version_output})
-
-      get_filename_component(CLANG_ROOT ${CLANG_BINDIR} DIRECTORY)
-      set(CLANG_OPENMP_LIBRARY "${CLANG_ROOT}/lib/libiomp5md.lib")
-
-      if(NOT TARGET caffe2::openmp)
-        add_library(caffe2::openmp INTERFACE IMPORTED)
-      endif()
-
-      set_property(
-        TARGET caffe2::openmp PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CLANG_OPENMP_LIBRARY})
-
-      list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::openmp)
-    endif()
-  endif()
-
-  if(WITH_OPENMP AND NOT CHECKED_OPENMP)
-    find_package(OpenMP QUIET)
-    set(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-
-    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
-    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
-    set(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
-  endif()
-
+if(USE_OPENMP AND NOT TARGET caffe2::openmp)
+  include(${CMAKE_CURRENT_LIST_DIR}/Modules/FindOpenMP.cmake)
+  find_package(OpenMP REQUIRED)
   if(OPENMP_FOUND)
     message(STATUS "Adding OpenMP CXX_FLAGS: " ${OpenMP_CXX_FLAGS})
-    if("${OpenMP_CXX_LIBRARIES}" STREQUAL "")
-        message(STATUS "No OpenMP library needs to be linked against")
-    else()
-        message(STATUS "Will link against OpenMP libraries: ${OpenMP_CXX_LIBRARIES}")
+    if(OpenMP_CXX_LIBRARIES)
+      message(STATUS "Will link against OpenMP libraries: ${OpenMP_CXX_LIBRARIES}")
     endif()
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    add_library(caffe2::openmp INTERFACE IMPORTED)
+    target_link_libraries(caffe2::openmp INTERFACE OpenMP::OpenMP_CXX)
+    list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::openmp)
+    if(MSVC AND OpenMP_CXX_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
+      target_compile_definitions(caffe2::openmp INTERFACE _OPENMP_NOFORCE_MANIFEST)
+      target_link_options(caffe2::openmp INTERFACE "/NODEFAULTLIB:vcomp")
+    endif()
   else()
     message(WARNING "Not compiling with OpenMP. Suppress this warning with -DUSE_OPENMP=OFF")
     caffe2_update_option(USE_OPENMP OFF)
   endif()
 endif()
+
 
 
 # ---[ Android specific ones

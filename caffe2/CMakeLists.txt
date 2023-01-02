@@ -6,11 +6,6 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
-# ---[ MSVC OpenMP modification
-if(MSVC)
-  include(../cmake/public/utils.cmake)
-endif()
-
 # Debug messages - if you want to get a list of source files and examine
 # target information, enable the following by -DPRINT_CMAKE_DEBUG_INFO=ON.
 set(PRINT_CMAKE_DEBUG_INFO FALSE CACHE BOOL "print cmake debug information")
@@ -1219,29 +1214,6 @@ if(NOT NO_API)
     $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api/include>)
 endif()
 
-
-if(USE_OPENMP)
-  find_package(OpenMP QUIET)
-endif()
-if(USE_OPENMP AND OPENMP_FOUND)
-  if(MSVC AND OpenMP_CXX_LIBRARIES MATCHES "libiomp5md\\.lib")
-    set(AT_MKL_MT 1)
-  else()
-    set(AT_MKL_MT 0)
-  endif()
-  message(STATUS "pytorch is compiling with OpenMP. \n"
-    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
-    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  if(UNIX)
-    separate_arguments(OpenMP_CXX_OPTIONS UNIX_COMMAND "${OpenMP_CXX_FLAGS}")
-  else()
-    separate_arguments(OpenMP_CXX_OPTIONS WINDOWS_COMMAND "${OpenMP_CXX_FLAGS}")
-  endif()
-  target_compile_options(torch_cpu PRIVATE ${OpenMP_CXX_OPTIONS})
-  target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
-endif()
-
-
 if(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE
     USE_ROCM
@@ -1330,13 +1302,6 @@ if(NOT INTERN_BUILD_MOBILE)
   else()
     target_link_libraries(torch_cpu PUBLIC protobuf::libprotobuf)
   endif()
-endif()
-
-if(USE_OPENMP AND OPENMP_FOUND)
-  message(STATUS "Caffe2 is compiling with OpenMP. \n"
-    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
-    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
 if($ENV{TH_BINARY_BUILD})
@@ -1711,11 +1676,6 @@ if(BUILD_TEST)
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
     target_link_libraries(${test_name} torch_library gtest_main)
-    if(USE_OPENMP)
-      # -fopenmp is a compile time flag and as result not guaranteed
-      # to link executable against OpenMP runtime library
-      target_link_libraries(${test_name} ${OpenMP_CXX_LIBRARIES})
-    endif()
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
