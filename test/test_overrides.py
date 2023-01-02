@@ -760,7 +760,7 @@ class Wrapper:
         val = getattr(self._data, name)
 
         # If it's a method
-        if callable(val):
+        if not isinstance(val, torch.device) and callable(val):
             c = getattr(type(self._data), name)
             # Don't append self to args if classmethod/staticmethod
             if c is val:
