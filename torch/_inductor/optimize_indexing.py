@@ -21,6 +21,10 @@ class ValueRanges(object):
     lower: Union[sympy.Symbol, sympy.Number, int, float, bool]
     upper: Union[sympy.Symbol, sympy.Number, int, float, bool]
 
+    def __contains__(self, x):
+        # TODO This needs to be generalised if lower/upper are sympy.Symbols
+        return self.lower <= x <= self.upper
+
     @classmethod
     def wrap(cls, arg):
         if isinstance(arg, ValueRanges):
@@ -29,34 +33,50 @@ class ValueRanges(object):
         return ValueRanges(arg, arg)
 
     @classmethod
-    def unary_map(cls, x, fn):
+    def increasing_map(cls, x, fn):
         """map lower and upper bound with fn"""
         x = cls.wrap(x)
         return ValueRanges(fn(x.lower), fn(x.upper))
 
     @classmethod
-    def checked_unary_map(cls, x, fn):
-        """check the max and min of computed upper and lower bound for the output"""
-        out = cls.unary_map(x, fn)
-        return ValueRanges(min(out.lower, out.upper), max(out.lower, out.upper))
+    def decreasing_map(cls, x, fn):
+        """map lower bound to upper bound and upper bound to lower bound"""
+        x = cls.wrap(x)
+        return ValueRanges(fn(x.upper), fn(x.lower))
 
     @classmethod
-    def binary_map(cls, x, y, fn):
+    def monotone_map(cls, x, fn):
+        """check the max and min of computed upper and lower bound for the output"""
+        x = cls.wrap(x)
+        l = fn(x.lower)
+        u = fn(x.upper)
+        return ValueRanges(min(l, u), max(l, u))
+
+    @classmethod
+    def convex_min_zero_map(cls, x, fn):
+        """the max is at one of the ends"""
+        x = ValueRanges.wrap(x)
+        if 0 in x:
+            return ValueRanges(0, max(fn(x.lower), fn(x.upper)))
+        else:
+            return cls.monotone_map(x, fn)
+
+    @classmethod
+    def coordinatewise_increasing_map(cls, x, y, fn):
         """map upper and lower bounds accessing corresponding values of inputs"""
         x, y = cls.wrap(x), cls.wrap(y)
-
         return ValueRanges(
             fn(x.lower, y.lower),
             fn(x.upper, y.upper),
         )
 
     @classmethod
-    def binary_map_products(cls, a, b, fn):
+    def coordinatewise_monotone_map(cls, x, y, fn):
         """compute the product of all lower and upper bounds and take min and max"""
-        a, b = cls.wrap(a), cls.wrap(b)
+        x, y = cls.wrap(x), cls.wrap(y)
         products = [
-            fn(x, y)
-            for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper])
+            fn(a, b)
+            for a, b in itertools.product([x.lower, x.upper], [y.lower, y.upper])
         ]
         return ValueRanges(min(products), max(products))
 
@@ -136,77 +156,94 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def reciprocal(x):
-        return ValueRanges.checked_unary_map(x, lambda y: 1 / y)
-
-    @staticmethod
-    def abs(x):
-        return ValueRanges.checked_unary_map(x, abs)
-
-    @staticmethod
-    def neg(x):
-        return ValueRanges.checked_unary_map(x, lambda x: -x)
-
-    @staticmethod
-    def truediv(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.truediv)
-
-    @staticmethod
-    def div(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.truediv)
-
-    @staticmethod
-    def add(a, b):
-        return ValueRanges.binary_map(a, b, operator.add)
-
-    @staticmethod
-    def mul(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.mul)
-
-    @staticmethod
-    def sub(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.sub)
-
-    @staticmethod
-    def exp(x):
-        return ValueRanges.unary_map(x, sympy.functions.elementary.exponential.exp)
+        x = ValueRanges.wrap(x)
+        if 0 in x:
+            return ValueRanges(-math.inf, math.inf)
+        else:
+            return ValueRanges.decreasing_map(x, lambda y: 1 / y)
 
     @staticmethod
     def square(x):
-        return ValueRanges.checked_unary_map(x, lambda y: y * y)
+        return ValueRanges.convex_min_zero_map(x, lambda y: y * y)
+
+    @staticmethod
+    def abs(x):
+        return ValueRanges.convex_min_zero_map(x, lambda y: abs)
+
+    @staticmethod
+    def neg(x):
+        return ValueRanges.decreasing_map(x, lambda x: -x)
+
+    @staticmethod
+    def truediv(a, b):
+        b = ValueRanges.warp(b)
+        if 0 in b:
+            return ValueRanges(-math.inf, math.inf)
+        else:
+            return ValueRangeAnalysis.mul(a, ValueRanges(1 / b.upper, 1 / b.lower))
+
+    @staticmethod
+    def div(a, b):
+        # We give a non-strict bound
+        out = ValueRangeAnalysis.truediv(a, b)
+        floor = sympy.functions.elementary.integers.floor
+        ceil = sympy.functions.elementary.integers.ceiling
+        return ValueRanges(ceil(out.min), floor(out.max))
+
+    @staticmethod
+    def add(a, b):
+        return ValueRanges.coordinatewise_increasing_map(a, b, operator.add)
+
+    @staticmethod
+    def mul(a, b):
+        return ValueRanges.coordinatewise_monotone_map(a, b, operator.mul)
+
+    @staticmethod
+    def sub(a, b):
+        b = ValueRanges.wrap(b)
+        return ValueRangeAnalysis.add(a, ValueRanges(-b.upper, -b.lower))
+
+    @staticmethod
+    def exp(x):
+        return ValueRanges.increasing_map(x, sympy.functions.elementary.exponential.exp)
 
     @staticmethod
     def log(x):
-        return ValueRanges.checked_unary_map(
+        return ValueRanges.increasing_map(
             x, lambda y: -math.inf if y <= 0 else sympy.log(y)
         )
 
     @staticmethod
     def sqrt(x):
-        return ValueRanges.unary_map(x, sympy.sqrt)
+        return ValueRanges.increasing_map(x, sympy.sqrt)
 
     @staticmethod
     def pow(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.pow)
+        return ValueRanges.coordinatewise_monotone_map(a, b, operator.pow)
 
     @staticmethod
     def minimum(a, b):
-        return ValueRanges.binary_map(a, b, min)
+        return ValueRanges.coordinatewise_increasing_map(a, b, min)
 
     @staticmethod
     def maximum(a, b):
-        return ValueRanges.binary_map(a, b, max)
+        return ValueRanges.coordinatewise_increasing_map(a, b, max)
 
     @staticmethod
     def where(a, b, c):
+        b = ValueRanges.wrap(b)
+        c = ValueRanges.wrap(c)
         return ValueRanges(min(b.lower, c.lower), max(b.upper, c.upper))
 
     @staticmethod
     def floor(x):
-        return ValueRanges.unary_map(x, sympy.functions.elementary.integers.floor)
+        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
 
     @staticmethod
     def ceil(x):
-        return ValueRanges.unary_map(x, sympy.functions.elementary.integers.ceiling)
+        return ValueRanges.increasing_map(
+            x, sympy.functions.elementary.integers.ceiling
+        )
 
     def __getattr__(self, name):
         log.warning(f"unhandled ValueRange op {name}")
