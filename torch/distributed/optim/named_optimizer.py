@@ -33,6 +33,8 @@ class _NamedOptimizer(optim.Optimizer):
             `param_groups` to pass to optimizer if specified.
             The key of the inner map needs to be FQNs.
             Default: None
+        module (nn.Module): the module whose parameters to updated
+            by the optimizer.
         args: arguments to pass to the optimizer constructor.
         kwargs: arguments to pass to the optimizer constructor.
 
@@ -239,7 +241,8 @@ class _NamedOptimizer(optim.Optimizer):
                 param_keys.append(self.ordered_param_keys[param_key])  # type: ignore[call-overload]
             new_group_map[_gen_param_group_key(param_keys)] = new_group
         for group_key, new_group in new_group_map.items():
-            # When the conditional training is performed, not all parameters need to be in the param_group.
+            # When not all parameters are used in training or receive gradient, aka., not all parameters
+            # would be in the param_group. Thus we skip the group_key here.
             if group_key not in src_group_map:
                 continue
             src_group = src_group_map[group_key]
@@ -263,11 +266,11 @@ class _NamedOptimizer(optim.Optimizer):
             "add_param_group not supported yet and might be implemented soon."
         )
 
-    def _pre_load_state_dict(self, state_dict) -> None:
+    def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
             return FSDP._load_optim_state_dict_pre_hook(self.module, self._optimizer, state_dict)
         return state_dict
-    
+
     def _post_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
             FSDP._optim_state_dict_post_hook(self.module, self._optimizer, state_dict)

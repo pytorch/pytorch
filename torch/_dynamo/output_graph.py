@@ -40,7 +40,7 @@ from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, LocalSource, ShapeEnvSource, Source
+from .source import ConstantSource, is_constant_source, LocalSource, ShapeEnvSource
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,
@@ -367,16 +367,20 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
 
     def register_attr_or_module(
-        self, target: Union[torch.nn.Module, torch.Tensor, Any], *names, **options
+        self,
+        target: Union[torch.nn.Module, torch.Tensor, Any],
+        *names,
+        **options,
     ):
         if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
-        source: Source = options.get("source", None)
+        assert "source" in options
+        source = options["source"]
         if isinstance(target, torch.Tensor):
-            if source:
+            if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):

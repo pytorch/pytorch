@@ -36,7 +36,7 @@ class C10_API TaskThreadPoolBase {
    */
   virtual bool inThreadPool() const = 0;
 
-  virtual ~TaskThreadPoolBase() noexcept {}
+  virtual ~TaskThreadPoolBase() noexcept = default;
 
   static size_t defaultNumThreads() {
     auto num_threads = std::thread::hardware_concurrency();

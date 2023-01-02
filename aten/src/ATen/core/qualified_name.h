@@ -10,7 +10,7 @@ namespace c10 {
 
 // Represents a name of the form "foo.bar.baz"
 struct QualifiedName {
-  QualifiedName() {}
+  QualifiedName() = default;
 
   // `name` can be a dotted string, like "foo.bar.baz", or just a bare name.
   /* implicit */ QualifiedName(const std::string& name) {

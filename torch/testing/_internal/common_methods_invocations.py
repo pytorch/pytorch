@@ -3764,10 +3764,13 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                               shape(S, rank, False), None, mode, align_corners)
             yield SampleInput(make_arg(shape(D, rank)),
                               shape(L, rank, False), None, mode, align_corners)
-            yield SampleInput(make_arg(shape(D, rank)),
-                              None, 1.7, mode, align_corners)
-            yield SampleInput(make_arg(shape(D, rank)),
-                              None, 0.6, mode, align_corners)
+            for recompute_scale_factor in [False, True]:
+                yield SampleInput(make_arg(shape(D, rank)),
+                                  None, 1.7, mode, align_corners,
+                                  recompute_scale_factor=recompute_scale_factor)
+                yield SampleInput(make_arg(shape(D, rank)),
+                                  None, 0.6, mode, align_corners,
+                                  recompute_scale_factor=recompute_scale_factor)
 
 def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
     N, C = 2, 3
@@ -9566,7 +9569,7 @@ op_db: List[OpInfo] = [
            reference_inputs_func=reference_inputs_diagonal_diag_embed,
            error_inputs_func=error_inputs_diagonal_diag_embed),
     OpInfo('diagonal_scatter',
-           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -10824,6 +10827,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Fails in most cases, passes on LAZY for some reason'), 'TestCommon', 'test_variant_consistency_eager'),  # noqa: B950
                DecorateInfo(unittest.skip('Fails on cuda + rocm'), 'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
                # AssertionError: Tensor-likes are not close! (new_empty_strided.default)
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),)),
@@ -12018,14 +12022,16 @@ op_db: List[OpInfo] = [
                 'TestUnaryUfuncs', device_type='cuda',
             ), ],
     ),
+    # Marked as a Unary function because it has some rather odd broadcasting semantics in its
+    # second argument
     UnaryUfuncInfo(
         'nn.functional.prelu',
-        aten_backward_name='prelu_backward',
+        aten_backward_name='_prelu_kernel_backward',
         ref=lambda x, weight:
             np.maximum(0., x) + np.minimum(0., x) *
             (weight if x.ndim == 1 else weight.reshape([weight.size if i == 1 else 1 for i in range(0, x.ndim)])),
         dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -12038,12 +12044,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_prelu,
         reference_inputs_func=reference_inputs_prelu,
         decorators=[
-            # https://github.com/pytorch/pytorch/issues/89895
-            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-            # FIXME: second derivative is implemented but seems to be incorrect
-            # https://github.com/pytorch/pytorch/issues/68760
-            DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_gradgrad'),
             # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
             # Consider making it a parameter or input, or detaching the gradient
             # https://github.com/pytorch/pytorch/issues/68752
@@ -18436,6 +18436,8 @@ python_ref_db = [
         "_refs.as_strided_scatter",
         torch_opinfo_name="as_strided_scatter",
         supports_nvfuser=False,
+        # returns a view of an intermediate tensor (as_strided)
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",
@@ -18509,6 +18511,8 @@ python_ref_db = [
         torch_opinfo_name="diagonal_scatter",
         supports_out=True,
         supports_nvfuser=False,
+        # returns a view of an intermediate tensor (as_strided)
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.diag_embed",
