@@ -50,7 +50,6 @@ VersionMap = Dict[str, VersionRange]
 # Or from include/crt/host_config.h in the CUDA SDK
 # The second value is the exclusive(!) upper bound, i.e. min <= version < max
 CUDA_GCC_VERSIONS: VersionMap = {
-    '10.2': (MINIMUM_GCC_VERSION, (9, 0)),
     '11.0': (MINIMUM_GCC_VERSION, (10, 0)),
     '11.1': (MINIMUM_GCC_VERSION, (11, 0)),
     '11.2': (MINIMUM_GCC_VERSION, (11, 0)),
@@ -63,7 +62,6 @@ CUDA_GCC_VERSIONS: VersionMap = {
 
 MINIMUM_CLANG_VERSION = (3, 3, 0)
 CUDA_CLANG_VERSIONS: VersionMap = {
-    '10.2': (MINIMUM_CLANG_VERSION, (9, 0)),
     '11.1': (MINIMUM_CLANG_VERSION, (11, 0)),
     '11.2': (MINIMUM_CLANG_VERSION, (12, 0)),
     '11.3': (MINIMUM_CLANG_VERSION, (12, 0)),
@@ -912,6 +910,7 @@ def CppExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
         >>> setup(
@@ -959,6 +958,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         >>> setup(
@@ -1006,14 +1006,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
     To workaround the issue, move python binding logic to pure C++ file.
 
     Example use:
-        >>> # xdoctest: +SKIP
-        >>> #include <ATen/ATen.h>
-        >>> at::Tensor SigmoidAlphaBlendForwardCuda(....)
+        #include <ATen/ATen.h>
+        at::Tensor SigmoidAlphaBlendForwardCuda(....)
 
     Instead of:
-        >>> # xdoctest: +SKIP
-        >>> #include <torch/extension.h>
-        >>> torch::Tensor SigmoidAlphaBlendForwardCuda(...)
+        #include <torch/extension.h>
+        torch::Tensor SigmoidAlphaBlendForwardCuda(...)
 
     Currently open issue for nvcc bug: https://github.com/pytorch/pytorch/issues/69460
     Complete workaround code example: https://github.com/facebookresearch/pytorch3d/commit/cb170ac024a949f1f9614ffe6af1c38d972f7d48
@@ -1037,6 +1035,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> CUDAExtension(
         ...        name='cuda_extension',
         ...        sources=['extension.cpp', 'extension_kernel.cu'],
@@ -1362,6 +1361,7 @@ def load_inline(name,
             causes issues.
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> from torch.utils.cpp_extension import load_inline
         >>> source = """
         at::Tensor sin_add(at::Tensor x, at::Tensor y) {
@@ -2145,7 +2145,7 @@ def _write_ninja_file(path,
         # --generate-dependencies-with-compile was added in CUDA 10.2.
         # Compilation will work on earlier CUDA versions but header file
         # dependencies are not correctly computed.
-        required_cuda_version = packaging.version.parse('10.2')
+        required_cuda_version = packaging.version.parse('11.0')
         has_cuda_version = torch.version.cuda is not None
         if has_cuda_version and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
             cuda_compile_rule.append('  depfile = $out.d')

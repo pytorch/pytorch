@@ -18,7 +18,8 @@ class DiagnosticEngine:
 
     Examples:
         Step 1: Create a set of rules.
-        >>> rules = infra.RuleCollection.from_list(
+        >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
+        >>> rules = infra.RuleCollection.custom_collection_from_list(
         ...     "CustomRuleCollection",
         ...     [
         ...         infra.Rule(
@@ -34,6 +35,7 @@ class DiagnosticEngine:
 
         Step 3: Start a new diagnostic context.
         >>> with engine.create_diagnostic_context("torch.onnx.export", version="1.0") as context:
+        ...     ...
 
         Step 4: Add diagnostics in your code.
         ...     context.diagnose(rules.rule1, infra.Level.ERROR)
