@@ -144,5 +144,7 @@ runs:
         name: usage-log-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
         retention-days: 14
         if-no-files-found: ignore
-        path: usage_log.txt
+        path: |
+          usage_log.txt
+          test/**/*.log
       continue-on-error: true
