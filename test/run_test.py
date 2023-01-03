@@ -472,7 +472,7 @@ def run_test(
     with open(log_path, "w") as f:
         ret_code = shell(command, test_directory, stdout=f, stderr=f, env=env)
     print_log_file(test_module, log_path, failed=(ret_code != 0))
-    os.remove(log_path)
+    # os.remove(log_path)
     return ret_code
 
 
