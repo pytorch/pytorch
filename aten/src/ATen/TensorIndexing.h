@@ -31,7 +31,7 @@ enum class TensorIndexType { None, Ellipsis, Integer, Boolean, Slice, Tensor };
 constexpr c10::nullopt_t None = c10::nullopt;
 
 struct TORCH_API EllipsisIndexType final {
-  EllipsisIndexType() {}
+  EllipsisIndexType() = default;
 };
 TORCH_API extern const EllipsisIndexType Ellipsis;
 
