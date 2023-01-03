@@ -14033,38 +14033,29 @@ for unary_base_func_name in (
     "reciprocal",
     "sigmoid",
     "trunc",
+    "zero",
 ):
     unary_foreach_func_name = f"_foreach_{unary_base_func_name}"
-    add_docstr(
-        getattr(torch, unary_foreach_func_name),
-        r"""
+    if hasattr(torch, unary_foreach_func_name):
+        add_docstr(
+            getattr(torch, unary_foreach_func_name),
+            r"""
 {}(self: List[Tensor]) -> List[Tensor]
 
 Apply :func:`torch.{}` to each Tensor of the input list.
-
-.. note::
-    Only CPU and CUDA are supported. Forward-mode AD is not supported.
-    """.format(
-            unary_foreach_func_name, unary_base_func_name
-        ),
-    )
+            """.format(
+                unary_foreach_func_name, unary_base_func_name
+            ),
+        )
     unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
-    add_docstr(
-        getattr(torch, unary_inplace_foreach_func_name),
-        r"""
+    if hasattr(torch, unary_inplace_foreach_func_name):
+        add_docstr(
+            getattr(torch, unary_inplace_foreach_func_name),
+            r"""
 {}(self: List[Tensor]) -> None
 
-In-place version of :func:`torch.{}`
-    """.format(
-            unary_inplace_foreach_func_name, unary_foreach_func_name
-        ),
-    )
-
-add_docstr(
-    torch._foreach_zero_,
-    r"""
-_foreach_zero_(self: List[Tensor]) -> None
-
-Apply :func:`torch.zero_` to each Tensor of the input list.
-""",
-)
+Apply :func:`torch.{}` to each Tensor of the input list.
+        """.format(
+                unary_inplace_foreach_func_name, unary_base_func_name
+            ),
+        )
