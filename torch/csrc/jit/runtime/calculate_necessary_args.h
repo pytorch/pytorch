@@ -23,7 +23,7 @@ inline std::pair<int64_t, int64_t> CalculateNecessaryArgs(
   if (allow_trailing_out_args) {
     // skip over out arguments in the end.
     while (schema_idx >= 0) {
-      auto current_arg = schema_args.at(schema_idx);
+      const auto& current_arg = schema_args.at(schema_idx);
       if (!current_arg.is_out()) {
         break;
       }
