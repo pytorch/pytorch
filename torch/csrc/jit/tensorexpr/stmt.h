@@ -4,6 +4,7 @@
 #include <list>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -381,7 +382,7 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
     buf_ = buf;
   }
 
-  explicit Allocate(BufPtr buf) : buf_(buf) {}
+  explicit Allocate(BufPtr buf) : buf_(std::move(buf)) {}
 
  private:
   BufPtr buf_;
@@ -417,7 +418,7 @@ class TORCH_API PlacementAllocate : public StmtNode<PlacementAllocate> {
   }
 
   explicit PlacementAllocate(BufPtr buf, BufPtr buf_to_reuse)
-      : buf_(buf), buf_to_reuse_(buf_to_reuse) {}
+      : buf_(std::move(buf)), buf_to_reuse_(std::move(buf_to_reuse)) {}
 
  private:
   BufPtr buf_;
@@ -443,7 +444,7 @@ class TORCH_API Free : public StmtNode<Free> {
     buf_ = buf;
   }
 
-  explicit Free(BufPtr buf) : buf_(buf) {}
+  explicit Free(BufPtr buf) : buf_(std::move(buf)) {}
 
  private:
   BufPtr buf_;
@@ -473,7 +474,7 @@ class TORCH_API Let : public StmtNode<Let> {
     return alloc<Let>(var.node(), val.node());
   }
 
-  Let(VarPtr var, ExprPtr val) : var_(var), val_(val) {}
+  Let(VarPtr var, ExprPtr val) : var_(std::move(var)), val_(std::move(val)) {}
 
   VarPtr var() const {
     return var_;
@@ -544,7 +545,7 @@ class TORCH_API Cond : public StmtNode<Cond> {
   }
 
   Cond(ExprPtr condition, StmtPtr true_stmt, StmtPtr false_stmt)
-      : condition_(condition) {
+      : condition_(std::move(condition)) {
     set_true_stmt(true_stmt);
     set_false_stmt(false_stmt);
   }
@@ -735,7 +736,7 @@ class TORCH_API For : public StmtNode<For> {
   }
 
   For(VarPtr var, ExprPtr start, ExprPtr stop, StmtPtr body)
-      : var_(var), start_(start), stop_(stop) {
+      : var_(std::move(var)), start_(std::move(start)), stop_(std::move(stop)) {
     BlockPtr b = to<Block>(body);
     if (!b) {
       b = alloc<Block>(std::vector<StmtPtr>({body}));
@@ -839,7 +840,9 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AtomicAdd(BufPtr buf, std::vector<ExprPtr> indices, ExprPtr value)
-      : buf_(buf), indices_(std::move(indices)), value_(value) {}
+      : buf_(std::move(buf)),
+        indices_(std::move(indices)),
+        value_(std::move(value)) {}
 
   VarPtr base_handle() const {
     return buf_->base_handle();
@@ -946,7 +949,7 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
       std::string func_name,
       std::vector<BufPtr> buf_args,
       std::vector<ExprPtr> args)
-      : buf_(buf),
+      : buf_(std::move(buf)),
         func_name_(std::move(func_name)),
         buf_args_(std::move(buf_args)),
         args_(std::move(args)) {}

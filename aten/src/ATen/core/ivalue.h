@@ -8,11 +8,12 @@
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/type_factory.h>
 #include <c10/core/SymFloat.h>
+#include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/macros/Export.h>
 #include <typeindex>
+#include <utility>
 
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
@@ -1387,16 +1388,10 @@ struct TORCH_API WeakTypePtr {
 // internal build errors with std::variant :/
 struct WeakOrStrongCompilationUnit {
   explicit WeakOrStrongCompilationUnit(
-      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) {
-    strong_ptr_ = shared_cu;
-    weak_ptr_ = c10::nullopt;
-  }
+      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) : strong_ptr_(std::move(shared_cu)), weak_ptr_(c10::nullopt) {}
 
   explicit WeakOrStrongCompilationUnit(
-      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) {
-    strong_ptr_ = c10::nullopt;
-    weak_ptr_ = weak_cu;
-  }
+      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) : strong_ptr_(c10::nullopt), weak_ptr_(std::move(weak_cu)) {}
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
     TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
@@ -1424,17 +1419,11 @@ struct WeakOrStrongCompilationUnit {
 // Constant in the graph and a Owning reference otherwise
 struct TORCH_API WeakOrStrongTypePtr {
   explicit WeakOrStrongTypePtr(WeakTypePtr weak)
-      : cu_(WeakOrStrongCompilationUnit(weak.cu_)) {
-    type_ = weak.type_;
-  }
+      : cu_(WeakOrStrongCompilationUnit(std::move(weak.cu_))), type_(std::move(weak.type_)) {}
   explicit WeakOrStrongTypePtr(StrongTypePtr strong)
-      : cu_(WeakOrStrongCompilationUnit(strong.cu_)) {
-    type_ = strong.type_;
-  }
+      : cu_(WeakOrStrongCompilationUnit(std::move(strong.cu_))), type_(std::move(strong.type_)) {}
   explicit WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type)
-      : cu_(cu) {
-    type_ = type;
-  }
+      : cu_(std::move(cu)), type_(std::move(type)) {}
   WeakTypePtr asWeakTypePtr() const;
 
   WeakOrStrongCompilationUnit cu_;
