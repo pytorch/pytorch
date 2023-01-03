@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/mps/MPSAllocator.h>
 
@@ -28,32 +29,34 @@ static std::string getUniqueKey(const ScalarType& dtype, const IntArrayRef& base
 }
 
 // dim arg not supported when non consecutive, ie sorted
-NSArray<MPSGraphTensor*> *buildUniqueGraph(const Tensor& self, UniqueCachedGraph *uniqueGraph, const bool return_inverse, const bool return_counts, const bool consecutive, c10::optional<int64_t> dimOpt) {
+std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self, UniqueCachedGraph *uniqueGraph, const bool return_inverse, const bool return_counts, const bool consecutive, c10::optional<int64_t> dimOpt) {
   int64_t dim = dimOpt.has_value() ? maybe_wrap_dim(dimOpt.value(), self.dim()) : 0;
 
   MPSGraph *graph = uniqueGraph->graph();
   MPSGraphTensor *inputTensor = uniqueGraph->inputTensor_;
   MPSShape *shape = [inputTensor shape];
   MPSShape *destShape = shape;
-  NSUInteger length = [shape[dim] integerValue];
+  uint64_t length = [shape[dim] unsignedIntValue];
   MPSDataType dataType = [inputTensor dataType];
 
-  MPSGraphTensor *resultTensor = (MPSGraphTensor *)[NSNull null];
-  MPSGraphTensor *inverseIndicesTensor = (MPSGraphTensor *)[NSNull null];
-  MPSGraphTensor *countTensor = (MPSGraphTensor *)[NSNull null];
-  MPSGraphTensor *lengthTensor = (MPSGraphTensor *)[NSNull null];
+  MPSGraphTensor *resultTensor = nil;
+  MPSGraphTensor *inverseIndicesTensor = nil;
+  MPSGraphTensor *countTensor = nil;
+  MPSGraphTensor *lengthTensor = nil;
   if (length <= 1) {
     // Trivial case, only 1 element everything is unique
     resultTensor = inputTensor;
     lengthTensor = [graph constantWithScalar:0.0f
                                     dataType:MPSDataTypeInt32];
-    if (return_inverse)
+    if (return_inverse) {
       inverseIndicesTensor = [graph constantWithScalar:0.0f
                                               dataType:MPSDataTypeInt32];
-    if (return_counts)
+    }
+    if (return_counts) {
       countTensor = [graph constantWithScalar:1.0f
                                      dataType:MPSDataTypeInt32];
-    return @[resultTensor, inverseIndicesTensor, countTensor, lengthTensor];
+    }
+    return {resultTensor, inverseIndicesTensor, countTensor, lengthTensor};
   }
 
   // Sort only supports following types, cast if necessary
@@ -72,18 +75,23 @@ NSArray<MPSGraphTensor*> *buildUniqueGraph(const Tensor& self, UniqueCachedGraph
                              withShape:@[@-1]
                                   name:nil];
     length = 1;
-    for(NSUInteger i = 0; i < [shape count]; i++)
-      length *= [shape[i] integerValue];
+    for (const auto i: c10::irange([shape count])) {
+      if (c10::mul_overflows(length, [shape[i] unsignedIntValue], &length)) {
+        TORCH_CHECK(false, "RuntimeError: Tensor size overflow");
+      }
+    }
+
     destShape = @[[NSNumber numberWithUnsignedInteger:length]];
   }
 
   MPSGraphTensor *sortedInput = nil;
-  if (consecutive)
+  if (consecutive) {
     sortedInput = inputTensor;
-  else
+  } else {
     sortedInput = [graph sortWithTensor:inputTensor
                                    axis:0
                                    name:nil];
+  }
 
   MPSGraphTensor *frontNMinusOne = [graph sliceTensor:sortedInput
                                             dimension:dim
@@ -105,9 +113,10 @@ NSArray<MPSGraphTensor*> *buildUniqueGraph(const Tensor& self, UniqueCachedGraph
   // If comparing tensors, not scalars, check if entire tensor matches previos element using reductionOr over tensor
   if (dimOpt.has_value() && [shape count] != 1) {
     NSMutableArray *axes = [[NSMutableArray alloc] initWithCapacity:[shape count]-1];
-    for (NSUInteger axis = 0; axis < [shape count]; axis++){
-      if (axis != dim)
+    for (const auto axis : c10::irange([shape count])) {
+      if (axis != dim) {
         [axes addObject:[NSNumber numberWithUnsignedInteger:axis]];
+      }
     }
     mask = [graph reductionOrWithTensor:mask
                                    axes:axes
@@ -151,10 +160,11 @@ NSArray<MPSGraphTensor*> *buildUniqueGraph(const Tensor& self, UniqueCachedGraph
                                                      mode:MPSGraphScatterModeSet
                                                      name:nil];
   // Cast back if necessary
-  if ([uniqueGraph->inputTensor_ dataType] != dataType)
+  if ([uniqueGraph->inputTensor_ dataType] != dataType) {
     resultTensor = [graph castTensor:resultTensor
                               toType:[uniqueGraph->inputTensor_ dataType]
                                 name:@"castResultTensor"];
+  }
 
   // Compute optional returned tensors if requested
   if(return_inverse) {
@@ -191,7 +201,7 @@ NSArray<MPSGraphTensor*> *buildUniqueGraph(const Tensor& self, UniqueCachedGraph
                                                       name:nil];
   }
 
-  return @[resultTensor, inverseIndicesTensor, countTensor, lengthTensor];
+  return {resultTensor, inverseIndicesTensor, countTensor, lengthTensor};
 }
 
 static UniqueCachedGraph* getUniqueGraph(const Tensor& self, const bool return_inverse, const bool return_counts, const bool consecutive, c10::optional<int64_t> dim) {
@@ -215,7 +225,7 @@ static UniqueCachedGraph* getUniqueGraph(const Tensor& self, const bool return_i
            auto inputType = getMPSScalarType(self.scalar_type());
            newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self.sizes()));
 
-           NSArray<MPSGraphTensor *> *outputTensors = buildUniqueGraph(self, newCachedGraph, return_inverse, return_counts, consecutive, dim);
+           auto outputTensors = buildUniqueGraph(self, newCachedGraph, return_inverse, return_counts, consecutive, dim);
 
            newCachedGraph->outputTensor_ = outputTensors[0];
            newCachedGraph->inverseIndicesTensor_ = outputTensors[1];
@@ -308,12 +318,21 @@ _unique_impl_mps(const Tensor& self, const bool return_inverse, const bool retur
   return std::make_tuple(output, inverse_indices, counts);
 }
 
+
+static
+std::tuple<Tensor, Tensor, Tensor> castToMPS(std::tuple<Tensor, Tensor, Tensor> out) {
+  return std::make_tuple(
+    get<0>(out).to("mps"),
+    get<1>(out).to("mps"),
+    get<2>(out).to("mps"));
+}
+
 std::tuple<Tensor, Tensor, Tensor>
 unique_consecutive_mps(const Tensor& self, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: unique_consecutive op is supported natively starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performace implications.");
-    return at::unique_consecutive(self.to("cpu"), return_inverse, return_counts, dim);
+    return castToMPS(at::unique_consecutive(self.to("cpu"), return_inverse, return_counts, dim));
   }
 
   return _unique_impl_mps(self, return_inverse, return_counts, true, dim);
@@ -324,7 +343,7 @@ unique_dim_consecutive_mps(const Tensor& self, int64_t dim, const bool return_in
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: unique_dim_consecutive op is supported natively starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performace implications.");
-    return at::unique_dim_consecutive(self.to("cpu"), dim, return_inverse, return_counts);
+    return castToMPS(at::unique_dim_consecutive(self.to("cpu"), dim, return_inverse, return_counts));
   }
 
   return _unique_impl_mps(self, return_inverse, return_counts, true, c10::make_optional((int64_t)dim));
@@ -335,7 +354,7 @@ _unique2_mps(const Tensor& self, const bool sorted, const bool return_inverse, c
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: _unique2 op is supported natively starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performace implications.");
-    return at::_unique2(self.to("cpu"), sorted, return_inverse, return_counts);
+    return castToMPS(at::_unique2(self.to("cpu"), sorted, return_inverse, return_counts));
   }
 
   return _unique_impl_mps(self, return_inverse, return_counts, false, c10::nullopt);
