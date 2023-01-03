@@ -502,8 +502,8 @@ static inline bool is_expandable_to(
     return false;
   }
   for (const auto i : c10::irange(ndim)) {
-    auto size = shape[ndim - i - 1];
-    auto target = desired[target_dim - i - 1];
+    const auto& size = shape[ndim - i - 1];
+    const auto& target = desired[target_dim - i - 1];
     if (size != target && size != 1) {
       return false;
     }
