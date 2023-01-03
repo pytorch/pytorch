@@ -316,6 +316,37 @@ class TestVmapAPI(TestCase):
         result = vmap(foo, out_dims=(1,))(tensor)
         self.assertEqual(result, expected)
 
+    def test_out_dims_none_tuple(self):
+        def foo(x):
+            return x, 'hello world'
+
+        tensor = torch.randn(2, 3)
+        result = vmap(foo, out_dims=(0, None))(tensor)
+        self.assertEqual(result[1], 'hello world')
+        self.assertIsInstance(result[0], torch.Tensor)
+
+        def foo(x):
+            x.add_(1)
+            return None, 'hello world'
+        result = vmap(foo, out_dims=(None, None))(tensor)
+        self.assertEqual(result, (None, 'hello world'))
+
+
+    def test_out_dims_none(self):
+        def foo(x):
+            return x
+
+        tensor = torch.randn(2, 3)
+        with self.assertRaisesRegex(ValueError, 'can not return a Tensor when out_dim is None'):
+            vmap(foo, out_dims=None)(tensor)
+
+        def foo(x):
+            x.add_(1)
+            return 'hello world'
+        result = vmap(foo, out_dims=None)(tensor)
+        self.assertEqual(result, 'hello world')
+
+
     def test_pytree_returns(self):
         x = torch.randn(2, 3)
 
