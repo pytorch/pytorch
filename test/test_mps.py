@@ -977,8 +977,8 @@ class TestMPS(TestCase):
         res_cpu = torch.norm(b_cpu, float('inf'))
         self.assertEqual(res, res_cpu)
 
-        c = torch.tensor([[1, 2, 3],[-1, 1, 4]] , dtype=torch.float, device="mps")
-        c_cpu = torch.tensor([[1, 2, 3],[-1, 1, 4]] , dtype=torch.float, device="cpu")
+        c = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float, device="mps")
+        c_cpu = torch.tensor([[1, 2, 3], [-1, 1, 4]] , dtype=torch.float, device="cpu")
 
         res = torch.norm(c, dim=0)
         res_cpu = torch.norm(c_cpu, dim=0)
@@ -995,8 +995,8 @@ class TestMPS(TestCase):
         d = torch.arange(8, dtype=torch.float, device="mps").reshape(2, 2, 2)
         d_cpu = torch.arange(8, dtype=torch.float, device="cpu").reshape(2, 2, 2)
 
-        res = torch.norm(d, dim=(1,2))
-        res_cpu = torch.norm(d_cpu, dim=(1,2))
+        res = torch.norm(d, dim=(1, 2))
+        res_cpu = torch.norm(d_cpu, dim=(1, 2))
         self.assertEqual(res, res_cpu)
 
         res = torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
