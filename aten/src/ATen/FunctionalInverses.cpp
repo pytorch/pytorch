@@ -43,7 +43,7 @@ Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool re
   return result;
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, IntArrayRef sizes, bool reapply_views) {
+Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIntArrayRef sizes, bool reapply_views) {
   const auto ndim = sizes.size();
   const auto mask = at::dim_list_to_bitset(dim, ndim);
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
