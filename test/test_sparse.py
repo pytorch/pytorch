@@ -10,7 +10,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
-    parametrize, subtest
+    parametrize, subtest, is_coalesced_indices
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -3421,23 +3421,6 @@ class TestSparse(TestSparseBase):
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
         """
 
-        def check_is_coalesced(s):
-            self.assertTrue(s.is_coalesced())
-
-            indices = s.indices()
-            hash_coeffs = torch.tensor(s.shape[:s.sparse_dim()], device=s.device).cumprod(-1).flip(-1)
-            if s.sparse_dim() > 1:
-                hash_coeffs.unsqueeze_(-1)
-                hash_values = (indices * hash_coeffs).sum(0)
-            else:
-                hash_values = indices * hash_coeffs
-
-            # check if indices are sorted
-            self.assertEqual(hash_values, hash_values.sort()[0])
-
-            # check if there are no repeated indices
-            self.assertEqual(hash_values, hash_values.unique())
-
         def ref_sparse_mm(a, b):
             return a.to_dense() @ b.to_dense()
 
@@ -3479,7 +3462,9 @@ class TestSparse(TestSparseBase):
             # cpp implementation
             r2 = torch.sparse.mm(a, b)
             self.assertEqual(r1, r2.to_dense())
-            check_is_coalesced(r2)
+
+            # Check result is truly coalesced
+            self.assertTrue(r2.is_coalesced() and is_coalesced_indices(r2))
 
             if dtype in [torch.double, torch.cdouble]:
                 a.requires_grad_(True)
@@ -4299,6 +4284,13 @@ class TestSparseAny(TestCase):
                         self.assertEqual(plain_indices.dtype, index_dtype)
                     self.assertEqual(r.values().dtype, dtype)
                 elif r.layout is torch.sparse_coo:
+                    if t.layout is torch.sparse_coo:
+                        self.assertEqual(t.is_coalesced(), r.is_coalesced())
+
+                    # Check r is truly coalesced when r.is_coalesced == True
+                    if r.is_coalesced():
+                        self.assertTrue(is_coalesced_indices(r))
+
                     torch._validate_sparse_coo_tensor_args(r._indices(), r._values(), r.shape)
                     self.assertEqual(r._indices().dtype, torch.int64)
                     self.assertEqual(r._values().dtype, dtype)
