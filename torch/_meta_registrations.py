@@ -397,17 +397,15 @@ def device_hint(tensor) -> "str":
         return "cuda"  # default to cuda
 
 
-@register_meta(aten.convolution.default)
-def meta_conv(
+def calc_conv_nd_return_shape(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
-    bias: torch.Tensor,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    stride: Union[List[int], int],
+    padding: Union[List[int], int],
+    dilation: Union[List[int], int],
     is_transposed: bool,
-    output_padding: List[int],
     groups: int,
+    output_padding: Optional[Union[List[int], int]] = None,
 ):
     def _formula(ln: int, p: int, d: int, k: int, s: int) -> int:
         """
@@ -445,63 +443,77 @@ def meta_conv(
         """
         return (ln - 1) * s - 2 * p + d * (k - 1) + op + 1
 
-    def calc_conv_nd_return_shape(
-        dims: torch.Size,
-        kernel_size: torch.Size,
-        stride: Union[List[int], int],
-        padding: Union[List[int], int],
-        dilation: Union[List[int], int],
-        output_padding: Optional[Union[List[int], int]] = None,
-    ):
-        ret_shape = []
-        if isinstance(stride, IntLike):
-            stride = [stride] * len(dims)
-        elif len(stride) == 1:
-            stride = [stride[0]] * len(dims)
+    kernel_size = weight.shape[2:]
+    dims = input_tensor.shape[2:]
+    if is_transposed:
+        out_channels = groups * weight.shape[1]
+    else:
+        out_channels = weight.shape[0]
+        if weight.shape[1] * groups != input_tensor.shape[1]:
+            raise RuntimeError("Invalid channel dimensions")
 
-        if isinstance(padding, IntLike):
-            padding = [padding] * len(dims)
-        elif len(padding) == 1:
-            padding = [padding[0]] * len(dims)
+    ret_shape = [input_tensor.shape[0], out_channels]
+    if isinstance(stride, IntLike):
+        stride = [stride] * len(dims)
+    elif len(stride) == 1:
+        stride = [stride[0]] * len(dims)
 
-        if isinstance(dilation, IntLike):
-            dilation = [dilation] * len(dims)
-        elif len(dilation) == 1:
-            dilation = [dilation[0]] * len(dims)
+    if isinstance(padding, IntLike):
+        padding = [padding] * len(dims)
+    elif len(padding) == 1:
+        padding = [padding[0]] * len(dims)
 
-        output_padding_list: Optional[List[int]] = None
-        if output_padding:
-            if isinstance(output_padding, IntLike):
-                output_padding_list = [output_padding] * len(dims)
-            elif len(output_padding) == 1:
-                output_padding_list = [output_padding[0]] * len(dims)
-            else:
-                output_padding_list = output_padding
+    if isinstance(dilation, IntLike):
+        dilation = [dilation] * len(dims)
+    elif len(dilation) == 1:
+        dilation = [dilation[0]] * len(dims)
 
-        for i in range(len(dims)):
-            # If output_padding is present, we are dealing with a transposed convolution
-            if output_padding_list:
-                ret_shape.append(
-                    _formula_transposed(
-                        dims[i],
-                        padding[i],
-                        dilation[i],
-                        kernel_size[i],
-                        stride[i],
-                        output_padding_list[i],
-                    )
+    output_padding_list: Optional[List[int]] = None
+    if output_padding:
+        if isinstance(output_padding, IntLike):
+            output_padding_list = [output_padding] * len(dims)
+        elif len(output_padding) == 1:
+            output_padding_list = [output_padding[0]] * len(dims)
+        else:
+            output_padding_list = output_padding
+
+    for i in range(len(dims)):
+        # If output_padding is present, we are dealing with a transposed convolution
+        if output_padding_list:
+            ret_shape.append(
+                _formula_transposed(
+                    dims[i],
+                    padding[i],
+                    dilation[i],
+                    kernel_size[i],
+                    stride[i],
+                    output_padding_list[i],
                 )
-            else:
-                ret_shape.append(
-                    _formula(
-                        dims[i], padding[i], dilation[i], kernel_size[i], stride[i]
-                    )
-                )
-        return ret_shape
+            )
+        else:
+            ret_shape.append(
+                _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
+            )
 
-    def is_channels_last(ten):
-        return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
+    return ret_shape
 
+
+def is_channels_last(ten):
+    return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
+
+
+@register_meta(aten.convolution.default)
+def meta_conv(
+    input_tensor: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    is_transposed: bool,
+    output_padding: List[int],
+    groups: int,
+):
     def pick_memory_format():
         if device_hint(input_tensor) == "cuda":
             if is_channels_last(input_tensor) or is_channels_last(weight):
@@ -514,31 +526,123 @@ def meta_conv(
         elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
             return torch.preserve_format
 
-    kernel_size = weight.shape[2:]
-    dims = input_tensor.shape[2:]
-    if is_transposed:
-        out_channels = groups * weight.shape[1]
+    shape_out = calc_conv_nd_return_shape(
+        input_tensor,
+        weight,
+        stride,
+        padding,
+        dilation,
+        is_transposed,
+        groups,
+        output_padding if is_transposed else None,
+    )
 
-        shape_out = calc_conv_nd_return_shape(
-            dims,
-            kernel_size,
-            stride,
-            padding,
-            dilation,
-            output_padding,
-        )
-
-    else:
-        out_channels = weight.shape[0]
-        if weight.shape[1] * groups != input_tensor.shape[1]:
-            raise RuntimeError("Invalid channel dimensions")
-        shape_out = calc_conv_nd_return_shape(
-            dims, kernel_size, stride, padding, dilation
-        )
-    out = input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
-
+    out = input_tensor.new_empty(shape_out)
     out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
     return out
+
+
+if torch._C.has_mkldnn:
+    _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
+        "mkldnn", "IMPL", "Meta"
+    )
+
+    def pick_mkldnn_conv_memory_format(input_tensor, weight):
+        if weight.is_mkldnn:
+            return torch.channels_last
+        if is_channels_last(input_tensor) or is_channels_last(weight):
+            return torch.channels_last
+        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
+            return torch.contiguous_format
+        elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
+            return torch.preserve_format
+
+    @register_meta(torch.ops.mkldnn._convolution_pointwise.default)
+    def meta_mkldnn_convolution_default(
+        input_tensor,
+        weight,
+        bias,
+        padding,
+        stride,
+        dilation,
+        groups,
+        attr,
+        scalars,
+        algorithm,
+    ):
+        shape_out = calc_conv_nd_return_shape(
+            input_tensor, weight, stride, padding, dilation, False, groups, []
+        )
+        out = input_tensor.new_empty(shape_out)
+        out_memory_format = torch.channels_last
+        out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
+        return out
+
+    @register_meta(torch.ops.mkldnn._convolution_pointwise.binary)
+    def meta_mkldnn_convolution_binary(
+        input_tensor,
+        other,
+        weight,
+        bias,
+        padding,
+        stride,
+        dilation,
+        groups,
+        binary_attr,
+        alpha,
+        unary_attr,
+        unary_scalars,
+        unary_algorithm,
+    ):
+        out = input_tensor.new_empty(other.size())
+        out = out.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
+        return out
+
+    @register_meta(torch.ops.mkldnn._convolution_pointwise_.binary)
+    def meta_mkldnn_convolution_binary_inplace(
+        input_tensor,
+        other,
+        weight,
+        bias,
+        padding,
+        stride,
+        dilation,
+        groups,
+        binary_attr,
+        alpha,
+        unary_attr,
+        unary_scalars,
+        unary_algorithm,
+    ):
+        return other
+
+    @register_meta(torch.ops.mkldnn._linear_pointwise.default)
+    def meta_linear_pointwise_default(
+        input_tensor, weight, bias, attr, scalars, algorithm
+    ):
+        return input_tensor.new_empty((*input_tensor.shape[:-1], weight.shape[0]))
+
+    @register_meta(torch.ops.mkldnn._linear_pointwise.binary)
+    def meta_linear_pointwise_binary(input_tensor, other, weight, bias, attr):
+        out = input_tensor.new_empty(other.size())
+        return out
+
+    if torch._C.has_mkl:
+        _meta_lib_dont_use_me_use_register_meta_for_mkl = torch.library.Library(
+            "mkl", "IMPL", "Meta"
+        )
+
+        @register_meta(torch.ops.mkl._mkl_linear)
+        def meta_mkl_linear(
+            input_tensor,
+            packed_weight,
+            orig_weight,
+            bias,
+            batch_size,
+        ):
+            return input_tensor.new_empty(
+                (*input_tensor.shape[:-1], orig_weight.shape[0])
+            )
 
 
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
@@ -2345,7 +2449,12 @@ def activate_meta():
         }:
             pass
         else:
-            _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
+            if "mkldnn::" in op_overload.name():
+                _meta_lib_dont_use_me_use_register_meta_for_mkldnn.impl(op_overload, fn)
+            elif "mkl::" in op_overload.name():
+                _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
+            else:
+                _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
 
 activate_meta()
