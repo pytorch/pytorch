@@ -2,6 +2,7 @@
 
 #include <torch/csrc/Export.h>
 #include <functional>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -15,7 +16,7 @@ class TORCH_API Tensor {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Tensor(BufPtr buf, const std::vector<VarPtr>& args, ExprPtr body)
-      : buf_(buf) {
+      : buf_(std::move(buf)) {
     stmt_ = constructStmt(args, body, {}, {});
   }
   Tensor(BufHandle buf, const std::vector<VarHandle>& args, ExprHandle body)
@@ -28,7 +29,7 @@ class TORCH_API Tensor {
       const std::vector<ExprPtr>& reduce_dims,
       const std::vector<VarPtr>& reduce_args,
       ExprPtr body)
-      : buf_(buf) {
+      : buf_(std::move(buf)) {
     stmt_ = constructStmt(args, body, reduce_dims, reduce_args);
   }
   Tensor(
@@ -44,7 +45,8 @@ class TORCH_API Tensor {
             VarHandleVectorToVarVector(reduce_args),
             body.node()) {}
 
-  Tensor(BufPtr buf, StmtPtr stmt) : buf_(buf), stmt_(stmt) {}
+  Tensor(BufPtr buf, StmtPtr stmt)
+      : buf_(std::move(buf)), stmt_(std::move(stmt)) {}
 
   BufPtr buf() const {
     return buf_;
