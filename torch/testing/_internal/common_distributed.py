@@ -951,75 +951,25 @@ class MultiThreadedTestCase(TestCase):
             )
 
     def threaded_run_test(self):
-        self.perThreadSetUp()
-
-        try:
-            print(f">>>> threaded run_test, cls tls: {self._tls.precision}")
-            MultiThreadedTestCase.run_test_with_threaded_pg(
-                name=self._current_test_name,
-                timeout=TIMEOUT_DEFAULT,
-                world_size=self.world_size,
-                callback=self._test_method,
-            )
-        finally:
-            self.perThreadTearDown()
-
-    def perThreadSetUp(self):
-        super().setUp()  # TestCase.setUp() calls torch.manual_seed()
-
-    def perThreadTearDown(self):
-        pass
-
-    # @classmethod
-    # def _run(cls, rank: int, test_name: str) -> None:
-    #     self = cls(test_name)
-    #     self.rank = rank
-    #     self.run_test_with_threaded_pg
-
-    @classmethod
-    def run_test_with_threaded_pg(cls, name, timeout, world_size, callback):
-        """
-        Run ``callback`` with ``world_size`` threads using the in-proc process group
-        """
         # Show full C++ stacktraces when a Python error originating from C++ is raised.
         os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
-        # failed_ranks = run_with_threaded_pg(world_size, timeout, callback)
 
+        # install threaded pg to the world_pg
         world = _install_threaded_pg()
-
         def world_is_valid():
             return world == c10d.distributed_c10d._world
 
-        global_store = c10d.HashStore()
-        exception_queue = queue.Queue()
+        if not world_is_valid():
+            raise RuntimeError("Invalid world")
 
-        def worker(rank):
-            if not world_is_valid():
-                raise TimeoutError("Invalid world")  # TODO: raise TimeoutError or RuntimeError?
-            c10d.init_process_group(
-                backend="threaded", rank=rank, world_size=world_size, store=global_store
-            )
-            try:
-                callback()
-            # Exceptions are handled in MultiThreadedTestCase
-            except BaseException as ex:
-                exception_queue.put((rank, sys.exc_info()))
-                world.default_pg.exception_handle(ex)  # trigger _terminate event and awaken worker threads
-            finally:
-                if world_is_valid():
-                    c10d.destroy_process_group()
+        exception_queue = queue.Queue()
+        timeout = TIMEOUT_DEFAULT
+        test_name = self._current_test_name
 
         try:
-            print(f">>>> thread ls: {cls._tls.precision}")
-            threads = [
-                threading.Thread(target=worker, args=(rank,)) for rank in range(world_size)
-            ]
-            for thread in threads:
-                thread.start()
-
-            deadline = time.time() + timeout
-            for idx, thread in enumerate(threads):
-                thread.join(max(0, deadline - time.time()))
+            self._start_threads()
+            for idx, thread in enumerate(self.threads):
+                thread.join(max(0, timeout))
                 if thread.is_alive():
                     exception_queue.put(
                         (
@@ -1052,7 +1002,7 @@ class MultiThreadedTestCase(TestCase):
             exc = exc_info[1]
             if isinstance(exc, unittest.SkipTest):
                 logger.info(
-                    f"Thread {rank} skipping test {name} for following reason: {str(exc)}"
+                    f"Thread {rank} skipping test {test_name} for following reason: {str(exc)}"
                 )
                 if skip_code < 0:
                     skip_code = TEST_SKIPS["generic"].exit_code
@@ -1084,15 +1034,73 @@ class MultiThreadedTestCase(TestCase):
                     if IS_SANDCASTLE:
                         # "pass" the test with an appropriate message.
                         logger.info(
-                            f"Skipping {name} on sandcastle for the following reason: {skip.message}"
+                            f"Skipping {test_name} on sandcastle for the following reason: {skip.message}"
                         )
                         return
                     else:
                         raise unittest.SkipTest(skip.message)
 
+
+        self.perThreadSetUp()
+
+        try:
+            print(f">>>> threaded run_test, cls tls: {self._tls.precision}")
+            MultiThreadedTestCase.run_test_with_threaded_pg(
+                name=self._current_test_name,
+                timeout=TIMEOUT_DEFAULT,
+                world_size=self.world_size,
+                callback=self._test_method,
+            )
+        finally:
+            self.perThreadTearDown()
+
+    def perThreadSetUp(self):
+        super().setUp()  # TestCase.setUp() calls torch.manual_seed()
+
+    def perThreadTearDown(self):
+        pass
+
+    @classmethod
+    def _run(cls, rank: int, test_name: str) -> None:
+        self = cls(test_name)
+        self.rank = rank
+        self.run_test_with_threaded_pg
+
+    def _start_threads(self):
+        self._threads = []
+        for rank in range(self.world_size):
+            t = threading.Thread(target=self._run, args=(rank, self._current_test_name))
+            t.start()
+            logger.info(f"Started thread {rank} with thread id {t.native_id}")
+            self._threads.append(t)
+
+    def run_test_with_threaded_pg(self, test_name, rank, world_size):
+        """
+        Run ``callback`` with ``world_size`` threads using the in-proc process group
+        """
+        global_store = c10d.HashStore()
+        c10d.init_process_group(
+            backend="threaded", rank=rank, world_size=world_size, store=global_store
+        )
+        
+        self.perThreadSetUp()
+
+        def worker(rank):
+            try:
+                callback()
+            # Exceptions are handled in MultiThreadedTestCase
+            except BaseException as ex:
+                exception_queue.put((rank, sys.exc_info()))
+                world.default_pg.exception_handle(ex)  # trigger _terminate event and awaken worker threads
+            finally:
+                if world_is_valid():
+                    c10d.destroy_process_group()
+
+
     @property
     def world_size(self) -> int:
-        raise RuntimeError("world size not implemented")
+        # raise RuntimeError("world size not implemented")
+        return DEFAULT_WORLD_SIZE
 
     @property
     def rank(self) -> int:
