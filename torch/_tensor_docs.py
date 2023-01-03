@@ -4811,6 +4811,15 @@ Example::
 )
 
 add_docstr_all(
+    "untyped_storage",
+    r"""
+untyped_storage() -> torch.UntypedStorage
+
+Returns the underlying :class:`UntypedStorage`.
+""",
+)
+
+add_docstr_all(
     "stride",
     r"""
 stride(dim) -> tuple or int
@@ -5383,7 +5392,7 @@ Example::
            values=tensor([[ 9,  0, 10]]),
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
 
-.. method:: to_sparse(*, layout=None, blocksize=None, n_dense_dim=None) -> Tensor
+.. method:: to_sparse(*, layout=None, blocksize=None, dense_dim=None) -> Tensor
    :noindex:
 
 Returns a sparse tensor with the specified layout and blocksize.  If
@@ -5410,7 +5419,7 @@ Args:
       RuntimeError exception.  A block size must be a tuple of length
       two such that its items evenly divide the two sparse dimensions.
 
-    n_dense_dim (int, optional): Number of dense dimensions of the
+    dense_dim (int, optional): Number of dense dimensions of the
       resulting CSR, CSC, BSR or BSC tensor.  This argument should be
       used only if :attr:`self` is a strided tensor, and must be a
       value between 0 and dimension of :attr:`self` tensor minus two.
@@ -5434,7 +5443,7 @@ Example::
     RuntimeError: to_sparse for Strided to SparseCsr conversion does not use specified blocksize
 
     >>> x = torch.tensor([[[1], [0]], [[0], [0]], [[2], [3]]])
-    >>> x.to_sparse(layout=torch.sparse_csr, n_dense_dim=1)
+    >>> x.to_sparse(layout=torch.sparse_csr, dense_dim=1)
     tensor(crow_indices=tensor([0, 1, 1, 3]),
            col_indices=tensor([0, 0, 1]),
            values=tensor([[1],
@@ -5447,7 +5456,7 @@ Example::
 add_docstr_all(
     "to_sparse_csr",
     r"""
-to_sparse_csr(n_dense_dim=None) -> Tensor
+to_sparse_csr(dense_dim=None) -> Tensor
 
 Convert a tensor to compressed row storage format (CSR).  Except for
 strided tensors, only works with 2D tensors.  If the :attr:`self` is
@@ -5456,7 +5465,7 @@ hybrid CSR tensor will be created.
 
 Args:
 
-    n_dense_dim (int, optional): Number of dense dimensions of the
+    dense_dim (int, optional): Number of dense dimensions of the
       resulting CSR tensor.  This argument should be used only if
       :attr:`self` is a strided tensor, and must be a value between 0
       and dimension of :attr:`self` tensor minus two.
@@ -5470,7 +5479,7 @@ Example::
 
     >>> dense = torch.zeros(3, 3, 1, 1)
     >>> dense[0, 0] = dense[1, 2] = dense[2, 1] = 0
-    >>> dense.to_sparse_csr(n_dense_dim=2)
+    >>> dense.to_sparse_csr(dense_dim=2)
     tensor(crow_indices=tensor([0, 1, 2, 3]),
            col_indices=tensor([0, 2, 1]),
            values=tensor([[[1.]],
@@ -5495,7 +5504,7 @@ and a hybrid CSC tensor will be created.
 
 Args:
 
-    n_dense_dim (int, optional): Number of dense dimensions of the
+    dense_dim (int, optional): Number of dense dimensions of the
       resulting CSC tensor.  This argument should be used only if
       :attr:`self` is a strided tensor, and must be a value between 0
       and dimension of :attr:`self` tensor minus two.
@@ -5509,7 +5518,7 @@ Example::
 
     >>> dense = torch.zeros(3, 3, 1, 1)
     >>> dense[0, 0] = dense[1, 2] = dense[2, 1] = 0
-    >>> dense.to_sparse_csc(n_dense_dim=2)
+    >>> dense.to_sparse_csc(dense_dim=2)
     tensor(ccol_indices=tensor([0, 1, 2, 3]),
            row_indices=tensor([0, 2, 1]),
            values=tensor([[[1.]],
@@ -5525,7 +5534,7 @@ Example::
 add_docstr_all(
     "to_sparse_bsr",
     r"""
-to_sparse_bsr(blocksize, n_dense_dim) -> Tensor
+to_sparse_bsr(blocksize, dense_dim) -> Tensor
 
 Convert a tensor to a block sparse row (BSR) storage format of given
 blocksize.  If the :attr:`self` is strided, then the number of dense
@@ -5539,7 +5548,7 @@ Args:
       length two such that its items evenly divide the two sparse
       dimensions.
 
-    n_dense_dim (int, optional): Number of dense dimensions of the
+    dense_dim (int, optional): Number of dense dimensions of the
       resulting BSR tensor.  This argument should be used only if
       :attr:`self` is a strided tensor, and must be a value between 0
       and dimension of :attr:`self` tensor minus two.
@@ -5578,7 +5587,7 @@ Example::
 add_docstr_all(
     "to_sparse_bsc",
     r"""
-to_sparse_bsc(blocksize, n_dense_dim) -> Tensor
+to_sparse_bsc(blocksize, dense_dim) -> Tensor
 
 Convert a tensor to a block sparse column (BSC) storage format of
 given blocksize.  If the :attr:`self` is strided, then the number of
@@ -5592,7 +5601,7 @@ Args:
       length two such that its items evenly divide the two sparse
       dimensions.
 
-    n_dense_dim (int, optional): Number of dense dimensions of the
+    dense_dim (int, optional): Number of dense dimensions of the
       resulting BSC tensor.  This argument should be used only if
       :attr:`self` is a strided tensor, and must be a value between 0
       and dimension of :attr:`self` tensor minus two.

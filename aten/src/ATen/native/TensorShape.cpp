@@ -2900,11 +2900,11 @@ static inline Tensor sparse_compressed_transpose(
       [&self]() { return self.row_indices(); });
 
   const auto n_batch_dim = compressed_inds.dim() - 1;
-  const auto n_dense_dim = self.dim() - n_batch_dim - 2;
+  const auto dense_dim = self.dim() - n_batch_dim - 2;
 
   // In theory it works, but missing to_dense coverage to test
   TORCH_CHECK(
-      n_dense_dim == 0,
+      dense_dim == 0,
       "transpose(): hybrid sparse compressed tensors with dense dimensions are not supported");
 
   // Classify transpose "type"
@@ -2992,7 +2992,7 @@ static inline Tensor sparse_compressed_transpose(
         // blocked: the blocks are nested under the sparse dims so they must be
         // transposed as well.
         [&]() {
-          return self.values().transpose(-2 - n_dense_dim, -1 - n_dense_dim);
+          return self.values().transpose(-2 - dense_dim, -1 - dense_dim);
         });
   }
   return at::native::_sparse_compressed_tensor_unsafe(

@@ -875,7 +875,7 @@ class TestSparseCompressed(TestCase):
                  base.device != other.device)):
                 return False
             if base.device.type == 'cpu' or base.device.type == 'cuda':
-                if base._storage().data_ptr() != other._storage().data_ptr():
+                if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                     return False
             return True
 
@@ -2980,10 +2980,10 @@ class TestSparseCSR(TestCase):
             for batch_index in np.ndindex(batch_shape):
                 pt_matrix = pt_tensor[batch_index]
                 dense_matrix = dense[batch_index]
-                n_dense_dim = pt_matrix.dim() - 2
+                dense_dim = pt_matrix.dim() - 2
                 dense_matrix_pt = dense_matrix.to_sparse(layout=layout,
                                                          blocksize=blocksize or None,
-                                                         n_dense_dim=n_dense_dim)
+                                                         dense_dim=dense_dim)
                 # sanity check, selecting batch of to_<layout> and dense[batch].to_<layout> should give the same result
                 self.assertEqual(pt_matrix, dense_matrix_pt)
                 check_batch(pt_matrix, dense_matrix, blocksize, **kwargs)
@@ -3032,7 +3032,7 @@ class TestSparseCSR(TestCase):
                 sparse_sizes, blocksizes, batch_sizes, hybrid_sizes):
             dense = _generate_subject(sparse_shape, batch_shape, hybrid_shape)
             if expect_to_layout_support:
-                sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None, n_dense_dim=len(hybrid_shape))
+                sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None, dense_dim=len(hybrid_shape))
                 check_content(sparse, dense, blocksize=blocksize, batch_shape=batch_shape, hybrid_shape=hybrid_shape)
                 if expect_from_layout_support:
                     dense_back = sparse.to_dense()
@@ -3042,7 +3042,7 @@ class TestSparseCSR(TestCase):
                         sparse.to_dense()
             else:
                 with self.assertRaises(RuntimeError):
-                    dense.to_sparse(layout=layout, blocksize=blocksize or None, n_dense_dim=len(hybrid_shape))
+                    dense.to_sparse(layout=layout, blocksize=blocksize or None, dense_dim=len(hybrid_shape))
 
         # special cases for batched tensors
         if batched and expect_to_layout_support:
@@ -3078,7 +3078,7 @@ class TestSparseCSR(TestCase):
             mask = mask.view(mask_shape + (1,) * len(hybrid_shape))
             mask = mask.expand(mask_shape + hybrid_shape)
             dense = dense * mask
-            sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None, n_dense_dim=len(hybrid_shape))
+            sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None, dense_dim=len(hybrid_shape))
             check_content(sparse, dense, blocksize=blocksize, batch_shape=batch_shape, hybrid_shape=hybrid_shape)
 
             if expect_from_layout_support:

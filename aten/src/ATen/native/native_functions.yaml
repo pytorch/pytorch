@@ -4654,22 +4654,20 @@
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
-  dispatch:
-    MkldnnCPU: mkldnn_prelu
-    CPU: prelu_cpu
-    CUDA: prelu_cuda
-    MPS: prelu_mps
-    QuantizedCPU: prelu_quantized_cpu
   autogen: prelu.out
 
-- func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
-  variants: function, method
+- func: _prelu_kernel(Tensor self, Tensor weight) -> Tensor
   dispatch:
+    CPU, CUDA: _prelu_kernel
+    QuantizedCPU: _prelu_kernel_quantized_cpu
+    MkldnnCPU: mkldnn_prelu
+    MPS: prelu_mps
+
+- func: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
+  dispatch:
+    CPU, CUDA: _prelu_kernel_backward
     MkldnnCPU: mkldnn_prelu_backward
-    CPU: prelu_backward_cpu
-    CUDA: prelu_backward_cuda
     MPS: prelu_backward_mps
-  autogen: prelu_backward.out
 
 - func: gelu.out(Tensor self, *, str approximate='none', Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -6208,10 +6206,6 @@
   dispatch:
     CPU, CUDA: frexp_out
   tags: pointwise
-# Deprecated (v.1.12)
-
-- func: frobenius_norm(Tensor self) -> Tensor
-  variants: function
 
 # Deprecated (v.1.12)
 - func: frobenius_norm.dim(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
@@ -6798,7 +6792,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
   autogen: to_sparse.sparse_dim_out
 
-- func: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? n_dense_dim=None) -> Tensor
+- func: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse
@@ -6806,7 +6800,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
   autogen: to_sparse.out
 
-- func: to_sparse_csr(Tensor self, int? n_dense_dim=None) -> Tensor
+- func: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_csr
@@ -6814,7 +6808,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_csr
   autogen: to_sparse_csr.out
 
-- func: to_sparse_csc(Tensor self, int? n_dense_dim=None) -> Tensor
+- func: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_csc
@@ -6822,7 +6816,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_csc
   autogen: to_sparse_csc.out
 
-- func: to_sparse_bsr(Tensor self, int[2] blocksize, int? n_dense_dim=None) -> Tensor
+- func: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_bsr
@@ -6830,7 +6824,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_bsr
   autogen: to_sparse_bsr.out
 
-- func: to_sparse_bsc(Tensor self, int[2] blocksize, int? n_dense_dim=None) -> Tensor
+- func: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_bsc
