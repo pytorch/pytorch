@@ -130,20 +130,24 @@ def _create_batched_inputs(
                       for in_dim, arg in zip(flat_in_dims, flat_args)]
     return tree_unflatten(batched_inputs, args_spec)
 
+
+def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_dim):
+    if out_dim is None:
+        return batched_output
+
+    if not isinstance(batched_output, torch.Tensor):
+        raise ValueError(f'vmap({name}, ...): `{name}` must only return '
+                         f'Tensors, got type {type(batched_output)} as a return.')
+
+    return _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)
+
+
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
-
-
 def _unwrap_batched(
         batched_outputs: Union[Tensor, Tuple[Tensor, ...]],
         out_dims: out_dims_t,
         vmap_level: int, batch_size: int, func: Callable) -> Tuple:
     flat_batched_outputs, output_spec = tree_flatten(batched_outputs)
-
-    for out in flat_batched_outputs:
-        if isinstance(out, torch.Tensor):
-            continue
-        raise ValueError(f'vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return '
-                         f'Tensors, got type {type(out)} as a return.')
 
     def incompatible_error():
         raise ValueError(
@@ -159,34 +163,39 @@ def _unwrap_batched(
             flat_out_dims = [out_dims]
         elif isinstance(out_dims, tuple) and len(out_dims) == 1:
             flat_out_dims = out_dims
-            out_dims = out_dims[0]
+        elif out_dims is None:
+            flat_out_dims = [out_dims]
         else:
             incompatible_error()
     else:
         flat_out_dims = _broadcast_to_and_flatten(out_dims, output_spec)
+        print("flat_out_dims", flat_out_dims)
         if flat_out_dims is None:
+            print("out_dims, output_spec", out_dims, output_spec)
             incompatible_error()
 
     flat_outputs = [
-        _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)
+        _maybe_remove_batch_dim(_get_name(func), batched_output, vmap_level, batch_size, out_dim)
         for batched_output, out_dim in zip(flat_batched_outputs, flat_out_dims)
     ]
     return tree_unflatten(flat_outputs, output_spec)
 
 
-def _check_int(x, func, out_dims):
+def _check_int_or_none(x, func, out_dims):
     if isinstance(x, int):
+        return
+    if x is None:
         return
     raise ValueError(
         f'vmap({_get_name(func)}, ..., out_dims={out_dims}): `out_dims` must be '
-        f'an int or a python collection of ints representing where in the outputs the '
+        f'an int, None or a python collection of ints representing where in the outputs the '
         f'vmapped dimension should appear.')
 
 
 def _check_out_dims_is_int_or_int_pytree(out_dims: out_dims_t, func: Callable) -> None:
     if isinstance(out_dims, int):
         return
-    tree_map_(partial(_check_int, func=func, out_dims=out_dims), out_dims)
+    tree_map_(partial(_check_int_or_none, func=func, out_dims=out_dims), out_dims)
 
 
 def _get_name(func: Callable):
