@@ -722,6 +722,7 @@ unary_modules_map = {
     nn.Sigmoid: UnaryAttr("sigmoid"),
     nn.Tanh: UnaryAttr("tanh"),
     nn.Hardswish: UnaryAttr("hardswish"),
+    nn.Hardsigmoid: UnaryAttr("hardsigmoid"),
     nn.LeakyReLU: UnaryAttr("leaky_relu", scalars_attr=["negative_slope"]),
     nn.Hardtanh: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
     nn.GELU: UnaryAttr("gelu", algorithm_attr="approximate"),
