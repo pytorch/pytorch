@@ -36,6 +36,7 @@ class ShardingPlan(object):
       Suppose we want to shard a module with two linear layers and then run it with DDP, we also
       want to convert the output of the second linear layer back to DDP, we can do it as follows:
 
+        >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
         >>> class MyModule(nn.Module):
         >>>     def __init__(self):
         >>>        super().__init__()
