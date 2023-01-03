@@ -504,6 +504,10 @@ class Tensor(torch._C._TensorBase):
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.
 
+        .. note::
+            See :ref:`backward-hooks-execution` for more information on how when this hook
+            is executed, and how its execution is ordered relative to other hooks.
+
         Example::
 
             >>> v = torch.tensor([0., 0., 0.], requires_grad=True)
