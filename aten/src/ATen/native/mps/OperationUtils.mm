@@ -87,6 +87,30 @@ std::string getMPSTypeString(ScalarType scalar_type) {
   }
 }
 
+NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
+  int64_t ndim = t.dim();
+  auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
+  for (const auto i: c10::irange(ndim)) {
+    axes[i] = [NSNumber numberWithInteger:i];
+  }
+  return axes;
+}
+
+NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim) {
+  if (dim.has_value() && dim.value().size() != 0) {
+    IntArrayRef dimValues = dim.value();
+    int ndim = dimValues.size();
+    auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
+    for (const auto i: c10::irange(ndim)) {
+      axes[i] = [NSNumber numberWithInteger:dimValues[i]];
+    }
+
+    return axes;
+  }
+
+  return getTensorAxes(t);
+}
+
 std::string getMPSShapeString(MPSShape* shape) {
     std::string str;
     for(NSNumber *elem in shape) {
