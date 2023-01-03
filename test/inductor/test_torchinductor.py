@@ -342,6 +342,7 @@ def check_model(
         self.assertEqual(
             actual,
             correct,
+            msg="inductor: {}, correct: {}".format(actual, correct),
             atol=atol,
             rtol=rtol,
             equal_nan=True,
