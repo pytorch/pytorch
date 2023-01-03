@@ -4330,9 +4330,19 @@ def linspace(
 
     # Perform in arange in int for exactness, so that out[0] == start, out[-1] == end
     rg = torch.arange(0, steps, **factory_kwargs)  # type: ignore[arg-type]
-    double_dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
-    rg = _maybe_convert_to_dtype(rg, double_dtype)  # type: ignore[assignment]
-    out = rg * ((end - start) / (steps - 1)) + start
+
+    # Small types need to be computed in higher precision as this is, at heart, an associative scan
+    dtype_red = (
+        torch.int64
+        if (utils.is_boolean_dtype(dtype) or utils.is_integer_dtype(dtype))
+        else dtype
+    )
+    computation_dtype, _ = utils.reduction_dtypes(
+        rg, REDUCTION_OUTPUT_TYPE_KIND.SAME, dtype_red
+    )
+
+    cast = partial(torch.full, (1,), dtype=computation_dtype, **factory_kwargs)
+    out = rg * cast((end - start) / (steps - 1)) + cast(start)
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
