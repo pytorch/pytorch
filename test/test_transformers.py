@@ -1330,6 +1330,34 @@ class TestTransformers(NNTestCase):
                 _ = torch.nn.functional._scaled_dot_product_attention(
                     q, k, v, None, 0.0, False, False)
 
+    @parametrize("device", device_list)
+    @slowTest
+    def test_train_with_is_causal(self, device):
+        iters = 100
+        layer = nn.TransformerEncoderLayer(
+            d_model=2,
+            dim_feedforward=4,
+            nhead=2,
+            batch_first=True,
+            activation="gelu",
+            dropout=0,
+        )
+        criterion = nn.MSELoss()
+        encoder = nn.TransformerEncoder(layer, 2).to(device)
+        optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
+        encoder.train()
+        for i in range(iters):
+            encoder.train()
+            optimizer.zero_grad()
+            inputs = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
+
+            outputs = encoder(inputs, is_causal=True)
+
+            loss = criterion(outputs[:, 0:2, :], inputs[:, 0:2, :])
+            loss.backward()
+            optimizer.step()
+
+
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
 instantiate_parametrized_tests(TestTransformers)
