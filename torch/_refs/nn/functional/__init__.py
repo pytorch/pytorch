@@ -58,7 +58,7 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
-aten = torch.ops.aten
+aten = torch._ops.ops.aten
 
 
 def _dropout_helper(

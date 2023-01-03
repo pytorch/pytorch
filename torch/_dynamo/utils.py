@@ -37,9 +37,7 @@ from torch.utils._pytree import tree_flatten, tree_map
 from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = (
-    "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
-)
+troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 

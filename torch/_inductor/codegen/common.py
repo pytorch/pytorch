@@ -363,7 +363,7 @@ class CSEVariable:
     def __eq__(self, other) -> bool:
         return type(other) == type(self) and other.name == self.name
 
-    def update_on_args(self, args, kwargs):
+    def update_on_args(self, name, args, kwargs):
         pass
 
 
@@ -388,6 +388,7 @@ class CSE:
         iter_buffers=None,
         store_cache=None,
         reduction_cache=None,
+        varname_map=None,
     ):
         self.prefix = prefix
         self.suffix = suffix
@@ -397,7 +398,7 @@ class CSE:
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
         self.invalidated_stores = set()
-        self.varname_map = {}
+        self.varname_map = varname_map or {}
 
     def invalidate(self, keep_vars: typing.Set[str]):
         for name, tmp in list(self.store_cache.items()):
@@ -407,12 +408,14 @@ class CSE:
         self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
 
     def clone(self):
+        # Note(fdrocha): reduction_cache is not being cloned, not sure if this is intentional
         return CSE(
-            self.prefix,
-            self.suffix,
-            self.name_prefix,
-            self.iter_buffer_ids,
-            self.store_cache,
+            prefix=self.prefix,
+            suffix=self.suffix,
+            name_prefix=self.name_prefix,
+            iter_buffers=self.iter_buffer_ids,
+            store_cache=self.store_cache,
+            varname_map=self.varname_map,
         )
 
     def generate(
@@ -522,7 +525,7 @@ class Kernel(CodeGen):
                     csevar = self.cse.generate(
                         self.compute, getattr(parent_handler, name)(*args, **kwargs)
                     )
-                    csevar.update_on_args(args, kwargs)
+                    csevar.update_on_args(name, args, kwargs)
                     return csevar
 
                 return inner

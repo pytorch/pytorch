@@ -2942,7 +2942,7 @@ torch.cuda.synchronize()
                     ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
                      int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
                      torch.cuda.get_device_capability() < (8, 0))
-                should_error_from_not_implemented = should_error_from_cudnn or 'prelu' in op or 'thnn' in op \
+                should_error_from_not_implemented = should_error_from_cudnn or 'thnn' in op \
                     or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
                 if not skip_test:
                     if should_error_from_not_implemented:
