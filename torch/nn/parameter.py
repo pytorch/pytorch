@@ -52,9 +52,14 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         if id(self) in memo:
             return memo[id(self)]
         else:
-            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad)
+            # Redispatch to Tensor.__deepcopy__() to get proper view handling.
+            # See https://github.com/pytorch/pytorch/issues/79788
+            result = type(self)(super().__deepcopy__(memo), self.requires_grad)
             memo[id(self)] = result
             return result
+
+    def new_empty(self, shape, *args, **kwargs):
+        return type(self)(super().new_empty(shape, *args, **kwargs))
 
     def __repr__(self):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()

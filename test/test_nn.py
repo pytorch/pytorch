@@ -187,6 +187,29 @@ class TestNN(NNTestCase):
         for b in net.buffers():
             self.assertTrue(b.storage().is_shared())
 
+    def test_param_deepcopy_preserves_view_relationships(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                t = torch.randn(3)
+                self.p1 = torch.nn.Parameter(t)
+                self.p2 = torch.nn.Parameter(t)
+
+        net = Net()
+        self.assertTrue(net.p1.storage().data_ptr() == net.p2.storage().data_ptr())
+
+        # Copy's parameters should reference the same storage.
+        net_copy = deepcopy(net)
+        self.assertTrue(net_copy.p1.storage().data_ptr() == net_copy.p2.storage().data_ptr())
+
+    def test_param_new_empty(self):
+        # Parmeter.new_empty should return a parameter
+        x = nn.Parameter(torch.randn(3, dtype=torch.float))
+        y = x.new_empty(4, 4, dtype=torch.double)
+        self.assertTrue(isinstance(y, nn.Parameter))
+        self.assertEqual(y.shape, [4, 4])
+        self.assertEqual(y.dtype, torch.double)
+
     def test_to(self):
         m = nn.Linear(3, 5)
         self.assertIs(m, m.to('cpu'))
