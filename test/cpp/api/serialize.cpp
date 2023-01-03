@@ -293,7 +293,7 @@ TEST(SerializeTest, MathBits) {
     // We don't support serializing `ZeroTensor` as it is not public facing yet.
     // If in future, `ZeroTensor` serialization is supported, this test should
     // start failing!
-    auto t = torch::_efficientzerotensor({5, 5});
+    auto t = torch::_efficientzerotensor({5, 5}, false);
     ASSERT_THROWS_WITH(save_and_load(t), "ZeroTensor is not serializable,");
   }
 }
