@@ -2393,6 +2393,17 @@ def error_inputs_masked_select(op_info, device, **kwargs):
                      error_type=RuntimeError,
                      error_regex='unsupported operation')
 
+def error_inputs_median(op_info, device, **kwargs):
+    x = torch.tensor([[[[[[[[[[[[[[[[[[[[[[[[[nan],
+                               [nan]]]]]]]]]]]]]]]]]]]]]]]]], device=device)
+    if device == 'cuda':
+        yield ErrorInput(SampleInput(x, kwargs=dict(dim=(-1))),
+                         error_type=RuntimeError,
+                         error_regex='CUDA Tensors cannot have more than 25 dimensions')
+    else:
+        return
+
+
 def error_inputs_index_select(op_info, device, **kwargs):
     x = torch.rand((1, 6), device=device).expand((2, 6))
     y = torch.rand((3, 6), device=device)
@@ -10322,6 +10333,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           error_inputs_func=error_inputs_median,
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16),
@@ -16060,6 +16072,13 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
            skips=(
+               # MPS has some mild accuracy issues for float16. We divide the tolerances by 10
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=1e-4, rtol=0.01)}),
+                   'TestConsistency',
+                   'test_output_match',
+
+               ),
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
                DecorateInfo(
                    unittest.skip("Skipped!"),
