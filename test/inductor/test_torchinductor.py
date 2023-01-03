@@ -107,6 +107,7 @@ unary_list = [
     torch.nn.GELU(approximate="tanh"),
     torch.nn.ReLU6(),
     torch.nn.SiLU(),
+    torch.nn.Hardsigmoid()
     lambda x: F.relu(x),
     lambda x: F.sigmoid(x),
     lambda x: F.tanh(x),
@@ -117,6 +118,7 @@ unary_list = [
     lambda x: F.gelu(x, approximate="tanh"),
     lambda x: F.relu6(x),
     lambda x: F.silu(x),
+    lambda x: F.hardsigmoid(x),  
 ]
 
 
