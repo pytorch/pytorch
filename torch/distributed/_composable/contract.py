@@ -41,6 +41,7 @@ def contract(state_cls: Type[_State] = _State):
     ``func.state(module)``.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> import torch.nn as nn
         >>>
         >>> class MyModel(nn.Module):
