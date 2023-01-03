@@ -407,7 +407,10 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
 Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
   auto tmp = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard;
-    return at::alias(self);
+    auto result = at::alias(self);
+    auto is_wrapped_number = self.unsafeGetTensorImpl()->is_wrapped_number();
+    result.unsafeGetTensorImpl()->set_wrapped_number(is_wrapped_number);
+    return result;
   })();
   std::function<at::Tensor(const at::Tensor&)> func = nullptr;
   if (!self.unsafeGetTensorImpl()->support_as_strided()) {
