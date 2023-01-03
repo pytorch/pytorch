@@ -345,8 +345,18 @@ def _export_fx_to_ts(fx_module_with_metadata):
             raise RuntimeError("Found node type not defined in torch.fx: " + node.op)
 
     torch._C._jit_pass_onnx_scalar_type_analysis(
-        g, True, ONNX_GLOBALS.export_onnx_opset_version
+        g, lowprecision_cast=True, opset_version=ONNX_GLOBALS.export_onnx_opset_version
     )
+
+    # When replace aten with onnx ops, the node-level shape type inference uses
+    # ConstantValueMap which will not be cleared up until graph-level
+    # shape type inference, and could be a bug. node/graph level inference should be both applied.
+    # TODO(titaiwang): If onnx shape type inference is intended to be deprecated in converter.
+    # node-level shape type inference should be also deprecated as well in g.op
+    if ONNX_GLOBALS.onnx_shape_inference:
+        torch._C._jit_pass_onnx_graph_shape_type_inference(
+            g, params_dict={}, opset_version=ONNX_GLOBALS.export_onnx_opset_version
+        )
 
     return g, ts_name_to_real_tensor
 
