@@ -553,7 +553,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("resize_", resize__plumbing);
   VMAP_SUPPORT2(select, int, select_batching_rule);
   VMAP_SUPPORT(squeeze, squeeze_batch_rule);
-  VMAP_SUPPORT2(squeeze, dim, squeeze_dims_batch_rule);
+  VMAP_SUPPORT2(squeeze, dim, squeeze_dim_batch_rule);
+  VMAP_SUPPORT2(squeeze, dims, squeeze_dims_batch_rule);
   VMAP_SUPPORT(_reshape_alias, _reshape_alias_batch_rule);
   VMAP_SUPPORT(roll, roll_batch_rule);
   VMAP_SUPPORT(permute, permute_batching_rule);
