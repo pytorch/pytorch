@@ -70,6 +70,9 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Setup SSH (Click me for login details)
+        uses: chkimes/actions-ssh@v0.1
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
