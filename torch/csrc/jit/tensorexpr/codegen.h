@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -19,7 +21,7 @@ class TORCH_API CodeGen {
   template <typename... Ts>
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CodeGen(StmtPtr stmt, Ts... ts)
-      : stmt_(stmt), buffer_args_({BufferArg(ts)...}) {}
+      : stmt_(std::move(stmt)), buffer_args_({BufferArg(ts)...}) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CodeGen(

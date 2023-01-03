@@ -495,10 +495,11 @@ static void _save_variables(
       bool is_output = tensor.grad_fn().get() == cdata_ptr.get();
       self->saved_variables.emplace_back(tensor, is_output);
     } else {
-      throw torch::TypeError(
-          "save_for_backward can only save variables, but argument %ld is of "
-          "type %s",
+      TORCH_CHECK_TYPE(
+          false,
+          "save_for_backward can only save variables, but argument ",
           i,
+          " is of type ",
           Py_TYPE(obj)->tp_name);
     }
   }
