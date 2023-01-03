@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -164,9 +165,9 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
       : ExprNodeBase(body->dtype()),
         body_(body),
         reduce_args_(std::move(reduce_args)),
-        result_buf_(result_buf),
-        acc_buf_(acc_buf),
-        ri_operand_(ri_operand),
+        result_buf_(std::move(result_buf)),
+        acc_buf_(std::move(acc_buf)),
+        ri_operand_(std::move(ri_operand)),
         reducer_(reducer) {}
 
   static ExprHandle make(

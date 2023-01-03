@@ -39,6 +39,8 @@ namespace {
 // since the algorithm requires sync between omp threads, which can not be perfectly
 // mapped to `at::parallel_for` at the current stage.
 //
+// TODO: fix dependency of radix sort with fbgemm_gpu and use `fbgemm::radix_sort_parallel`
+// directly, and remove this file.
 
 // histogram size per thread
 constexpr int RDX_HIST_SIZE = 256;

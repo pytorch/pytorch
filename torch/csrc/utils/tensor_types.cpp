@@ -103,9 +103,7 @@ at::TensorOptions options_from_string(const std::string& str) {
   }
 
   auto it = map->find(str);
-  if (it == map->end()) {
-    throw ValueError("invalid type: '%s'", str.c_str());
-  }
+  TORCH_CHECK_VALUE(it != map->end(), "invalid type: '", str, "'");
   return it->second->options();
 }
 
@@ -136,7 +134,7 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
           (backend == Backend::SparseCUDA || backend == Backend::SparseCPU)) {
         continue;
       }
-      ret.emplace_back(std::make_pair(backend, scalar_type));
+      ret.emplace_back(backend, scalar_type);
     }
   }
 
