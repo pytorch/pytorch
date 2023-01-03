@@ -8433,7 +8433,7 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
                     supports_forward_ad=True,
-                    supports_rhs_python_scalar=True,
+                    supports_rhs_python_scalar=False,
                     supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
@@ -8444,13 +8444,15 @@ op_db: List[OpInfo] = [
                                      device_type='cuda'),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        # test error disabled since rhs non-tensor python scalar is supported
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
                     )),
     BinaryUfuncInfo('clamp_min',
                     ref=_clamp_min_numpy,
                     dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
                     supports_forward_ad=True,
-                    supports_rhs_python_scalar=True,
+                    supports_rhs_python_scalar=False,
                     supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
@@ -8461,6 +8463,8 @@ op_db: List[OpInfo] = [
                                      device_type='cuda'),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        # test error disabled since rhs non-tensor python scalar is supported
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
@@ -18198,11 +18202,19 @@ python_ref_db = [
         "_refs.clamp_min",
         torch_opinfo_name="clamp_min",
         supports_nvfuser=False,
+        skips=(
+            # test error disabled since rhs non-tensor python scalar is supported
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_max",
         torch_opinfo_name="clamp_max",
         supports_nvfuser=False,
+        skips=(
+            # test error disabled since rhs non-tensor python scalar is supported
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.clamp",
