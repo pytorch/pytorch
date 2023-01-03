@@ -24,6 +24,7 @@ import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
+from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
@@ -1185,12 +1186,13 @@ class BenchmarkRunner:
                 new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
-                if self.args.ci and (
-                    (
-                        isinstance(e, RuntimeError)
-                        and "Internal Triton PTX codegen error" in str(e)
+                if (
+                    self.args.ci
+                    and isinstance(e, BackendCompilerFailed)
+                    and (
+                        "Internal Triton PTX codegen error" in str(e)
+                        or "cubin" in str(e)
                     )
-                    or (isinstance(e, KeyError) and "cubin" in str(e))
                 ):
                     accuracy_status = "pass_due_to_skip"
                     return record_status(accuracy_status)
