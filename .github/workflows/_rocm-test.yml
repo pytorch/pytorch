@@ -72,6 +72,8 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: chkimes/actions-ssh@v0.1
+        with:
+          sshUser: huydo
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
