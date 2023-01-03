@@ -4,6 +4,14 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_segment_reduce_backward_native.h>
+#include <ATen/ops/segment_reduce_native.h>
+#endif
+
 namespace at {
 namespace native {
 
