@@ -11,12 +11,12 @@ import types
 from typing import Any, Optional, Union
 
 import numpy as np
-from functorch.experimental.ops import PyOperator
 
 import torch
 
 from torch import SymInt
 from torch._guards import GuardSource
+from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
@@ -157,6 +157,7 @@ class VariableBuilder:
         tx,
         source: Source,
     ):
+        assert source is not None
         super(VariableBuilder, self).__init__()
         self.tx = tx
         self.source = source
@@ -584,7 +585,7 @@ class VariableBuilder:
             return self.tx.output.register_attr_or_module(
                 value,
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                source=None,
+                source=self.get_source(),
                 # Guards are added inside register_attr_or_module
             )
 
@@ -659,11 +660,12 @@ class VariableBuilder:
                 and not is_constant_source(self.get_source())
             ):
                 shape_env = self.tx.output.shape_env
-                sname = self.source.name()
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, sname=sname)
+                    shape_env.create_symbol(value, source=self.source)
                 )
-                self.tx.output.tracked_fakes.append(TrackedFake(wrapped_value, sname))
+                self.tx.output.tracked_fakes.append(
+                    TrackedFake(wrapped_value, self.source)
+                )
                 # TODO: Do float
             else:
                 # TODO: Eliminate this case entirely
@@ -792,12 +794,8 @@ def wrap_fx_proxy_cls(
                 "ignore_subclass": ignore_subclass,
                 "is_tensor": target_cls is TensorVariable,
             }
-            assert "source" in options
-            if options["source"] is None:
-                kwargs["static_shapes"] = True
-                kwargs["sname"] = "__constant_illegal_sname"
-            else:
-                kwargs["sname"] = options["source"].name()
+            assert "source" in options and options["source"] is not None
+            kwargs["source"] = options["source"]
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
             )
@@ -934,29 +932,31 @@ def wrap_fx_proxy_cls(
 @dataclasses.dataclass
 class TrackedFake:
     fake: Union[FakeTensor, SymInt]
-    sname: str
+    source: Source
 
 
 def wrap_to_fake_tensor_and_record(
-    e, tx, ignore_subclass=False, *, sname: str, static_shapes=False, is_tensor: bool
+    e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes = static_shapes or config.dynamic_shapes is False
-        if type(e) is torch.nn.Parameter:
-            # Always static for params
-            static_shapes = True
+        static_shapes = (
+            source is None
+            or type(e) is torch.nn.Parameter
+            or config.dynamic_shapes is False
+            or not is_tensor
+        )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
                 static_shapes=static_shapes,
                 ignore_subclass=ignore_subclass,
-                sname=sname,
+                source=source,
             )
         )
         if is_tensor:
-            tx.output.tracked_fakes.append(TrackedFake(fake_e, sname))
+            tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e
     else:
         return e
