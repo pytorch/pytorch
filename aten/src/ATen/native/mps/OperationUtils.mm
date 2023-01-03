@@ -7,60 +7,6 @@ namespace at {
 namespace native {
 namespace mps {
 
-uint64_t MPSGeneratorImpl::seed() {
-  auto random = c10::detail::getNonDeterministicRandom(true);
-  this->set_current_seed(random);
-  return random;
-}
-
-uint64_t MPSGeneratorImpl::current_seed() const {
-  return seed_;
-}
-
-void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
-  seed_ = seed;
-}
-
-MPSGeneratorImpl::MPSGeneratorImpl(DeviceIndex device_index)
-  : c10::GeneratorImpl{Device(DeviceType::MPS, device_index),
-              DispatchKeySet(c10::DispatchKey::MPS)} {
-}
-
-const Generator& getDefaultMPSGenerator() {
-  static auto gen = make_generator<MPSGeneratorImpl>(0);
-  gen.seed();
-  return gen;
-}
-DeviceType MPSGeneratorImpl::device_type() {
-  return DeviceType::MPS;
-}
-c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(int64_t);
-  static const size_t total_size = seed_size + offset_size;
-
-  auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
-
-  return state_tensor.getIntrusivePtr();
-}
-
-void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  static const size_t seed_size = sizeof(uint64_t);
-
-  detail::check_rng_state(new_state);
-
-  uint64_t input_seed;
-  auto new_rng_state = new_state.data<uint8_t>();
-  memcpy(&input_seed, new_rng_state, seed_size);
-  this->set_current_seed(input_seed);
-}
-
-MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
-  auto gen = new MPSGeneratorImpl(0);
-  gen->set_current_seed(this->seed_);
-  return gen;
-}
-
 void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
   mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
 }
@@ -220,13 +166,14 @@ void printTensorNDArray(const Tensor& t) {
   C10_CLANG_DIAGNOSTIC_POP()
 }
 
-Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape) : _tensor(src)
+Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape,
+                         bool gatherTensorData, MPSDataType dataType) : _tensor(src)
 {
   TORCH_CHECK(src.is_mps(), "Placeholder storage has not been allocated on MPS device!");
   // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
   // a view tensor could be contiguous (e.g., slice ops) or non-contiguous (e.g., transpose())
-  if (src.is_view() || !src.is_contiguous()) {
+  if ((!src.is_contiguous() || src.is_view()) && gatherTensorData) {
      Tensor emptyShell = Tensor();
     // use "_tensor" from Placeholder to retain view's output during its usage in other ops
     _tensor = gatherViewTensor(src, emptyShell);
@@ -241,8 +188,8 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
   // if buffer size is zero in here, it's not a user error. It could be a missing check for
   // tensor.numel() == 0 in our internal implementations of ops.
   TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!");
-
-  const MPSDataType mpsDataType = _tensor.dim() == 0 ? getMPSScalarType(_tensor.scalar_type()) : getMPSDataType(_tensor.scalar_type());
+  const MPSDataType mpsDataType = dataType != MPSDataTypeInvalid ? dataType :
+                      _tensor.dim() == 0 ? getMPSScalarType(_tensor.scalar_type()) : getMPSDataType(_tensor.scalar_type());
   if (!mpsShape)
     mpsShape = getMPSShape(_tensor);
 
