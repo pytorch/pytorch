@@ -1266,9 +1266,6 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
     def store(self, name, index, value, mode=None):
         self.check_can_tile2d(name, index)
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        self.can_tile2d = False
-
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
@@ -1296,12 +1293,6 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
             @staticmethod
             def store(name, index, value, mode=None):
                 return self.store(name, index, value, mode=mode)
-
-            @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, index, value):
-                return self.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
-                )
 
         self.exit_stack.enter_context(V.set_ops_handler(Tile2DCheckerProxy()))
         self.exit_stack.enter_context(V.set_kernel_handler(self))
