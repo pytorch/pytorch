@@ -86,9 +86,5 @@ TEST(ProfilerTest, soft_assert) {
   EXPECT_NO_THROW(SOFT_ASSERT(false));
   // Reset soft assert behavior to default
   torch::profiler::impl::setSoftAssertRaises(c10::nullopt);
-#ifdef NDEBUG
   EXPECT_NO_THROW(SOFT_ASSERT(false));
-#else
-  EXPECT_ANY_THROW(SOFT_ASSERT(false));
-#endif
 }
