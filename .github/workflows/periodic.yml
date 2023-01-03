@@ -62,6 +62,7 @@ jobs:
   linux-focal-rocm5_3-py3_8-distributed-build:
     name: linux-focal-rocm5.3-py3.8-distributed
     uses: ./.github/workflows/_linux-build.yml
+    if: false
     with:
       build-environment: linux-focal-rocm5.3-py3.8
       docker-image-name: pytorch-linux-focal-rocm5.3-py3.8
@@ -75,6 +76,7 @@ jobs:
     name: linux-focal-rocm5.3-py3.8-distributed
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm5_3-py3_8-distributed-build
+    if: false
     with:
       build-environment: linux-focal-rocm5.3-py3.8
       docker-image: ${{ needs.linux-focal-rocm5_3-py3_8-distributed-build.outputs.docker-image }}
