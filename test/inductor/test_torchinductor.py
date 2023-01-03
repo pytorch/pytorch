@@ -5294,6 +5294,8 @@ if HAS_CPU:
                 return maxpool(x)
 
             with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
                 graph = torch.compile(func, backend="inductor")
                 graph(input)
                 assert same(graph(input), func(input), equal_nan=True)
