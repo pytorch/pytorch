@@ -656,6 +656,11 @@ template<>
         auto N_hash = std::hash<int64_t>{}(*arg.N());
         hash = c10::hash_combine(hash, N_hash);
       }
+      if (arg.alias_info()) {
+        auto alias_info_hash = std::hash<c10::AliasInfo>{}(*arg.alias_info());
+        hash = c10::hash_combine(hash, alias_info_hash);
+      }
+
       // We don't need to hash the alias_info because it
       // is not useful in distinguishing schema.
       return hash;
