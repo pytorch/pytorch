@@ -662,7 +662,6 @@ meta_function_skips = {
     torch.functional.atleast_3d : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.cartesian_prod : {bf16, i8, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.einsum : {bf16, c128, f64, f32, f16, c64},
-    torch.functional.stft : {c128, f32, c64, f64},
     torch.functional.tensordot : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
     torch.inner : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
     torch.linalg.lu_solve : {c128, c64},
