@@ -434,8 +434,6 @@ class NamedTupleVariable(TupleVariable):
 
 class SliceVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
-        from .tensor import DynamicShapeVariable
-
         items_to_map = items
         start, stop, step = [variables.ConstantVariable(None)] * 3
 
@@ -448,18 +446,10 @@ class SliceVariable(BaseListVariable):
         else:
             raise AssertionError()
 
-        for limit in (start, stop):
-            if isinstance(limit, (variables.TensorVariable)):
-                unimplemented(
-                    "Dynamic slicing on data-dependent value is not supported"
-                )
-
-        # TODO (tugsbayasgalan) Address this later, the implementation
-        # of slice unpacking does some adjustments based on step size
-        # to start and stop. It is bit unclear what those adjustment
-        # be when step is symbolic
-        if isinstance(step, DynamicShapeVariable):
-            unimplemented("Step size needs to be static")
+        if isinstance(start, variables.TensorVariable) or isinstance(
+            stop, variables.TensorVariable
+        ):
+            unimplemented("Dynamic slicing on data-dependent value is not supported")
 
         super().__init__([start, stop, step], **kwargs)
 
