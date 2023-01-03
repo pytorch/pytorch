@@ -878,9 +878,9 @@ Tensor unsqueeze_to(
 }
 
 Tensor unsqueeze_to(
-  const Tensor& self,
-  int64_t dim,
-  c10::SymIntArrayRef sym_sizes) {
+    const Tensor& self,
+    int64_t dim,
+    c10::SymIntArrayRef sym_sizes) {
   return unsqueeze_to(self, IntArrayRef{dim}, sym_sizes);
 }
 
