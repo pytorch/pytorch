@@ -1316,28 +1316,8 @@ class CppKernelProxy(CppKernel):
         ).group
 
         def codegen_kernel(cls, *args):
-            in_suffix = False
-
             with kernel_group.new_kernel(cls, *args) as kernel:
-                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-
-                # TODO(jgong5): reuse `run()` to dedup the following logic
-                for node in nodes:
-                    if node.group[1] in [
-                        (group, reduction_group),
-                        (group + reduction_group, ()),
-                    ]:
-                        assert not in_suffix
-                        node.run(vars, reduction_vars)
-                    else:
-                        in_suffix = True
-                        assert node.group[1] == (
-                            group,
-                            (),
-                        ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
-                        # we can fuse in some extra pointwise into the suffix
-                        with kernel.write_to_suffix():
-                            node.run(vars, ())
+                run(kernel)
 
                 # Ugly hack to maitain the metrics kernel count since
                 # we only count in CppKernelProxy, not those contained in it
@@ -1347,18 +1327,23 @@ class CppKernelProxy(CppKernel):
 
         def run(kernel):
             vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+            in_suffix = False
             for node in nodes:
                 if node.group[1] in [
                     (group, reduction_group),
                     (group + reduction_group, ()),
                 ]:
+                    assert not in_suffix
                     node.run(vars, reduction_vars)
                 else:
+                    in_suffix = True
                     assert node.group[1] == (
                         group,
                         (),
                     ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
-                    node.run(vars, ())
+                    # we can fuse in some extra pointwise into the suffix
+                    with kernel.write_to_suffix():
+                        node.run(vars, ())
 
         scalar_kernel = codegen_kernel(CppKernel)
         inner_most_idx = len(scalar_kernel.itervars) - 1
