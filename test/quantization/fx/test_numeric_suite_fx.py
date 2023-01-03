@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from torch.ao.quantization import (
     default_dynamic_qconfig,
     QConfigMapping,
+    get_default_qconfig_mapping,
 )
 import torch.nn.quantized as nnq
 toq = torch.ops.quantized
@@ -84,6 +85,7 @@ from torch.ao.ns._numeric_suite_fx import (
     print_comparisons_n_shadows_model,
     loggers_set_enabled,
     loggers_set_save_activations,
+    _prepare_n_shadows_add_loggers_model,
 )
 from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 from torch.ao.quantization.backend_config import get_native_backend_config
@@ -2561,6 +2563,170 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
 
         results = extract_results_n_shadows_model(msq)
         print_comparisons_n_shadows_model(results)
+
+    def _test_add_loggers_impl(self, m, example_input, qconfig_mapping):
+        backend_config = get_native_backend_config()
+        m_copy = copy.deepcopy(m)
+
+        # test that input is valid
+        _ = m(*example_input)
+
+        msp = _prepare_n_shadows_add_loggers_model(
+            m, example_input, qconfig_mapping, backend_config)
+        # print('msp', msp)
+
+        for _ in range(2):
+            msp(*example_input)
+
+        msq = convert_n_shadows_model(msp)
+        print('msq', msq)
+
+        loggers_set_enabled(msq, True)
+        output_fp32 = msq(*example_input)
+
+        results = extract_results_n_shadows_model(msq)
+        # print(results)
+        print_comparisons_n_shadows_model(results)
+
+        # get the last quantized output from results
+        inner_results = results['model']['node_output']
+        last_subgraph = list(inner_results.keys())[-1]
+        output_shadow = inner_results[last_subgraph][0]['values'][-1]
+
+        # verify that both fp32 and quantized output matches reference
+        output_fp32_ref = m_copy(*example_input)
+        mp_ref = prepare_fx(m_copy, qconfig_mapping, example_input)
+        for _ in range(2):
+            mp_ref(*example_input)
+        mq_ref = convert_fx(mp_ref)
+        output_shadow_ref = mq_ref(*example_input)
+        self.assertTrue(
+            torch.allclose(output_fp32, output_fp32_ref),
+            f"fp32 comparison: {output_fp32} not close to {output_fp32_ref}")
+
+        print('shadow', output_shadow.shape, output_shadow)
+        print('shadow_ref', output_shadow_ref.shape, output_shadow_ref)
+
+        # off-by-one errors are okay in the shadow version, because
+        # the models are not actually equivalent - the PNP model has
+        # a lot of extra q/dq
+        self.assertTrue(
+            torch.allclose(output_shadow, output_shadow_ref, rtol=0.1),
+            f"shadow comparison: {output_shadow} not close to {output_shadow_ref}")
+
+        return msq
+
+    @withQNNPACKBackend
+    def test_add_loggers_linear_mod_quant_quant(self):
+        m = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+        example_input = (torch.randn(2, 2),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_linear_mod_fp32_quant(self):
+        m = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+        example_input = (torch.randn(2, 2),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        qconfig_mapping.set_module_name('0', None)
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_linear_mod_quant_fp32(self):
+        m = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+        example_input = (torch.randn(2, 2),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        qconfig_mapping.set_module_name('1', None)
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_linear_mod_fp32_fp32(self):
+        m = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+        example_input = (torch.randn(2, 2),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        qconfig_mapping.set_module_name('0', None)
+        qconfig_mapping.set_module_name('1', None)
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_conv_bn_relu_fusion_quant(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.BatchNorm2d(1), nn.ReLU())
+        m.eval()
+        example_input = (torch.randn(16, 1, 4, 4),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_conv_bn_relu_fusion_fp32(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.BatchNorm2d(1), nn.ReLU())
+        m.eval()
+        example_input = (torch.randn(16, 1, 4, 4),)
+        qconfig_mapping = get_default_qconfig_mapping()
+        qconfig_mapping.set_module_name('0', None)
+        qconfig_mapping.set_module_name('1', None)
+        qconfig_mapping.set_module_name('2', None)
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @withQNNPACKBackend
+    def test_add_loggers_functions(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.randn(2, 2))
+                self.b1 = nn.Parameter(torch.randn(2))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(x, self.w1, self.b1)
+                x = F.relu(x)
+                x = x + x
+                x = x + 1
+                # TODO(future PR): support first arg being a scalar
+                # x = 1 + x
+                x = torch.cat([x, x])
+                x = torch.cat([x, x])
+                x = torch.cat(tensors=[x, x])
+                # function not matchable by quantization
+                x = torch.nn.functional.rrelu(x)
+                x = F.linear(x, self.w1, self.b1)
+                return x
+
+        m = M().eval()
+        example_input = (torch.randn(16, 2),)
+        for qconfig_mapping in (
+            get_default_qconfig_mapping(),
+            QConfigMapping(),
+        ):
+            self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+
+    @skip_if_no_torchvision
+    @withQNNPACKBackend
+    def test_add_loggers_mobilenet_v2(self):
+        import torchvision
+        m = torchvision.models.quantization.mobilenet_v2(
+            pretrained=False, quantize=False).eval()
+        example_input = (torch.randn(8, 3, 224, 224),)
+
+        qconfig_mapping = get_default_qconfig_mapping()
+        # self._test_add_loggers_impl(m, example_input, qconfig_mapping)
+        # TODO(next) verify that propagation error matches the add_loggers
+        # baseline
+
+        m = torchvision.models.quantization.mobilenet_v2(
+            pretrained=False, quantize=False).eval()
+        mp = prepare_fx(copy.deepcopy(m), qconfig_mapping, example_input)
+        mp(*example_input)
+        mq = convert_fx(mp)
+
+        ns_a, ns_b = add_loggers('fp32', m, 'int8', mq, OutputLogger)
+        ns_a(*example_input)
+        ns_b(*example_input)
+        act_compare_dict = extract_logger_info(ns_a, ns_b, OutputLogger, 'int8')
+        extend_logger_results_with_comparison(
+            act_compare_dict, 'fp32', 'int8', compute_sqnr, 'sqnr')
+        print(act_compare_dict)
+
+
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
