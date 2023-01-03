@@ -41,9 +41,12 @@ from torch._ops import PyOperator
 from torch._functorch.utils import enable_autograd_function
 from torch.autograd.function import _set_autograd_function_extension_enabled
 import torch.autograd.forward_ad as fwAD
+from torch.func import functional_call
 
 # NB: numpy is a testing dependency!
 import numpy as np
+
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 USE_TORCHVISION = False
 try:
@@ -145,6 +148,30 @@ class TestSliceArgnums(TestCase):
 
         res = _slice_argnums(args, (1, 0))
         self.assertEqual(res, (args[1], args[0]))
+
+def _get_weights_and_functional_call(net, mechanism):
+    if mechanism == "make_functional":
+        return make_functional(net)
+    else:
+        assert mechanism == "functional_call"
+        # this makes it so the function from make_functional and this call have the same signature
+
+        def net_func(weights, data):
+            return functional_call(net, weights, (data,))
+
+        return net_func, dict(net.named_parameters())
+
+def _get_weights_and_functional_call_with_buffers(net, mechanism):
+    if mechanism == "make_functional":
+        return make_functional_with_buffers(net)
+    else:
+        assert mechanism == "functional_call"
+
+        # this makes it so the function from make_functional and this call have the same signature
+        def net_func(weights, buffers, data):
+            return functional_call(net, (weights, buffers), (data,))
+
+        return net_func, dict(net.named_parameters()), dict(net.named_buffers())
 
 
 class TestGradTransform(TestCase):
@@ -1327,7 +1354,23 @@ class TestVmapOfGrad(TestCase):
         # TODO: Check if the rtol is a problem
         self.assertEqual(result, expected, atol=0, rtol=5e-4)
 
-    def test_per_sample_grads_embeddingnet(self, device):
+    def _compare_expected_and_result(self, expected, result, mechanism):
+        if mechanism == "make_functional":
+            expected = zip(*expected)
+            expected = tuple(torch.stack(shards) for shards in expected)
+            for r, e in zip(result, expected):
+                # TODO: Check if the rtol is a problem
+                self.assertEqual(r, e, atol=0, rtol=1e-3)
+        else:
+            assert mechanism == "functional_call"
+            expected = {k: tuple(d[k] for d in expected) for k, v in expected[0].items()}
+            expected = {k: torch.stack(shards) for k, shards in expected.items()}
+            for key in result:
+                # TODO: Check if the rtol is a problem
+                self.assertEqual(result[key], expected[key], atol=0, rtol=1e-3)
+
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_per_sample_grads_embeddingnet(self, device, mechanism):
         class SampleNet(nn.Module):
             def __init__(self, vocab_size: int):
                 super().__init__()
@@ -1358,7 +1401,7 @@ class TestVmapOfGrad(TestCase):
         net = SampleNet(vocab_size).to(device=device)
         criterion = nn.CrossEntropyLoss()
 
-        net_func, weights = make_functional(net)
+        net_func, weights = _get_weights_and_functional_call(net, mechanism)
 
         def compute_loss(weights, data, target):
             output = net_func(weights, data)
@@ -1366,13 +1409,8 @@ class TestVmapOfGrad(TestCase):
             return result
 
         expected = [grad(compute_loss)(weights, data[i], targets[i]) for i in range(64)]
-        expected = zip(*expected)
-        expected = tuple(torch.stack(shards) for shards in expected)
-
         result = vmap(partial(grad(compute_loss), weights))(data, targets)
-        for r, e in zip(result, expected):
-            # TODO: Check if the rtol is a problem
-            self.assertEqual(r, e, atol=0, rtol=1e-3)
+        self._compare_expected_and_result(expected, result, mechanism)
 
     def test_log_softmax(self, device):
         x = torch.randn(3, 5, device=device)
@@ -3075,6 +3113,29 @@ class TestMakeFunctional(TestCase):
         for param in params:
             self.assertEqual(param.requires_grad, not disable_autograd_tracking)
 
+    @parametrize('detach_params', [True, False])
+    def test_using_detach_functional_call(self, detach_params):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.register_buffer('buffer', torch.randn(3))
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = x + self.buffer
+                return x
+
+        def params_dict(mod):
+            named_params = mod.named_parameters()
+            return {k: v.detach() for k, v in named_params} if detach_params else dict(named_params)
+
+        mod = Foo()
+        x = torch.randn(3, 3)
+        d = (params_dict(mod), dict(mod.named_buffers()))
+        out = functional_call(mod, d, x)
+        self.assertEqual(out.grad_fn is None, detach_params)
+
     def test_parameter_tying_grad(self):
         class Foo(nn.Module):
             def __init__(self):
@@ -3140,7 +3201,8 @@ class TestMakeFunctional(TestCase):
 
         self.assertEqual(result, expected)
 
-    def test_correctness_mnist(self):
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_correctness_mnist(self, mechanism):
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
@@ -3161,10 +3223,10 @@ class TestMakeFunctional(TestCase):
 
         x = torch.randn(64, 1, 32, 32)
         torch.manual_seed(301)
-        fnet, _ = make_functional(Net())
+        fnet, _ = _get_weights_and_functional_call(Net(), mechanism)
 
         torch.manual_seed(0)
-        _, params = make_functional(Net())
+        _, params = _get_weights_and_functional_call(Net(), mechanism)
         result = fnet(params, x)
 
         torch.manual_seed(0)
@@ -3199,7 +3261,8 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = combine_state_for_ensemble(models)
 
-    def test_state_correctly_returned_after_forward(self):
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_make_functional_state_correctly_returned_after_forward(self, mechanism):
         class Net(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3209,21 +3272,34 @@ class TestMakeFunctional(TestCase):
                 x = self.linear(x)
                 return x
 
+        def get_module_info(mod):
+            if mechanism == "make_functional":
+                return make_functional(mod)
+            else:
+                assert mechanism == "functional_call"
+                return mod, dict(mod.named_parameters())
+
         mod = Net()
-        func, params = make_functional(mod)
+        func_mod, params = get_module_info(mod)
 
         # state in func.names_map
-        old_state_linear_weight = func.stateless_model.linear.weight
-        old_state_linear_bias = func.stateless_model.linear.bias
+        mod = func_mod.stateless_model if mechanism == "make_functional" else func_mod
+        old_state_linear_weight = mod.linear.weight
+        old_state_linear_bias = mod.linear.bias
 
         self.assertIsNotNone(old_state_linear_weight)
         self.assertIsNotNone(old_state_linear_bias)
 
         x = torch.randn(4, 3)
-        func(params, x)
+        if mechanism == "make_functional":
+            func_mod(params, x)
+        else:
+            assert mechanism == "functional_call"
+            functional_call(func_mod, params, x)
 
-        new_state_linear_weight = func.stateless_model.linear.weight
-        new_state_linear_bias = func.stateless_model.linear.bias
+        mod = func_mod.stateless_model if mechanism == "make_functional" else func_mod
+        new_state_linear_weight = mod.linear.weight
+        new_state_linear_bias = mod.linear.bias
 
         self.assertIsNotNone(new_state_linear_weight)
         self.assertIsNotNone(new_state_linear_bias)
@@ -3232,7 +3308,15 @@ class TestMakeFunctional(TestCase):
         self.assertEqual(old_state_linear_bias, new_state_linear_bias)
 
 class TestExamplesCorrectness(TestCase):
-    def test_maml_regression(self, device):
+    def _update_params(self, params, grads, alpha, mechanism):
+        if mechanism == "make_functional":
+            return [(params[i] - alpha * grads[i]) for i in range(len(params))]
+        else:
+            assert mechanism == "functional_call"
+            return {k: params[k] - alpha * grads[k] for k in params}
+
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_maml_regression(self, device, mechanism):
         class ThreeLayerNet(nn.Module):
             def __init__(self):
                 super(ThreeLayerNet, self).__init__()
@@ -3254,7 +3338,7 @@ class TestExamplesCorrectness(TestCase):
         def mse_loss(x, y):
             return torch.mean((x - y) ** 2)
 
-        net, params = make_functional(ThreeLayerNet().to(device))
+        net, params = _get_weights_and_functional_call(ThreeLayerNet().to(device), mechanism)
         K = 20
         num_tasks = 4
         alpha = 0.1
@@ -3290,18 +3374,22 @@ class TestExamplesCorrectness(TestCase):
                 grads = grad(inner_loss)(params, x1, y1)
             else:
                 loss = inner_loss(params, x1, y1)
-                grads = torch.autograd.grad(loss, params, create_graph=True)
-            new_params = [(params[i] - alpha * grads[i]) for i in range(len(params))]
+                grad_params, spec = tree_flatten(params)
+                grads = torch.autograd.grad(loss, grad_params, create_graph=True)
+                grads = tree_unflatten(grads, spec)
+
+            new_params = self._update_params(params, grads, alpha, mechanism)
 
             v_f = net(new_params, x2)
             return mse_loss(v_f, y2)
 
         task = sample_tasks(num_tasks, K)
+        list_params = params if mechanism == "make_functional" else list(params.values())
 
         # Compute with vmap+grad
         inner_losses = vmap(partial(get_loss_for_task, True))(task[0], task[1], task[2], task[3])
         loss2 = sum(inner_losses) / len(inner_losses)
-        result_grads = torch.autograd.grad(loss2, params)
+        result_grads = torch.autograd.grad(loss2, list_params)
 
         # Compute without vmap+grad
         inner_losses = [
@@ -3309,11 +3397,12 @@ class TestExamplesCorrectness(TestCase):
             for i in range(num_tasks)
         ]
         loss2 = sum(inner_losses) / len(inner_losses)
-        expected_grads = torch.autograd.grad(loss2, params)
+        expected_grads = torch.autograd.grad(loss2, list_params)
 
         self.assertEqual(result_grads, expected_grads)
 
-    def test_maml_omniglot(self, device):
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_maml_omniglot(self, device, mechanism):
         # TODO: there appears to be precision issues for float32
         dtype = torch.double
 
@@ -3341,7 +3430,7 @@ class TestExamplesCorrectness(TestCase):
             nn.Flatten(),
             nn.Linear(64, n_way)).to(device).to(dtype)
 
-        fnet, params, buffers = make_functional_with_buffers(net)
+        fnet, params, buffers = _get_weights_and_functional_call_with_buffers(net, mechanism)
         net = (params, buffers, fnet)
 
         def loss_for_task(net, n_inner_iter, use_transform, x_spt, y_spt, x_qry, y_qry):
@@ -3359,8 +3448,11 @@ class TestExamplesCorrectness(TestCase):
                     grads = grad(compute_loss)(new_params, buffers, x_spt, y_spt)
                 else:
                     res = compute_loss(new_params, buffers, x_spt, y_spt)
-                    grads = torch.autograd.grad(res, new_params, create_graph=True)
-                new_params = [p - g * 1e-1 for p, g, in zip(new_params, grads)]
+                    grad_params, spec = tree_flatten(new_params)
+                    grads = torch.autograd.grad(res, grad_params, create_graph=True)
+                    grads = tree_unflatten(grads, spec)
+
+                new_params = self._update_params(new_params, grads, 1e-1, mechanism)
 
             qry_logits = fnet(new_params, buffers, x_qry)
             qry_loss = F.cross_entropy(qry_logits, y_qry)
@@ -3378,18 +3470,20 @@ class TestExamplesCorrectness(TestCase):
         # compute with vmap + grad
         compute_loss = partial(loss_for_task, net, n_inner_iter, True)
         qry_losses, _ = vmap(compute_loss)(x_spt, y_spt, x_qry, y_qry)
-        result_grads = torch.autograd.grad(qry_losses.sum(), params)
+        list_params = params if mechanism == "make_functional" else list(params.values())
+        result_grads = torch.autograd.grad(qry_losses.sum(), list_params)
 
         # compute without vmap + grad
         compute_loss = partial(loss_for_task, net, n_inner_iter, False)
         losses = [compute_loss(x_spt[i], y_spt[i], x_qry[i], y_qry[i])[0]
                   for i in range(num_tasks)]
-        expected_grads = torch.autograd.grad(sum(losses), params)
+        expected_grads = torch.autograd.grad(sum(losses), list_params)
 
         self.assertEqual(result_grads, expected_grads)
 
+    @parametrize('mechanism', ["make_functional", "functional_call"])
     @parametrize('originally_track_running_stats', [True, False])
-    def test_update_batch_norm(self, device, originally_track_running_stats):
+    def test_update_batch_norm(self, device, originally_track_running_stats, mechanism):
         dtype = torch.double
         inplace_relu = False
         classes = 5
@@ -3403,8 +3497,7 @@ class TestExamplesCorrectness(TestCase):
 
         replace_all_batch_norm_modules_(net)
         transformed_net = net
-        fnet, params, buffers = make_functional_with_buffers(transformed_net)
-        net = (params, buffers, fnet)
+        fnet, params, buffers = _get_weights_and_functional_call_with_buffers(transformed_net, mechanism)
         criterion = nn.CrossEntropyLoss()
 
         def compute_loss(x, y, params, buffers):
@@ -3418,12 +3511,14 @@ class TestExamplesCorrectness(TestCase):
         result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None, None))(x, y, params, buffers)
 
         # compute some per sample grads without vmap + grad
-        fnet, params, buffers = make_functional_with_buffers(transformed_net)
+        fnet, params, buffers = _get_weights_and_functional_call_with_buffers(transformed_net, mechanism)
+        flat_params, spec = tree_flatten(params)
         expected_grads = [
-            torch.autograd.grad(compute_loss(x[i], y[i], params, buffers), params)
+            torch.autograd.grad(compute_loss(x[i], y[i], params, buffers), flat_params)
             for i in range(num_batches)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
+        expected_grads = tree_unflatten(expected_grads, spec)
 
         self.assertEqual(result_grads, expected_grads)
 
@@ -3644,14 +3739,15 @@ class TestExamplesCorrectness(TestCase):
                             tuple(weight[1] for weight in result_weights))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_resnet18_per_sample_grads(self, device):
+    @parametrize('mechanism', ["make_functional", "functional_call"])
+    def test_resnet18_per_sample_grads(self, device, mechanism):
         import torchvision.models as models
         model = models.__dict__['resnet18'](
             pretrained=False, norm_layer=(lambda c: nn.GroupNorm(min(32, c), c))
         ).to(device)
         criterion = nn.CrossEntropyLoss(reduction='sum')  # avoid cross batch reductions for for loop comparison
 
-        func_model, weights = make_functional(model)
+        func_model, weights = _get_weights_and_functional_call(model, mechanism)
 
         def compute_loss(weights, image, target):
             image = image.unsqueeze(0)
@@ -3666,11 +3762,13 @@ class TestExamplesCorrectness(TestCase):
 
         result_grads = vmap(grad(compute_loss), in_dims=(None, 0, 0))(weights, images, targets)
 
+        flat_weights, spec = tree_flatten(weights)
         expected_grads = [
-            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), weights)
+            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), flat_weights)
             for i in range(batch_size)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
+        expected_grads = tree_unflatten(expected_grads, spec)
 
         self.assertEqual(result_grads, expected_grads, atol=1e-3, rtol=1.)
 
@@ -4164,6 +4262,12 @@ class TestPyOperatorInteraction(TestCase):
         y = grad(f)(x)
         z, = torch.autograd.grad(y.sum(), x)
         self.assertEqual(z, torch.full_like(x, 2))
+
+    def test_functional_call_multiple_dicts(self):
+        mod = nn.Linear(1, 1)
+        x = torch.randn((1, 1))
+        params = ({'weight': torch.zeros(1, 1)}, {'bias': torch.ones(1)})
+        functional_call(mod, params, x)
 
 
 only_for = ("cpu", "cuda")
