@@ -97,7 +97,7 @@ class SubgraphMatcher:
             return True
 
         if pn.op == gn.op:
-            if pn.op == "placeholder" or pn.op == "output":
+            if pn.op == "placeholder" or pn.op == "output" or pn.op == "get_attr":
                 return True
             return pn.target == gn.target
         return False
