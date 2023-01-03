@@ -213,7 +213,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
                     exporter_key
                 )
                 assert symbolic_function_group is not None
-                symbolic_fn = symbolic_function_group.get(14)
+                symbolic_fn = symbolic_function_group.get(ONNX_GLOBALS.export_onnx_opset_version)
                 assert symbolic_fn is not None
                 # TODO(wechi): current type checking throws when feeding torch._C.Graph
                 # to symbolic_opset*.py functions, so we need the following wrapper.
@@ -254,7 +254,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
                         "aten::__getitem_"
                     )
                     assert symbolic_function_group is not None
-                    symbolic_fn = symbolic_function_group.get(14)
+                    symbolic_fn = symbolic_function_group.get(ONNX_GLOBALS.export_onnx_opset_version)
                     assert symbolic_fn is not None
                     graph_context = jit_utils.GraphContext(
                         graph=g,
@@ -340,7 +340,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
             # TODO(wechi): Support get_attr, call_module, call_method.
             raise RuntimeError("Found node type not defined in torch.fx: " + node.op)
 
-    torch._C._jit_pass_onnx_scalar_type_analysis(g, True, 14)
+    torch._C._jit_pass_onnx_scalar_type_analysis(g, True, ONNX_GLOBALS.export_onnx_opset_version)
 
     return g, ts_name_to_real_tensor
 
