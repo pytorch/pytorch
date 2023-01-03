@@ -228,9 +228,9 @@ def shard_module(
     process_group=None
 ):
     """
-    Shards a given module according to the provided sharding_plan. This method
-    first shards all the parameters according to the given sharding_plan. Then if
-    `output_plan` and `return_local_tensor` are specified in the sharding_plan, it
+    Shards a given module according to the provided sharding `plan`. This method
+    first shards all the parameters according to the given sharding `plan`. Then if
+    `output_plan` and `return_local_tensor` are specified in the sharding `plan`, it
     will tag the output of modules according `output_plan`, convert the module's
     output back to data parallel according to `return_local_tensor`.
 
@@ -238,7 +238,7 @@ def shard_module(
 
     Args:
         module (:class:`torch.nn.Module`): The module to apply sharding to
-        sharding_plan (:class:`torch.distributed._shard.sharding_plan.ShardingPlan`):
+        plan (:class:`torch.distributed._shard.sharding_plan.ShardingPlan`):
             The ShardingPlan which specified param name to ShardingSpec to apply to
             each parameter.
 

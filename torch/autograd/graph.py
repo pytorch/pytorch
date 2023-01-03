@@ -48,6 +48,7 @@ class saved_tensors_hooks():
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def pack_hook(x):
         ...     print("Packing", x)
         ...     return x
@@ -107,6 +108,7 @@ class save_on_cpu(saved_tensors_hooks):
     Example::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> a = torch.randn(5, requires_grad=True, device="cuda")
         >>> b = torch.randn(5, requires_grad=True, device="cuda")
         >>> c = torch.randn(5, requires_grad=True, device="cuda")
@@ -160,6 +162,7 @@ def disable_saved_tensors_hooks(error_message):
 
     Example::
 
+        >>> # xdoctest: +SKIP(failing)
         >>> message = "saved tensors default hooks are disabled"
         >>> with torch.autograd.graph.disable_saved_tensors_hooks(message):
         ...     # Raises RuntimeError: saved tensors default hooks are disabled

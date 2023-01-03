@@ -41,57 +41,7 @@ if(NOT INTERN_BUILD_MOBILE)
   cmake_pop_check_state()
 endif()
 
-if(NOT INTERN_BUILD_MOBILE)
-  # ---[ Check if certain std functions are supported. Sometimes
-  # _GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-  cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++14")
-  CHECK_CXX_SOURCE_COMPILES("
-  #include <cmath>
-  #include <string>
-
-  int main() {
-    int a = std::isinf(3.0);
-    int b = std::isnan(0.0);
-    std::string s = std::to_string(1);
-
-    return 0;
-    }" SUPPORT_GLIBCXX_USE_C99)
-  if(NOT SUPPORT_GLIBCXX_USE_C99)
-    # Force cmake to retest next time around
-    unset(SUPPORT_GLIBCXX_USE_C99 CACHE)
-    message(FATAL_ERROR
-        "The C++ compiler does not support required functions. "
-        "This is very likely due to a known bug in GCC 5 "
-        "(and maybe other versions) on Ubuntu 17.10 and newer. "
-        "For more information, see: "
-        "https://github.com/pytorch/pytorch/issues/5229")
-  endif()
-  cmake_pop_check_state()
-endif()
-
-# ---[ Check if std::exception_ptr is supported.
-cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_FLAGS "-std=c++14")
-CHECK_CXX_SOURCE_COMPILES(
-    "#include <string>
-    #include <exception>
-    int main(int argc, char** argv) {
-      std::exception_ptr eptr;
-      try {
-          std::string().at(1);
-      } catch(...) {
-          eptr = std::current_exception();
-      }
-    }" CAFFE2_EXCEPTION_PTR_SUPPORTED)
-
-if(CAFFE2_EXCEPTION_PTR_SUPPORTED)
-  message(STATUS "std::exception_ptr is supported.")
-  set(CAFFE2_USE_EXCEPTION_PTR 1)
-else()
-  message(STATUS "std::exception_ptr is NOT supported.")
-endif()
-cmake_pop_check_state()
+set(CAFFE2_USE_EXCEPTION_PTR 1)
 
 # ---[ Check if we want to turn off deprecated warning due to glog.
 # Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that

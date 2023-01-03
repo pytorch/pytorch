@@ -3421,6 +3421,23 @@ class TestSparse(TestSparseBase):
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
         """
 
+        def check_is_coalesced(s):
+            self.assertTrue(s.is_coalesced())
+
+            indices = s.indices()
+            hash_coeffs = torch.tensor(s.shape[:s.sparse_dim()], device=s.device).cumprod(-1).flip(-1)
+            if s.sparse_dim() > 1:
+                hash_coeffs.unsqueeze_(-1)
+                hash_values = (indices * hash_coeffs).sum(0)
+            else:
+                hash_values = indices * hash_coeffs
+
+            # check if indices are sorted
+            self.assertEqual(hash_values, hash_values.sort()[0])
+
+            # check if there are no repeated indices
+            self.assertEqual(hash_values, hash_values.unique())
+
         def ref_sparse_mm(a, b):
             return a.to_dense() @ b.to_dense()
 
@@ -3462,6 +3479,7 @@ class TestSparse(TestSparseBase):
             # cpp implementation
             r2 = torch.sparse.mm(a, b)
             self.assertEqual(r1, r2.to_dense())
+            check_is_coalesced(r2)
 
             if dtype in [torch.double, torch.cdouble]:
                 a.requires_grad_(True)
@@ -4087,10 +4105,26 @@ class TestSparseAny(TestCase):
                     nontrivial_blocksize = 1 not in blocksize
                 else:
                     nontrivial_blocksize = None
-                tested_combinations.add((t.layout, is_hybrid, is_batch, nontrivial_blocksize))
+                if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                    contiguous_indices = t.crow_indices().is_contiguous() and t.col_indices().is_contiguous()
+                    contiguous_values = t.values().is_contiguous()
+                elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+                    contiguous_indices = t.ccol_indices().is_contiguous() and t.row_indices().is_contiguous()
+                    contiguous_values = t.values().is_contiguous()
+                elif t.layout is torch.sparse_coo:
+                    contiguous_indices = t._indices().is_contiguous()
+                    contiguous_values = t._values().is_contiguous()
+                else:
+                    contiguous_indices = None
+                    contiguous_values = t.is_contiguous()
+
+                tested_combinations.add((t.layout, is_hybrid, is_batch, nontrivial_blocksize,
+                                         contiguous_indices, contiguous_values))
 
         # Ensure that the inputs generation covers all layout,
-        # non-hybrid/hybrid, and non-batch/batch combinations:
+        # non-hybrid/hybrid, non-batch/batch, and contiguity
+        # combinations:
+        untested_combinations = set()
         for layout in layouts:
             for is_hybrid in [False, True]:
                 if layout is torch.strided:
@@ -4101,19 +4135,54 @@ class TestSparseAny(TestCase):
                     for nontrivial_blocksize in [False, True]:
                         if layout not in {torch.sparse_bsr, torch.sparse_bsc}:
                             nontrivial_blocksize = None
-                        key = (layout, is_hybrid, is_batch, nontrivial_blocksize)
-                        assert key in tested_combinations, key
+                        for contiguous_indices in [False, True]:
+                            if layout is torch.strided:
+                                contiguous_indices = None
+                            elif not is_batch:
+                                # indices are contiguous per-patch
+                                contiguous_indices = True
+                            for contiguous_values in [False, True]:
+                                key = (layout, is_hybrid, is_batch, nontrivial_blocksize,
+                                       contiguous_indices, contiguous_values)
+                                if key not in tested_combinations:
+                                    untested_combinations.add(
+                                        f'layout={layout}, is_hybrid={is_hybrid}, is_batch={is_batch},'
+                                        f' nontrivial_blocksize={nontrivial_blocksize},'
+                                        f' contiguous_indices{contiguous_indices}, contiguous_values={contiguous_values}')
+        assert not untested_combinations, untested_combinations
+
+    @all_sparse_layouts('from_layout', include_strided=False)
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    def test_to_dense(self, from_layout, device, dtype, index_dtype):
+        """
+        This test tests conversion from any layout to any sparse layout.
+        """
+        for t in self.generate_simple_inputs(
+                from_layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            is_hybrid = t.dense_dim() > 0
+
+            # TODO: The following exception cases all correspond to
+            # not implemented conversions
+            if is_hybrid and from_layout is not torch.sparse_coo:
+                with self.assertRaisesRegex(RuntimeError, "sparse_compressed_to_dense: Hybrid tensors are not supported"):
+                    t.to_dense()
+
+            else:
+                r = t.to_dense()
+                self.assertEqual(r.layout, torch.strided)
+                self.assertEqual(r, t)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_to_sparse(self, from_layout, to_layout, device, dtype):
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    def test_to_sparse(self, from_layout, to_layout, device, dtype, index_dtype):
         """
         This test tests conversion from any layout to any sparse layout.
         """
-
         for t in self.generate_simple_inputs(
-                from_layout, device=device, dtype=dtype,
+                from_layout, device=device, dtype=dtype, index_dtype=index_dtype,
                 enable_hybrid=(
                     # TODO: to support conversion strided->hybrid
                     # CSR/CSC/BSR/BSC, to_sparse() requires extra keyword
@@ -4222,8 +4291,17 @@ class TestSparseAny(TestCase):
                         compressed_indices, plain_indices = r.ccol_indices(), r.row_indices()
                     torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, r.values(),
                                                                   r.shape, r.layout)
+                    if from_layout in {torch.strided, torch.sparse_coo}:
+                        self.assertEqual(compressed_indices.dtype, torch.int64)
+                        self.assertEqual(plain_indices.dtype, torch.int64)
+                    else:
+                        self.assertEqual(compressed_indices.dtype, index_dtype)
+                        self.assertEqual(plain_indices.dtype, index_dtype)
+                    self.assertEqual(r.values().dtype, dtype)
                 elif r.layout is torch.sparse_coo:
                     torch._validate_sparse_coo_tensor_args(r._indices(), r._values(), r.shape)
+                    self.assertEqual(r._indices().dtype, torch.int64)
+                    self.assertEqual(r._values().dtype, dtype)
                 else:
                     assert 0  # unreachable
 
@@ -4242,6 +4320,20 @@ class TestSparseAny(TestCase):
             torch._validate_sparse_compressed_tensor_args(r.crow_indices(), r.col_indices(), r.values(), r.shape, r.layout)
             self.assertEqual(r, t)
 
+        if (from_layout, to_layout) in {(torch.sparse_csr, torch.sparse_csc),
+                                        (torch.sparse_csc, torch.sparse_csr)}:
+            # See gh-91007
+            compressed_indices = torch.tensor([0, 4, 8, 8, 12, 16, 20], dtype=index_dtype, device=device)
+            plain_indices = torch.tensor([0, 1, 2, 3] * 5, dtype=index_dtype, device=device)
+            t = torch.sparse_compressed_tensor(compressed_indices, plain_indices, range(20),
+                                               dtype=dtype, device=device, layout=from_layout)
+            r = t.to_sparse(layout=to_layout)
+            if r.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                compressed_indices, plain_indices = r.crow_indices(), r.col_indices()
+            else:
+                compressed_indices, plain_indices = r.ccol_indices(), r.row_indices()
+            torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, r.values(), r.shape, r.layout)
+            self.assertEqual(r, t)
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
