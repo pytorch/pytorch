@@ -18,11 +18,11 @@ log = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class ValueRanges(object):
-    lower: Union[sympy.Symbol, sympy.Number, int, float, bool]
-    upper: Union[sympy.Symbol, sympy.Number, int, float, bool]
+    lower: Union[sympy.Expr, sympy.Number, int, float, bool]
+    upper: Union[sympy.Expr, sympy.Number, int, float, bool]
 
     def __contains__(self, x):
-        # TODO This needs to be generalised if lower/upper are sympy.Symbols
+        # TODO This needs to be generalised if lower/upper are sympy.Expr
         return self.lower <= x <= self.upper
 
     @classmethod
@@ -129,8 +129,8 @@ class ValueRangeAnalysis(object):
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
         def is_bool(val):
-            return (
-                isinstance(val, bool) or hasattr(low, "is_Boolean") and low.is_Boolean
+            return isinstance(val, bool) or (
+                hasattr(val, "is_Boolean") and val.is_Boolean
             )
 
         x = ValueRanges.wrap(x)
@@ -168,11 +168,11 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def abs(x):
-        return ValueRanges.convex_min_zero_map(x, lambda y: abs)
+        return ValueRanges.convex_min_zero_map(x, abs)
 
     @staticmethod
     def neg(x):
-        return ValueRanges.decreasing_map(x, lambda x: -x)
+        return ValueRanges.decreasing_map(x, operator.neg)
 
     @staticmethod
     def truediv(a, b):
@@ -219,6 +219,18 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def pow(a, b):
+        def is_integer(val):
+            return isinstance(val, int) or (
+                hasattr(val, "is_integer") and val.is_integer
+            )
+
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+        if a.lower < 0 and not is_integer(b.lower):
+            # The function is not defined
+            return ValueRanges(-math.inf, math.inf)
+        elif 0 in a and b.lower <= 0:
+            return ValueRanges(-math.inf, math.inf)
         return ValueRanges.coordinatewise_monotone_map(a, b, operator.pow)
 
     @staticmethod
@@ -253,6 +265,7 @@ class ValueRangeAnalysis(object):
 def dominated_nodes(
     initial_queue: Union[torch.fx.Node, Iterable[torch.fx.Node]], skip_filter=None
 ):
+    """Returns the set of nodes whose values depend on those within initial_queue"""
     if isinstance(initial_queue, torch.fx.Node):
         initial_queue = [initial_queue]
 
