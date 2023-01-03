@@ -1338,27 +1338,6 @@ def arange(
     )
 
 
-@register_lowering([torch.linspace, aten.linspace])
-def linspace(start, end, steps, *, dtype=None, device=None, pin_memory=False):
-    assert not pin_memory
-    dtype = dtype or torch.get_default_dtype()
-
-    step_size = (end - start) / (steps - 1)
-
-    def inner_fn(index):
-        return ops.add(
-            ops.mul(ops.constant(step_size, dtype), ops.index_expr(index[0], dtype)),
-            ops.constant(start, dtype),
-        )
-
-    return Pointwise.create(
-        device=decode_device(device),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=[sympy.Integer(steps)],
-    )
-
-
 @register_lowering(aten.triu)
 def triu(x, diagonal=0):
     x_loader = x.make_loader()

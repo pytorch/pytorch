@@ -4328,20 +4328,11 @@ def linspace(
     if start == end:
         return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
-    # arange returns values in the interval [start, end) so we add an an eps to make it [start, end]
-    # The eps is small enough as to always add just the element end
-    step_size = 1 / (steps - 1)
-    eps = step_size / 2
-    # arange returns a tensor of size divup(end - start, step) and thus, for the arguemnts below
-    # ceil(div(1 + step_size/2,  1/(steps - 1)) = steps - 1  + ceil(1 / 2) = steps
-    # torch.arange is an scan algorithm, so we need a high-precision dtype
-    rg = torch.arange(
-        0, 1 + eps, step_size, dtype=torch.float64, **factory_kwargs  # type: ignore[arg-type]
-    )
+    # Perform in arange in int for exactness, so that out[0] == start, out[-1] == end
+    rg = torch.arange(0, steps, **factory_kwargs)  # type: ignore[arg-type]
     double_dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
     rg = _maybe_convert_to_dtype(rg, double_dtype)  # type: ignore[assignment]
-    cast = partial(torch.full, (1,), dtype=double_dtype, **factory_kwargs)
-    out = torch.lerp(cast(start), cast(end), rg)
+    out = rg * ((end - start) / (steps - 1)) + start
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
