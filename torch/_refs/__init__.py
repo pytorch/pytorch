@@ -13,6 +13,7 @@ import torch
 
 import torch._prims as prims
 import torch._prims_common as utils
+from torch import sym_float, sym_int
 from torch._prims_common import (
     check,
     DeviceLikeType,
@@ -42,7 +43,6 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -297,7 +297,7 @@ __all__ = [
 
 Tensor = torch.Tensor
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
-aten = torch.ops.aten
+aten = torch._ops.ops.aten
 
 
 def _broadcast_shapes(*_shapes):
@@ -3699,7 +3699,7 @@ def diagonal_scatter(
     dim1: int = 0,
     dim2: int = 1,
 ) -> TensorLikeType:
-    out = input.clone()
+    out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
     check(
         diag.shape == src.shape,
@@ -4481,8 +4481,8 @@ def movedim(
         len(source) == len(destination),  # type: ignore[arg-type]
         lambda: (
             "movedim: Invalid source or destination dims: source "  # type: ignore[arg-type]
-            f"({list(source)} dims) should contain the same number of dims as "
-            f"destination ({list(destination)} dims)"
+            f"({list(source)} dims) should contain the same number "  # type: ignore[arg-type]
+            f"of dims as destination ({list(destination)} dims)"  # type: ignore[arg-type]
         ),
     )
 

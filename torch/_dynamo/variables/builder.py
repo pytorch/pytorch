@@ -11,12 +11,12 @@ import types
 from typing import Any, Optional, Union
 
 import numpy as np
-from functorch.experimental.ops import PyOperator
 
 import torch
 
 from torch import SymInt
 from torch._guards import GuardSource
+from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
@@ -945,6 +945,7 @@ def wrap_to_fake_tensor_and_record(
             source is None
             or type(e) is torch.nn.Parameter
             or config.dynamic_shapes is False
+            or not is_tensor
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(

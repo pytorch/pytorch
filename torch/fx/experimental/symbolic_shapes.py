@@ -13,7 +13,9 @@ import traceback
 import collections
 import textwrap
 import logging
-from torch import SymInt, SymFloat
+
+# NB: The sym_* functions are used via getattr() and must be imported here.
+from torch import SymInt, SymFloat, sym_float, sym_int  # noqa: F401
 from torch._guards import ShapeGuard, Source
 
 log = logging.getLogger(__name__)
@@ -26,12 +28,11 @@ try:
 except ImportError:
     HAS_SYMPY = False
 
-aten = torch.ops.aten  # type: ignore[has-type]
+aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "sym_int", "sym_float", "FloorDiv", "guard_int", "wrap_node",
-    "sym_sqrt",
+    "SymDispatchMode", "FloorDiv", "guard_int", "wrap_node",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -103,34 +104,11 @@ def guard_int(a):
     assert isinstance(a, int)
     return a
 
-def sym_float(a):
-    if isinstance(a, SymFloat):
-        return a
-    elif hasattr(a, '__sym_float__'):
-        return a.__sym_float__()
-    return float(a)
-
 # Drop in replacement for math.sqrt
 def sym_sqrt(a):
     if hasattr(a, '__sym_sqrt__'):
         return a.__sym_sqrt__()
     return math.sqrt(a)
-
-# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
-# directly usable, but this has a more relaxed type signature for mypy
-# (mypy requires SupportFloat which is too strict)
-def sym_floor(a):
-    return math.floor(a)  # type: ignore[type]
-
-def sym_ceil(a):
-    return math.ceil(a)  # type: ignore[type]
-
-def sym_int(a):
-    if isinstance(a, SymInt):
-        return a
-    elif isinstance(a, SymFloat):
-        return sym_floor(a) if a > 0 else sym_ceil(a)
-    return int(a)
 
 def to_node(self, num):
     if isinstance(num, (SymInt, SymFloat)):
@@ -206,10 +184,10 @@ class SymNode:
         return self.str()
 
     # These methods are metaprogrammed in below
-    def sym_int(self) -> "SymNode":
+    def sym_int(self) -> "SymNode":  # noqa: F811
         raise AssertionError("should have been overridden")
 
-    def sym_float(self) -> "SymNode":
+    def sym_float(self) -> "SymNode":  # noqa: F811
         raise AssertionError("should have been overridden")
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
@@ -472,9 +450,11 @@ if HAS_SYMPY:
         def __init__(
             self,
             symbol_to_source,
+            source_ref,
         ):
             super().__init__()
             self.symbol_to_source = symbol_to_source
+            self.source_ref = source_ref
 
         def _print_Symbol(self, expr) -> str:
             assert isinstance(expr, Symbol), str(type(expr))
@@ -482,7 +462,7 @@ if HAS_SYMPY:
                 f"{expr} (could be from {[s.name() for s in expr.sources]}) "
                 f"not in {self.symbol_to_source}"
             )
-            return self.symbol_to_source[expr][0].name()
+            return self.source_ref(self.symbol_to_source[expr][0])
 
 
 
@@ -644,7 +624,8 @@ class ShapeEnv(object):
     # on if the guards evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
-    def codegen_guards(self, placeholders, sources):
+    def codegen_guards(self, placeholders, sources,
+                       source_ref=lambda n: n.name()):
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -756,11 +737,15 @@ class ShapeEnv(object):
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
         for source, expr in input_guards:
-            sexpr = ShapeGuardPrinter(symbol_to_source).doprint(expr)
             # Small optimization
-            if source == sexpr:
+            if (
+                isinstance(expr, Symbol) and
+                expr in symbol_to_source and
+                source == symbol_to_source[expr][0]
+            ):
                 continue
-            exprs.append(f"{source.name()} == {sexpr}")
+            sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
+            exprs.append(f"{source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
@@ -769,7 +754,7 @@ class ShapeEnv(object):
                 continue
             g = self.simplify(g)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
+                exprs.append(ShapeGuardPrinter(symbol_to_source, source_ref).doprint(g))
             except Exception:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
@@ -779,7 +764,7 @@ class ShapeEnv(object):
             assert sources
             # We must assert that each symbol is not zero or one, as we make
             # negative inferences on shape variables
-            exprs.append(f"{sources[0].name()} != 0 and {sources[0].name()} != 1")
+            exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
         if exprs:
             return " and ".join(exprs)
@@ -1022,5 +1007,6 @@ class ShapeEnv(object):
             elif concrete_val is sympy.false:
                 self.guards.append(ShapeGuard(sympy.Not(expr), stack))
             else:
-                self.guards.append(ShapeGuard(sympy.Eq(expr, concrete_val), stack))
+                self.guards.append(
+                    ShapeGuard(sympy.Eq(expr, concrete_val), stack))  # type: ignore[arg-type]
         return concrete_val
