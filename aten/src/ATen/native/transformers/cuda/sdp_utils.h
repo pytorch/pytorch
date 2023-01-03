@@ -16,6 +16,7 @@
 #include <functional>
 #include <unordered_set>
 #include <vector>
+#include <cmath>
 
 namespace sdp {
 
@@ -28,6 +29,46 @@ struct sdp_params {
   bool need_attn_weights;
   bool is_causal;
 };
+
+inline std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
+  constexpr std::array<SDPBackend, num_backends> default_order{
+      SDPBackend::flash_attention,
+      SDPBackend::efficient_attention,
+      SDPBackend::math};
+  // Logic is taken from xformers
+  // FlashAttention parallelizes across "batch_size * num_heads"
+  // MemEff parallelizes across "batch_size * num_heads * num_queries" and can
+  // be more efficient. batch_size, q_len, num_heads, k = inp.query.shape
+  if (params.query.is_nested()) {
+    // See check_for_nested_inputs for details
+    return {
+        SDPBackend::efficient_attention,
+        SDPBackend::flash_attention,
+        SDPBackend::math};
+  }
+  const auto sizes = params.query.sizes();
+  if (params.query.dim() != 4) {
+    return default_order;
+  }
+  const auto batch_size{sizes[0]}, num_heads{sizes[1]}, query_lengths{sizes[2]},
+      head_dim{sizes[3]};
+  if (batch_size > 0) {
+    const int64_t threads_flash = batch_size * num_heads;
+    const int64_t threads_cutlass =
+        threads_flash * (int64_t)std::floor(query_lengths / 64);
+    bool more_threads_cutlass =
+        (int64_t)std::floor(threads_cutlass / 2) >= threads_flash;
+    bool small_threads_flash = threads_flash < 60;
+    bool large_head_dim = std::max(head_dim, params.key.sizes()[3]) == 128;
+    if ((small_threads_flash && more_threads_cutlass) || large_head_dim) {
+      return {
+          SDPBackend::efficient_attention,
+          SDPBackend::flash_attention,
+          SDPBackend::math};
+    }
+  }
+  return default_order;
+}
 
 template <typename dtype_vector>
 inline bool check_tensor_dtype(
@@ -147,7 +188,7 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
         (query_dim == 4 ))) {
     if (debug) {
       TORCH_WARN(
-        "Flash attention requires query, key and value to be 4 dimensional, but got Query dim: ",
+        "Both fused kernels requires query, key and value to be 4 dimensional, but got Query dim: ",
         query_dim,
         ", Key dim: ",
         params.key.dim(),
@@ -368,23 +409,38 @@ inline SDPBackend select_sdp_backend(sdp_params kernel_params) {
   if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP() && !ctx.userEnabledMemEfficientSDP()) {
     return SDPBackend::error;
   }
+  // Get ideal kernel ordering
+  const auto ordering = priority_order(kernel_params);
+
   // Because TORCHCHECK checks if condition is true we negate debug so that
   // The statements will be printed when debug is true
   bool print_debug = false;
-  if (use_flash_attention(kernel_params, print_debug)) {
-    return SDPBackend::flash_attention;
-  }
-  if (use_mem_efficient_attention(kernel_params, print_debug)) {
-    return SDPBackend::efficient_attention;
-  }
-  if (ctx.userEnabledMathSDP()) {
-    return SDPBackend::math;
+  for (auto& backend : ordering) {
+    switch (backend) {
+      case SDPBackend::flash_attention:
+        if (use_flash_attention(kernel_params, print_debug)) {
+          return SDPBackend::flash_attention;
+        }
+        break;
+      case SDPBackend::efficient_attention:
+        if (use_mem_efficient_attention(kernel_params, print_debug)) {
+          return SDPBackend::efficient_attention;
+        }
+        break;
+      case SDPBackend::math:
+        if (ctx.userEnabledMathSDP()) {
+          return SDPBackend::math;
+        }
+        break;
+      default:
+        TORCH_CHECK(false, "Invalid backend");
+    }
   }
   // If we have gotten to this point then two things have happened:
   // 1. use_flash_attention or use_mem_efficient did not satisfy the
   // constraints to be ran
   // 2. The user has explicitly disabled the math kernel
-  // We then re-run use_flash_attention with debug enabled to print out the
+  // We then re-run the kernel checks with debug enabled to print out the
   // reason why the kernel was not selected
 
   print_debug = true;
