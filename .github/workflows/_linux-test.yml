@@ -210,7 +210,7 @@ jobs:
         shell: bash
         if: always()
         run: |
-          cat test/**/*.log || exit 0 || exit 0
+          cat test/**/*.log || exit 0
 
       - name: Get workflow job id
         id: get-job-id
