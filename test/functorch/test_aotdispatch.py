@@ -2185,9 +2185,10 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
         reset_grads()
         call_forwards_backwards(f)
         orig_grad = get_grads(args)
-        device = orig_grad[0].device if isinstance(orig_grad, list) else orig_grad.device
-        atol = 2e-05 if device == torch.device("cpu") else 1e-05
-        rtol = 1.3e-05 if device == torch.device("cpu") else 1.3e-06
+        grad_to_check_device = orig_grad[0] if isinstance(orig_grad, list) else orig_grad
+        is_cpu_device = isinstance(grad_to_check_device, torch.Tensor) and grad_to_check_device.device == torch.device("cpu")
+        atol = 2e-05 if is_cpu_device else 1.3e-05
+        rtol = 1.3e-05 if is_cpu_device else 1.3e-06
         self.assertEqual(orig_grad, compiled_grad, atol=atol, rtol=rtol)
 
         def create_new_arg(x):
