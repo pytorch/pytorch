@@ -3,7 +3,6 @@
 
 #include <type_traits>
 #include <utility>
-#include <iostream>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
@@ -1025,11 +1024,9 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   self_meta.unsafeGetTensorImpl()->set_wrapped_number(self.unsafeGetTensorImpl()->is_wrapped_number());
   other_meta.unsafeGetTensorImpl()->set_wrapped_number(other.unsafeGetTensorImpl()->is_wrapped_number());
   auto result_dtype = at::result_type(other_meta, self_meta);
-  std::cout << result_dtype << "RESULT_DTYPE\n";
 
   auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
   auto options = meta_out.options().device(out_device).dtype(result_dtype);
-  std::cout << options << "OPTIONS\n";
   return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, options);
 }
 
