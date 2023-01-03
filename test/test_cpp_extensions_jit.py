@@ -712,7 +712,7 @@ class TestCppExtensionJIT(common.TestCase):
         source = '''
         // error_type:
         // 0: no error
-        // 1: torch::TypeError
+        // 1: c10::TypeError
         // 2: python_error()
         // 3: py::error_already_set
         at::Tensor foo(at::Tensor x, int error_type) {
@@ -720,9 +720,7 @@ class TestCppExtensionJIT(common.TestCase):
             err_stream << "Error with "  << x.type();
 
             TORCH_WARN(err_stream.str());
-            if(error_type == 1) {
-                throw torch::TypeError(err_stream.str().c_str());
-            }
+            TORCH_CHECK_TYPE(error_type != 1, err_stream.str());
             if(error_type == 2) {
                 PyObject* obj = PyTuple_New(-1);
                 TORCH_CHECK(!obj);
