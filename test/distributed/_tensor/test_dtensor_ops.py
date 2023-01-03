@@ -661,7 +661,9 @@ def check_dtensor_func(test_case, test_func, opinfo, dry_run=False):
         test_case.destroy_pg()
 
 
-class TestDTensorOps(DTensorTestBase):
+from torch.testing._internal.common_distributed import MultiThreadedTestCase
+
+class TestDTensorOps(MultiThreadedTestCase):
     @property
     def world_size(self) -> int:
         return 4

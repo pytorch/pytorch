@@ -651,6 +651,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
         # type set to Any and suppressed due to unsupport runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, empty_class), {})
+        print(f">>>>. base have tls: {hasattr(base, '_tls')}, test class tls state: {hasattr(device_type_test_class, '_tls')}")
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
@@ -665,6 +666,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
                 nontest = getattr(generic_test_class, name)
+                print(f">>>> setting non test attr: {name}")
                 setattr(device_type_test_class, name, nontest)
 
         # Mimics defining the instantiated class in the caller's file

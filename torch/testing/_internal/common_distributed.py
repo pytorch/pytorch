@@ -2,6 +2,7 @@ import faulthandler
 import logging
 import multiprocessing
 import os
+import queue
 import subprocess
 import sys
 import tempfile
@@ -33,7 +34,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TestCase,
 )
-from torch.testing._internal.distributed.multi_threaded_pg import run_with_threaded_pg
+from torch.testing._internal.distributed.multi_threaded_pg import (
+    _install_threaded_pg,
+    _uninstall_threaded_pg,
+    ProcessLocalGroup,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -892,7 +897,7 @@ def spawn_threads_and_init_comms(
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # TODO: get test name from kwargs
-        MultiThreadedTestCase._run_test_with_mt_pg(
+        MultiThreadedTestCase.run_test_with_threaded_pg(
             "runTest", timeout, world_size, lambda: func(self, *args, **kwargs)
         )
 
@@ -911,6 +916,26 @@ class MultiThreadedTestCase(TestCase):
     No global state possible
         How bad of a limitation is this?
     """
+    # Precision is a thread-local setting since it may be overridden per test
+    _tls = threading.local()
+    _tls.precision = TestCase._precision
+    _tls.rel_tol = TestCase._rel_tol
+
+    @property
+    def precision(self):
+        return self._tls.precision
+
+    @precision.setter
+    def precision(self, prec):
+        self._tls.precision = prec
+
+    @property
+    def rel_tol(self):
+        return self._tls.rel_tol
+
+    @rel_tol.setter
+    def rel_tol(self, prec):
+        self._tls.rel_tol = prec
 
     def __init__(self, method_name: str = "runTest") -> None:
         super().__init__(method_name)
@@ -927,8 +952,10 @@ class MultiThreadedTestCase(TestCase):
 
     def threaded_run_test(self):
         self.perThreadSetUp()
+
         try:
-            MultiThreadedTestCase._run_test_with_mt_pg(
+            print(f">>>> threaded run_test, cls tls: {self._tls.precision}")
+            MultiThreadedTestCase.run_test_with_threaded_pg(
                 name=self._current_test_name,
                 timeout=TIMEOUT_DEFAULT,
                 world_size=self.world_size,
@@ -943,11 +970,76 @@ class MultiThreadedTestCase(TestCase):
     def perThreadTearDown(self):
         pass
 
+    # @classmethod
+    # def _run(cls, rank: int, test_name: str) -> None:
+    #     self = cls(test_name)
+    #     self.rank = rank
+    #     self.run_test_with_threaded_pg
+
     @classmethod
-    def _run_test_with_mt_pg(cls, name, timeout, world_size, callback):
+    def run_test_with_threaded_pg(cls, name, timeout, world_size, callback):
+        """
+        Run ``callback`` with ``world_size`` threads using the in-proc process group
+        """
         # Show full C++ stacktraces when a Python error originating from C++ is raised.
         os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
-        failed_ranks = run_with_threaded_pg(world_size, timeout, callback)
+        # failed_ranks = run_with_threaded_pg(world_size, timeout, callback)
+
+        world = _install_threaded_pg()
+
+        def world_is_valid():
+            return world == c10d.distributed_c10d._world
+
+        global_store = c10d.HashStore()
+        exception_queue = queue.Queue()
+
+        def worker(rank):
+            if not world_is_valid():
+                raise TimeoutError("Invalid world")  # TODO: raise TimeoutError or RuntimeError?
+            c10d.init_process_group(
+                backend="threaded", rank=rank, world_size=world_size, store=global_store
+            )
+            try:
+                callback()
+            # Exceptions are handled in MultiThreadedTestCase
+            except BaseException as ex:
+                exception_queue.put((rank, sys.exc_info()))
+                world.default_pg.exception_handle(ex)  # trigger _terminate event and awaken worker threads
+            finally:
+                if world_is_valid():
+                    c10d.destroy_process_group()
+
+        try:
+            print(f">>>> thread ls: {cls._tls.precision}")
+            threads = [
+                threading.Thread(target=worker, args=(rank,)) for rank in range(world_size)
+            ]
+            for thread in threads:
+                thread.start()
+
+            deadline = time.time() + timeout
+            for idx, thread in enumerate(threads):
+                thread.join(max(0, deadline - time.time()))
+                if thread.is_alive():
+                    exception_queue.put(
+                        (
+                            idx,
+                            (
+                                TimeoutError,
+                                TimeoutError(
+                                    f"Rank failed to join in under {timeout} seconds"
+                                ),
+                                None,
+                            ),
+                        )
+                    )
+            ProcessLocalGroup.reset()
+            failed_ranks = []
+            while not exception_queue.empty():
+                failure = exception_queue.get()
+                failed_ranks.append(failure)
+        finally:
+            _uninstall_threaded_pg()
 
         # Print based on exceptions raised from threads
         #   SkipTest: print info for each thread
