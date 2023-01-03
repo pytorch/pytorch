@@ -4341,7 +4341,7 @@ def linspace(
         rg, REDUCTION_OUTPUT_TYPE_KIND.SAME, dtype_red
     )
 
-    cast = partial(torch.full, (1,), dtype=computation_dtype, **factory_kwargs)
+    cast = partial(torch.full, (), dtype=computation_dtype, **factory_kwargs)
     out = rg * cast((end - start) / (steps - 1)) + cast(start)
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
