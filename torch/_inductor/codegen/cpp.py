@@ -1251,10 +1251,7 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
             if self.is_stride1_at(itervar, index):
                 # only support 2d tile now
                 if loop_idx < len(self.itervars) - 1:
-                    if (
-                        self.outer_tiling_idx >= 0
-                        and self.outer_tiling_idx != loop_idx
-                    ):
+                    if self.outer_tiling_idx >= 0 and self.outer_tiling_idx != loop_idx:
                         self.can_tile2d = False
                         return
                     else:
@@ -1427,9 +1424,7 @@ class CppKernelProxy(CppKernel):
                     codegen_kernel(CppTile2DKernel, tiling_factor, outer_tiling_idx)
                 )
                 inner_tail_loop.set_kernel(
-                    codegen_kernel(
-                        CppTile2DTailKernel, tiling_factor, outer_tiling_idx
-                    )
+                    codegen_kernel(CppTile2DTailKernel, tiling_factor, outer_tiling_idx)
                 )
 
     def codegen_loops(self, code, worksharing):
