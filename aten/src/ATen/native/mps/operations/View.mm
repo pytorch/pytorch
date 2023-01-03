@@ -92,14 +92,15 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
 
 MPSGraphTensor *permuteTensor(MPSGraph *graph, MPSGraphTensor *inputTensor, NSArray *permuteOrder) {
   NSUInteger srcRank = [[inputTensor shape] count];
-  if (srcRank != [permuteOrder count])
+  if (srcRank != [permuteOrder count]) {
     return nil;
+  }
 
   MPSGraphTensor *outputTensor = inputTensor;
   std::vector<NSUInteger> dimensionOrder(srcRank);
   std::iota (std::begin(dimensionOrder), std::end(dimensionOrder), 0);
 
-  for (NSUInteger i = 0; i < srcRank; i++) {
+  for (const auto  i : c10::irange(srcRank)) {
     NSUInteger axis = [permuteOrder[i] integerValue];
     auto axisIter = std::find(dimensionOrder.begin(), dimensionOrder.end(), axis);
     NSUInteger axis1 = i;
@@ -153,10 +154,12 @@ MPSGraphTensor* asStridedLayer_expandDimsPattern(MPSGraph *graph, MPSGraphTensor
     NSUInteger currSrcDimLength = currSrcDim >= 0 ? [[inputTensor shape][currSrcDim] integerValue] : 1;
 
     NSUInteger targetDimLength =  currSrcDimLength;
-    if (currDimLength != targetDimLength)
+    if (currDimLength != targetDimLength) {
       targetDimLength = 1;
-    if (currDimLength != targetDimLength || currStride != currSrcStride)
+    }
+    if (currDimLength != targetDimLength || currStride != currSrcStride) {
       isValidExpand = NO;
+    }
     if (currSrcDim >= 0 && currSrcDimLength == targetDimLength) {
       currSrcStride *= currSrcDimLength;
       currSrcDim--;
@@ -624,7 +627,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
     output = at::native::empty_mps(src.sizes(), src.scalar_type(), c10::nullopt, kMPS);
     requires_sync = true;
   }
-  ViewCachedGraph* cachedGraph = createViewGraph(src, src.sizes(), src.strides(),
+  ViewCachedGraph* cachedGraph = createViewGraph(src, dst, src.sizes(), src.strides(),
                                                  src.storage_offset(), /*needsScatter*/ false);
   return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false, requires_sync);
 }
