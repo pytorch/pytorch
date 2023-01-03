@@ -4,6 +4,12 @@ import sys
 # add some debug printouts
 debug = False
 
+# Whether to disable a progress bar for autotuning
+disable_progress = True
+
+# Whether to enable printing the source code for each future
+verbose_progress = False
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -92,7 +98,6 @@ dynamo_import = inductor_import.replace("inductor", "dynamo")
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
-alignment_size = 4
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -132,6 +137,12 @@ class triton:
     # Use cudagraphs on output code
     cudagraphs = True
 
+    # Synchronize before and after every compiled graph.
+    debug_sync_graph = False
+
+    # Synchronize after every kernel launch, to help pinpoint bugs
+    debug_sync_kernel = False
+
     # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"
 
@@ -165,7 +176,7 @@ class triton:
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
-    enabled = os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+    enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
     debug_log = True
@@ -283,3 +294,8 @@ class InductorConfigContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._prev._apply()
+
+
+from .._dynamo.config_utils import get_config_serialization_fns
+
+save_config, load_config = get_config_serialization_fns(sys.modules[__name__])

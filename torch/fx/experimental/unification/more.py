@@ -7,11 +7,11 @@ def unifiable(cls):
     This uses the type and __dict__ or __slots__ attributes to define the
     nature of the term
     See Also:
+    >>> # xdoctest: +SKIP
     >>> class A(object):
     ...     def __init__(self, a, b):
     ...         self.a = a
     ...         self.b = b
-    >>> # xdoctest: +SKIP
     >>> unifiable(A)
     <class 'unification.more.A'>
     >>> x = var('x')
@@ -33,13 +33,13 @@ def unifiable(cls):
 
 def reify_object(o, s):
     """ Reify a Python object with a substitution
+    >>> # xdoctest: +SKIP
     >>> class Foo(object):
     ...     def __init__(self, a, b):
     ...         self.a = a
     ...         self.b = b
     ...     def __str__(self):
     ...         return "Foo(%s, %s)"%(str(self.a), str(self.b))
-    >>> # xdoctest: +SKIP
     >>> x = var('x')
     >>> f = Foo(1, x)
     >>> print(f)
@@ -88,13 +88,13 @@ def _reify(o, s):
 def unify_object(u, v, s):
     """ Unify two Python objects
     Unifies their type and ``__dict__`` attributes
+    >>> # xdoctest: +SKIP
     >>> class Foo(object):
     ...     def __init__(self, a, b):
     ...         self.a = a
     ...         self.b = b
     ...     def __str__(self):
     ...         return "Foo(%s, %s)"%(str(self.a), str(self.b))
-    >>> # xdoctest: +SKIP
     >>> x = var('x')
     >>> f = Foo(1, x)
     >>> g = Foo(1, 2)
@@ -109,6 +109,7 @@ def unify_object(u, v, s):
                      s)
     else:
         return unify(u.__dict__, v.__dict__, s)
+
 
 @dispatch(slice, slice, dict)
 def _unify(u, v, s):

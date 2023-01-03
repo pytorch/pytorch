@@ -8,19 +8,22 @@ import numbers
 import operator
 import re
 import types
-from abc import ABCMeta
 from typing import Any, Optional, Union
 
 import numpy as np
-from functorch.experimental.ops import PyOperator
 
 import torch
+
+from torch import SymInt
+from torch._guards import GuardSource
+from torch._ops import PyOperator
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
 from ..exc import unimplemented
-from ..guards import GuardBuilder, GuardSource
+from ..guards import GuardBuilder
 from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
@@ -49,7 +52,7 @@ from ..utils import (
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
-    wrap_to_fake_tensor_and_record,
+    wrap_fake_exception,
 )
 
 from .base import MutableLocal, typestr
@@ -73,6 +76,7 @@ from .lists import (
 )
 from .misc import (
     AutogradFunctionVariable,
+    ComptimeVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -110,6 +114,13 @@ class GraphArg:
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
 
+    # UnspecializedNumpyVariable and UnspecializedPythonVariable
+    # often masquerade as tensors.  We MUST NOT generate shape guard code
+    # that actually tries to access tensor properties on these values.
+    # is_tensor lets us tell if this graph arg actually is a tensor
+    # or not.
+    is_tensor: bool = True
+
     def __post_init__(self):
         if isinstance(self.example, torch.Tensor):
             assert isinstance(
@@ -146,6 +157,7 @@ class VariableBuilder:
         tx,
         source: Source,
     ):
+        assert source is not None
         super(VariableBuilder, self).__init__()
         self.tx = tx
         self.source = source
@@ -215,6 +227,8 @@ class VariableBuilder:
         return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
+        from ..comptime import comptime
+
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
@@ -402,6 +416,8 @@ class VariableBuilder:
                 InspectSignatureVariable.create,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif value is comptime:
+            return ComptimeVariable()
         elif value is dataclasses.fields:
             return LambdaVariable(
                 _dataclasses_fields_lambda,
@@ -429,12 +445,6 @@ class VariableBuilder:
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif istype(value, (type, ABCMeta)):
-            # TODO(whc) the following seems preferable but breaks some tests, debug
-            # elif inspect.isclass(value):
-            return UserDefinedClassVariable(
-                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
         elif value in tensor_dunder_fns:
             return TorchVariable(
                 value,
@@ -455,7 +465,7 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif (
-            isinstance(value, types.BuiltinFunctionType)
+            isinstance(value, types.MethodType)
             and type(getattr(value, "__self__", None))
             is torch.autograd.function.FunctionMeta
             and getattr(value, "__name__", "") == "apply"
@@ -491,6 +501,12 @@ class VariableBuilder:
             return TorchVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif issubclass(type(value), type):
+            # TODO(whc) the following seems preferable but breaks some tests, debug
+            # elif inspect.isclass(value):
+            return UserDefinedClassVariable(
+                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         else:
             result = UserDefinedObjectVariable(
@@ -569,7 +585,7 @@ class VariableBuilder:
             return self.tx.output.register_attr_or_module(
                 value,
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                source=None,
+                source=self.get_source(),
                 # Guards are added inside register_attr_or_module
             )
 
@@ -605,6 +621,7 @@ class VariableBuilder:
             guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
+            source=self.get_source(),
         )
 
         # TODO: I think the result is guaranteed to be fake with
@@ -637,10 +654,17 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
-            if config.dynamic_shapes and isinstance(value, int):
+            if (
+                config.dynamic_shapes
+                and isinstance(value, int)
+                and not is_constant_source(self.get_source())
+            ):
                 shape_env = self.tx.output.shape_env
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value)
+                    shape_env.create_symbol(value, source=self.source)
+                )
+                self.tx.output.tracked_fakes.append(
+                    TrackedFake(wrapped_value, self.source)
                 )
                 # TODO: Do float
             else:
@@ -682,7 +706,13 @@ class VariableBuilder:
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
                 self.tx.output.graphargs.append(
-                    GraphArg(self.get_source(), wrapped_value, True, fake_tensor_value)
+                    GraphArg(
+                        self.get_source(),
+                        wrapped_value,
+                        True,
+                        fake_tensor_value,
+                        is_tensor=False,
+                    )
                 )
             return unspec_var
 
@@ -720,15 +750,13 @@ def wrap_fx_proxy(tx, proxy, example_value=None, **options):
 def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, ignore_subclass=False, **options
 ):
+    from ..symbolic_convert import InstructionTranslatorBase
+
+    assert isinstance(tx, InstructionTranslatorBase)
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
     assert "example_value" not in proxy.node.meta
-    if not config.dynamic_propagation:
-        # TODO: This probably doesn't handle subclass correctly
-        if isinstance(example_value, torch.Tensor):
-            options.update(target_cls.specialize(example_value))
-        return target_cls(proxy, **options)
 
     initial_example_value = example_value
 
@@ -744,29 +772,33 @@ def wrap_fx_proxy_cls(
     with preserve_rng_state():
         if example_value is None:
             example_value = get_fake_value(proxy.node, tx)
-        else:
-            # Note: Unfortunately, this can happen during tracing, and is valid enough for now to allow.
-            # TODO(voz): Find all the callsites and burn this down.
-            # Flipping it to an assert fails dozens of tests.
-            # TODO(ezyang): should attempt this burndown again
-            if not isinstance(example_value, torch._subclasses.FakeTensor):
-                # We shouldn't be doing this at all, see
-                # https://github.com/pytorch/torchdynamo/issues/1950
-                # But assuming we're doing it, the legacy behavior for
-                # subclasses was to perform a clone WITHOUT preserving
-                # the subclass.  It's not clear to me that's what you actually
-                # want, but whatever, I wouldn't have this cache at all.
+
+        # Handle recursive calls here
+        elif isinstance(example_value, FakeTensor):
+            pass
+
+        elif isinstance(example_value, torch.Tensor):
+            if tx.export:
+                # The legacy behavior for real value cache with subclasses was
+                # to perform a clone WITHOUT preserving the subclass.  It's
+                # not entirely clear this is what you actually want though.
                 with torch._C.DisableTorchFunction():
                     proxy.tracer.real_value_cache[proxy.node] = _clone_input(
                         example_value
                     )
-                # NB: If we're ignoring subclass, then the expectation is you will
-                # take the returned TensorVariable and wrap it into a more
-                # accurate TensorVariable that is able to track subclass-ness;
-                # otherwise this is wrong!
-                example_value = wrap_to_fake_tensor_and_record(
-                    example_value, tx=tx, ignore_subclass=ignore_subclass
-                )
+            # NB: If we're ignoring subclass, then the expectation is you will
+            # take the returned TensorVariable and wrap it into a more
+            # accurate TensorVariable that is able to track subclass-ness;
+            # otherwise this is wrong!
+            kwargs = {
+                "ignore_subclass": ignore_subclass,
+                "is_tensor": target_cls is TensorVariable,
+            }
+            assert "source" in options and options["source"] is not None
+            kwargs["source"] = options["source"]
+            example_value = wrap_to_fake_tensor_and_record(
+                example_value, tx=tx, **kwargs
+            )
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
@@ -889,7 +921,42 @@ def wrap_fx_proxy_cls(
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable(proxy, example_value, **options)
     else:
-        raise AssertionError(
+        unimplemented(
             "torch.* op returned non-Tensor "
             + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
         )
+
+
+# Tracks the sources of all fake tensors we wrap in Dynamo.
+# Used by shape guard computation.
+@dataclasses.dataclass
+class TrackedFake:
+    fake: Union[FakeTensor, SymInt]
+    source: Source
+
+
+def wrap_to_fake_tensor_and_record(
+    e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
+):
+    if type(e) in (torch.Tensor, torch.nn.Parameter) or (
+        ignore_subclass and isinstance(e, torch.Tensor)
+    ):
+        static_shapes = (
+            source is None
+            or type(e) is torch.nn.Parameter
+            or config.dynamic_shapes is False
+            or not is_tensor
+        )
+        fake_e = wrap_fake_exception(
+            lambda: tx.fake_mode.from_tensor(
+                e,
+                static_shapes=static_shapes,
+                ignore_subclass=ignore_subclass,
+                source=source,
+            )
+        )
+        if is_tensor:
+            tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
+        return fake_e
+    else:
+        return e

@@ -8,6 +8,7 @@ import types
 from collections import defaultdict, OrderedDict
 from dataclasses import dataclass
 from enum import Enum
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import (
     Any,
@@ -422,17 +423,20 @@ class PackageExporter:
             return False
 
     def _get_source_of_module(self, module: types.ModuleType) -> Optional[str]:
-        filename = getattr(module, "__file__", None)
-        result = (
-            None
-            if filename is None or not filename.endswith(".py")
-            else linecache.getlines(filename, module.__dict__)
-        )
-
-        if result is None:
-            return None
-
-        return "".join(result)
+        filename = None
+        spec = getattr(module, "__spec__", None)
+        if spec is not None:
+            loader = getattr(spec, "loader", None)
+            if loader is not None and isinstance(loader, SourceFileLoader):
+                try:
+                    filename = loader.get_filename(module.__name__)
+                except ImportError:
+                    pass
+        if filename is None:
+            filename = getattr(module, "__file__", None)
+        if isinstance(filename, str) and filename.endswith(".py"):
+            return "".join(linecache.getlines(filename, module.__dict__))
+        return None
 
     def add_dependency(self, module_name: str, dependencies=True):
         """Given a module, add it to the dependency graph according to patterns
@@ -887,22 +891,25 @@ class PackageExporter:
 
     def _persistent_id(self, obj):
         if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
+
+            storage: Storage
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
                 untyped_storage = obj._untyped_storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
+                storage = cast(Storage, untyped_storage)
                 storage_numel = obj.size()
 
             elif isinstance(obj, torch.UntypedStorage):
                 untyped_storage = obj
+                storage = cast(Storage, untyped_storage)
                 storage_type = normalize_storage_type(type(storage))
                 storage_numel = storage.nbytes()
             else:
                 raise RuntimeError(f"storage type not recognized: {type(obj)}")
 
-            storage: Storage = cast(Storage, untyped_storage)
             location = location_tag(storage)
 
             # serialize storage if not already written
