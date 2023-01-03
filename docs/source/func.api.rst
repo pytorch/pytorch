@@ -65,6 +65,7 @@ Here's how we would compute the Jacobian over the parameters
     :nosignatures:
 
     functional_call
+    stack_module_state
 
 If you're looking for information on fixing Batch Norm modules, please follow the
 guidance here
