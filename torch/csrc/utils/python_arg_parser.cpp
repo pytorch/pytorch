@@ -353,8 +353,12 @@ auto handle_torch_function_no_python_arg_parser(
       throw python_error();
     }
   }
-  tf_g.clear();
-  td_g.clear();
+  while(tf_g.begin() != tf_g.end()) {
+    tf_g.pop_back();
+  }
+  while(td_g.begin() != td_g.end()) {
+    td_g.pop_back();
+  }
 
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
     for (auto& arg : overloaded_args) {
