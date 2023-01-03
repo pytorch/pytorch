@@ -1844,10 +1844,6 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonAwaitWrapper, std::shared_ptr<PythonAwaitWrapper>>(
       m, "Await")
-      //.def(py::init([]() {
-      //  return std::make_shared<PythonAwaitWrapper>(
-      //      c10::make_intrusive<c10::ivalue::Await>(PyObjectType::get()));
-      //}))
       .def(
           "wait",
           &PythonAwaitWrapper::wait,
@@ -1867,6 +1863,12 @@ void initJITBindings(PyObject* module) {
       .def(
           "type",
           &PythonAwaitWrapper::type)
+      .def("__getattr__",
+          [](PythonAwaitWrapper& self, const std::string& name) -> py::object{
+            // LazyAwaitable semantic
+            auto val = self.wait();
+            return py::getattr(val, name.c_str(), py::none());
+          })
       .def(
           py::pickle(
               /* __getstate__ */

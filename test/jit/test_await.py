@@ -335,3 +335,11 @@ class TestAwait(JitTestCase):
         out = main(inp)
         script_out = sm(inp)
         self.assertTrue(torch.allclose(script_out, out))
+
+    def test_await_eager_lazy(self):
+        def delayed(x: Tensor) -> Tensor:
+            return 2 * (x + 1)
+        t = torch.ones(2, dtype=torch.int64)
+        aw = torch.jit.awaitable(delayed, t)
+        self.assertTrue(isinstance(aw, torch._C.Await))
+        self.assertTrue(t.dtype == aw.dtype)
