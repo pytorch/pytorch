@@ -1069,6 +1069,7 @@
   dispatch:
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
+    MPS: _bincount_mps
   tags: dynamic_output_shape
   autogen: bincount.out
 
@@ -2571,6 +2572,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: floor_divide
+    MPS: floor_divide_mps
     SparseCPU, SparseCUDA: floor_divide_sparse
 
 - func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -2578,12 +2580,14 @@
   variants: method
   dispatch:
     CPU, CUDA: floor_divide_
+    MPS: floor_divide_mps_
     SparseCPU, SparseCUDA: floor_divide_sparse_
 
 - func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: floor_divide_out
+    MPS: floor_divide_out_mps
     SparseCPU, SparseCUDA: floor_divide_out_sparse_zerodim
 
 - func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
@@ -4651,22 +4655,20 @@
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
-  dispatch:
-    MkldnnCPU: mkldnn_prelu
-    CPU: prelu_cpu
-    CUDA: prelu_cuda
-    MPS: prelu_mps
-    QuantizedCPU: prelu_quantized_cpu
   autogen: prelu.out
 
-- func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
-  variants: function, method
+- func: _prelu_kernel(Tensor self, Tensor weight) -> Tensor
   dispatch:
+    CPU, CUDA: _prelu_kernel
+    QuantizedCPU: _prelu_kernel_quantized_cpu
+    MkldnnCPU: mkldnn_prelu
+    MPS: prelu_mps
+
+- func: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
+  dispatch:
+    CPU, CUDA: _prelu_kernel_backward
     MkldnnCPU: mkldnn_prelu_backward
-    CPU: prelu_backward_cpu
-    CUDA: prelu_backward_cuda
     MPS: prelu_backward_mps
-  autogen: prelu_backward.out
 
 - func: gelu.out(Tensor self, *, str approximate='none', Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -6205,10 +6207,6 @@
   dispatch:
     CPU, CUDA: frexp_out
   tags: pointwise
-# Deprecated (v.1.12)
-
-- func: frobenius_norm(Tensor self) -> Tensor
-  variants: function
 
 # Deprecated (v.1.12)
 - func: frobenius_norm.dim(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
@@ -9436,7 +9434,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta: unfold
+    CPU, CUDA, Meta, MPS: unfold
     QuantizedCPU, QuantizedCUDA: unfold
 
 - func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor

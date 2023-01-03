@@ -162,18 +162,6 @@ std::string processErrorMsg(std::string str) {
   return str;
 }
 
-static std::string formatMessage(const char* format, va_list fmt_args) {
-  static const size_t ERROR_BUF_SIZE = 1024;
-  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  char error_buf[ERROR_BUF_SIZE];
-  vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
-
-  // Ensure that the string is null terminated
-  error_buf[sizeof(error_buf) / sizeof(*error_buf) - 1] = 0;
-
-  return std::string(error_buf);
-}
-
 void translate_exception_to_python(const std::exception_ptr& e_ptr) {
   try {
     TORCH_INTERNAL_ASSERT(
@@ -183,41 +171,6 @@ void translate_exception_to_python(const std::exception_ptr& e_ptr) {
     std::rethrow_exception(e_ptr);
   }
   CATCH_ALL_ERRORS(return )
-}
-
-IndexError::IndexError(const char* format, ...) {
-  va_list fmt_args;
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
-}
-
-TypeError::TypeError(const char* format, ...) {
-  va_list fmt_args;
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
-}
-
-ValueError::ValueError(const char* format, ...) {
-  va_list fmt_args;
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
-}
-
-AttributeError::AttributeError(const char* format, ...) {
-  va_list fmt_args;
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
-}
-
-LinAlgError::LinAlgError(const char* format, ...) {
-  va_list fmt_args;
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
 }
 
 void PyWarningHandler::InternalHandler::process(const c10::Warning& warning) {

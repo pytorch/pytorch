@@ -536,6 +536,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
         if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
             report('-- Using lightweight dispatch')
+        if cmake_cache_vars['BUILD_EXECUTORCH']:
+            report('-- Building Executorch')
 
         if cmake_cache_vars['USE_ITT']:
             report('-- Using ITT')
@@ -989,7 +991,7 @@ def main():
         if os.path.exists(triton_pin_file):
             with open(triton_pin_file) as f:
                 triton_pin = f.read().strip()
-                extras_require['dynamo'] = ['torchtriton==2.0.0+' + triton_pin[:10], 'jinja2']
+                extras_require['dynamo'] = ['pytorch-triton==2.0.0+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1151,6 +1153,7 @@ def main():
         'include/THH/generic/*.h',
         'include/sleef.h',
         "_inductor/codegen/*.h",
+        "_inductor/codegen/*.j2",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',

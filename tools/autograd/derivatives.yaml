@@ -965,7 +965,7 @@
   result: logsumexp_jvp(self_p, self_t, dim, keepdim)
 
 - name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
-  self, b: linalg_lstsq_backward(grad, self, b, rcond, driver, grad_input_mask)
+  self, b: linalg_lstsq_backward(grad, self, b, grad_input_mask)
   solution: linalg_lstsq_jvp(self_p, b_p, self_t, b_t)
   output_differentiability: [True, False, False, False]
 
@@ -1168,7 +1168,7 @@
   rstd: not_implemented("native_layer_norm_backward rstd")
 
 - name: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
-  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].device().is_xpu() ? grads[0] : grads[0].contiguous(), input.device().is_xpu() ? input : input.contiguous(), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
+  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].device().is_xpu() ? grads[0] : grads[0].contiguous(grads[0].suggest_memory_format()), input.device().is_xpu() ? input : input.contiguous(input.suggest_memory_format()), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
   result0: group_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, result1, result2, group)
   result1: group_norm_mean_jvp(input_t, result1, group)
   result2: group_norm_invstd_jvp(input_p, input_t, result1, result2, group)
@@ -1987,19 +1987,23 @@
   self: _masked_softmax_backward(grad, result, mask, dim)
   mask: non_differentiable
 
-- name: prelu(Tensor self, Tensor weight) -> Tensor
-  self, weight: "grad.defined() ? prelu_backward(grad, self, weight) : std::tuple<Tensor, Tensor>()"
-  result: prelu_jvp(self_p, self_t, weight_p, weight_t)
+- name: _prelu_kernel(Tensor self, Tensor weight) -> Tensor
+  self, weight: "grad.defined() ? _prelu_kernel_backward(grad, self, weight) : std::tuple<Tensor, Tensor>()"
+  result: at::where(self_p >= 0, self_t, weight_p * self_t + weight_t * self_p)
 
-- name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
-  grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
-  result0: prelu_backward_self_jvp(self_p, weight_p, weight_t, grad_output_p, grad_output_t)
-  result1: prelu_backward_weight_jvp(weight_p, self_p, self_t, grad_output_p, grad_output_t)
+- name: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
+  grad_output: "grads[0].defined() ?
+                (grads[1].defined() ? at::where(self >= 0, grads[0], grads[0] * weight + grads[1] * self)
+                                    : at::where(self >= 0, grads[0], grads[0] * weight))
+                                    : at::where(self >= 0, at::zeros({}, grad_output.options()), grads[1] * self)"
+  self: "grads[1].defined() ? at::where(self >= 0, at::zeros({}, self.options()), grad_output * grads[1]) : zeros_like(self)"
+  weight: "grads[0].defined() ? at::where(self >= 0, at::zeros({}, weight.options()), grad_output * grads[0]) : zeros_like(self)"
+  result0: at::where(self_p >= 0, grad_output_t, grad_output_t * weight_p + grad_output_p * weight_t)
+  result1: at::where(self_p >= 0, at::zeros({}, self_p.options()), grad_output_p * self_t + grad_output_t * self_p)
 
 - name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
   result: auto_element_wise
-
 
 - name: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   self: rrelu_with_noise_backward(grad, result, noise, lower, upper, training, true)
