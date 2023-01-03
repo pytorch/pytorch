@@ -2012,6 +2012,86 @@ def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
     return self
 
 
+def multiply_integers(vs):
+    r = 1
+    for v in vs:
+        r *= v
+    return r
+
+
+def upsample_common_check(input_size, output_size, num_spatial_dims):
+    check(
+        len(output_size) == num_spatial_dims,
+        lambda: f"It is expected output_size equals to {num_spatial_dims}, but got size {len(output_size)}",
+    )
+    expected_input_dims = num_spatial_dims + 2  # N, C, ...
+    check(
+        len(input_size) == expected_input_dims,
+        lambda: f"It is expected input_size equals to {expected_input_dims}, but got size {len(input_size)}",
+    )
+
+    check(
+        all([s > 0 for s in input_size[2:]]) and all([s > 0 for s in output_size]),
+        lambda: f"Input and output sizes should be greater than 0, but got "
+        f"input size {input_size} and output size {output_size}",
+    )
+
+    nbatch, channels = input_size[:2]
+    return (nbatch, channels, *output_size)
+
+
+@register_meta(aten.upsample_nearest1d.default)
+def upsample_nearest1d(input, output_size, scales=None):
+    check(
+        input.numel() != 0 or multiply_integers(input.size()[1:]),
+        lambda: "Non-empty 3D data tensor expected but got a tensor with sizes {input.size()}",
+    )
+    full_output_size = upsample_common_check(
+        input.size(), output_size, num_spatial_dims=1
+    )
+    return input.new_empty(full_output_size).to(
+        memory_format=utils.suggest_memory_format(input)
+    )
+
+
+@register_meta(aten.upsample_nearest2d.default)
+def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
+    check(
+        input.numel() != 0 or multiply_integers(input.size()[1:]),
+        lambda: "Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
+    )
+    full_output_size = upsample_common_check(
+        input.size(), output_size, num_spatial_dims=2
+    )
+    output = input.new_empty(full_output_size)
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(input)
+
+    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
+    _, n_channels, _, _ = input.shape
+    if input.device.type == "cuda" and n_channels < 4:
+        memory_format = torch.contiguous_format
+
+    output = output.contiguous(memory_format=memory_format)
+
+    return output
+
+
+@register_meta(aten.upsample_nearest3d.default)
+def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_w=None):
+    check(
+        input.numel() != 0 or multiply_integers(input.size()[1:]),
+        lambda: "Non-empty 5D data tensor expected but got a tensor with sizes {input.size()}",
+    )
+    full_output_size = upsample_common_check(
+        input.size(), output_size, num_spatial_dims=3
+    )
+    return input.new_empty(full_output_size).to(
+        memory_format=utils.suggest_memory_format(input)
+    )
+
+
 @register_meta([aten.sort.default, aten.sort.stable])
 def meta_sort(self, stable=None, dim=-1, descending=False):
     return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
