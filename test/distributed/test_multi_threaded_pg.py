@@ -6,6 +6,8 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import ReduceOp
 from unittest import skip, SkipTest
 
+from torch.distributed._tensor.device_mesh import DeviceMesh
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -149,6 +151,24 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         dist.broadcast(rank_0_tensor, src=0)
         self.assertEqualOnRank(rank_0_tensor, self_tensor, rank=0)
         self.assertNotEqualOnRank(rank_0_tensor, self_tensor, rank=1)
+
+    def test_subgroups(self):
+        # mesh: [[0, 1], [2, 3]]
+        mesh_tensor = torch.arange(self.world_size).reshape(2, 2)
+        # construct a device mesh
+        mesh = DeviceMesh("cpu", mesh_tensor)
+        # local tensor to perform all_reduce
+        output = torch.ones(3, 3) * dist.get_rank()
+
+        # test 1: cross-host reduction
+        mesh.all_reduce(output)
+        expected = torch.ones(3, 3) * (2 if dist.get_rank() % 2 == 0 else 4)
+        self.assertEqual(output, expected)
+        return
+        # test 2: within-host reduction
+        mesh.all_reduce(output)
+        excepted = torch.ones(3, 3) * 6
+        self.assertEqual(output, expected)
 
 
 if __name__ == "__main__":
