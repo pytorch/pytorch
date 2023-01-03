@@ -105,7 +105,7 @@ if __name__ == "__main__":
     elif os.name == 'posix':
         escaped_cmd = shlex.quote(cmd)
     else:
-        return 'Could not determine operating system'
+        sys.exit('Could not determine operating system')
     
     # Run command
     ret = subprocess.run(
