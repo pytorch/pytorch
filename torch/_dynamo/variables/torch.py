@@ -826,7 +826,7 @@ class TorchPyOperator(VariableTracker):
                 args[0].as_proxy(),
                 true_node,
                 false_node,
-                tuple(a.as_proxy() for a in sub_args),
+                list(a.as_proxy() for a in sub_args),
             )
             # TODO: assert that the true/false return values are
             # consistent
