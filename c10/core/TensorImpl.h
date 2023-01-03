@@ -216,7 +216,7 @@ enum class PyInterpreterStatus {
 } // namespace impl
 
 struct C10_API NamedTensorMetaInterface {
-  virtual ~NamedTensorMetaInterface(){};
+  virtual ~NamedTensorMetaInterface() = default;
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::clone");
@@ -265,7 +265,7 @@ struct C10_API ExtraMeta {
   bool_is_non_overlapping_and_dense is_non_overlapping_and_dense_{true};
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 
-  ExtraMeta() {}
+  ExtraMeta() = default;
 
   ExtraMeta(
       SymDimVector sizes,
