@@ -427,7 +427,7 @@ TEST(ShapeAnalysisTest, ShapeCacheMultipleFns) {
   clear_shape_cache();
 
   auto squeeze_op =
-      getSchema("aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)");
+      getSchema("aten::squeeze.dim(Tensor(a) self, int[1] dim) -> Tensor(a)");
   auto mul_tensor =
       getSchema("aten::mul.Tensor(Tensor self, Tensor other) -> Tensor");
   auto mul_scalar =

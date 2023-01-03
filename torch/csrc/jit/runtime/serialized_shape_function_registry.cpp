@@ -123,35 +123,39 @@ def squeeze_nodim(li: List[int]) -> List[int]:
   return out
 
 def squeeze(li: List[int],
-    dim: int) -> List[int]:
+    dim: List[int]) -> List[int]:
   out = annotate(List[int], [])
-  _0 = torch.len(li)
-  if torch.le(_0, 0):
-    dim_post_expr = 1
-  else:
-    dim_post_expr = _0
-  min = torch.neg(dim_post_expr)
-  max = torch.sub(dim_post_expr, 1)
-  if torch.lt(dim, min):
-    _1 = True
-  else:
-    _1 = torch.gt(dim, max)
-  if torch.__not__(_1):
-    pass
-  else:
-    ops.prim.RaiseException("AssertionError: ")
-  if torch.lt(dim, 0):
-    wrapped_dim = torch.add(dim, dim_post_expr)
-  else:
-    wrapped_dim = dim
+  ndim = torch.len(li)
+  wrapped_dims = annotate(List[int], [])
+  for _0 in range(torch.len(dim)):
+    d = dim[_0]
+    if torch.le(ndim, 0):
+      dim_post_expr = 1
+    else:
+      dim_post_expr = ndim
+    min = torch.neg(dim_post_expr)
+    max = torch.sub(dim_post_expr, 1)
+    if torch.lt(d, min):
+      _1 = True
+    else:
+      _1 = torch.gt(d, max)
+    if torch.__not__(_1):
+      pass
+    else:
+      ops.prim.RaiseException("AssertionError: ")
+    if torch.lt(d, 0):
+      dim0 = torch.add(d, dim_post_expr)
+    else:
+      dim0 = d
+    _2 = torch.append(wrapped_dims, dim0)
   for i in range(torch.len(li)):
-    if torch.eq(i, wrapped_dim):
+    if torch.__contains__(wrapped_dims, i):
       if torch.ne(li[i], 1):
-        _2 = torch.append(out, li[i])
+        _3 = torch.append(out, li[i])
       else:
         pass
     else:
-      _3 = torch.append(out, li[i])
+      _4 = torch.append(out, li[i])
   return out
 
 )=====")
@@ -543,54 +547,71 @@ def mv(self: List[int],
           ops.prim.RaiseException("AssertionError: ")
         _19 = [out[0], tensor2[1]]
         out0 = annotate(List[int], [])
-        for i in range(2):
-          if torch.eq(i, 0):
-            if torch.ne(_19[i], 1):
-              _20 = torch.append(out0, _19[i])
-            else:
-              pass
+        wrapped_dims = annotate(List[int], [])
+        for _20 in range(1):
+          d = ([0])[_20]
+          if torch.lt(d, -2):
+            _21 = True
           else:
-            _21 = torch.append(out0, _19[i])
-        _14 = out0
-      else:
-        if torch.eq(dim_tensor1, 2):
-          _22 = torch.eq(dim_tensor2, 2)
-        else:
-          _22 = False
-        if _22:
-          _24 = torch.eq(torch.len(tensor1), 2)
-          if _24:
-            pass
-          else:
-            ops.prim.RaiseException(_2)
-          _25 = torch.eq(torch.len(tensor2), 2)
-          if _25:
-            pass
-          else:
-            ops.prim.RaiseException(_3)
-          _26 = torch.eq(tensor1[1], tensor2[0])
-          if _26:
+            _21 = torch.gt(d, 1)
+          if torch.__not__(_21):
             pass
           else:
             ops.prim.RaiseException("AssertionError: ")
-          _23 = [tensor1[0], tensor2[1]]
+          if torch.lt(d, 0):
+            dim = torch.add(d, 2)
+          else:
+            dim = d
+          _22 = torch.append(wrapped_dims, dim)
+        for i in range(2):
+          _23 = torch.__contains__(wrapped_dims, i)
+          if _23:
+            if torch.ne(_19[i], 1):
+              _24 = torch.append(out0, _19[i])
+            else:
+              pass
+          else:
+            _25 = torch.append(out0, _19[i])
+        _14 = out0
+      else:
+        if torch.eq(dim_tensor1, 2):
+          _26 = torch.eq(dim_tensor2, 2)
+        else:
+          _26 = False
+        if _26:
+          _28 = torch.eq(torch.len(tensor1), 2)
+          if _28:
+            pass
+          else:
+            ops.prim.RaiseException(_2)
+          _29 = torch.eq(torch.len(tensor2), 2)
+          if _29:
+            pass
+          else:
+            ops.prim.RaiseException(_3)
+          _30 = torch.eq(tensor1[1], tensor2[0])
+          if _30:
+            pass
+          else:
+            ops.prim.RaiseException("AssertionError: ")
+          _27 = [tensor1[0], tensor2[1]]
         else:
           if torch.ge(dim_tensor1, 1):
-            _27 = torch.ge(dim_tensor2, 1)
+            _31 = torch.ge(dim_tensor2, 1)
           else:
-            _27 = False
-          if _27:
+            _31 = False
+          if _31:
             if torch.gt(dim_tensor1, 1):
               n = tensor1[-2]
             else:
               n = 1
             batch_tensor1 = annotate(List[int], [])
             for i0 in range(torch.sub(dim_tensor1, 2)):
-              _29 = torch.append(batch_tensor1, tensor1[i0])
+              _33 = torch.append(batch_tensor1, tensor1[i0])
             p = tensor2[-1]
             batch_tensor2 = annotate(List[int], [])
             for i1 in range(torch.sub(dim_tensor2, 2)):
-              _30 = torch.append(batch_tensor2, tensor2[i1])
+              _34 = torch.append(batch_tensor2, tensor2[i1])
             dimsA = torch.len(batch_tensor1)
             dimsB = torch.len(batch_tensor2)
             ndim = ops.prim.max(dimsA, dimsB)
@@ -608,38 +629,38 @@ def mv(self: List[int],
               else:
                 sizeB = 1
               if torch.ne(sizeA, sizeB):
-                _31 = torch.ne(sizeA, 1)
+                _35 = torch.ne(sizeA, 1)
               else:
-                _31 = False
-              if _31:
-                _32 = torch.ne(sizeB, 1)
+                _35 = False
+              if _35:
+                _36 = torch.ne(sizeB, 1)
               else:
-                _32 = False
-              if _32:
-                _33 = torch.format(_4, sizeA, sizeB, i2)
-                _34 = torch.add("AssertionError: ", _33)
-                ops.prim.RaiseException(_34)
+                _36 = False
+              if _36:
+                _37 = torch.format(_4, sizeA, sizeB, i2)
+                _38 = torch.add("AssertionError: ", _37)
+                ops.prim.RaiseException(_38)
               else:
                 pass
               if torch.eq(sizeA, 1):
-                _35 = sizeB
+                _39 = sizeB
               else:
-                _35 = sizeA
-              _36 = torch.append(expand_batch_portion, _35)
+                _39 = sizeA
+              _40 = torch.append(expand_batch_portion, _39)
             if torch.gt(dim_tensor1, 1):
-              _37 = torch.append(expand_batch_portion, n)
+              _41 = torch.append(expand_batch_portion, n)
             else:
               pass
             if torch.gt(dim_tensor2, 1):
-              _38 = torch.append(expand_batch_portion, p)
+              _42 = torch.append(expand_batch_portion, p)
             else:
               pass
-            _28 = expand_batch_portion
+            _32 = expand_batch_portion
           else:
             ops.prim.RaiseException(_5)
-            _28 = _6
-          _23 = _28
-        _14 = _23
+            _32 = _6
+          _27 = _32
+        _14 = _27
       _11 = _14
     _8 = _11
   return _8
@@ -746,21 +767,38 @@ def mv(self: List[int],
           ops.prim.RaiseException("AssertionError: ")
         _19 = [out0[0], _5[1]]
         out1 = annotate(List[int], [])
+        wrapped_dims = annotate(List[int], [])
+        for _20 in range(1):
+          d = ([0])[_20]
+          if torch.lt(d, -2):
+            _21 = True
+          else:
+            _21 = torch.gt(d, 1)
+          if torch.__not__(_21):
+            pass
+          else:
+            ops.prim.RaiseException("AssertionError: ")
+          if torch.lt(d, 0):
+            dim = torch.add(d, 2)
+          else:
+            dim = d
+          _22 = torch.append(wrapped_dims, dim)
         for i in range(2):
-          if torch.eq(i, 0):
+          _23 = torch.__contains__(wrapped_dims, i)
+          if _23:
             if torch.ne(_19[i], 1):
-              _20 = torch.append(out1, _19[i])
+              _24 = torch.append(out1, _19[i])
             else:
               pass
           else:
-            _21 = torch.append(out1, _19[i])
+            _25 = torch.append(out1, _19[i])
         _14 = out1
       else:
         if torch.eq(dim_tensor1, 2):
-          _22 = torch.eq(dim_tensor2, 2)
+          _26 = torch.eq(dim_tensor2, 2)
         else:
-          _22 = False
-        if _22:
+          _26 = False
+        if _26:
           if torch.eq(torch.len(input), 2):
             pass
           else:
@@ -773,24 +811,24 @@ def mv(self: List[int],
             pass
           else:
             ops.prim.RaiseException("AssertionError: ")
-          _23 = [input[0], _5[1]]
+          _27 = [input[0], _5[1]]
         else:
           if torch.ge(dim_tensor1, 1):
-            _24 = torch.ge(dim_tensor2, 1)
+            _28 = torch.ge(dim_tensor2, 1)
           else:
-            _24 = False
-          if _24:
+            _28 = False
+          if _28:
             if torch.gt(dim_tensor1, 1):
               n = input[-2]
             else:
               n = 1
             batch_tensor1 = annotate(List[int], [])
             for i0 in range(torch.sub(dim_tensor1, 2)):
-              _26 = torch.append(batch_tensor1, input[i0])
+              _30 = torch.append(batch_tensor1, input[i0])
             p = _5[-1]
             batch_tensor2 = annotate(List[int], [])
             for i1 in range(torch.sub(dim_tensor2, 2)):
-              _27 = torch.append(batch_tensor2, _5[i1])
+              _31 = torch.append(batch_tensor2, _5[i1])
             dimsA = torch.len(batch_tensor1)
             dimsB = torch.len(batch_tensor2)
             ndim = ops.prim.max(dimsA, dimsB)
@@ -808,38 +846,38 @@ def mv(self: List[int],
               else:
                 sizeB = 1
               if torch.ne(sizeA, sizeB):
-                _28 = torch.ne(sizeA, 1)
+                _32 = torch.ne(sizeA, 1)
               else:
-                _28 = False
-              if _28:
-                _29 = torch.ne(sizeB, 1)
+                _32 = False
+              if _32:
+                _33 = torch.ne(sizeB, 1)
               else:
-                _29 = False
-              if _29:
-                _30 = torch.format(_2, sizeA, sizeB, i2)
-                _31 = torch.add("AssertionError: ", _30)
-                ops.prim.RaiseException(_31)
+                _33 = False
+              if _33:
+                _34 = torch.format(_2, sizeA, sizeB, i2)
+                _35 = torch.add("AssertionError: ", _34)
+                ops.prim.RaiseException(_35)
               else:
                 pass
               if torch.eq(sizeA, 1):
-                _32 = sizeB
+                _36 = sizeB
               else:
-                _32 = sizeA
-              _33 = torch.append(expand_batch_portion, _32)
+                _36 = sizeA
+              _37 = torch.append(expand_batch_portion, _36)
             if torch.gt(dim_tensor1, 1):
-              _34 = torch.append(expand_batch_portion, n)
+              _38 = torch.append(expand_batch_portion, n)
             else:
               pass
             if torch.gt(dim_tensor2, 1):
-              _35 = torch.append(expand_batch_portion, p)
+              _39 = torch.append(expand_batch_portion, p)
             else:
               pass
-            _25 = expand_batch_portion
+            _29 = expand_batch_portion
           else:
             ops.prim.RaiseException(_3)
-            _25 = _7
-          _23 = _25
-        _14 = _23
+            _29 = _7
+          _27 = _29
+        _14 = _27
       _11 = _14
     out = _11
   if torch.__isnot__(bias, None):
@@ -861,24 +899,24 @@ def mv(self: List[int],
       else:
         sizeB0 = 1
       if torch.ne(sizeA0, sizeB0):
-        _36 = torch.ne(sizeA0, 1)
+        _40 = torch.ne(sizeA0, 1)
       else:
-        _36 = False
-      if _36:
-        _37 = torch.ne(sizeB0, 1)
+        _40 = False
+      if _40:
+        _41 = torch.ne(sizeB0, 1)
       else:
-        _37 = False
-      if _37:
-        _38 = torch.format(_4, sizeA0, sizeB0, i3)
-        _39 = torch.add("AssertionError: ", _38)
-        ops.prim.RaiseException(_39)
+        _41 = False
+      if _41:
+        _42 = torch.format(_4, sizeA0, sizeB0, i3)
+        _43 = torch.add("AssertionError: ", _42)
+        ops.prim.RaiseException(_43)
       else:
         pass
       if torch.eq(sizeA0, 1):
-        _40 = sizeB0
+        _44 = sizeB0
       else:
-        _40 = sizeA0
-      _41 = torch.append(expandedSizes, _40)
+        _44 = sizeA0
+      _45 = torch.append(expandedSizes, _44)
     if torch.eq(expandedSizes, out):
       pass
     else:
@@ -2355,49 +2393,57 @@ def conv_forwards(input: List[int],
 )=====")
 + std::string(R"=====(def upsample_nearest2d(input: List[int],
     output_size: Optional[List[int]],
-    scale_factors: Optional[List[float]]) -> Optional[List[int]]:
-  _0 = "AssertionError: Must specify exactly one of output_size and scale_factors"
-  _1 = "AssertionError: Either output_size or scale_factors must be presented"
+    scale_factors: Optional[List[float]]) -> List[int]:
+  _0 = "AssertionError: Either output_size or scale_factors must be presented"
+  _1 = "AssertionError: Must specify exactly one of output_size and scale_factors"
+  _2 = uninitialized(Optional[List[float]])
   out = annotate(List[int], [])
-  _2 = torch.append(out, input[0])
-  _3 = torch.append(out, input[1])
+  _3 = torch.append(out, input[0])
+  _4 = torch.append(out, input[1])
+  if torch.__is__(scale_factors, None):
+    _5, scale_factors0 = torch.__is__(output_size, None), scale_factors
+  else:
+    scale_factors1 = unchecked_cast(List[float], scale_factors)
+    _5, scale_factors0 = False, scale_factors1
+  if _5:
+    ops.prim.RaiseException(_0)
+  else:
+    pass
   if torch.__isnot__(output_size, None):
-    output_size0 = unchecked_cast(List[int], output_size)
-    if torch.__is__(scale_factors, None):
-      pass
+    output_size1 = unchecked_cast(List[int], output_size)
+    if torch.__is__(scale_factors0, None):
+      scale_factors3 : Optional[List[float]] = scale_factors0
     else:
-      ops.prim.RaiseException(_0)
-    _5 = torch.eq(torch.len(output_size0), 2)
-    if _5:
+      ops.prim.RaiseException(_1)
+      scale_factors3 = _2
+    _6 = torch.eq(torch.len(output_size1), 2)
+    if _6:
       pass
     else:
       ops.prim.RaiseException("AssertionError: ")
-    _6 = torch.append(out, output_size0[0])
-    _7 = torch.append(out, output_size0[1])
-    _4 : Optional[List[int]] = out
+    _7 = torch.append(out, output_size1[0])
+    _8 = torch.append(out, output_size1[1])
+    scale_factors2, output_size0 = scale_factors3, output_size1
   else:
-    _8 = torch.__isnot__(scale_factors, None)
-    if _8:
-      scale_factors0 = unchecked_cast(List[float], scale_factors)
-      if torch.__is__(output_size, None):
-        pass
-      else:
-        ops.prim.RaiseException(_0)
-      _10 = torch.eq(torch.len(scale_factors0), 2)
-      if _10:
-        pass
-      else:
-        ops.prim.RaiseException("AssertionError: ")
-      _11 = torch.mul(input[2], scale_factors0[0])
-      _12 = torch.append(out, int(_11))
-      _13 = torch.mul(input[3], scale_factors0[1])
-      _14 = torch.append(out, int(_13))
-      _9 : Optional[List[int]] = out
+    scale_factors2, output_size0 = scale_factors0, output_size
+  if torch.__isnot__(scale_factors2, None):
+    scale_factors4 = unchecked_cast(List[float], scale_factors2)
+    if torch.__is__(output_size0, None):
+      pass
     else:
       ops.prim.RaiseException(_1)
-      _9 = None
-    _4 = _9
-  return _4
+    _9 = torch.eq(torch.len(scale_factors4), 2)
+    if _9:
+      pass
+    else:
+      ops.prim.RaiseException("AssertionError: ")
+    _10 = torch.mul(input[2], scale_factors4[0])
+    _11 = torch.append(out, int(_10))
+    _12 = torch.mul(input[3], scale_factors4[1])
+    _13 = torch.append(out, int(_12))
+  else:
+    pass
+  return out
 
 )=====")
 + std::string(R"=====(def broadcast(a: List[int],
@@ -2803,7 +2849,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start"},
     {"aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start_step"},
     {"aten::squeeze(Tensor(a) self) -> Tensor(a)", "squeeze_nodim"},
-    {"aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", "squeeze"},
+    {"aten::squeeze.dim(Tensor(a) self, int[1] dim) -> Tensor(a)", "squeeze"},
     {"aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", "unsqueeze"},
     {"aten::slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)", "slice"},
     {"aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", "select"},
@@ -2853,6 +2899,8 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", "nll_loss_forward"},
     {"aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", "native_layer_norm"},
     {"aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
+    {"aten::_native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
+    {"aten::_native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},

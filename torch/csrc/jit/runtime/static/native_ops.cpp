@@ -701,14 +701,14 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten_squeeze,
     [](Node* n) -> SROperator {
       if (!n->matches(torch::schema(
-              "aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)"))) {
+              "aten::squeeze.dim(Tensor(a) self, int[1] dim) -> Tensor(a)"))) {
         LogAndDumpSchema(n);
         return nullptr;
       }
 
       return [](ProcessedNode* p_node) {
         const auto& self = p_node->Input(0).toTensor();
-        const auto dim = p_node->Input(1).toInt();
+        const auto dim = p_node->Input(1).toIntVector();
         p_node->Output(0) = at::native::squeeze(self, dim);
       };
     });

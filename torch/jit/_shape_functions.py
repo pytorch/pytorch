@@ -415,11 +415,12 @@ def squeeze_nodim(li: List[int]):
     return out
 
 
-def squeeze(li: List[int], dim: int):
+def squeeze(li: List[int], dim: List[int]):
     out: List[int] = []
-    wrapped_dim = maybe_wrap_dim(dim, len(li))
+    ndim = len(li)
+    wrapped_dims = [maybe_wrap_dim(d, ndim) for d in dim]
     for i in range(len(li)):
-        if i == wrapped_dim:
+        if i in wrapped_dims:
             if li[i] != 1:
                 out.append(li[i])
         else:
@@ -1040,7 +1041,7 @@ add_shape_compute_mapping("aten::arange(Scalar end, *, int? dtype=None, int? lay
 add_shape_compute_mapping("aten::arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", arange_start)
 add_shape_compute_mapping("aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", arange_start_step)
 add_shape_compute_mapping("aten::squeeze(Tensor(a) self) -> Tensor(a)", squeeze_nodim)
-add_shape_compute_mapping("aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", squeeze)
+add_shape_compute_mapping("aten::squeeze.dim(Tensor(a) self, int[1] dim) -> Tensor(a)", squeeze)
 add_shape_compute_mapping("aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", unsqueeze)
 add_shape_compute_mapping("aten::slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)", slice)
 add_shape_compute_mapping("aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", select)
