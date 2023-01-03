@@ -41,8 +41,12 @@ DECLARE_DISPATCH(scatter_reduce_two_fn, scatter_reduce_two_stub);
 TORCH_API Tensor& index_out(Tensor& result, const Tensor & self, const c10::List<c10::optional<at::Tensor>>& indices);
 
 // fast paths for GNN usage
-template <bool is_scatter_like = true>
-bool can_use_expanded_index_path(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+static inline bool can_use_expanded_index_path(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& src,
+    bool is_scatter_like) {
   if (!self.device().is_cpu()) { return false; }
 
   const auto st = self.scalar_type();
