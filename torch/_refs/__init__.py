@@ -4341,7 +4341,7 @@ def linspace(
         rg, REDUCTION_OUTPUT_TYPE_KIND.SAME, dtype_red
     )
     cast = partial(torch.full, (), dtype=computation_dtype, **factory_kwargs)
-    # We implement an optimised version of torch.lerp for these particular inputs
+    # We implement torch.lerp without performing rg / (steps - 1) explicitly
     # With this we get out[0] == start, out[-1] == end
     step = cast((end - start) / (steps - 1))
     out = torch.where(
