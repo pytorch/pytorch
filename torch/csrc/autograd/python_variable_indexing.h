@@ -1,11 +1,6 @@
 #pragma once
 
 #include <c10/core/SymInt.h>
-#include <c10/util/Exception.h>
-#include <pybind11/detail/common.h>
-#include <pybind11/pytypes.h>
-#include <pyport.h>
-#include <sys/types.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
@@ -21,17 +16,23 @@ struct UnpackedSlice {
 };
 
 // This mirrors Cpython's PySlice_Unpack method
-inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
+static inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
   PySliceObject* r = (PySliceObject*)_r;
   /* this is harder to get right than you might think */
-
-  // Py_BUILD_ASSERT replaced because it is not available in all versions
-  static_assert(PY_SSIZE_T_MIN + 1 <= -PY_SSIZE_T_MAX, "Build failed");
 
   c10::SymInt start_sym, stop_sym, step_sym;
 
   auto clip_val = [](Py_ssize_t val) {
     if (val < c10::SymInt::min_representable_int()) {
+      auto r = PyErr_WarnEx(
+          PyExc_UserWarning,
+          "Truncating the start/stop/step "
+          "of slice. This is likely because of "
+          "saved old models when the start/stop/step were larger.",
+          1);
+      if (r != 0) {
+        throw python_error();
+      }
       return c10::SymInt::min_representable_int();
     }
     return val;
@@ -57,7 +58,7 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     }
   }
 
-  if (torch::is_symint(py::handle(r->start))) {
+  if (torch::is_symint(r->start)) {
     start_sym = py::handle(r->start).cast<c10::SymInt>();
   } else if (r->start == Py_None) {
     start_sym = c10::SymInt(step_sym < 0 ? PY_SSIZE_T_MAX : 0);
@@ -71,7 +72,7 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     start_sym = c10::SymInt(start);
   }
 
-  if (torch::is_symint(py::handle(r->stop))) {
+  if (torch::is_symint(r->stop)) {
     stop_sym = py::handle(r->stop).cast<c10::SymInt>();
   } else if (r->stop == Py_None) {
     stop_sym = c10::SymInt(
@@ -86,7 +87,8 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     stop_sym = c10::SymInt(stop);
   }
 
-  return UnpackedSlice{start_sym, stop_sym, step_sym};
+  return UnpackedSlice{
+      std::move(start_sym), std::move(stop_sym), std::move(step_sym)};
 }
 
 Py_ssize_t THPVariable_length(PyObject* self);

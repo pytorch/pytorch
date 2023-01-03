@@ -133,10 +133,6 @@ inline Variable valueToTensor(
   }
 }
 
-static inline UnpackedSlice checkUnpackSlice(PyObject* index) {
-  return __PySlice_Unpack(index);
-}
-
 static inline void recordSliceTrace(PyObject* obj) {
   PySliceObject* sliceobj = (PySliceObject*)obj;
   if (THPVariable_Check(sliceobj->start)) {
@@ -208,7 +204,7 @@ static inline Variable applySlicing(
             }
             return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
           } else if (PySlice_Check(obj)) {
-            auto val = checkUnpackSlice(obj);
+            auto val = __PySlice_Unpack(obj);
             if (is_tracing) {
               recordSliceTrace(obj);
             }
@@ -352,7 +348,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     return THPVariable_Wrap(at::indexing::get_item(
         self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}));
   } else if (PySlice_Check(index)) {
-    auto val = checkUnpackSlice(index);
+    auto val = __PySlice_Unpack(index);
     if (is_tracing) {
       recordSliceTrace(index);
     }
@@ -481,7 +477,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    auto val = checkUnpackSlice(index);
+    auto val = __PySlice_Unpack(index);
     if (is_tracing) {
       recordSliceTrace(index);
     }

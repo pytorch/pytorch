@@ -23,8 +23,8 @@
 namespace at {
 namespace indexing {
 
-const int64_t INDEX_MAX = std::numeric_limits<int64_t>::max();
 const int64_t INDEX_MIN = c10::SymInt::min_representable_int();
+const int64_t INDEX_MAX = -(INDEX_MIN + 1);
 
 enum class TensorIndexType { None, Ellipsis, Integer, Boolean, Slice, Tensor };
 
@@ -44,7 +44,7 @@ struct TORCH_API Slice final {
     if (!step_index.has_value()) {
       step_ = c10::SymInt(1);
     } else {
-      step_ = step_index.value();
+      step_ = std::move(step_index).value();
     }
 
     TORCH_CHECK_VALUE(step_ != 0, "slice step cannot be zero");
@@ -52,13 +52,13 @@ struct TORCH_API Slice final {
     if (!start_index.has_value()) {
       start_ = c10::SymInt(step_ < 0 ? INDEX_MAX : 0);
     } else {
-      start_ = start_index.value();
+      start_ = std::move(start_index).value();
     }
 
     if (!stop_index.has_value()) {
       stop_ = c10::SymInt(step_ < 0 ? INDEX_MIN : INDEX_MAX);
     } else {
-      stop_ = stop_index.value();
+      stop_ = std::move(stop_index).value();
     }
   }
 
