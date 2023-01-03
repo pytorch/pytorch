@@ -123,7 +123,7 @@ class C10_API Warning {
   Warning(
       warning_variant_t type,
       const SourceLocation& source_location,
-      const std::string& msg,
+      std::string msg,
       bool verbatim);
 
   Warning(
@@ -250,6 +250,12 @@ class C10_API TypeError : public Error {
 // Used in ATen for functionality that is not implemented.  These turn into
 // NotImplementedError when they cross to Python.
 class C10_API NotImplementedError : public Error {
+  using Error::Error;
+};
+
+// Used in ATen for attribute reference or assignment errors.  These turn into
+// AttributeError when they cross to Python.
+class C10_API AttributeError : public Error {
   using Error::Error;
 };
 
@@ -557,6 +563,10 @@ namespace detail {
 // Like TORCH_CHECK, but raises NotImplementedErrors instead of Errors.
 #define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
+
+// Like TORCH_CHECK, but raises AttributeErrors instead of Errors.
+#define TORCH_CHECK_ATTRIBUTE(cond, ...) \
+  TORCH_CHECK_WITH_MSG(AttributeError, cond, "TYPE", __VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
 #define WARNING_MESSAGE_STRING(...) \

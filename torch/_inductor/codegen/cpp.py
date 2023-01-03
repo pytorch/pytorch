@@ -1198,7 +1198,6 @@ class CppVecKernelChecker(CppVecKernel):
                 current_node.meta[
                     "most_inner_loop_irrevelant"
                 ] = most_inner_loop_irrevelant
-
                 tmp_var = self.cse.newvar()
                 return tmp_var
 
@@ -1214,10 +1213,12 @@ class CppVecKernelChecker(CppVecKernel):
                 current_node.meta["dtype"] = load_dtype
                 current_node.meta["is_masked_load"] = is_masked_load
 
-                self.simd_vec = is_masked_load and current_node.meta["dtype"] in [
+                _simd_vec = is_masked_load and current_node.meta["dtype"] in [
                     torch.float32,
                     torch.float,
                 ]
+                if not _simd_vec:
+                    self.simd_vec = False
 
                 tmp_var = self.cse.newvar()
                 return tmp_var
@@ -1225,7 +1226,7 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def to_dtype(x, dtype):
                 current_node: torch.fx.Node = V.interpreter.current_node
-                current_node["dtype"] = dtype
+                current_node.meta["dtype"] = dtype
 
                 if dtype != torch.bool:
                     self.simd_vec = False
