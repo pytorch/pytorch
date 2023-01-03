@@ -676,7 +676,9 @@ FW_DERIVATIVE_DEFINED_EFFICIENT_ZERO_GRAD_TEMPLATE = CodeTemplate(
 auto ${inp}_t_raw = toNonOptFwGrad(${inp});
 auto ${inp}_tensor = toNonOptTensor(${inp});
 auto ${inp}_t = (${inp}_t_raw.defined() || !${inp}_tensor.defined())
-  ? ${inp}_t_raw : at::_efficientzerotensor(${inp}_tensor.sizes(), ${inp}_tensor.unsafeGetTensorImpl()->is_wrapped_number(), ${inp}_tensor.options());
+  ? ${inp}_t_raw : at::_efficientzerotensor(${inp}_tensor.sizes(),
+                                            ${inp}_tensor.unsafeGetTensorImpl()->is_wrapped_number(),
+                                            ${inp}_tensor.options());
 """
 )
 
@@ -1538,14 +1540,16 @@ def emit_body(
             for inp in differentiable_inputs:
                 use_efficientzerotensor = not (inplace and inp.name == "self")
                 if use_efficientzerotensor:
-                    fw_derivative_defined_grad_template = FW_DERIVATIVE_DEFINED_EFFICIENT_ZERO_GRAD_TEMPLATE
+                    fw_derivative_defined_grad_template = (
+                        FW_DERIVATIVE_DEFINED_EFFICIENT_ZERO_GRAD_TEMPLATE
+                    )
                 else:
-                    fw_derivative_defined_grad_template = FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE
+                    fw_derivative_defined_grad_template = (
+                        FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE
+                    )
                 if inp.name in derivative.required_inputs_fw_grad:
                     unpacked_arguments += (
-                        fw_derivative_defined_grad_template.substitute(
-                            inp=inp.name
-                        )
+                        fw_derivative_defined_grad_template.substitute(inp=inp.name)
                     )
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += (
