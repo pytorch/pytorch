@@ -353,10 +353,11 @@ auto handle_torch_function_no_python_arg_parser(
       throw python_error();
     }
   }
-  while(tf_g.begin() != tf_g.end()) {
+  // can't use clear since it doesn't guarantee objs destroyed back -> front
+  while (tf_g.begin() != tf_g.end()) {
     tf_g.pop_back();
   }
-  while(td_g.begin() != td_g.end()) {
+  while (td_g.begin() != td_g.end()) {
     td_g.pop_back();
   }
 
