@@ -53,6 +53,7 @@ __all__ = ['InputError', 'openf', 'bcolors', 'GeneratedFileCleaner', 'match_exte
            'is_caffe2_gpu_file', 'Trie', 'preprocessor', 'file_specific_replacement', 'file_add_header',
            'fix_static_global_kernels', 'extract_arguments', 'str2bool', 'hipify']
 
+
 class InputError(Exception):
     # Exception raised for errors in the input.
 
@@ -78,6 +79,7 @@ class bcolors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
+
 
 # To the programmer, the output of hipify most likely are intermediates.
 # This class allows users of hipify to ask for a cleanup by running the
@@ -119,12 +121,15 @@ class GeneratedFileCleaner:
             for d in self.dirs_to_clean[::-1]:
                 os.rmdir(d)
 
+
 def match_extensions(filename: str, extensions: Iterable) -> bool:
     """Helper method to see if filename ends with certain extension"""
     return any(filename.endswith(e) for e in extensions)
 
+
 def _fnmatch(filepath, patterns):
     return any(fnmatch.fnmatch(filepath, pattern) for pattern in patterns)
+
 
 def matched_files_iter(
         root_path: str,
@@ -407,10 +412,8 @@ def find_closure_group(input_string, start, group):
     find_closure_group returns the positions of group[0] and group[1] as a tuple.
 
     Example:
-        find_closure_group("(hi)", 0, ["(", ")"])
-
-    Returns:
-        0, 3
+        >>> find_closure_group("(hi)", 0, ["(", ")"])
+        (0, 3)
     """
 
     inside_parenthesis = False
@@ -522,7 +525,7 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
     """
     # At the moment, some PyTorch source files are HIPified in place.  The predicate
     # is_out_of_place tells us if this is the case or not.
-    assert(not os.path.isabs(rel_filepath))
+    assert not os.path.isabs(rel_filepath)
     if not is_pytorch_extension and not is_out_of_place(rel_filepath):
         return rel_filepath
 
@@ -589,7 +592,7 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
 
 
 def is_out_of_place(rel_filepath):
-    assert(not os.path.isabs(rel_filepath))
+    assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("torch/"):
         return False
     if rel_filepath.startswith("tools/autograd/templates/"):
@@ -599,7 +602,7 @@ def is_out_of_place(rel_filepath):
 
 # Keep this synchronized with includes/ignores in build_amd.py
 def is_pytorch_file(rel_filepath):
-    assert(not os.path.isabs(rel_filepath))
+    assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("aten/"):
         if rel_filepath.startswith("aten/src/ATen/core/"):
             return False
@@ -616,8 +619,9 @@ def is_cusparse_file(rel_filepath):
         return "sparse" in rel_filepath.lower()
     return False
 
+
 def is_caffe2_gpu_file(rel_filepath):
-    assert(not os.path.isabs(rel_filepath))
+    assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("c10/cuda"):
         return True
     filename = os.path.basename(rel_filepath)
@@ -732,6 +736,8 @@ Returns a dict with the following keys:
                       "skipped" if an identical hipified file already existed or hipified file couldn't be written out
                       "ignored" if the source file was a hipified file itself or not meant to be hipified
 """
+
+
 def preprocessor(
         output_directory: str,
         filepath: str,
@@ -884,6 +890,7 @@ def preprocessor(
             return {"hipified_path": fin_path, "status": "[skipped, no permissions]"}
     else:
         return {"hipified_path": fout_path, "status": "[skipped, already hipified]"}
+
 
 def file_specific_replacement(filepath, search_string, replace_string, strict=False):
     with openf(filepath, "r+") as f:
