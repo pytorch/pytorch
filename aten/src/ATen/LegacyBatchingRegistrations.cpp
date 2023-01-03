@@ -1122,8 +1122,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("split.sizes", split_with_sizes_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("squeeze", squeeze_batching_rule);
-  m.impl("squeeze.dim", squeeze_dim_batching_rule);
-  m.impl("squeeze.dims", squeeze_dims_batching_rule);
+  m.impl("squeeze.dim", squeeze_dims_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
   m.impl("trace", trace_batching_rule);
   m.impl("transpose.int", transpose_int_batching_rule);

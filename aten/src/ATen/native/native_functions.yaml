@@ -5170,7 +5170,7 @@
     QuantizedCPU, QuantizedCUDA: squeeze_quantized
     NestedTensorCPU, NestedTensorCUDA: squeeze_nested
 
-- func: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
+- func: squeeze.dim(Tensor(a) self, int[1] dim) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -5185,17 +5185,6 @@
   device_check: NoCheck
   device_guard: False
 
-
-- func: squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)
-  variants: function, method
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: squeeze
-    QuantizedCPU, QuantizedCUDA: squeeze_quantized
-    NestedTensorCPU, NestedTensorCUDA: squeeze_dim_nested
-  tags: canonical
-
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
   variants: method
   device_check: NoCheck
@@ -5204,15 +5193,7 @@
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
-- func: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
-  variants: method
-  device_check: NoCheck
-  device_guard: False
-  tags: inplace_view
-  dispatch:
-    CompositeExplicitAutograd: squeeze_
-
-- func: squeeze_.dims(Tensor(a!) self, int[] dim) -> Tensor(a!)
+- func: squeeze_.dim(Tensor(a!) self, int[1] dim) -> Tensor(a!)
   variants: method
   device_check: NoCheck
   device_guard: False
@@ -13378,13 +13359,7 @@
     CompositeExplicitAutogradNonFunctional: squeeze_copy
   tags: view_copy
 
-- func: squeeze_copy.dim(Tensor self, int dim) -> Tensor
-  variants: function
-  dispatch:
-    CompositeExplicitAutogradNonFunctional: squeeze_copy_dim
-  tags: view_copy
-
-- func: squeeze_copy.dims(Tensor self, int[] dim) -> Tensor
+- func: squeeze_copy.dim(Tensor self, int[1] dim) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: squeeze_copy_dims
@@ -13596,13 +13571,7 @@
     CompositeExplicitAutograd: squeeze_copy_out
 
 
-- func: squeeze_copy.dim_out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: squeeze_copy_dim_out
-
-
-- func: squeeze_copy.dims_out(Tensor self, int[] dim, *, Tensor(a!) out) -> Tensor(a!)
+- func: squeeze_copy.dim_out(Tensor self, int[1] dim, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CompositeExplicitAutograd: squeeze_copy_dims_out

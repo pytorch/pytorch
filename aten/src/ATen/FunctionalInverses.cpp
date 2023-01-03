@@ -232,11 +232,7 @@ Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor
     return unsqueeze_copy_to(mutated_view, base.sym_sizes(), reapply_views);
 }
 
-Tensor FunctionalInverses::squeeze_copy_dim_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim) {
-    return unsqueeze_copy_to(mutated_view, dim, base.sym_sizes(), reapply_views);
-}
-
-Tensor FunctionalInverses::squeeze_copy_dims_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, IntArrayRef dim) {
+Tensor FunctionalInverses::squeeze_copy_dim_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, IntArrayRef dim) {
   return unsqueeze_copy_to(mutated_view, dim, base.sizes(), reapply_views);
 }
 

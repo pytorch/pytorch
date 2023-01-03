@@ -827,8 +827,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   // still legacy b/c needs special inplace rules
   m.impl("squeeze_", squeeze__batching_rule);
-  m.impl("squeeze_.dim", squeeze_dim__batching_rule);
-  m.impl("squeeze_.dims", squeeze_dims__batching_rule);
+  m.impl("squeeze_.dim", squeeze_dims__batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
   m.impl("transpose_", transpose__batching_rule);
 
