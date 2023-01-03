@@ -417,26 +417,22 @@ void impl_func_norm_mps(
   NormOpBlock normOpBlock = nullptr
   ) {
 
-  namespace native_mps = at::native::mps;
   if (input_tensor.numel() == 0) {
     return;
   }
 
   auto input_t = (input_tensor.sizes().size() == 0) ? input_tensor.view({1}) : input_tensor;
   auto in_dtype = opt_dtype.value_or(input_tensor.scalar_type());
-  auto mps_input_dtype = native_mps::getMPSDataType(in_dtype);
+  auto mps_input_dtype = getMPSDataType(in_dtype);
 
   IntArrayRef input_shape = cdist ? input_broadcasted_shape.value() : input_t.sizes();
 
-  for (const auto i : c10::irange(dim.size())) {
-    auto wrap_dim = maybe_wrap_dim(dim[i], input_shape.size());
-    TORCH_CHECK(wrap_dim < input_shape.size(),
-    "norm_out_mps: reduction dim must be in the range of input shape")
+  for (const auto dim_val: dim) {
+    auto wrap_dim = maybe_wrap_dim(dim_val, input_shape.size());
+    TORCH_CHECK(wrap_dim < input_shape.size(), "norm_out_mps: reduction dim must be in the range of input shape")
   }
 
-  using CachedGraph = native_mps::MPSBinaryCachedGraph;
-
-  native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
+  auto cache_ = MPSGraphCache::getInstance();
 
   auto p = opt_p.has_value() ? opt_p.get().to<double>() : Scalar(2.0).to<double>();
   auto reciprocal_p = 1 / p;
@@ -475,26 +471,27 @@ void impl_func_norm_mps(
   }
 
   auto stream = at::mps::getCurrentMPSStream();
+
   @autoreleasepool {
     NSString* ns_key = [[axes valueForKey:@"description"] componentsJoinedByString:@","];
       string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
-      string tensor_key = cdist ? native_mps::getTensorsStringKey({input_tensor, other_tensor}) : mps::getTensorsStringKey({input_t});
+      string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : mps::getTensorsStringKey({input_t});
       string key =  string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + to_string(p) + ":" + keepdim_info;
 
-    auto cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    auto cachedGraph = cache_->LookUpAs<MPSBinaryCachedGraph>(key);
 
     if(!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<MPSBinaryCachedGraph>(key, ^ MPSCachedGraph * () {
 
-        CachedGraph *newCachedGraph = nil;
+        MPSBinaryCachedGraph *newCachedGraph = nil;
 
         @autoreleasepool {
-          MPSGraph* mpsGraph = native_mps::make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-          newCachedGraph->inputTensor_ = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new MPSBinaryCachedGraph(mpsGraph);
+          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
 
           if (cdist) {
-            newCachedGraph->otherTensor_ = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, other_tensor);
+            newCachedGraph->otherTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, other_tensor);
           }
 
           MPSGraphTensor* inputTensor = cdist ? normOpBlock(newCachedGraph, newCachedGraph->inputTensor_, newCachedGraph->otherTensor_) :
@@ -502,7 +499,7 @@ void impl_func_norm_mps(
           if (opt_dtype.has_value()) {
             inputTensor = [mpsGraph castTensor:inputTensor
                                         toType:mps_input_dtype
-                                          name:@"any_all"];
+                                          name:@"castInputTensor"];
           }
 
           MPSGraphTensor *outputTensor;
@@ -565,15 +562,15 @@ void impl_func_norm_mps(
       });
     }
 
-    auto otherPlaceholder = native_mps::Placeholder();
-    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
-    auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output_t, apparent_output_shape);
+    auto otherPlaceholder = Placeholder();
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_output_shape);
 
     NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =[NSMutableDictionary dictionary];
     feeds[inputPlaceholder.getMPSGraphTensor()]   = inputPlaceholder.getMPSGraphTensorData();
 
     if (cdist) {
-      otherPlaceholder = native_mps::Placeholder(cachedGraph->otherTensor_, other_tensor);
+      otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other_tensor);
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
 
@@ -581,7 +578,7 @@ void impl_func_norm_mps(
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
 
-    native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 }
 
