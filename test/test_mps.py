@@ -5193,6 +5193,28 @@ class TestNLLLoss(TestCase):
         mps_out = torch.bernoulli(all_ones)
         self.assertEqual(mps_out, all_ones)
 
+    def test_mps_generator(self):
+        # explicit manual seeding by creating an MPS Generator
+        g_mps = torch.Generator(device='mps')
+        g_mps.manual_seed(999)
+        mps_x = torch.randn(5, device='mps', generator=g_mps)
+        g_mps.manual_seed(999)
+        mps_y = torch.randn(5, device='mps', generator=g_mps)
+        # seed values were the same, so the random tensor contents should match
+        self.assertEqual(mps_x, mps_y)
+        # save generator's state to restore it later
+        g_state = g_mps.get_state()
+
+        # generate random numbers without seeding
+        mps_x = torch.randn(5, device='mps', generator=g_mps)
+        # in this case, the random results must differ from the last generated random results
+        self.assertNotEqual(mps_x, mps_y)
+
+        # restore the previously saved state, and the results should match again
+        g_mps.set_state(g_state)
+        mps_x = torch.randn(5, device='mps', generator=g_mps)
+        self.assertEqual(mps_x, mps_y)
+
     # Test random_.to and random_.from
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
