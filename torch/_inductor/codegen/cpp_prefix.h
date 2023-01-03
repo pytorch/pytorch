@@ -364,7 +364,7 @@ inline void transpose_kernel_8x8_avx256(
       _mm256_unpackhi_pd(_mm256_castps_pd(tf), _mm256_castps_pd(th)));
 
   //  shuffle 128-bits (composed of 4 32-bit elements)
-  //  a0  b0  c0  d0  a8  b8  c8  d8  e0  f0  g0  h0  e8  f8  g8  h8
+  //  a0  b0  c0  d0  e0  f0  g0  h0
   //  a1  b1  c1  d1 ...
   //  a2  b2  c2  d2 ...
   //  a3  b3  c3  d3 ...
@@ -372,14 +372,14 @@ inline void transpose_kernel_8x8_avx256(
   //  a5  b5  c5  d5 ...
   //  a6  b6  c6  d6 ...
   //  a7  b7  c7  d7 ...
-  ta = _mm256_shuffle_f32x4(a, e, 0x00);
-  tb = _mm256_shuffle_f32x4(b, f, 0x00);
-  tc = _mm256_shuffle_f32x4(c, g, 0x00);
-  td = _mm256_shuffle_f32x4(d, h, 0x00);
-  te = _mm256_shuffle_f32x4(a, e, 0x03);
-  tf = _mm256_shuffle_f32x4(b, f, 0x03);
-  tg = _mm256_shuffle_f32x4(c, g, 0x03);
-  th = _mm256_shuffle_f32x4(d, h, 0x03);
+  ta = _mm256_permute2f128_ps(a, e, 0x20);
+  tb = _mm256_permute2f128_ps(b, f, 0x20);
+  tc = _mm256_permute2f128_ps(c, g, 0x20);
+  td = _mm256_permute2f128_ps(d, h, 0x20);
+  te = _mm256_permute2f128_ps(a, e, 0x31);
+  tf = _mm256_permute2f128_ps(b, f, 0x31);
+  tg = _mm256_permute2f128_ps(c, g, 0x31);
+  th = _mm256_permute2f128_ps(d, h, 0x31);
 
   // store from registers to dst
   _mm256_storeu_ps(&dst[0 * ld_dst], ta);
