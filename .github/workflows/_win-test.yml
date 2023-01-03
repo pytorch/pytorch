@@ -167,9 +167,8 @@ jobs:
       - name: Print undeleted logs
         shell: bash
         if: always()
-        continue-on-error: true
         run: |
-          cat test/**/*.log
+          cat test/**/*.log || exit 0
 
       - name: Get workflow job id
         id: get-job-id
