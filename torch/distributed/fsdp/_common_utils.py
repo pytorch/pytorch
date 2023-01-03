@@ -16,6 +16,7 @@ from typing import (
 )
 
 import torch
+import torch.distributed as dist
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
@@ -23,7 +24,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 
-from .api import FullStateDictConfig, StateDictConfig, StateDictType
+from .api import FullStateDictConfig, ShardingStrategy, StateDictConfig, StateDictType
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -41,7 +42,14 @@ class _FSDPState(_State):
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
         self._ignored_modules: Set[nn.Module] = set()
+        self._fully_sharded_module_to_handles: Dict[
+            nn.Module, flat_param_file.FlatParamHandle
+        ] = {}
         self.rank: int = -1
+        self.world_size: int = -1
+        self.sharding_strategy = ShardingStrategy.FULL_SHARD
+        self.compute_device = torch.device("cuda", torch.cuda.current_device())
+        self.process_group: Optional[dist.ProcessGroup] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -49,6 +57,17 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
     if state is None or not isinstance(state, _FSDPState):
         return None
     return state
+
+
+def _get_module_fsdp_state_if_comm_module(module: nn.Module) -> Optional[_FSDPState]:
+    state = _get_module_fsdp_state(module)
+    if state is None:
+        return None
+    if state == module:  # FullyShardedDataParallel module case.
+        return state
+    if module in state._fully_sharded_module_to_handles:  # fully_shard case.
+        return state
+    return None
 
 
 class TrainingState(Enum):

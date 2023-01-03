@@ -36,6 +36,15 @@ def is_constant_source(source):
     return False
 
 
+def is_input_source(source):
+    return source.guard_source() in [
+        GuardSource.LOCAL,
+        GuardSource.GLOBAL,
+        GuardSource.LOCAL_NN_MODULE,
+        GuardSource.GLOBAL_NN_MODULE,
+    ]
+
+
 @dataclasses.dataclass
 class LocalSource(Source):
     local_name: str

@@ -8,6 +8,10 @@ from typing import Any
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import gh_post_pr_comment as gh_post_comment, GitHubPR
 
+SAME_SHA_ERROR = (
+    "\n```\nAborting rebase because rebasing the branch resulted in the same sha as the target branch.\n" +
+    "This usually happens because the PR has already been merged.  Please rebase locally and push.\n```"
+)
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
@@ -26,6 +30,10 @@ def rebase_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = F
 
     repo.fetch(branch, branch)
     repo._run_git("rebase", onto_branch, branch)
+
+    if repo.rev_parse(branch) == repo.rev_parse(onto_branch):
+        raise Exception(SAME_SHA_ERROR)
+
     if dry_run:
         push_result = repo._run_git("push", "--dry-run", "-f", remote_url, refspec)
     else:
@@ -49,11 +57,14 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
 
+    if repo.rev_parse(orig_ref) == repo.rev_parse(onto_branch):
+        raise Exception(SAME_SHA_ERROR)
+
     # steal the identity of the committer of the commit on the orig branch
     email = repo._run_git("log", orig_ref, "--pretty=format:%ae", "-1")
     name = repo._run_git("log", orig_ref, "--pretty=format:%an", "-1")
-    repo._run_git("config", "--global", "user.name", name)
     repo._run_git("config", "--global", "user.email", email)
+    repo._run_git("config", "--global", "user.name", name)
 
     os.environ["OAUTH_TOKEN"] = os.environ["GITHUB_TOKEN"]
     with open('.ghstackrc', 'w+') as f:
@@ -122,16 +133,31 @@ def main() -> None:
         return
 
     try:
+        email = name = ""
+
         if pr.is_ghstack_pr():
+            # Check the configured name and email. If they are available, store them so that
+            # we can put them back after rebasing here
+            email = repo._run_git("config", "user.email")
+            name = repo._run_git("config", "user.name")
+
             rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
-            return
-        rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+        else:
+            rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+
     except Exception as e:
         msg = f"Rebase failed due to {e}"
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
         gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+
+    finally:
+        if email:
+            repo._run_git("config", "--global", "user.email", email)
+
+        if name:
+            repo._run_git("config", "--global", "user.name", name)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ import numpy as np
 #
 # Axes:
 # - saves {output, input, intermediate, non-tensor}
-# - {inputs, outputs} x {single tensor, tensors, arbitrary objects}
+# - {inputs, output} x {single tensor, tensors, arbitrary objects}
 # - Uses {mark_dirty, mark_non_differentiable, once_differentiable}
 
 
@@ -32,9 +32,9 @@ class NumpyCube(torch.autograd.Function):
         return torch.tensor(input_np ** 3, device=input.device), dinput
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
-        ctx.save_for_backward(inputs[0], outputs[1])
-        ctx.save_for_forward(inputs[0], outputs[1])
+    def setup_context(ctx, inputs, output):
+        ctx.save_for_backward(inputs[0], output[1])
+        ctx.save_for_forward(inputs[0], output[1])
 
     @staticmethod
     def backward(ctx, grad_output, grad_saved):
@@ -62,12 +62,18 @@ class CubeGenVmap(torch.autograd.Function):
     @staticmethod
     def setup_context(ctx, inputs, outputs):
         ctx.save_for_backward(inputs[0], outputs[1])
+        ctx.save_for_forward(inputs[0], outputs[1])
 
     @staticmethod
     def backward(ctx, grad_output, grad_saved):
         input, dinput = ctx.saved_tensors
         result = grad_output * dinput + 6 * dinput
         return result
+
+    @staticmethod
+    def jvp(ctx, input_tangent):
+        input, dinput = ctx.saved_tensors
+        return MulGenVmap.apply(input_tangent, dinput), 6 * NumpyMul.apply(input_tangent, input)
 
 
 def sample_inputs_numpy_cube(opinfo, device, dtype, requires_grad, **kwargs):
@@ -82,8 +88,8 @@ class NumpyCubeNotComposable(torch.autograd.Function):
         return torch.tensor(input_np ** 3, device=input.device), input_np
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
-        _, input_np = outputs
+    def setup_context(ctx, inputs, output):
+        _, input_np = output
         ctx.input_np = input_np
         ctx.device = inputs[0].device
 
@@ -100,7 +106,7 @@ class NumpyMul(torch.autograd.Function):
         return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
+    def setup_context(ctx, inputs, output):
         ctx.save_for_backward(*inputs)
         ctx.save_for_forward(*inputs)
 
@@ -172,11 +178,11 @@ class NumpyExp_(torch.autograd.Function):
         return x
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
+    def setup_context(ctx, inputs, output):
         x, = inputs
         ctx.mark_dirty(x)
-        ctx.save_for_backward(outputs)
-        ctx.save_for_forward(outputs)
+        ctx.save_for_backward(output)
+        ctx.save_for_forward(output)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -210,9 +216,9 @@ class NumpySort(torch.autograd.Function):
         )
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
+    def setup_context(ctx, inputs, output):
         x, dim = inputs
-        _, ind, ind_inv = outputs
+        _, ind, ind_inv = output
         ctx.mark_non_differentiable(ind, ind_inv)
         ctx.save_for_backward(ind, ind_inv)
         ctx.save_for_forward(ind, ind_inv)
@@ -245,7 +251,7 @@ class SortGenVmap(torch.autograd.Function):
         ind = torch.argsort(x, dim=dim)
         ind_inv = torch.argsort(ind, axis=dim)
         result = torch.take_along_dim(x, ind, dim=dim)
-        return x, ind, ind_inv
+        return result, ind, ind_inv
 
     @staticmethod
     def setup_context(ctx, inputs, outputs):
@@ -281,7 +287,7 @@ class NumpyTake(torch.autograd.Function):
         return torch.tensor(np.take_along_axis(x, ind, dim), device=device)
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
+    def setup_context(ctx, inputs, output):
         x, ind, ind_inv, dim = inputs
         ctx.save_for_backward(ind, ind_inv)
         ctx.save_for_forward(ind, ind_inv)
@@ -339,13 +345,18 @@ class TakeGenVmap(torch.autograd.Function):
         result = TakeGenVmap.apply(grad_output, ind_inv, ind, ctx.dim)
         return result, None, None, None
 
+    @staticmethod
+    def jvp(ctx, x_tangent, ind_tangent, ind_inv_tangent, _):
+        ind, ind_inv = ctx.saved_tensors
+        return TakeGenVmap.apply(x_tangent, ind, ind_inv, ctx.dim)
+
 class Select(torch.autograd.Function):
     @staticmethod
     def forward(x, idx):
         return x[idx]
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
+    def setup_context(ctx, inputs, output):
         x, idx = inputs
         ctx.x_shape = x.shape
         ctx.idx = idx
@@ -504,8 +515,8 @@ autograd_function_db = [
     OpInfo(
         'CubeGenVmapAutogradFunction',
         op=CubeGenVmap.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_cube,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
@@ -522,8 +533,8 @@ autograd_function_db = [
     OpInfo(
         'SortGenVmapAutogradFunction',
         op=SortGenVmap.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_sort,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
