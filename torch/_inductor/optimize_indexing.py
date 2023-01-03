@@ -184,11 +184,10 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def div(a, b):
-        # We give a non-strict bound
+        # We think of this as floor(a / b)
         out = ValueRangeAnalysis.truediv(a, b)
         floor = sympy.functions.elementary.integers.floor
-        ceil = sympy.functions.elementary.integers.ceiling
-        return ValueRanges(ceil(out.lower), floor(out.upper))
+        return ValueRanges(floor(out.lower), floor(out.upper))
 
     @staticmethod
     def add(a, b):
