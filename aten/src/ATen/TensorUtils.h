@@ -6,6 +6,8 @@
 #include <ATen/TensorGeometry.h>
 #include <ATen/Utils.h>
 
+#include <utility>
+
 // These functions are NOT in Utils.h, because this file has a dep on Tensor.h
 
 namespace at {
@@ -37,7 +39,7 @@ struct TORCH_API TensorGeometryArg {
   /* implicit */ TensorGeometryArg(TensorArg arg)
       : tensor(TensorGeometry{arg.tensor}), name(arg.name), pos(arg.pos) {}
   TensorGeometryArg(TensorGeometry tensor, const char* name, int pos)
-      : tensor(tensor), name(name), pos(pos) {}
+      : tensor(std::move(tensor)), name(name), pos(pos) {}
   const TensorGeometry* operator->() const {
     return &tensor;
   }

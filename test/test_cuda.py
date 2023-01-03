@@ -600,6 +600,36 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
+    def test_cublas_workspace_explicit_allocation(self):
+        a = torch.randn(7, 7, device='cuda', requires_grad=False)
+        default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8
+        # different size (32 MiB) expected on Hopper GPU
+        if torch.cuda.get_device_capability() == (9, 0):
+            default_workspace_size = 4096 * 8 * 1024
+
+        def check_workspace_size(inp):
+            torch._C._cuda_clearCublasWorkspaces()
+            start = torch.torch.cuda.memory_stats()['active_bytes.all.allocated']
+            with torch.no_grad():
+                torch.matmul(inp, inp)
+            finish = torch.torch.cuda.memory_stats()['active_bytes.all.allocated']
+            return finish - start
+
+        # check default
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ''
+        self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
+
+        # check default with bad user config
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = '-1'
+        self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
+
+        # check valid config
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':128:8:64:16:32:32'
+        self.assertTrue(abs(check_workspace_size(a) - (3072 * 1024)) < 524288)
+
+        torch._C._cuda_clearCublasWorkspaces()
+
     def test_cublas_allow_tf32_get_set(self):
         skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
             int(os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'])
@@ -2942,7 +2972,7 @@ torch.cuda.synchronize()
                     ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
                      int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
                      torch.cuda.get_device_capability() < (8, 0))
-                should_error_from_not_implemented = should_error_from_cudnn or 'prelu' in op or 'thnn' in op \
+                should_error_from_not_implemented = should_error_from_cudnn or 'thnn' in op \
                     or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
                 if not skip_test:
                     if should_error_from_not_implemented:
