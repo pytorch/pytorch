@@ -886,10 +886,10 @@ void index_reduce_func_cuda_impl(
       self.scalar_type(), "index_reduce_func_cuda_exclude_input_init", [&] {
       scalar_t init_val;
       switch (reduce) {
-        case ReductionType:PROD:
+        case ReductionType::PROD:
           init_val = (scalar_t)1;
           break;
-        case ReductionType:MAX:
+        case ReductionType::MAX:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::lowest();
           break;
