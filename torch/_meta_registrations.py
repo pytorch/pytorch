@@ -50,13 +50,15 @@ def toRealValueType(dtype):
     return from_complex.get(dtype, dtype)
 
 
-@register_meta(aten._fft_c2c.default)
+@register_meta([aten._fft_c2c.default, aten._fft_c2c.out])
+@out_wrapper()
 def meta_fft_c2c(self, dim, normalization, forward):
     assert self.dtype.is_complex
     return self.new_empty(self.size())
 
 
-@register_meta(aten._fft_r2c.default)
+@register_meta([aten._fft_r2c.default, aten._fft_r2c.out])
+@out_wrapper()
 def meta_fft_r2c(self, dim, normalization, onesided):
     assert self.dtype.is_floating_point
     output_sizes = list(self.size())

@@ -658,24 +658,6 @@ sys.exit()
 meta_function_skips = {
     torch.Tensor.__rmatmul__ : {bf16, c128, f64, f32, f16, c64},
     torch.Tensor.matmul : {f64, f32, c128, c64},
-    torch.fft.fft2 : {i8, i64, u8, c128, b8, f64, i16, f32, i32, c64, c32, f16},
-    torch.fft.fft : {i8, i64, u8, c128, b8, f64, i16, f32, i32, c64, c32, f16},
-    torch.fft.fftn : {i8, i64, u8, c128, b8, f64, i16, f32, i32, c64, c32, f16},
-    torch.fft.ifft2 : {i8, i64, u8, c128, b8, f64, i16, f32, i32, c64, c32, f16, c32},
-    torch.fft.ifft : {c128, c64, c32, f16},
-    torch.fft.ifftn : {i8, i64, u8, c128, b8, f64, i16, f32, i32, c64, c32, f16},
-    torch.fft.hfft: {f16},
-    torch.fft.hfftn: {f16},
-    torch.fft.hfft2: {f16},
-    torch.fft.ihfft: {f16},
-    torch.fft.ihfft2 : {i8, i64, u8, f64, b8, f32, i32, i16, f16, c32, f16},
-    torch.fft.ihfftn : {i8, i64, u8, f64, b8, f32, i32, i16, c32, f16},
-    torch.fft.irfft2 : {f16},
-    torch.fft.irfft : {f16},
-    torch.fft.irfftn : {f16},
-    torch.fft.rfft2 : {i8, i64, u8, f64, b8, f32, i32, i16, c32, f16},
-    torch.fft.rfft : {i8, i64, u8, f64, b8, f32, i32, i16, c32, f16},
-    torch.fft.rfftn : {i8, i64, u8, f64, b8, f32, i32, i16, c32, f16},
     torch.functional.atleast_2d : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.atleast_3d : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.cartesian_prod : {bf16, i8, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
@@ -841,8 +823,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 # these always fail
 meta_dispatch_expected_failures = {
     aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
-    aten._fft_c2c.out : {f16, c64, i8, f64, c128, i32, i64, f32, c32, b8, i16, u8},
-    aten._fft_r2c.out : {f16, i8, f64, i32, i64, f32, b8, i16, u8},
     aten.cholesky.default : {c64, c128, f64, f32},
     aten.cholesky.out : {c64, c128, f64, f32},
     aten.cholesky_inverse.default : {c64, c128, f64, f32},
