@@ -90,6 +90,7 @@ from torch.testing._comparison import (
 )
 from torch.testing._comparison import assert_equal as assert_equal
 from torch.testing._internal.common_dtype import get_all_dtypes
+import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
 
@@ -942,6 +943,9 @@ if TEST_WITH_TORCHDYNAMO:
     # TODO: Remove this; this is grandfathered in because we suppressed errors
     # on test suite previously
     torch._dynamo.config.suppress_errors = True
+    if TEST_WITH_TORCHINDUCTOR:
+        import torch._inductor.config
+        torch._inductor.config.fallback_random = True
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
@@ -1879,6 +1883,28 @@ class TensorOrArrayPair(TensorLikePair):
         return actual, expected
 
 
+class TypedStoragePair(TensorLikePair):
+    """Pair for :class:`torch.storage.TypedStorage` inputs."""
+    def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters):
+        self._check_inputs_isinstance(actual, expected, cls=torch.storage.TypedStorage)
+        super().__init__(actual, expected, **other_parameters)
+        self.rtol = max(self.rtol, rtol_override)
+        self.atol = max(self.atol, atol_override)
+
+    def _to_tensor(self, typed_storage):
+        return torch.tensor(
+            typed_storage._untyped_storage,
+            dtype={
+                torch.quint8: torch.uint8,
+                torch.quint4x2: torch.uint8,
+                torch.quint2x4: torch.uint8,
+                torch.qint32: torch.int32,
+                torch.qint8: torch.int8
+            }.get(typed_storage.dtype, typed_storage.dtype),
+            device=typed_storage.device,
+        )
+
+
 class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
 
@@ -2109,8 +2135,10 @@ class TestCase(expecttest.TestCase):
             return
 
         if using_unittest:
-            failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
-            errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
+            # Keep track of the number of tests marked as failures, errors, and skipped before starting
+            failures_before = 0 if result is None else len(result.failures)
+            errors_before = 0 if result is None else len(result.errors)
+            skipped_before = 0 if result is None else len(result.skipped)
 
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
@@ -2164,7 +2192,7 @@ class TestCase(expecttest.TestCase):
                 result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red + 1, num_green=num_green)
-        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and not result.skipped:
+        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and skipped_before == len(result.skipped):
             # Always re-run up to MAX_NUM_RETRIES when running under rerun disabled tests modes if the test successes.
             # The parameter num_retries_left can be equal to MAX_NUM_RETRIES here because num_runs_left is initially
             # set to MAX_NUM_RETRIES + 1, i.e. the first run successes
@@ -2454,6 +2482,8 @@ class TestCase(expecttest.TestCase):
                                enable_batch=True,
                                enable_hybrid=True,
                                enable_zero_sized=True,
+                               enable_non_contiguous_indices=True,
+                               enable_non_contiguous_values=True,
                                enable_batch_variable_nse=False,
                                output_tensor=True,
                                patterns=None):
@@ -2465,6 +2495,7 @@ class TestCase(expecttest.TestCase):
         - tensor values are sorted sequences for COO and CSR formats, e.g. [1, 2, 3, 4]
         - the generated tensors represent the same mathematical tensor for all layouts
         - the generated tensors include regular, zero-sized, and optionally, batched or/and hybrid tensors.
+        - the generated tensors include contiguous or non-contiguous tensors both in indices and values
 
         If output_tensor is True, yield tensors with the given
         layout. Otherwise, yield inputs to the corresponding tensor
@@ -2488,6 +2519,8 @@ class TestCase(expecttest.TestCase):
             for args, kwargs in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype,
                                                             enable_batch=enable_batch, enable_hybrid=enable_hybrid,
                                                             enable_zero_sized=enable_zero_sized,
+                                                            enable_non_contiguous_indices=enable_non_contiguous_indices,
+                                                            enable_non_contiguous_values=enable_non_contiguous_values,
                                                             enable_batch_variable_nse=enable_batch_variable_nse,
                                                             output_tensor=False):
                 if layout is torch.strided:
@@ -2681,6 +2714,21 @@ class TestCase(expecttest.TestCase):
                   [[1, 0],
                    [0, 0]]], [(1, 1)], ([()] if enable_batch_variable_nse else []))]
 
+        def non_contiguous_copy(t, dim=-1, offset=0):
+            # return a copy of t that is non-contiguous along the
+            # given dimension and with the given storage offset
+            self.assertTrue(t.is_contiguous())
+            if dim < 0:
+                dim = dim + t.ndim
+            assert dim >= 0 and dim < t.ndim
+            step = max(2, offset + 1)
+            tmp = torch.zeros((*t.shape[:dim], t.shape[dim] * step, *t.shape[dim + 1:]), dtype=t.dtype, device=t.device)
+            dim_slices = (*((slice(None),) * dim), slice(offset, None, step))
+            r = tmp[dim_slices].copy_(t)
+            self.assertFalse(r.is_contiguous())
+            self.assertEqual(t, r)
+            return r
+
         # the main loop of the method:
         for pattern, blocksizes, densesizes in patterns:
             if not enable_hybrid:
@@ -2697,6 +2745,23 @@ class TestCase(expecttest.TestCase):
                     values = generate_values(data[-1], densesize).to(device=device, dtype=dtype)
                     yield (*indices, values), dict(device=device, dtype=dtype,
                                                    size=pattern.shape + densesize)
+
+                    if enable_non_contiguous_indices and pattern.ndim > 2:
+                        # sparse compressed indices can be sliced only along batch dimensions
+                        for (dim, offset) in {(0, 1), (-2, 0)}:
+                            indices_copy = [non_contiguous_copy(a, dim=dim, offset=offset) for a in indices]
+                            yield (*indices_copy, values), dict(device=device, dtype=dtype,
+                                                                size=pattern.shape + densesize)
+
+                            if enable_non_contiguous_values:
+                                values_copy = non_contiguous_copy(values, dim=-1, offset=1)
+                                yield (*indices_copy, values_copy), dict(device=device, dtype=dtype,
+                                                                         size=pattern.shape + densesize)
+
+                    if enable_non_contiguous_values:
+                        values_copy = non_contiguous_copy(values, dim=-1, offset=1)
+                        yield (*indices, values_copy), dict(device=device, dtype=dtype,
+                                                            size=pattern.shape + densesize)
 
         # zero-sized tensor inputs, non-batch, non-hybrid/hybrid
         if enable_zero_sized:
@@ -2864,6 +2929,7 @@ class TestCase(expecttest.TestCase):
                 RelaxedBooleanPair,
                 RelaxedNumberPair,
                 TensorOrArrayPair,
+                TypedStoragePair,
                 StringPair,
                 SetPair,
                 TypePair,
@@ -2871,7 +2937,6 @@ class TestCase(expecttest.TestCase):
             ),
             sequence_types=(
                 Sequence,
-                torch.storage.TypedStorage,
                 Sequential,
                 ModuleList,
                 ParameterList,
@@ -4024,6 +4089,22 @@ def custom_op(opname, symbolic_fn, opset_version):
     finally:
         unregister_custom_op_symbolic(opname, opset_version)
 
+
+def outs_and_grads(fn, graph_inps, inps):
+    outs = fn(*graph_inps)
+    for out in pytree.tree_flatten(outs)[0]:
+        if isinstance(out, torch.Tensor) and out.requires_grad:
+            out.sum().backward(retain_graph=True)
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+    for inp in pytree.tree_flatten(inps)[0]:
+        inp.grad = None
+    return outs, grads
+
+def compare_equal_outs_and_grads(test, m1, m2, inps):
+    r1, g1 = outs_and_grads(m1, inps, inps)
+    r2, g2 = outs_and_grads(m2, inps, inps)
+    test.assertEqual(r1, r2)
+    test.assertEqual(g1, g2)
 
 class TestGradients(TestCase):
     exact_dtype = True

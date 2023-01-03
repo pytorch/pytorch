@@ -174,6 +174,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(movedim, int);
   OP_DECOMPOSE(msort);
   OP_DECOMPOSE(mT);
+  OP_DECOMPOSE(nanmean);
   m.impl("narrow", native::narrow_symint);
   OP_DECOMPOSE(negative);
   OP_DECOMPOSE2(frobenius_norm, dim);
@@ -197,6 +198,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(resolve_neg);
   OP_DECOMPOSE(row_stack);
   OP_DECOMPOSE(rrelu);
+  OP_DECOMPOSE(prelu);
   OP_DECOMPOSE2(softmax, int);
   OP_DECOMPOSE(special_gammainc);
   OP_DECOMPOSE(special_gammaincc);

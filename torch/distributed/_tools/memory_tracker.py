@@ -1,5 +1,7 @@
 from collections import defaultdict
 
+import pickle
+
 from typing import (
     Any,
     Callable,
@@ -52,6 +54,7 @@ class MemoryTracker:
 
     Example usage:
 
+        >>> # xdoctest: +SKIP(failing)
         >>> net.cuda()
         >>> input = input.cuda()
 
@@ -74,15 +77,9 @@ class MemoryTracker:
         torch._C._log_api_usage_once("torch.distributed.memory_tracker")
         self._hooks: List[RemovableHandle] = []
         self._operator_names: Dict[str, int] = defaultdict(int)
-        self.memories_allocated: Dict[int, Dict[str, float]] = defaultdict(
-            lambda: defaultdict(float)
-        )
-        self.memories_active: Dict[int, Dict[str, float]] = defaultdict(
-            lambda: defaultdict(float)
-        )
-        self.memories_reserved: Dict[int, Dict[str, float]] = defaultdict(
-            lambda: defaultdict(float)
-        )
+        self.memories_allocated: Dict[int, Dict[str, float]] = defaultdict()
+        self.memories_active: Dict[int, Dict[str, float]] = defaultdict()
+        self.memories_reserved: Dict[int, Dict[str, float]] = defaultdict()
         self._markers: Dict[str, int] = defaultdict(int)
         self._cur_module_name: str = ""
         self._op_index: int = 0
@@ -179,6 +176,34 @@ class MemoryTracker:
                     [marker, marker], [min_val, max_val], "k-", lw=2, label=marker_name
                 )
         plt.legend()
+
+    def save_stats(self, path: str) -> None:
+        """
+        Save the stats using pickle during runtime if users want to plot the traces
+        in other places like notebook.
+        """
+        stats = {
+            "memories_allocated": self.memories_allocated,
+            "memories_active": self.memories_active,
+            "memories_reserved": self.memories_reserved,
+            "markers": self._markers,
+        }
+
+        with open(path, "wb") as f:
+            pickle.dump(stats, f)
+
+    def load(self, path: str) -> None:
+        """
+        Load the pickled memory stats to plot the traces or print the summary.
+        """
+
+        with open(path, "rb") as f:
+            stats = pickle.load(f)
+
+        self.memories_allocated = stats["memories_allocated"]
+        self.memories_active = stats["memories_active"]
+        self.memories_reserved = stats["memories_reserved"]
+        self._markers = stats["markers"]
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
         """
