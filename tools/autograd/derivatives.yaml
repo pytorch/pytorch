@@ -1512,7 +1512,7 @@
       self: unsqueeze_to(grad, dim, self.sym_sizes())
       result: auto_linear
     AutogradNestedTensor:
-      self: unsqueeze_multiple(grad, dim, self.sym_sizes())
+      self: unsqueeze_multiple(grad, dim, self.dim())
 
 - name: squeeze_(Tensor(a!) self) -> Tensor(a!)
   self: unsqueeze_to(grad, self.sym_sizes())
