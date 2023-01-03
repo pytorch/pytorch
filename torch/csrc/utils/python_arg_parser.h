@@ -549,7 +549,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
       jit::tracer::ArgumentStash::stashIntArrayRefElem(
           signature.params[i].name, size2, idx, var);
       try {
-        res.push_back(var.item<int64_t>());
+        res.emplace_back(var.item<int64_t>());
         continue;
       } catch (std::exception& e) {
         throw_intlist_exception(this, i, obj, idx);
@@ -565,15 +565,15 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
                 var.dtype().toScalarType(), /*include_bool*/ true)) {
           throw_intlist_exception(this, i, obj, idx);
         }
-        // TODO: ideally, if this was a fake tensor this would
-        // result in a SymInt, but we don't have the API to do this
-        res.push_back(var.item<int64_t>());
+        auto scalar = var.item();
+        TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+        res.push_back(scalar.toSymInt());
       } else {
         try {
           if (is_symint(py::handle(obj))) {
             res.push_back(py::handle(obj).cast<c10::SymInt>());
           } else {
-            res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
+            res.emplace_back(THPUtils_unpackIndex(obj));
           }
         } catch (std::exception& e) {
           throw_intlist_exception(this, i, obj, idx);

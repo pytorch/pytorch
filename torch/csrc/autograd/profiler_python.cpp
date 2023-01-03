@@ -358,7 +358,8 @@ std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
   for (auto& it : tensor_map) {
     auto* value = it.second.ptr();
     if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(value)) {
-      out.push_back({py::cast<std::string>(it.first), toTensorMetadata(value)});
+      out.emplace_back(
+          py::cast<std::string>(it.first), toTensorMetadata(value));
     }
   }
   return out;
@@ -932,7 +933,7 @@ class PostProcess {
   template <EventType E>
   struct State {
     ska::flat_hash_map<TraceKey, ExtraFields<E>> fields_;
-    std::priority_queue<Exit, std::vector<Exit>, std::greater<Exit>> exits_;
+    std::priority_queue<Exit, std::vector<Exit>, std::greater<>> exits_;
   };
 
   template <EventType E>
