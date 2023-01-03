@@ -4,9 +4,19 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Callable, Dict, Generator, List, no_type_check, Optional, Set
+from typing import (
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    no_type_check,
+    Optional,
+    Set,
+)
 
 import torch
+import torch.distributed as dist
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
@@ -14,7 +24,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 
-from .api import FullStateDictConfig, StateDictConfig, StateDictType
+from .api import FullStateDictConfig, ShardingStrategy, StateDictConfig, StateDictType
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -30,7 +40,16 @@ class _FSDPState(_State):
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._is_root: Optional[bool] = None
+        self._handles: List[flat_param_file.FlatParamHandle] = []
+        self._ignored_modules: Set[nn.Module] = set()
+        self._fully_sharded_module_to_handles: Dict[
+            nn.Module, flat_param_file.FlatParamHandle
+        ] = {}
         self.rank: int = -1
+        self.world_size: int = -1
+        self.sharding_strategy = ShardingStrategy.FULL_SHARD
+        self.compute_device = torch.device("cuda", torch.cuda.current_device())
+        self.process_group: Optional[dist.ProcessGroup] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -40,27 +59,15 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
     return state
 
 
-def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
-    """
-    Returns all ``_FSDPState`` instances in the module tree rooted at
-    ``module`` without any duplicates and following the ``module.modules()``
-    traversal order.
-
-    For the wrapper code path, this returns all ``FullyShardedDataParallel``
-    instances. For the non-wrapper code path, this returns composable state
-    instances.
-
-    NOTE: For now, we must pass an ``nn.Module`` as the argument because
-    ``_FSDPState`` does not support graph traversal.
-    """
-    fsdp_states: List[_FSDPState] = []
-    visited_fsdp_states: Set[_FSDPState] = set()
-    for submodule in module.modules():
-        optional_state = _get_module_fsdp_state(submodule)
-        if optional_state is not None and optional_state not in visited_fsdp_states:
-            visited_fsdp_states.add(optional_state)
-            fsdp_states.append(optional_state)
-    return fsdp_states
+def _get_module_fsdp_state_if_comm_module(module: nn.Module) -> Optional[_FSDPState]:
+    state = _get_module_fsdp_state(module)
+    if state is None:
+        return None
+    if state == module:  # FullyShardedDataParallel module case.
+        return state
+    if module in state._fully_sharded_module_to_handles:  # fully_shard case.
+        return state
+    return None
 
 
 class TrainingState(Enum):
@@ -91,18 +98,6 @@ def _is_composable(state: _FSDPState):
 
 
 @no_type_check
-def _all_handles(state: _FSDPState) -> List:
-    """
-    Returns all ``FlatParamHandle`` s managed by ``state``.
-    """
-    return (
-        state._handles
-        if _is_composable(state)
-        else state._fsdp_handles(state)  # `FullyShardedDataParallel`
-    )
-
-
-@no_type_check
 def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     """
     Returns the ``FlatParamHandle`` s corresponding to ``module``. These are
@@ -122,6 +117,28 @@ def _module_handles(state: _FSDPState, module: nn.Module) -> List:
 def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
     """Returns if ``module`` has parameters managed by FSDP."""
     return len(_module_handles(state, module)) > 0
+
+
+def _get_sharding_strategy(handles: Iterable):
+    """
+    Returns the sharding strategy of the group of handles given by ``handles``
+    or ``None`` if ``handles`` is empty. The input should be the handles
+    corresponding to one module, so we enforce that they all share the same
+    sharding strategy.
+    """
+    sharding_strategy = None
+    for handle in handles:
+        if sharding_strategy is None:
+            sharding_strategy = handle._sharding_strategy
+        elif (
+            sharding_strategy is not None
+            and sharding_strategy != handle._sharding_strategy
+        ):
+            raise AssertionError(
+                "Expects each group of handles to have the same sharding "
+                f"strategy but got {sharding_strategy} and {handle._sharding_strategy}"
+            )
+    return sharding_strategy
 
 
 def clean_tensor_name(tensor_name: str) -> str:
