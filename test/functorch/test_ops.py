@@ -370,7 +370,6 @@ class TestOperators(TestCase):
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
-        xfail('linalg.eig'),  # diagonal_scatter does not support complex
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
 
@@ -732,8 +731,6 @@ class TestOperators(TestCase):
         # (2) attempting to use a Tensor in some data-dependent control flow or
         # (3) encountering this error in PyTorch internals.
         xfail("index_reduce"),
-        xfail("linalg.eig"),  # vmap over torch.allclose
-        xfail("linalg.eigvals"),  # vmap over torch.allclose
         xfail("linalg.householder_product"),  # vmap: inplace into a regular tensor
         xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
         xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
@@ -880,7 +877,6 @@ class TestOperators(TestCase):
         skip("native_batch_norm"),
         skip("_native_batch_norm_legit"),
         xfail('__getitem__', ''),  # dynamic error
-        xfail('linalg.eig'),  # Uses aten::allclose
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('narrow'),  # .item() call
@@ -1064,8 +1060,6 @@ class TestOperators(TestCase):
         xfail('take'),
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
-        xfail('nanmean'),
-        xfail('nansum'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.dropout2d', ''),
@@ -1134,13 +1128,10 @@ class TestOperators(TestCase):
         xfail('cummin'),
         xfail('cumprod'),
         xfail('fill'),
-        xfail('nansum'),
-        xfail('nanmean'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
         xfail('index_copy'),
         xfail('index_fill'),
-        xfail('linalg.eig'),
         xfail('linalg.householder_product'),
         xfail('lu'),
         xfail('lu_solve'),
@@ -1492,7 +1483,6 @@ class TestOperators(TestCase):
         xfail('float'),  # required rank 4 tensor to use channels_last format
         xfail('half'),  # required rank 4 tensor to use channels_last format
         xfail('index_reduce'),  # Forward AD not implemented and no decomposition
-        xfail('linalg.eig'),  # vmap over torch.allclose isn't supported yet.
         xfail('logcumsumexp'),  # Forward AD not implemented and no decomposition
         xfail('mvlgamma', 'mvlgamma_p_1'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
@@ -1776,7 +1766,6 @@ class TestOperators(TestCase):
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
-        xfail('linalg.eig'),  # all close?
         # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
         xfail('masked_select'),
         xfail('nn.functional.max_unpool2d', 'grad'),  # contiguous call

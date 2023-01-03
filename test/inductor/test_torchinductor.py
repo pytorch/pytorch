@@ -5476,6 +5476,35 @@ if HAS_CUDA:
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
+        @patch.object(config, "permute_fusion", True)
+        def test_permute_fusion(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, view, reshape_2):
+                    permute = view.permute(0, 2, 1)
+                    view = None
+                    reshape = torch.reshape(permute, (-1, 642))
+                    bmm = torch.bmm(permute, reshape_2)
+                    return (bmm,)
+
+            args = [
+                ((1024, 642, 160), (102720, 160, 1), torch.float32, "cuda", True),
+                ((1024, 642, 20), (12840, 20, 1), torch.float32, "cuda", True),
+            ]
+            args = [
+                rand_strided(sh, st, dt, dev).requires_grad_(rg)
+                for (sh, st, dt, dev, rg) in args
+            ]
+
+            mod = Repro()
+            opt_mod = torch._dynamo.optimize("inductor")(mod)
+
+            ref = mod(*args)
+            res = opt_mod(*args)
+            self.assertTrue(same(ref, res))
+
         @patch.object(config.triton, "autotune", True)
         def test_inplace_add_alpha_autotune(self):
             def fn(x, y):
