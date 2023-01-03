@@ -135,6 +135,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 namespace at {
@@ -458,7 +459,7 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
     }
   }
 
-  auto info = at::native::make_info(self, indices);
+  auto info = at::native::make_info(self, std::move(indices));
   build_index_op(*this, info, result);
   return TORCH_PRECOMPUTE_STRUCT2(index, Tensor)()
       .set_sizes(std::move(info.indexed_sizes))
@@ -861,6 +862,63 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     if (numel == 0) {
       return;
     }
+
+    // When the slice of source or result is noncontiguous,
+    // original index_add is slow as it uses add for the sliced tensor,
+    // which is serial on index and parallel on sliced tensor to avoid write conflict.
+    // Doing parallel on the sliced tensor is not optimal as the size of sliced tensor
+    // may be not big enough to parallel and also causes multiple parallelizations.
+    // scatter_add is used to speedup for this case as scatter_add parallels on
+    // the outer dimension of input and is serial on the inner dimension to
+    // avoid write conflict. scatter_add only need one parallel and the size of
+    // outer dimensions is bigger to do parallel.
+
+    // TODO: When https://github.com/pytorch/pytorch/pull/82703 lands,
+    // using scatter_add will also get obvious speedup for the case dim == 0.
+    if ((result.stride(dim) == 1 || source.stride(dim) == 1) &&
+        // Data type of index should be long and alpha should be 1 to use scatter_add.
+        alpha.equal(1.0) && index_contig.scalar_type() == ScalarType::Long &&
+        result.numel() > at::internal::GRAIN_SIZE &&
+        // scatter_add does not support ComplexHalf
+        source.scalar_type() != ScalarType::ComplexHalf &&
+        result.scalar_type() != ScalarType::ComplexHalf) {
+      std::vector<int64_t> ep_sizes(result.sizes().size());
+      std::vector<int64_t> ep_strides(source.sizes().size());
+
+      // Check whether result and source are matched apart from the dimension dim.
+      // Note that the broadcast case:
+      // source.select(dim, i) is broadcast for result.select(dim, index_data[i])
+      // The broadcast case is not applicable for scatter_add
+      auto check_sizes = [&ep_sizes, &ep_strides, &numel](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
+        if (a.size() != b.size()) {
+          return false;
+        }
+
+        ep_sizes[dim] = numel;
+        ep_strides[dim] = 1;
+        for (const int64_t i : c10::irange(a.size())) {
+          if (i == dim) {
+            continue;
+          }
+
+          if (a[i] != b[i]) {
+            return false;
+          }
+          ep_sizes[i] = a[i];
+          ep_strides[i] = 0;
+
+        }
+        return true;
+      };
+
+      if (check_sizes(result.sizes(), source.sizes(), dim)) {
+        auto ep_index = index_contig.as_strided(ep_sizes, ep_strides);
+        result.scatter_add_(dim, ep_index, source);
+        return;
+      }
+
+    }
+
     auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
     auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
@@ -1668,7 +1726,7 @@ TORCH_IMPL_FUNC(scatter_add)
       }
     }
   } else {
-    if (can_use_expanded_index_path</*is_scatter_like*/true>(mut_out, dim, index, src)) {
+    if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
       scatter_add_expanded_index_stub(self.device().type(), mut_out, index, src);
     } else {
       scatter_add_stub(self.device().type(), mut_out, dim, index, src);
@@ -1688,16 +1746,15 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
   TORCH_WARN_ONCE("scatter_reduce() is in beta and the API may change at any time.");
 
   dim = at::maybe_wrap_dim(dim, self.dim());
-  auto mut_out = const_cast<Tensor&>(out);
 
-  if (!self.is_same(mut_out)) {
-    mut_out.copy_(self);
+  if (!self.is_same(out)) {
+    out.copy_(self);
   }
 
   const auto op = meta::get_operator_enum(reduce, true);
 
-  if (can_use_expanded_index_path</*is_scatter_like*/true>(mut_out, dim, index, src)) {
-    scatter_reduce_expanded_index_stub(self.device().type(), mut_out, index, src, op, include_self);
+  if (can_use_expanded_index_path(out, dim, index, src, /*is_scatter_like*/true)) {
+    scatter_reduce_expanded_index_stub(self.device().type(), out, index, src, op, include_self);
     return;
   }
 
