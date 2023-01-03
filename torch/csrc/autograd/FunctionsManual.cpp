@@ -2930,178 +2930,6 @@ std::tuple<Tensor, Tensor> atan2_backward(
       output_mask[1] ? grad * -self * recip : Tensor()};
 }
 
-Tensor prelu_jvp(
-    const Tensor& x,
-    const Tensor& dx,
-    const Tensor& w,
-    const Tensor& dw) {
-  const auto ndim = x.dim();
-  auto as_nd = [ndim](const Tensor& t) {
-    std::vector<int64_t> sizes(ndim, 1), strides(ndim, 0);
-    if (ndim >= 2) {
-      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
-      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
-      return t.as_strided(sizes, strides);
-    }
-    return t.as_strided(sizes, strides);
-  };
-  auto w_ = as_nd(w);
-  auto dw_ = as_nd(dw);
-  return at::where(x >= 0, dx, w_ * dx + dw_ * x);
-}
-
-// TODO: Seriously consider writing the derivative formulas for
-// each output separately; there is not all that much sharing
-// of computation going on here.
-std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
-    const Tensor& grad_grad_input,
-    const Tensor& grad_grad_weight,
-    const Tensor& grad_out,
-    const Tensor& input_,
-    const Tensor& weight_) {
-  if (!(grad_grad_input.defined() || grad_grad_weight.defined() ||
-        grad_out.defined())) {
-    return std::tuple<Tensor, Tensor, Tensor>(Tensor(), Tensor(), Tensor());
-  }
-  auto input = input_.contiguous();
-  auto weight = weight_.contiguous();
-
-  // Zero-fill undefined grads (TODO: do this more efficiently)
-  auto ggI = grad_grad_input.defined()
-      ? grad_grad_input.contiguous()
-      : at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto ggW = grad_grad_weight.defined()
-      ? grad_grad_weight.contiguous()
-      : at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto gO = grad_out.defined()
-      ? grad_out.contiguous()
-      : at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  auto positive_mask = (input > 0).type_as(ggI);
-  auto nonpositive_mask = (input <= 0).type_as(ggW);
-
-  // Explanation: Let input be i, weight be w, grad_output be gO.
-  // f(i, w) = i      if i > 0
-  //         = w * i  if i <= 0
-  // gI = df/di * gO  = gO      if i > 0    gW = df/dw * gO = 0       if i > 0
-  //                  = gO * w  if i <= 0                   = gO * i  if i <= 0
-  // The rest is taking derivatives of these wrt i, w, gO and summing/expanding
-  // properly.
-
-  if (weight.numel() == 1) {
-    // from PReLU.forward: num_parameters == 0 is used indicate that a
-    // single weight is shared among all input channels.
-
-    // this is a little tricky because PReLU currently doesn't take a shape so
-    // the weight may be 1-d when the input is a scalar (and there isn't a good
-    // Parameter API for that anyway until Variable and tensor are merged).  So,
-    // use weight and ggW as 0-dim in this case.
-    bool scalar_input_1d_weight =
-        (positive_mask.dim() == 0 && weight.dim() == 1);
-    auto weight_maybe_squeeze =
-        scalar_input_1d_weight ? weight.squeeze() : weight;
-    auto ggW_maybe_squeeze = scalar_input_1d_weight ? ggW.squeeze() : ggW;
-
-    auto mask = positive_mask +
-        nonpositive_mask * weight_maybe_squeeze.expand_as(input);
-    auto ggO = ggI * mask +
-        ggW_maybe_squeeze.expand_as(gO) * (nonpositive_mask * input);
-    return std::tuple<Tensor, Tensor, Tensor>(
-        ggO,
-        ggW_maybe_squeeze.expand_as(gO) * gO * nonpositive_mask,
-        (ggI * gO * nonpositive_mask).sum().expand_as(weight));
-  } else {
-    // Expand ggW to match size of ggI; a simple expand doesn't work because
-    // ggW is the size of the input channel (dim==1 unless there is only 1
-    // dimension).  For example, let ggI be size (3,4,5,6,7) and ggW be size
-    // (4).  Then we unsqueeze ggW to be size (4,1,1,1) so the expand succeeds.
-    auto dims_to_unsqueeze = std::max<int64_t>(input.dim() - 2, 0);
-    auto ggW_expanded = ggW;
-    for (const auto i : c10::irange(dims_to_unsqueeze)) {
-      (void)i; // Suppress unused variable warning
-      ggW_expanded = ggW_expanded.unsqueeze(1);
-    }
-    ggW_expanded = ggW_expanded.expand_as(ggI);
-
-    auto gI = ggW_expanded * gO * nonpositive_mask;
-
-    auto gW = ggI * gO * nonpositive_mask;
-    if (input.dim() > 1) {
-      gW = gW.sum(0);
-    }
-    while (gW.dim() > 1) {
-      gW = gW.sum(1);
-    }
-
-    Tensor ggO;
-    // areAnyTensorSubclassLike check necessary for composite compiance:
-    // e.g. it's possible that grad_out/gO is a BatchedTensor wrapping
-    // some Tensor that does require grad
-    if (areAnyTensorSubclassLike({grad_out}) || gO.requires_grad()) {
-      // expand weight as input as in ggW/ggI above
-      auto weight_expanded = weight;
-      for (const auto i : c10::irange(dims_to_unsqueeze)) {
-        (void)i; // Suppress unused variable warning
-        weight_expanded = weight_expanded.unsqueeze(1);
-      }
-      weight_expanded = weight_expanded.expand_as(input);
-
-      auto mask = positive_mask + nonpositive_mask * weight_expanded;
-      ggO = ggI * mask + ggW_expanded * nonpositive_mask * input;
-    }
-    return std::tuple<Tensor, Tensor, Tensor>{ggO, gI, gW};
-  }
-}
-
-Tensor prelu_backward_self_jvp(
-    const Tensor& x,
-    const Tensor& w,
-    const Tensor& dw,
-    const Tensor& g,
-    const Tensor& dg) {
-  const auto ndim = x.dim();
-  auto as_nd = [ndim](const Tensor& t) {
-    std::vector<int64_t> sizes(ndim, 1), strides(ndim, 0);
-    if (ndim >= 2) {
-      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
-      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
-      return t.as_strided(sizes, strides);
-    }
-    return t.as_strided(sizes, strides);
-  };
-  auto w_ = as_nd(w);
-  auto dw_ = as_nd(dw);
-  return at::where(x >= 0, dg, dg * w_ + g * dw_);
-}
-
-Tensor prelu_backward_weight_jvp(
-    const Tensor& w,
-    const Tensor& x,
-    const Tensor& dx,
-    const Tensor& g,
-    const Tensor& dg) {
-  const auto dw_full =
-      at::where(x >= 0, at::zeros({}, x.options()), g * dx + dg * x);
-
-  const auto ndim = x.dim();
-  std::vector<int64_t> reduction_dims;
-  reduction_dims.reserve(ndim);
-  // we always reduce over the 0th dim.
-  reduction_dims.push_back(0);
-  if (ndim >= 2) {
-    // reduce over the 1th dim if w is a 0-dim tensor
-    if (!w.dim()) {
-      reduction_dims.push_back(1);
-    }
-    // reduce over dims which are >= 2.
-    for (int64_t i = 2; i < ndim; ++i) {
-      reduction_dims.push_back(i);
-    }
-  }
-  const auto dw = dw_full.sum(reduction_dims);
-  return dw.view_as(w);
-}
-
 Tensor gelu_double_backward(
     const Tensor& ggI,
     const Tensor& gO,
@@ -3661,37 +3489,39 @@ Tensor linalg_lstsq_jvp(
 }
 
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
-    const Tensor& grad,
+    const Tensor& gX_,
     const Tensor& A,
-    const Tensor& B,
-    const c10::optional<double> rcond,
-    const c10::optional<c10::string_view> driver,
+    const Tensor& B_,
     const std::array<bool, 2>& grad_input_mask) {
   at::NoTF32Guard disable_tf32;
-  Tensor A_grad, B_grad;
-  if (!grad.defined()) {
-    return std::make_tuple(A_grad, B_grad);
-  }
-
   auto A_requires_grad = grad_input_mask[0];
   auto B_requires_grad = grad_input_mask[1];
+  if (!gX_.defined() || (!A_requires_grad && !B_requires_grad)) {
+    return {};
+  }
 
-  Tensor pinvA;
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(A, B_);
+  const auto vector_to_matrix = [vector_case](const Tensor& X) {
+    return vector_case ? X.unsqueeze(-1) : X;
+  };
+  const auto matrix_to_vector = [vector_case](const Tensor& X) {
+    return vector_case ? X.squeeze(-1) : X;
+  };
+
+  auto gX = vector_to_matrix(gX_);
+  auto B = vector_to_matrix(B_);
+  Tensor pinvA = at::linalg_pinv(A);
+  Tensor A_grad, B_grad;
   if (A_requires_grad) {
-    pinvA = at::linalg_pinv(A);
-    auto pinvA_grad = grad.matmul(B.transpose(-1, -2).conj());
+    auto pinvA_grad = gX.matmul(B.mH());
     A_grad = pinv_backward(pinvA_grad, pinvA, A);
   }
 
   if (B_requires_grad) {
-    if (!pinvA.defined()) {
-      pinvA = at::linalg_pinv(A);
-    }
     // Equivalent to
-    // B_grad = std::get<0>(at::linalg_lstsq(A.transpose(-1, -2).conj(), grad,
-    // rcond, driver)); but we avoid this approach as `gelsy` is
-    // non-deterministic
-    B_grad = pinvA.transpose(-1, -2).conj().matmul(grad);
+    // B_grad = std::get<0>(at::linalg_lstsq(A.mH(), gX, rcond, driver));
+    // but we avoid this approach as `gelsy` is non-deterministic
+    B_grad = matrix_to_vector(pinvA.mH().matmul(gX));
   }
 
   return std::make_tuple(A_grad, B_grad);
@@ -5708,7 +5538,7 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
     gA_ = left ? -gB_.matmul(X_.mH()) : -X_.mH().matmul(gB_);
   }
   return std::make_tuple(
-      A_requires_grad ? matrix_to_vector(gA_) : Tensor{},
+      A_requires_grad ? gA_ : Tensor{},
       B_requires_grad ? matrix_to_vector(gB_) : Tensor{});
 }
 

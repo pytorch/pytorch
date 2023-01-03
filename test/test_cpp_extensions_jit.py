@@ -191,13 +191,15 @@ class TestCppExtensionJIT(common.TestCase):
         archflags = {
             '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
-            "Pascal 3.5": (['35', '60', '61'], None),
             "Volta": (['70'], ['70']),
         }
         if int(torch.version.cuda.split('.')[0]) >= 10:
             # CUDA 9 only supports compute capability <= 7.2
             archflags["7.5+PTX"] = (['75'], ['75'])
             archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
+        if int(torch.version.cuda.split('.')[0]) < 12:
+            # CUDA 12 drops compute capability < 5.0
+            archflags["Pascal 3.5"] = (['35', '60', '61'], None)
 
         for flags, expected in archflags.items():
             self._run_jit_cuda_archflags(flags, expected)
@@ -710,7 +712,7 @@ class TestCppExtensionJIT(common.TestCase):
         source = '''
         // error_type:
         // 0: no error
-        // 1: torch::TypeError
+        // 1: c10::TypeError
         // 2: python_error()
         // 3: py::error_already_set
         at::Tensor foo(at::Tensor x, int error_type) {
@@ -718,9 +720,7 @@ class TestCppExtensionJIT(common.TestCase):
             err_stream << "Error with "  << x.type();
 
             TORCH_WARN(err_stream.str());
-            if(error_type == 1) {
-                throw torch::TypeError(err_stream.str().c_str());
-            }
+            TORCH_CHECK_TYPE(error_type != 1, err_stream.str());
             if(error_type == 2) {
                 PyObject* obj = PyTuple_New(-1);
                 TORCH_CHECK(!obj);

@@ -277,27 +277,20 @@ def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tens
     return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_output)
 
 
-@register_decomposition(aten.prelu_backward)
-@pw_cast_for_opmath
-def prelu_backward(
-    grad_output: Tensor, self: Tensor, weight: Tensor
+@register_decomposition(aten._prelu_kernel)
+def _prelu_kernel(self: Tensor, weight: Tensor) -> Tensor:
+    return torch.where(self > 0, self, weight * self)
+
+
+@register_decomposition(aten._prelu_kernel_backward)
+def _prelu_kernel_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    weight: Tensor,
 ) -> Tuple[Tensor, Tensor]:
-    # Logic is more complicated than I would like.  Basically, weight can either
-    # be a scalar or a vector of size [C], and in the forward pass it's
-    # broadcast against [N, C, ...]. So now, we need to do the corresponding
-    # reduction, which is harder than we'd like...
-    cur_weight = weight
-    for _ in range(2, grad_output.dim()):
-        cur_weight = cur_weight.unsqueeze(-1)
-    input_grad = torch.where(self > 0, grad_output, cur_weight * grad_output)
-    weight_grad_collector = torch.where(self > 0, 0.0, self * grad_output)
-    if len(self.shape) == 0:
-        out = weight_grad_collector.view(cur_weight.shape)
-    else:
-        out = weight_grad_collector.sum_to_size(cur_weight.shape)
-    while out.dim() > weight.dim():
-        out = out.squeeze(-1)
-    return (input_grad.view_as(self), out)
+    input_grad = torch.where(self > 0, grad_output, weight * grad_output)
+    weight_grad = torch.where(self > 0, 0.0, self * grad_output)
+    return (input_grad, weight_grad)
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)

@@ -1597,37 +1597,11 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps) (
 Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
     using namespace mps;
 
-    int64_t weight_num = weight_.numel();
     Tensor result = at::empty_like(self, self.suggest_memory_format());
     TORCH_INTERNAL_ASSERT(weight_.defined());
 
     if (result.numel() == 0){
       return result;
-    }
-
-    TORCH_CHECK(
-      weight_.dim() == 1 || weight_.dim() == 0,
-      "prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = ", weight_.dim()
-    );
-
-    int64_t input_ndim = self.dim();
-    NSMutableArray<NSNumber*> * expand_dims = [NSMutableArray<NSNumber*> new];
-
-    if (weight_num != 1) {
-      TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
-
-      int64_t channel_size = 1; // channel_size default to 1
-      if (input_ndim > 1) {
-        channel_size = self.size(1); // channel is the 2nd dim of input
-      }
-      TORCH_CHECK(channel_size == weight_num,
-        "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
-        " and channel size = ", channel_size, ".");
-
-      for (const auto i : c10::irange(input_ndim)) {
-        if (i == 1) continue;
-        [expand_dims addObject:[NSNumber numberWithInt:i]];
-      }
     }
 
     struct CachedGraph : public MPSCachedGraph
@@ -1643,8 +1617,7 @@ Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
     MPSStream* stream = getCurrentMPSStream();
 
     @autoreleasepool {
-      NSString* expand_dims_key = [[expand_dims valueForKey:@"description"] componentsJoinedByString:@","];
-      string key = "prelu_mps:" + getTensorsStringKey({self, weight_}) + string([expand_dims_key UTF8String]);
+      string key = "prelu_mps:" + getTensorsStringKey({self, weight_});
 
       CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
       if(!cachedGraph) {
@@ -1671,18 +1644,9 @@ Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
                                                         truePredicateTensor: inputTensor
                                                         falsePredicateTensor: zeroTensor
                                                                         name: nil];
-          if (weight_num != 1) {
-            MPSGraphTensor *expandedWeightTensor = [mpsGraph expandDimsOfTensor:weightTensor
-                                                    axes:expand_dims
-                                                    name:nil];
-            weightedTensor = [mpsGraph multiplicationWithPrimaryTensor:weightedTensor
-                                                       secondaryTensor:expandedWeightTensor
-                                                                  name:nil];
-          }else{
-            weightedTensor = [mpsGraph multiplicationWithPrimaryTensor:weightedTensor
-                                                      secondaryTensor:weightTensor
-                                                                  name:nil];
-          }
+          weightedTensor = [mpsGraph multiplicationWithPrimaryTensor:weightedTensor
+                                                     secondaryTensor:weightTensor
+                                                                name:nil];
           MPSGraphTensor *outputTensor = [mpsGraph additionWithPrimaryTensor:reluTensor
                                                              secondaryTensor:weightedTensor
                                                                         name:nil];
@@ -1715,34 +1679,8 @@ Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
 std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const Tensor& self, const Tensor& weight_) {
     using namespace mps;
 
-    int64_t weight_num = weight_.numel();
-    NSMutableArray<NSNumber*> * reduce_dims = [NSMutableArray<NSNumber*> new];
     Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
     Tensor weight_grad = at::empty_like(weight_, at::MemoryFormat::Contiguous);
-
-    TORCH_CHECK(
-      weight_.dim() == 1 || weight_.dim() == 0,
-      "prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = ", weight_.dim()
-    );
-
-    if (weight_num != 1) {
-      int64_t input_ndim = self.dim();
-      TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
-
-      int64_t channel_size = 1; // channel_size default to 1
-      if (input_ndim > 1) {
-        channel_size = self.size(1); // channel is the 2nd dim of input
-      }
-      TORCH_CHECK(channel_size == weight_num,
-        "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
-        " and channel size = ", channel_size, "."
-      );
-
-      for (const auto i : c10::irange(input_ndim)) {
-        if (i == 1) continue;
-        [reduce_dims addObject:[NSNumber numberWithInt:i]];
-      }
-    }
 
     struct CachedGraph : public MPSCachedGraph
     {
@@ -1759,8 +1697,7 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
     MPSStream* stream = getCurrentMPSStream();
 
     @autoreleasepool {
-      NSString* reduce_dims_key = [[reduce_dims valueForKey:@"description"] componentsJoinedByString:@","];
-      string key = "prelu_backward_mps:" + getTensorsStringKey({grad_output, self, weight_}) + ":" + string([reduce_dims_key UTF8String]);
+      string key = "prelu_backward_mps:" + getTensorsStringKey({grad_output, self, weight_});
 
       CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
       if(!cachedGraph) {
@@ -1781,19 +1718,9 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
             MPSGraphTensor *zeroTensor = [mpsGraph constantWithScalar: 0.0
                                                                 shape:@[@1]
                                                               dataType: inputTensor.dataType];
-            MPSGraphTensor* weightedGradOutputTensor = nil;
-            if (weight_num != 1) {
-              MPSGraphTensor *expandedWeightTensor = [mpsGraph expandDimsOfTensor:weightTensor
-                                                  axes:reduce_dims
-                                                  name:nil];
-              weightedGradOutputTensor = [mpsGraph multiplicationWithPrimaryTensor:expandedWeightTensor
-                                                                secondaryTensor:gradOutputTensor
-                                                                  name:nil];
-            } else {
-              weightedGradOutputTensor = [mpsGraph multiplicationWithPrimaryTensor:weightTensor
-                                                                secondaryTensor:gradOutputTensor
-                                                                  name:nil];
-            }
+            MPSGraphTensor* weightedGradOutputTensor = [mpsGraph multiplicationWithPrimaryTensor:weightTensor
+                                                                 secondaryTensor:gradOutputTensor
+                                                                 name:nil];
             MPSGraphTensor* inputGradOutputTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
                                                               secondaryTensor:gradOutputTensor
                                                                 name:nil];
@@ -1808,10 +1735,6 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
                                                           truePredicateTensor: zeroTensor
                                                           falsePredicateTensor: inputGradOutputTensor
                                                                           name: nil];
-            weightedGradTensor = [mpsGraph reductionSumWithTensor:weightedGradTensor
-                                                              axes:reduce_dims
-                                                              name:nil];
-
             newCachedGraph->gradOutputTensor_ = gradOutputTensor;
             newCachedGraph->inputTensor_ = inputTensor;
             newCachedGraph->weightTensor_ = weightTensor;

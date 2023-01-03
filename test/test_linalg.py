@@ -12,6 +12,7 @@ from math import inf, nan, isnan
 import random
 from random import randrange
 from itertools import product
+import operator
 from functools import reduce, partial, wraps
 
 from torch.testing._internal.common_utils import \
@@ -4343,6 +4344,62 @@ class TestLinalg(TestCase):
             x = make_arg(size_x, noncontiguous=nctg_x)
             y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
+
+    def test_matmul_should_fold(self, device):
+        make_arg = partial(make_tensor, dtype=torch.float, device=device)
+        shapes_x = ((11, 7, 5),
+                    (0, 7, 5),
+                    (7, 5, 5),
+                    (3, 5, 5),
+                    (0, 5, 5),
+                    (5, 5, 5),
+                    (11, 7, 3, 5),
+                    (7, 5, 3, 5),
+                    (0, 5, 3, 5),
+                    (7, 3, 5, 5),
+                    (0, 0, 5, 5),
+                    (5, 3, 5, 5),
+                    (3, 3, 5, 5),
+                    (5, 5, 5, 5))
+
+        def should_fold(t1, t2):
+            if t1.ndim == 2:
+                return False
+            t1_larger = t1.ndim >= t2.ndim
+            if not t1_larger:
+                t1, t2 = t2.mT, t1
+            if not (t1.ndim >= 3 and t2.ndim <= 3):
+                return False
+            if t1.numel() == 0:
+                return True
+            return all(t1.stride(i) == t1.stride(i + 1) * t1.size(i + 1) for i in range(t1.ndim - 2))
+
+
+        for shape_x, nctg_x, nctg_y in product(shapes_x, (True, False), (True, False)):
+            x = make_arg(shape_x, noncontiguous=nctg_x)
+            for p in itertools.permutations(range(len(shape_x))):
+                x = x.permute(p)
+                n = x.size(-1)
+                for s in ((), (n - 1,), (n,), (n + 1,), (0,)):
+                    if len(s) == 1 and s[0] < 0:
+                        continue
+                    y = make_arg((n,) + s, noncontiguous=nctg_y)
+                    self.check_single_matmul(x, y)
+                    self.check_single_matmul(y if y.ndim == 1 else y.mT, x.mT)
+
+                    # Check that the folding strategy is optimal
+                    def fold():
+                        return x.view(reduce(operator.mul, x.shape[:-1], 1), x.size(-1))
+
+                    if should_fold(x, y):
+                        fold()
+                    else:
+                        self.assertRaises(RuntimeError, fold)
+
+                    if should_fold(y if y.ndim == 1 else y.mT, x.mT):
+                        fold()
+                    elif y.ndim != 2:
+                        self.assertRaises(RuntimeError, fold)
 
     def test_linear_algebra_scalar_raises(self, device) -> None:
         m = torch.randn(5, 5, device=device)
