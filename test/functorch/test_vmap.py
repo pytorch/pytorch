@@ -412,16 +412,12 @@ class TestVmapAPI(TestCase):
         self.assertEqual(y2, y0.t())
 
     def test_out_dims_must_be_int_or_collection_of_int_err_msg(self):
-        msg = 'must be an int or a python collection of ints'
+        msg = 'must be an int, None or a python collection of ints'
         tensor = torch.randn(2, 3)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda x: x, out_dims='lol')(tensor)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda x: x, out_dims=('lol',))(tensor)
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(lambda x: x, out_dims=None)(tensor)
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(lambda x: x, out_dims=(None,))(tensor)
 
     def test_out_dims_and_num_outputs_mismatch_err_msg(self):
         msg = 'not compatible'
