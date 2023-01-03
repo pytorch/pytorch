@@ -507,7 +507,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
     // TODO: implement sparse_compressed_mask
     switch(input_.layout()) {
     case kSparseCsr: return grad.sparse_mask(input_.to_sparse()).to_sparse_csr();
-    case kSparseCsc: return grad.sparse_mask(input_.to_sparse()).to_sparse_csc();
+    case kSparseCsc: return grad.sparse_mask(input_.to_sparse().coalesce()).to_sparse_csc();
     case kSparseBsr: {
       auto blocksize = DimVector(input_.values().sizes().slice(1, 2));
       return grad.sparse_mask(input_.to_sparse().coalesce()).to_sparse_bsr(blocksize);
