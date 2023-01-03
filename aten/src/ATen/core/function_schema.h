@@ -648,6 +648,7 @@ template<>
       auto kwarg_only_hash = std::hash<bool>{}(arg.kwarg_only());
       hash = c10::hash_combine(hash, type_hash);
       hash = c10::hash_combine(hash, kwarg_only_hash);
+      // hashing optional fields if they exist
       if (arg.default_value()) {
         auto default_value_hash = c10::hash<c10::IValue>{}(arg.default_value().value());
         hash = c10::hash_combine(hash, default_value_hash);
@@ -660,9 +661,6 @@ template<>
         auto alias_info_hash = std::hash<c10::AliasInfo>{}(*arg.alias_info());
         hash = c10::hash_combine(hash, alias_info_hash);
       }
-
-      // We don't need to hash the alias_info because it
-      // is not useful in distinguishing schema.
       return hash;
     }
   };
