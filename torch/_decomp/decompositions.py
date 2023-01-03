@@ -1349,8 +1349,8 @@ def native_batch_norm_helper(
 
         output = (input - mean) * rstd
 
-        save_mean = _squeeze_multiple(mean, reduction_dims)
-        save_rstd = _squeeze_multiple(rstd, reduction_dims)
+        save_mean = torch.squeeze(mean, reduction_dims)
+        save_rstd = torch.squeeze(rstd, reduction_dims)
         if running_mean is not None:
             new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
             if not functional:
@@ -1360,7 +1360,7 @@ def native_batch_norm_helper(
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            squeezed_var = _squeeze_multiple(biased_var, reduction_dims)
+            squeezed_var = torch.squeeze(biased_var, reduction_dims)
             unbiased_var = squeezed_var * (n / (n - 1))
             new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
             if not functional:
@@ -1889,23 +1889,13 @@ def index_add_(
     return x
 
 
-def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
-    ndim = self.dim()
-    wrapped_dims = utils.canonicalize_dims(ndim, dims)
-    assert isinstance(wrapped_dims, tuple)
-    for idx in range(ndim - 1, -1, -1):
-        if idx in wrapped_dims:
-            self = self.squeeze(idx)
-    return self
-
-
 @register_decomposition(aten.logsumexp.default)
 @pw_cast_for_int_to_real
 def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
-    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
+    maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)
     maxes_squeezed = torch.masked_fill(
         maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
     )
