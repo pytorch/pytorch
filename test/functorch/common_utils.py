@@ -11,9 +11,11 @@ import torch.utils._pytree as pytree
 from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_modules import module_db
 import os
 import unittest
 from torch.testing._internal.common_device_type import toleranceOverride
+from torch.testing._internal.autograd_function_db import autograd_function_db
 from collections import namedtuple
 
 IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'
@@ -21,21 +23,19 @@ IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'
 
 def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     outs = []
+    out_spec = None
     for idx in range(batch_size):
         flat_args, args_spec = pytree.tree_flatten(batched_args)
         flat_dims, dims_spec = pytree.tree_flatten(in_dims)
         assert(args_spec == dims_spec)
         new_args = [a.select(in_dim, idx) if in_dim is not None else a for a, in_dim in zip(flat_args, flat_dims)]
         out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
-        outs.append(out)
+        flat_out, out_spec = pytree.tree_flatten(out)
+        outs.append(flat_out)
 
-    loop_out = []
-    if isinstance(outs[0], torch.Tensor):
-        loop_out = torch.stack(outs)
-    else:
-        for idx in range(len(outs[0])):
-            loop_out.append(torch.stack([i[idx] for i in outs], out_dim))
-    return loop_out
+    outs = zip(*outs)
+    result = [torch.stack(out_lst) for out_lst in outs]
+    return pytree.tree_unflatten(result, out_spec)
 
 
 # Like loop helper function but for 2 levels of vmap. If we need more levels than this, probably possible
@@ -351,7 +351,7 @@ def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
 
 
 def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = op_db + additional_op_db
+    all_opinfos = op_db + additional_op_db + autograd_function_db
     for decorate_meta in to_skip:
         matching_opinfos = [o for o in all_opinfos
                             if o.name == decorate_meta.op_name and
@@ -372,6 +372,29 @@ def skipOps(test_case_name, base_test_name, to_skip):
 
     # This decorator doesn't modify fn in any way
     def wrapped(fn):
+        return fn
+    return wrapped
+
+
+def decorateForModules(decorator, module_classes, device_type=None, dtypes=None):
+
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn, module_classes=module_classes, decorator=decorator,
+                device_type=device_type, dtypes=dtypes):
+        name_parts = fn.__qualname__.split('.')
+        assert len(name_parts) == 2, "Decorator only applies to a test function of a test class"
+        test_case_name, base_test_name = name_parts
+        for module_cls in module_classes:
+            matching_module_infos = [m for m in module_db if m.module_cls == module_cls]
+            assert len(matching_module_infos) == 1, f"Couldn't find single ModuleInfo for {module_cls}"
+            module_info = matching_module_infos[0]
+            decorators = list(module_info.decorators)
+            new_decorator = DecorateInfo(decorator,
+                                         test_case_name, base_test_name,
+                                         device_type=device_type,
+                                         dtypes=dtypes)
+            decorators.append(new_decorator)
+            module_info.decorators = tuple(decorators)
         return fn
     return wrapped
 

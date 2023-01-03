@@ -237,7 +237,8 @@ def non_cont_test(t_view, t_cont):
         raise Exception('t_view is contiguous!')
     if not t_cont.is_contiguous():
         raise Exception('t_cont is not contiguous!')
-    torch.testing.assert_close(t_view, t_cont, rtol=0, atol=0, msg='t_view is not equal to t_cont!')
+    if not torch.equal(t_view, t_cont):
+        raise Exception('t_view is not equal to t_cont!')
     return t_view
 
 def my_function(a, b, c):
@@ -1067,7 +1068,7 @@ class RpcTestCommon:
             ps_gradient = rref.rpc_sync().get_gradient(rref)
             if ps_gradient.is_sparse:
                 ps_gradient = ps_gradient.to_dense().double()
-            self.assertEqual(gradient, ps_gradient, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(gradient, ps_gradient))
 
     def _my_parameter_server(self, sparse):
         ps_rref = RRef(MyParameterServer(self.world_size - 1))

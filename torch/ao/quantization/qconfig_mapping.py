@@ -83,26 +83,12 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
     qconfig_mapping = QConfigMapping() \
         .set_global(qconfig) \
         .set_object_type("reshape", default_reuse_input_qconfig) \
-        .set_object_type(torch.nn.Conv1d, qconfig) \
-        .set_object_type(torch.nn.Conv2d, qconfig) \
-        .set_object_type(torch.nn.Conv3d, qconfig) \
         .set_object_type(torch.nn.ConvTranspose1d, qconfig_transpose) \
         .set_object_type(torch.nn.ConvTranspose2d, qconfig_transpose) \
         .set_object_type(torch.nn.ConvTranspose3d, qconfig_transpose) \
-        .set_object_type(torch.nn.Linear, qconfig) \
-        .set_object_type(torch.nn.functional.conv1d, qconfig) \
-        .set_object_type(torch.nn.functional.conv2d, qconfig) \
-        .set_object_type(torch.nn.functional.conv3d, qconfig) \
         .set_object_type(torch.nn.functional.conv_transpose1d, qconfig_transpose) \
         .set_object_type(torch.nn.functional.conv_transpose2d, qconfig_transpose) \
         .set_object_type(torch.nn.functional.conv_transpose3d, qconfig_transpose) \
-        .set_object_type(torch.nn.functional.linear, qconfig) \
-        .set_object_type(torch.nn.ReLU, qconfig) \
-        .set_object_type(torch.nn.functional.relu, qconfig) \
-        .set_object_type(torch.relu, qconfig) \
-        .set_object_type(torch.nn.BatchNorm1d, qconfig) \
-        .set_object_type(torch.nn.BatchNorm2d, qconfig) \
-        .set_object_type(torch.nn.BatchNorm3d, qconfig) \
         .set_object_type(torch.nn.functional.layer_norm, qconfig_layernorm) \
         .set_object_type(torch.nn.LayerNorm, qconfig_layernorm) \
 
@@ -119,6 +105,16 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
             fixed_qparams_qconfig = QConfig(activation=activation, weight=default_weight)
             fixed_qparams_observer_to_qconfig[observer] = fixed_qparams_qconfig
         qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
+
+    # QConfig for fused ops for onednn backend
+    # Separate ops are required to have the same qconfig as fused ops
+    # TODO: we should be able to configure qconfig for patterns
+    if backend == 'onednn':
+        qconfig_mapping.set_object_type(torch.nn.Linear, qconfig) \
+                       .set_object_type(torch.nn.LeakyReLU, qconfig) \
+                       .set_object_type(torch.nn.functional.leaky_relu, qconfig) \
+                       .set_object_type(torch.nn.Tanh, qconfig) \
+                       .set_object_type(torch.nn.functional.tanh, qconfig)
 
     return qconfig_mapping
 

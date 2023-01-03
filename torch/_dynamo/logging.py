@@ -2,7 +2,7 @@ import itertools
 import logging
 import os
 
-from torch.hub import tqdm
+from torch.hub import _Faketqdm, tqdm
 
 # logging level for dynamo generated graphs/bytecode/guards
 logging.CODE = 15
@@ -10,7 +10,6 @@ logging.addLevelName(logging.CODE, "CODE")
 
 # Disable progress bar by default, not in dynamo config because otherwise get a circular import
 disable_progress = True
-
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
 def get_loggers():
@@ -67,7 +66,20 @@ def init_logging(log_level, log_file_name=None):
             for logger in get_loggers():
                 logger.addHandler(log_file)
 
-    set_loggers_level(log_level)
+        if bool(os.environ.get("TORCH_COMPILE_DEBUG", False)):
+            from .utils import get_debug_dir
+
+            log_level = logging.DEBUG
+            log_path = os.path.join(get_debug_dir(), "torchdynamo")
+            if not os.path.exists(log_path):
+                os.makedirs(log_path)
+
+            log_file = logging.FileHandler(os.path.join(log_path, "debug.log"))
+            log_file.setLevel(logging.DEBUG)
+            logger = logging.getLogger("torch._dynamo")
+            logger.addHandler(log_file)
+
+        set_loggers_level(log_level)
 
 
 # Creates a logging function that logs a message with a step # prepended.
@@ -94,13 +106,15 @@ if not disable_progress:
         num_steps = 3
     except ImportError:
         num_steps = 2
-    pbar = tqdm(total=num_steps, desc="torch.compile()", delay=15)
+    pbar = tqdm(total=num_steps, desc="torch.compile()", delay=0)
 
 
 def get_step_logger(logger):
     if not disable_progress:
-        pbar.set_postfix_str(f"{logger.name}")
         pbar.update(1)
+        if not isinstance(pbar, _Faketqdm):
+            pbar.set_postfix_str(f"{logger.name}")
+
     step = next(_step_counter)
 
     def log(level, msg):

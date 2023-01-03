@@ -56,7 +56,7 @@ jobs:
             And then change password using `passwd` command.
 
             To start build locally, change working folder to \actions-runner\_work\pytorch\pytorch,
-            Activate miniconda and Visual Studio environment, but running:
+            Activate miniconda and Visual Studio environment, by running:
               call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
               call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
 

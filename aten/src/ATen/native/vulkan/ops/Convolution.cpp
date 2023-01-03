@@ -320,6 +320,16 @@ static api::ShaderSource get_shader(
       break;
     case Conv2dDepthwise:
       shader = VK_SHADER(conv2d_dw);
+      if (kernel_size.size() == 4 && kernel_size[2] == 3 &&
+          kernel_size[3] == 3) {
+        // 1x1 refers to the output tile size
+        shader = VK_SHADER(conv2d_dw_3x3);
+      }
+      if (kernel_size.size() == 4 && kernel_size[2] == 5 &&
+          kernel_size[3] == 5) {
+        // 1x1 refers to the output tile size
+        shader = VK_SHADER(conv2d_dw_5x5);
+      }
       break;
     case Conv2dPointwise:
       shader = VK_SHADER(conv2d_pw_2x2);
@@ -609,7 +619,9 @@ bool weight_valid(const Tensor& weight, const bool quantized) {
       weight.device().type() != c10::DeviceType::Vulkan) {
     return false;
   }
-  if (quantized && weight.scalar_type() != c10::kQUInt8) {
+  if (quantized &&
+      (weight.scalar_type() != c10::kQUInt8 &&
+       weight.scalar_type() != c10::kQInt8)) {
     return false;
   }
 
@@ -982,7 +994,7 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
       dilation,
       /* transposed = */ false,
       /* quantized = */ true,
-      /* output_padding_arg = */ {},
+      /* output_padding_arg = */ {0},
       groups,
       output_min,
       output_max));

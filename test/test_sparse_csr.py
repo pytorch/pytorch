@@ -875,7 +875,7 @@ class TestSparseCompressed(TestCase):
                  base.device != other.device)):
                 return False
             if base.device.type == 'cpu' or base.device.type == 'cuda':
-                if base._storage().data_ptr() != other._storage().data_ptr():
+                if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                     return False
             return True
 
@@ -1297,6 +1297,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(block_t.values().dim(), 3)
             self.assertTrue(block_t.layout == torch.sparse_bsr)
             block_st = st.tobsr(blocksize=(blocksize, blocksize))
+            block_st.sort_indices()
             self.assertEqual(block_t.values().cpu(), block_st.data)
             self.assertEqual(block_t.col_indices().cpu(), torch.tensor(block_st.indices).to(index_dtype))
             self.assertEqual(block_t.crow_indices().cpu(), torch.tensor(block_st.indptr).to(index_dtype))
@@ -1726,6 +1727,32 @@ class TestSparseCSR(TestCase):
                     y = gen_y(y_shape, nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
                     _test_mm(x, y)
 
+        def test_empty_inputs(lhs_layout, rhs_layout):
+            xd = torch.rand(10, 0, device=device, dtype=dtype)
+            yd = xd.transpose(-2, -1)
+            zd = torch.rand(0, 0, device=device, dtype=dtype)
+
+            xls, yls, zls = [t.to_sparse(layout=lhs_layout) for t in (xd, yd, zd)]
+            xrs, yrs, zrs = [t.to_sparse(layout=rhs_layout) for t in (xd, yd, zd)]
+
+            for ls, rs, ld, rd in [(xls, yrs, xd, yd), (xls, zrs, xd, zd), (zls, yrs, zd, yd), (zls, zrs, zd, zd)]:
+                res_sparse = ls @ rs
+                res_dense = ld @ rd
+                self.assertEqual(res_sparse.to_dense(), res_dense)
+
+        def test_orthogonal_inputs(lhs_layout, rhs_layout):
+            ones = torch.ones(2, 2, device=device, dtype=dtype)
+            zeros = torch.zeros(2, 2, device=device, dtype=dtype)
+            x = torch.cat((ones, zeros), -1).to_sparse(layout=lhs_layout)
+            y = torch.cat((zeros, ones), -2).to_sparse(layout=rhs_layout)
+            res = x @ y
+            res_expected = torch.zeros(*res.shape, device=device, dtype=dtype, layout=res.layout)
+            self.assertEqual(res, res_expected)
+
+        for lhs_layout, rhs_layout in itertools.product([torch.sparse_csr, torch.sparse_csc], repeat=2):
+            test_empty_inputs(lhs_layout, rhs_layout)
+            test_orthogonal_inputs(lhs_layout, rhs_layout)
+
         for i in [2, 4]:
             for j in [2, 4, 7]:
                 for k in [2, 3, 7]:
@@ -2053,6 +2080,34 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(torch.mul, 0, [100, 100])
         _test_spadd_shape(torch.mul, 100, [100, 1])
         _test_spadd_shape(torch.mul, 100, [1, 100])
+
+    # TODO: enable hybrid once to_dense supports it
+    @parametrize('enable_hybrid', [False])
+    @all_sparse_compressed_layouts()
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
+    def test_mul_scalar(self, layout, device, dtype, enable_hybrid):
+        for sparse in self.generate_simple_inputs(
+                layout, device=device, dtype=dtype, index_dtype=torch.int32, enable_hybrid=enable_hybrid):
+            for scalar_dtype in all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half):
+                # ComplexHalf is experimental
+                if dtype is torch.half and scalar_dtype.is_complex:
+                    continue
+
+                scalar_t = torch.tensor(2, dtype=scalar_dtype)
+                for scalar in (scalar_t, scalar_t.item()):
+                    res_out = sparse.mul(scalar)
+                    self.assertEqual(res_out, scalar * sparse)
+
+                    res_dense_out = sparse.to_dense().mul(scalar)
+                    # BUG: dispatcher ignores mul.Scalar(Tensor, Scalar)
+                    # This issues is circumvented in the mul(Tensor, Tensor) kernel.
+                    self.assertEqual(res_out, res_dense_out)
+
+                    if dtype == torch.result_type(sparse, scalar):
+                        res_in_dense = sparse.to_dense().mul_(scalar)
+                        res_in = sparse.clone().mul_(scalar)
+                        self.assertEqual(res_in, res_in_dense)
+                        self.assertEqual(res_out, res_in)
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)

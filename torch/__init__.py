@@ -9,6 +9,7 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
+import math
 import os
 import sys
 import platform
@@ -48,7 +49,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'compile',
+    'sym_int', 'sym_float', 'compile', 'vmap'
 ]
 
 ################################################################################
@@ -142,20 +143,46 @@ if sys.platform == 'win32':
     kernel32.SetErrorMode(prev_error_mode)
 
 
+def _preload_cuda_deps():
+    """ Preloads cudnn/cublas deps if they could not be found otherwise """
+    # Should only be called on Linux if default path resolution have failed
+    assert platform.system() == 'Linux', 'Should only be called on Linux'
+    for path in sys.path:
+        nvidia_path = os.path.join(path, 'nvidia')
+        if not os.path.exists(nvidia_path):
+            continue
+        cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
+        cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
+        if not os.path.exists(cublas_path) or not os.path.exists(cudnn_path):
+            continue
+        break
+
+    ctypes.CDLL(cublas_path)
+    ctypes.CDLL(cudnn_path)
+
+
 # See Note [Global dependencies]
 def _load_global_deps():
-    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
+    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
     here = os.path.abspath(__file__)
     lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
 
-    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+    try:
+        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+    except OSError as err:
+        # Can only happen of wheel with cublas as PYPI deps
+        # As PyTorch is not purelib, but nvidia-cublas-cu11 is
+        if 'libcublas.so.11' not in err.args[0]:
+            raise err
+        _preload_cuda_deps()
+        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
-        platform.system() != 'Windows':
+        (sys.executable == "torch_deploy" or platform.system() != 'Windows'):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -283,6 +310,39 @@ class SymFloat:
     def get_pyobj(self):
         return self.node
 
+def sym_float(a):
+    r""" SymInt-aware utility for float casting.
+
+    Args:
+        a (SymInt, SymFloat, or object): Object to cast
+    """
+    if isinstance(a, SymFloat):
+        return a
+    elif hasattr(a, '__sym_float__'):
+        return a.__sym_float__()
+    return py_float(a)  # type: ignore[operator]
+
+# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
+# directly usable, but this has a more relaxed type signature for mypy
+# (mypy requires SupportFloat which is too strict)
+def _sym_floor(x):
+    return math.floor(x)  # type: ignore[type]
+
+def _sym_ceil(x):
+    return math.ceil(x)  # type: ignore[type]
+
+def sym_int(a):
+    r""" SymInt-aware utility for int casting.
+
+    Args:
+        a (SymInt, SymFloat, or object): Object to cast
+    """
+    if isinstance(a, SymInt):
+        return a
+    elif isinstance(a, SymFloat):
+        return _sym_floor(a) if a > 0 else _sym_ceil(a)
+    return py_int(a)  # type: ignore[operator]
+
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
 try:
@@ -367,7 +427,7 @@ def is_tensor(obj):
         obj (Object): Object to test
     Example::
 
-        >>> x=torch.tensor([1,2,3])
+        >>> x = torch.tensor([1, 2, 3])
         >>> torch.is_tensor(x)
         True
 
@@ -567,10 +627,10 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
-        >>> # xdoctest: +SKIP
         >>> torch.randn(10, device='cuda').kthvalue(0)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...
@@ -930,7 +990,7 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
+    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
@@ -939,6 +999,11 @@ def manager_path():
     return path.encode('utf-8')
 
 from torch.amp import autocast
+
+# Initializing the extension shadows the built-in python float / int classes;
+# store them for later use by SymInt / SymFloat.
+py_float = float
+py_int = int
 
 # Shared memory manager needs to know the exact location of manager executable
 _C._initExtension(manager_path())
@@ -1090,8 +1155,6 @@ del register_after_fork
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg as lobpcg
 
-from ._vmap_internals import vmap as vmap
-
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
 # class usage. We add these lines here to preserve backward compatibility.
@@ -1112,6 +1175,20 @@ from ._linalg_utils import (  # type: ignore[misc]
     solve,
     lstsq,
 )
+
+class _TorchCompileInductorWrapper:
+    def __init__(self, mode, passes):
+        from torch._dynamo.eval_frame import lookup_backend
+        from torch._inductor.config import InductorConfigContext
+
+        self.compile_fn = lookup_backend("inductor")
+        self.cm = InductorConfigContext(mode if mode is not None else passes)
+        self._torchdynamo_orig_callable = self.compile_fn
+
+    def __call__(self, model_, inputs_):
+        with self.cm:
+            return self.compile_fn(model_, inputs_)
+
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
@@ -1147,6 +1224,7 @@ def compile(model: Optional[Callable] = None, *,
             return torch.sin(x) + torch.cos(x)
 
     """
+    _C._log_api_usage_once("torch.compile")
     # Decorator mode
     if model is None:
         def fn(model: Callable):
@@ -1162,22 +1240,12 @@ def compile(model: Optional[Callable] = None, *,
         return fn
 
     import torch._dynamo
-    from torch._dynamo.eval_frame import lookup_backend
-    from torch._inductor.config import InductorConfigContext
     if mode is not None and passes is not None:
         raise RuntimeError("Either mode or passes can be specified, but both can't be specified at the same time.")
     if mode is None and passes is None:
         mode = "default"
     if backend == "inductor":
-        compile_fn = lookup_backend(backend)
-        cm = InductorConfigContext(mode if mode is not None else passes)
-
-        def _compile_fn(model_, inputs_):
-            with cm:
-                return compile_fn(model_, inputs_)
-
-        _compile_fn._torchdynamo_orig_callable = compile_fn  # type: ignore[attr-defined]
-        backend = _compile_fn
+        backend = _TorchCompileInductorWrapper(mode, passes)
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, **kwargs)(model)
 
 
@@ -1212,3 +1280,6 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.symbolic_shapes
+
+from torch import func as func
+from torch.func import vmap

@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/native/FractionalMaxPooling.h>
 
 #include <c10/util/irange.h>
 
@@ -99,28 +100,6 @@ TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
 
 namespace native {
 namespace {
-
-template<typename scalar_t>
-static std::vector<int> generate_intervals(
-  scalar_t sample,
-  int64_t inputSize,
-  int64_t outputSize,
-  int64_t poolSize) {
-  std::vector<int> sequence(outputSize);
-  if (outputSize > 1) {
-    scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
-      static_cast<scalar_t>(outputSize - 1);
-
-    for (const auto i : c10::irange(outputSize - 1)) {
-      sequence[i] =
-        static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
-    }
-  }
-  if (outputSize > 0) {
-    sequence[outputSize - 1] = inputSize - poolSize;
-  }
-  return sequence;
-}
 
 template<typename scalar_t>
 static void fractional_max_pool3d_out_single_batch_frame(
@@ -241,7 +220,7 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
   int64_t outputT,
   int64_t outputH,
   int64_t outputW,
-  const at::Tensor& randomSamples,
+  const at::Tensor& randomSamples_,
   int64_t numBatch,
   int64_t numPlanes,
   int64_t inputT,
@@ -249,8 +228,16 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
   int64_t inputW,
   const at::Tensor& output,
   const at::Tensor& indices) {
-  /* get contiguous input */
+
+  fractional_max_pool_check_shape</*ndim*/ 3>(input_, randomSamples_);
+
+  if (output.numel() == 0) {
+    return;
+  }
+
+  /* get contiguous input and samples */
   auto input = input_.contiguous();
+  auto randomSamples = randomSamples_.contiguous();
 
   AT_DISPATCH_FLOATING_TYPES(
     input.scalar_type(),
