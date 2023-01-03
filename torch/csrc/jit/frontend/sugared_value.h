@@ -252,6 +252,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 
   Value* asValue(const SourceRange& loc, GraphFunction& m) override {
     std::vector<Value*> vec;
+    vec.reserve(tup_.size());
     for (const auto& sv : tup_) {
       vec.push_back(sv->asValue(loc, m));
     }

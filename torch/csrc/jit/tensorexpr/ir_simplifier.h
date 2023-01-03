@@ -30,7 +30,7 @@ Dtype promoteTypesVec(ExprPtr s, std::vector<ExprType>& v) {
   Dtype t = s->dtype();
   bool first = true;
 
-  for (auto e : v) {
+  for (const auto& e : v) {
     if (first) {
       t = Dtype(t.scalar_type(), e->dtype().lanes());
       first = false;
@@ -47,7 +47,7 @@ Dtype promoteTypesVec(std::vector<ExprType>& v) {
   }
 
   Dtype t = v[0]->dtype();
-  for (auto e : v) {
+  for (const auto& e : v) {
     t = promoteTypes(t, e->dtype());
   }
   return t;
