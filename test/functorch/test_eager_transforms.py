@@ -41,12 +41,12 @@ from torch._ops import PyOperator
 from torch._functorch.utils import enable_autograd_function
 from torch.autograd.function import _set_autograd_function_extension_enabled
 import torch.autograd.forward_ad as fwAD
-from torch.func import functional_call
+from torch.func import functional_call, stack_module_state
 
 # NB: numpy is a testing dependency!
 import numpy as np
 
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 
 USE_TORCHVISION = False
 try:
@@ -3261,6 +3261,32 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = combine_state_for_ensemble(models)
 
+    def test_stack_module_state_smoke(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        _ = stack_module_state(models)
+
+    def test_stack_module_state_error(self):
+        in_features = 2
+        out_features = 2
+
+        models = []
+        with self.assertRaisesRegex(RuntimeError, "stack_module_state:.* Expected at least one model"):
+            _ = stack_module_state(models)
+
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[1].eval()
+        with self.assertRaisesRegex(RuntimeError, "stack_module_state:.* same training/eval mode."):
+            _ = stack_module_state(models)
+
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[1] = torch.nn.Conv2d(3, 3, (3, 3))
+        with self.assertRaisesRegex(RuntimeError, "stack_module_state:.* models to be of the same class"):
+            _ = stack_module_state(models)
+
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_make_functional_state_correctly_returned_after_forward(self, mechanism):
         class Net(nn.Module):
@@ -3589,7 +3615,8 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result, expected)
 
-    def test_ensemble_regression(self, device):
+    @parametrize('mechanism', ["make_functional", "functional_call"])
+    def test_ensemble_regression(self, device, mechanism):
         def make_spirals(n_samples, noise_std=0., rotations=1.):
             ts = torch.linspace(0, 1, n_samples)
             rs = ts ** 0.5
@@ -3622,7 +3649,7 @@ class TestExamplesCorrectness(TestCase):
 
         loss_fn = nn.NLLLoss()
 
-        func_model, weights = make_functional(MLPClassifier().to(device))
+        func_model, weights = _get_weights_and_functional_call(MLPClassifier().to(device), mechanism)
 
         def train_step_fn(use_transform, weights, batch, targets, lr=0.2):
             def compute_loss(weights, batch, targets):
@@ -3634,27 +3661,25 @@ class TestExamplesCorrectness(TestCase):
                 grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
             else:
                 loss = compute_loss(weights, batch, targets)
-                grad_weights = torch.autograd.grad(loss, weights)
+                flat_weights, spec = tree_flatten(weights)
+                flat_grad_weights = torch.autograd.grad(loss, flat_weights)
+                grad_weights = tree_unflatten(flat_grad_weights, spec)
 
-            new_weights = []
-            with torch.no_grad():
-                for grad_weight, weight in zip(grad_weights, weights):
-                    new_weights.append(weight - grad_weight * lr)
-            # NB: return looks weird because torch.vmap must return Tensors
-            return (loss, *new_weights)
+            new_weights = self._update_params(weights, grad_weights, lr, mechanism)
+            return (loss, new_weights)
 
         def unpack(train_result):
-            return train_result[0], train_result[1:]
+            return train_result[0], train_result[1]
 
         def init_fn(num_models):
             models = tuple(MLPClassifier().to(device) for _ in range(num_models))
-            weights = tuple(make_functional(model)[1] for model in models)
-            weights = tuple(zip(*weights))
-            weights = tuple(torch.stack(shards).detach() for shards in weights)
-            return weights
+            if mechanism == "make_functional":
+                return combine_state_for_ensemble(models)[1]
+            else:
+                return stack_module_state(models)[0]
 
         def slice_weights(batched_weights, index):
-            return tuple(weight[index].detach().requires_grad_() for weight in batched_weights)
+            return tree_map(lambda weight: weight[index].detach().requires_grad_(), batched_weights)
 
         batched_weights = init_fn(num_models=2)
         parallel_train_step_fn = vmap(partial(train_step_fn, True), in_dims=(0, None, None))
@@ -3664,7 +3689,12 @@ class TestExamplesCorrectness(TestCase):
         loss0, weights0 = unpack(train_step_fn(False, slice_weights(batched_weights, 0), points, labels))
         loss1, weights1 = unpack(train_step_fn(False, slice_weights(batched_weights, 1), points, labels))
         expected_loss = torch.stack([loss0, loss1])
+
+        weights0, spec0 = tree_flatten(weights0)
+        weights1, spec1 = tree_flatten(weights1)
+        assert spec0 == spec1
         expected_weights = tuple(torch.stack([w0, w1]) for w0, w1 in zip(weights0, weights1))
+        expected_weights = tree_unflatten(expected_weights, spec0)
 
         self.assertEqual(result_loss, expected_loss)
         self.assertEqual(result_weights, expected_weights)
@@ -3674,7 +3704,8 @@ class TestExamplesCorrectness(TestCase):
         subtest(nn.AlphaDropout, 'AlphaDropout'),
         subtest(nn.FeatureAlphaDropout, 'FeatureAlphaDropout'),
     ])
-    def test_find_learning_rate_ensembling(self, device, dropout_layer):
+    @parametrize('mechanism', ["make_functional", "functional_call"])
+    def test_find_learning_rate_ensembling(self, device, dropout_layer, mechanism):
         # This example mimics what a user might do when trying to find the optimal learning rate. They would
         # want to run a bunch of models with the same behavior (including the same dropout!) and have them
         # each run with different learning rates. Specifically, this is an example of using same randomness with vmap
@@ -3701,7 +3732,7 @@ class TestExamplesCorrectness(TestCase):
 
         loss_fn = nn.NLLLoss()
 
-        func_model, weights = make_functional(MLPClassifier().to(device))
+        func_model, weights = _get_weights_and_functional_call(MLPClassifier().to(device), mechanism)
 
         def train_step_fn(weights, batch, targets, lr):
             def compute_loss(weights, batch, targets):
@@ -3710,10 +3741,9 @@ class TestExamplesCorrectness(TestCase):
                 return loss
 
             grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
-            new_weights = []
-            with torch.no_grad():
-                for grad_weight, weight in zip(grad_weights, weights):
-                    new_weights.append(weight - grad_weight * lr)
+            new_weights = self._update_params(weights, grad_weights, lr, mechanism)
+            if mechanism != "make_functional":
+                new_weights = list(new_weights.values())
             # NB: return looks weird because torch.vmap must return Tensors
             return (loss, *new_weights)
 
@@ -3723,10 +3753,10 @@ class TestExamplesCorrectness(TestCase):
         def init_fn(num_models):
             og_model = MLPClassifier().to(device)
             models = tuple(copy.deepcopy(og_model) for _ in range(num_models))  # have same initialization
-            weights = tuple(make_functional(model)[1] for model in models)
-            weights = tuple(zip(*weights))
-            weights = tuple(torch.stack(shards).detach() for shards in weights)
-            return weights
+            if mechanism == "make_functional":
+                return combine_state_for_ensemble(models)[1]
+            else:
+                return stack_module_state(models)[0]
 
         batched_weights = init_fn(num_models=2)
         parallel_train_step_fn = vmap(train_step_fn, in_dims=(0, None, None, 0), randomness="same")
