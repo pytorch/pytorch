@@ -104,7 +104,9 @@ class ComptimeVariable(VariableTracker):
         # To support the comptime.print_graph convenience accessors
         from .functions import UserFunctionVariable
 
-        return UserFunctionVariable(getattr(comptime, name))
+        return UserFunctionVariable(
+            getattr(comptime, name), source=AttrSource(self.source, name)
+        )
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
