@@ -424,7 +424,7 @@ class CppVecOverrides(OpOverrides):
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
             zero_val = "at::vec::Vectorized<float>(0)"
-            float_mask = f"flag_to_float_vec({mask})"
+            float_mask = f"to_float_mask({mask})"
             blendv = f"decltype({result})::blendv({var}, {result}, {float_mask} != {zero_val})"
             code.writeline(f"{var} = {blendv};")
         V.kernel.compute.splice(code)
