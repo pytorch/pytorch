@@ -1,3 +1,6 @@
+# TODO: rename executorch to qnnpack_executorch since executorch is a general runtime
+# not a specific backend
+
 import operator
 from typing import List
 import torch
@@ -5,9 +8,18 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
-from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
+from .backend_config import (
+    BackendConfig,
+    BackendPatternConfig,
+    DTypeConfig,
+    ObservationType,
+)
+from .qnnpack import (
+    qnnpack_weighted_op_qint8_symmetric_dtype_config,
+    qnnpack_default_op_qint8_symmetric_dtype_config
+)
 from ._common_operator_config_utils import _Conv2dMetadata
-from ..fuser_method_mappings import _reverse_sequential_wrapper2
+from ..fuser_method_mappings import _sequential_wrapper2
 
 
 __all__ = [
@@ -47,6 +59,12 @@ executorch_default_dynamic_float16_dtype_config = DTypeConfig(
     is_dynamic=True,
 )
 
+executorch_weight_only_quint8_dtype_config = DTypeConfig(
+    input_dtype=torch.float,
+    output_dtype=torch.float,
+    weight_dtype=torch.quint8,
+)
+
 
 # =============================
 # |  BACKEND PATTERN CONFIGS  |
@@ -58,6 +76,7 @@ def _get_linear_configs() -> List[BackendPatternConfig]:
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
     dtype_configs = [
+        qnnpack_weighted_op_qint8_symmetric_dtype_config,
         executorch_weighted_op_int8_dtype_config,
         executorch_default_dynamic_int8_dtype_config,
         executorch_default_dynamic_float16_dtype_config,
@@ -84,7 +103,10 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
     Return all configs related to conv modules and ops.
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    dtype_configs = [executorch_weighted_op_int8_dtype_config]
+    dtype_configs = [
+        qnnpack_weighted_op_qint8_symmetric_dtype_config,
+        executorch_weighted_op_int8_dtype_config
+    ]
     conv_configs = []
     for convs in [_Conv2dMetadata]:
         # conv module
@@ -103,15 +125,15 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
                 ._set_input_type_to_index({"weight": 1, "bias": 2}))
         # conv module + relu module
         conv_configs.append(
-            BackendPatternConfig((torch.nn.ReLU, convs.root))
+            BackendPatternConfig((convs.root, nn.ReLU))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # conv module + functional relu
         conv_configs.append(
-            BackendPatternConfig((F.relu, convs.root))
+            BackendPatternConfig((convs.root, F.relu))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # fused conv relu module
         conv_configs.append(
@@ -123,12 +145,12 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
                 .set_qat_module(convs.relu_qat))
         # functional conv + relu module
         conv_configs.append(
-            BackendPatternConfig((torch.nn.ReLU, convs.func))
+            BackendPatternConfig((convs.func, nn.ReLU))
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs))
         # functional conv + functional relu
         conv_configs.append(
-            BackendPatternConfig((F.relu, convs.func))
+            BackendPatternConfig((convs.func, F.relu))
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs))
     return conv_configs
@@ -137,7 +159,10 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
     """
     Return all configs related to binary ops.
     """
-    dtype_configs = [executorch_weighted_op_int8_dtype_config]
+    dtype_configs = [
+        qnnpack_default_op_qint8_symmetric_dtype_config,
+        executorch_weighted_op_int8_dtype_config
+    ]
     num_tensor_args_to_observation_type_mapping = {
         # TODO: this is not used right now since we have extra check in prepare
         # will need to change this to NO_OBSERVER later after we implemented
@@ -165,7 +190,10 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     observer_0 - avgpool2d - observer_0 (same observer instance as input)
     """
     observation_type = ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT
-    dtype_configs = [executorch_default_op_quint8_dtype_config]
+    dtype_configs = [
+        qnnpack_default_op_qint8_symmetric_dtype_config,
+        executorch_default_op_quint8_dtype_config
+    ]
     share_qparams_ops = [
         F.adaptive_avg_pool2d,
         F.relu,
@@ -192,7 +220,10 @@ def _get_bn_configs() -> List[BackendPatternConfig]:
     Return all configs related to batchnorm.
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    dtype_configs = [executorch_default_op_quint8_dtype_config]
+    dtype_configs = [
+        qnnpack_default_op_qint8_symmetric_dtype_config,
+        executorch_default_op_quint8_dtype_config
+    ]
     bn_configs = []
     bn_configs.append(
         BackendPatternConfig(nn.BatchNorm2d)
@@ -201,13 +232,43 @@ def _get_bn_configs() -> List[BackendPatternConfig]:
     return bn_configs
 
 def _get_cat_configs() -> List[BackendPatternConfig]:
-    dtype_configs = [executorch_default_op_quint8_dtype_config]
+    dtype_configs = [
+        qnnpack_default_op_qint8_symmetric_dtype_config,
+        executorch_default_op_quint8_dtype_config
+    ]
     cat_configs = []
     cat_configs.append(
         BackendPatternConfig(torch.cat)
         .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
         .set_dtype_configs(dtype_configs))
     return cat_configs
+
+def _get_embedding_op_configs() -> List[BackendPatternConfig]:
+    dtype_configs = [
+        executorch_weight_only_quint8_dtype_config,
+    ]
+    embedding_op_configs = []
+    for embedding_op, qat_embedding_op, ref_embedding_op in [
+            (nn.Embedding, nnqat.Embedding, nnqr.Embedding),
+            (nn.EmbeddingBag, nnqat.EmbeddingBag, nnqr.EmbeddingBag),
+    ]:
+        embedding_op_configs.append(
+            BackendPatternConfig(embedding_op)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                .set_qat_module(qat_embedding_op)
+                .set_root_module(embedding_op)
+                .set_reference_quantized_module(ref_embedding_op)
+                ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+        # config for qat op
+        embedding_op_configs.append(
+            BackendPatternConfig(qat_embedding_op)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                .set_root_module(embedding_op)
+                .set_reference_quantized_module(ref_embedding_op)
+                ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+    return embedding_op_configs
 
 # =====================
 # |  BACKEND CONFIGS  |
@@ -223,4 +284,5 @@ def get_executorch_backend_config() -> BackendConfig:
         .set_backend_pattern_configs(_get_binary_ops_configs()) \
         .set_backend_pattern_configs(_get_share_qparams_ops_configs()) \
         .set_backend_pattern_configs(_get_bn_configs()) \
-        .set_backend_pattern_configs(_get_cat_configs())
+        .set_backend_pattern_configs(_get_cat_configs()) \
+        .set_backend_pattern_configs(_get_embedding_op_configs())

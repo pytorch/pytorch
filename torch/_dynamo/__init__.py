@@ -12,6 +12,7 @@ from .eval_frame import (
     run,
     skip,
 )
+from .external_utils import is_compiling
 from .utils import compilation_metrics, guard_failures, orig_code_map
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "list_backends",
     "skip",
     "OptimizedModule",
+    "is_compiling",
 ]
 
 

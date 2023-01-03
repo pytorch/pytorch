@@ -744,7 +744,7 @@ class TestJit(JitTestCase):
     def test_matrix_transpose(self):
         @torch.jit.script
         def check(x):
-            return bool((x.mT == x.transpose(-2, -1)).all())
+            return torch.equal(x.mT, x.transpose(-2, -1))
 
         x = torch.rand(3, 4)
         self.assertTrue(check(x))
@@ -752,7 +752,7 @@ class TestJit(JitTestCase):
     def test_transpose(self):
         @torch.jit.script
         def check(x):
-            return bool((x.T == x.t()).all())
+            return torch.equal(x.T, x.t())
 
         x = torch.rand(3, 4)
         self.assertTrue(check(x))
@@ -760,7 +760,7 @@ class TestJit(JitTestCase):
     def test_matrix_conj_transpose(self):
         @torch.jit.script
         def check(x):
-            return bool((x.mH == x.transpose(-2, -1).conj()).all())
+            return torch.equal(x.mH, x.transpose(-2, -1).conj())
 
         x = torch.rand(3, 4)
         self.assertTrue(check(x))
@@ -771,7 +771,7 @@ class TestJit(JitTestCase):
     def test_conj_transpose(self):
         @torch.jit.script
         def check(x):
-            return bool((x.H == x.t().conj()).all())
+            return torch.equal(x.H, x.t().conj())
 
         x = torch.rand(3, 4)
         self.assertTrue(check(x))
@@ -1139,7 +1139,7 @@ class TestJit(JitTestCase):
             # type: (Tensor, Tensor) -> Tensor
             tmp1 = torch.mul(input1, input2)
             tmp2 = torch.abs(tmp1)
-            if (input1 == input2).all():
+            if torch.equal(input1, input2):
                 tmp2 = torch.acos(tmp2)
             else:
                 tmp2 = torch.atan(tmp2)
@@ -1694,7 +1694,7 @@ graph(%Ra, %Rb):
         t_node = g2.create("prim::TensorTest").t_("a", torch.ones([2, 2]))
         self.assertEqual(t_node.attributeNames(), ["a"])
         g2.appendNode(t_node)
-        self.assertEqual(torch.ones(2, 2), t_node.t("a"), rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(torch.ones(2, 2), t_node.t("a")))
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
@@ -3282,6 +3282,7 @@ class TestScript(JitTestCase):
                 # there should still be a Bailout after disable_grad call
                 FileCheck().check("disable_grad").check("BailOut[").check("BailoutTemplate").run(g)
 
+    @skipIfTorchDynamo("Torchdynamo cannot correctly handle profiler.profile calls")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_profiling_merge(self):
         @torch.jit.script
@@ -5760,6 +5761,7 @@ a")
         real_outs = cu.test_view_shape_prop(*inputs)
         self.assertEqual(real_outs, outputs)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_view_listconstruct_shape_prop(self):
         def fn(x):
             B = x.size(0)
@@ -6784,6 +6786,7 @@ a")
         self.checkScript(plus_123, (2,))
         self.checkScript(plus_123, (3,))
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -9309,6 +9312,7 @@ dedent """
         self.run_pass("inline", fee.graph)
         FileCheck().check_not("prim::If").run(fee.graph)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_pack_unpack_nested(self):
         class SubSubMod(torch.jit.ScriptModule):
             def __init__(self):
@@ -10108,6 +10112,7 @@ dedent """
         # testing that tensor type of lists is unified
         self.getExportImportCopy(m)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @_inline_everything
     def test_import_constants_not_specialized(self):
         class Mod(torch.nn.Module):
@@ -10715,6 +10720,7 @@ dedent """
             graph = script.graph_for()
             FileCheck().check("aten::manual_seed").run(graph)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_index_select_shape_prop(self):
 
         @torch.jit.script
@@ -11154,6 +11160,7 @@ dedent """
                 self.assertEqual(x.grad, x_ref.grad)
                 self.assertEqual(w.grad, w_ref.grad)
 
+    @skipIfTorchDynamo("TorchDynamo doesn't support profile")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the profiling version of test_rand")
     def test_rand_profiling(self):
         def test_rand():

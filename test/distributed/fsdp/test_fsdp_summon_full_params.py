@@ -155,7 +155,9 @@ class TestSummonFullParams(FSDPTest):
 
             # shards are padded but the full_param tensor is not
             a, b = my_shard[0 : my_slice.numel()], my_slice
-            self.assertEqual(my_shard[0 : my_slice.numel()].cpu(), my_slice.cpu(), rtol=0, atol=0, exact_device=True)
+            self.assertTrue(
+                torch.equal(my_shard[0 : my_slice.numel()].cpu(), my_slice.cpu())
+            )
 
     @skip_if_lt_x_gpu(2)
     @parametrize("recurse", [True, False])

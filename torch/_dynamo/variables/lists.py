@@ -373,7 +373,6 @@ class SizeVariable(TupleVariable):
                 "call_function",
                 _dynamo_get_item_lambda,
                 *proxy_args_kwargs([self, arg], {}),
-                current_tx=tx,
             )
             items = self.items[index]
 

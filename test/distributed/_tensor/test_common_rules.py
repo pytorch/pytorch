@@ -16,13 +16,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torchgen.model import FunctionSchema
+from torch._C import parse_schema
 
 
 class CommonRulesTest(DTensorTestBase):
-    def parse_schema(self, schema_str):
-        return FunctionSchema.parse(schema_str)
-
     @property
     def world_size(self) -> int:
         # hard code world size to 4 as we need to test
@@ -34,7 +31,7 @@ class CommonRulesTest(DTensorTestBase):
         # plain einsum, mm
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        func_schema = self.parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
+        func_schema = parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
         # propagate col-wise sharding
         mat1, mat2 = [-1, -1], [-1, 0]
         mat1_spec = DTensorSpec.from_dim_map(mesh, mat1, [], shape=torch.Size([8, 4]))
@@ -75,7 +72,7 @@ class CommonRulesTest(DTensorTestBase):
     def test_einop_pointwise_propagation(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        func_schema = self.parse_schema(
+        func_schema = parse_schema(
             "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor"
         )
         # addition
@@ -126,7 +123,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        func_schema = self.parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
+        func_schema = parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
 
         mat1, mat2 = [0, -1], [-1, 1]
         mat1_spec = DTensorSpec.from_dim_map(mesh, mat1, [], shape=torch.Size([8, 4]))
@@ -146,7 +143,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        mm_func_schema = self.parse_schema(
+        mm_func_schema = parse_schema(
             "aten::mm(Tensor self, Tensor mat2) -> Tensor"
         )
 
@@ -180,7 +177,7 @@ class CommonRulesTest(DTensorTestBase):
 
         # einop prop with linearity on point-wise, should give back suggestion
         # on converting placements to partial
-        add_func_schema = self.parse_schema(
+        add_func_schema = parse_schema(
             "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor"
         )
         mat1, mat2 = [0, -1], [0, -1]
@@ -205,7 +202,7 @@ class CommonRulesTest(DTensorTestBase):
         mesh_shape = torch.arange(self.world_size)
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        func_schema = self.parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
+        func_schema = parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
         mat1, mat2 = [0, -1], [0, -1]
         mat1_spec = DTensorSpec.from_dim_map(mesh, mat1, [], shape=torch.Size([8, 12]))
         mat2_spec = DTensorSpec.from_dim_map(mesh, mat2, [], shape=torch.Size([12, 4]))
@@ -229,7 +226,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        func_schema = self.parse_schema(
+        func_schema = parse_schema(
             "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor"
         )
         mat1, mat2 = [0, -1], [1, -1]
@@ -243,7 +240,7 @@ class CommonRulesTest(DTensorTestBase):
     def test_pointwise_rules_broadcasting(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        func_schema = self.parse_schema(
+        func_schema = parse_schema(
             "where.self(Tensor condition, Tensor self, Tensor other) -> Tensor"
         )
         inp1, inp2, inp3 = [0], [], [-1, -1]
@@ -265,7 +262,7 @@ class CommonRulesTest(DTensorTestBase):
     def test_pointwise_rules_suggestion(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        func_schema = self.parse_schema(
+        func_schema = parse_schema(
             "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor"
         )
         # propagate point-wise sharding
@@ -293,7 +290,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        func_schema = self.parse_schema(
+        func_schema = parse_schema(
             "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor"
         )
 
@@ -337,7 +334,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        func_schema = self.parse_schema(
+        func_schema = parse_schema(
             "aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)"
         )
 
@@ -366,7 +363,7 @@ class CommonRulesTest(DTensorTestBase):
     def test_reduction_rule(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        func_schema = self.parse_schema(
+        func_schema = parse_schema(
             "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor"
         )
         # reduction on a 2d mat

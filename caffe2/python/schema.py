@@ -546,8 +546,8 @@ class Struct(Field):
             raise AttributeError(item)
         try:
             return super(Struct, self).__getattribute__("fields")[item]
-        except KeyError:
-            raise AttributeError(item)
+        except KeyError as e:
+            raise AttributeError(item) from e
 
     def __setattr__(self, key, value):
         # Disable setting attributes after initialization to prevent false

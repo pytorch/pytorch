@@ -5,6 +5,7 @@ import functools
 import inspect
 import itertools
 import operator
+import unittest
 from typing import Any
 from unittest.mock import patch
 
@@ -66,6 +67,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_add(a, b):
         return a + b
+
+    @make_test
+    def test_add_(a, b):
+        a_copy = torch.tensor(a)
+        return a_copy.add_(b, alpha=5.0)
+
+    @make_test
+    def test_addcdiv(a, b, c):
+        # dynamo decomposes this to avoid a graph break when
+        # the value kwarg is populated
+        return torch.addcdiv(a, b, c, value=5.0)
+
+    @make_test
+    def test_addcdiv_(a, b, c):
+        a_copy = torch.tensor(a)
+        return a_copy.addcdiv_(b, c, value=5.0)
 
     @make_test
     def test_is_not_null(a, b):
@@ -331,6 +348,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
 
     @make_test
+    def test_get_default_dtype(x):
+        if x.dtype == torch.get_default_dtype():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_device(x):
         if not x.is_cuda:
             return x + 1
@@ -339,6 +363,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_tensor_type(a, b):
         m = a.to(torch.float16)
         return b.type(m.type())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_tensor_type2(a, b):
+        m = a.to("cuda")
+        return m + b.type(m.type())
 
     @make_test
     def test_ndim(x):
@@ -664,6 +694,23 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = [1, 2, 3, 4]
         m[1:] = [6] * (len(m) - 1)
         return x + 1
+
+    @make_test
+    def test_distributed_is_available(x):
+        if torch.distributed.is_available():
+            return x + 1
+        else:
+            return x - 1
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "requires distributed package"
+    )
+    @make_test
+    def test_distributed_is_initialized(x):
+        if torch.distributed.is_initialized():
+            return x + 1
+        else:
+            return x - 1
 
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
