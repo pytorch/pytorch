@@ -1334,7 +1334,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    def test_permute(self):
+    def test_permute1(self):
         def fn(a):
             return (
                 torch.permute(a + 1, [2, 1, 4, 0, 3]) + 2,
@@ -1342,6 +1342,13 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn(2, 2, 2, 2, 2),))
+
+    def test_permute2(self):
+        def fn(a):
+            return (
+                torch.permute(a, [0, 2, 3, -3])
+            )
+        self.common(fn, (torch.randn(4, 4),))
 
     def test_expand(self):
         def fn(a):
