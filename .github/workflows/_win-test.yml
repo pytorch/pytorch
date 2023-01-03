@@ -164,6 +164,13 @@ jobs:
 
           .jenkins/pytorch/win-test.sh
 
+      - name: Print undeleted logs
+        shell: bash
+        if: always()
+        continue-on-error: true
+        run: |
+          cat test/**/*.log
+
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id

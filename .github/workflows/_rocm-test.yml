@@ -196,6 +196,13 @@ jobs:
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
+      - name: Print undeleted logs
+        shell: bash
+        if: always()
+        continue-on-error: true
+        run: |
+          cat test/**/*.log
+
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
