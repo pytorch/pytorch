@@ -508,7 +508,8 @@ Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn) {
         .masked_fill_(abs == 0., 0.);
   } else {
     auto is_wrapped_number = sgn.unsafeGetTensorImpl()->is_wrapped_number();
-    return at::_efficientzerotensor(sgn.sizes(), is_wrapped_number, sgn.options());
+    return at::_efficientzerotensor(
+        sgn.sizes(), is_wrapped_number, sgn.options());
   }
 }
 
@@ -2022,7 +2023,8 @@ Tensor binary_cross_entropy_with_logits_backward(
   // Trivial case
   if (grad._is_zerotensor()) {
     auto is_wrapped_number = input.unsafeGetTensorImpl()->is_wrapped_number();
-    return at::_efficientzerotensor(input.sizes(), is_wrapped_number, input.options());
+    return at::_efficientzerotensor(
+        input.sizes(), is_wrapped_number, input.options());
   }
 
   // -w * [ pos * y * (1 -sigmoid(x)) - (1 - y) sigmoid(x)] * grad
@@ -2073,7 +2075,8 @@ Tensor binary_cross_entropy_with_logits_target_backward(
     int64_t reduction) {
   if (grad_output._is_zerotensor()) {
     auto is_wrapped_number = target.unsafeGetTensorImpl()->is_wrapped_number();
-    return at::_efficientzerotensor(target.sizes(), is_wrapped_number, target.options());
+    return at::_efficientzerotensor(
+        target.sizes(), is_wrapped_number, target.options());
   }
 
   Tensor grad_target;
@@ -3917,7 +3920,9 @@ std::tuple<Tensor, Tensor> slogdet_jvp(
   } else {
     auto is_wrapped_number = sign.unsafeGetTensorImpl()->is_wrapped_number();
     return std::make_tuple(
-        at::_efficientzerotensor(sign.sizes(), is_wrapped_number, sign.options()), trAinvE);
+        at::_efficientzerotensor(
+            sign.sizes(), is_wrapped_number, sign.options()),
+        trAinvE);
   }
 }
 
@@ -5634,9 +5639,9 @@ Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
     for (const Tensor& t : materialized) {
       auto is_wrapped_number = t.unsafeGetTensorImpl()->is_wrapped_number();
       fw_grads.push_back(
-          isFwGradDefined(t)
-              ? t._fw_grad(/*level*/ 0)
-              : at::_efficientzerotensor(t.sizes(), is_wrapped_number, t.options()));
+          isFwGradDefined(t) ? t._fw_grad(/*level*/ 0)
+                             : at::_efficientzerotensor(
+                                   t.sizes(), is_wrapped_number, t.options()));
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
@@ -5660,9 +5665,9 @@ Tensor block_diag_jvp(at::TensorList tensors) {
     for (const auto& t : tensors) {
       auto is_wrapped_number = t.unsafeGetTensorImpl()->is_wrapped_number();
       fw_grads.push_back(
-          isFwGradDefined(t)
-              ? t._fw_grad(/*level*/ 0)
-              : at::_efficientzerotensor(t.sizes(), is_wrapped_number, t.options()));
+          isFwGradDefined(t) ? t._fw_grad(/*level*/ 0)
+                             : at::_efficientzerotensor(
+                                   t.sizes(), is_wrapped_number, t.options()));
     }
 
     out_fw_grad = at::block_diag(fw_grads);
@@ -5687,9 +5692,9 @@ Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
     for (auto& t : tensors) {
       auto is_wrapped_number = t.unsafeGetTensorImpl()->is_wrapped_number();
       fw_grads.push_back(
-          isFwGradDefined(t)
-              ? t._fw_grad(/*level*/ 0)
-              : at::_efficientzerotensor(t.sizes(), is_wrapped_number, t.options()));
+          isFwGradDefined(t) ? t._fw_grad(/*level*/ 0)
+                             : at::_efficientzerotensor(
+                                   t.sizes(), is_wrapped_number, t.options()));
     }
     out_fw_grad = at::stack(fw_grads, dim);
   }
