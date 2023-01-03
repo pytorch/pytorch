@@ -655,9 +655,9 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
     for (const auto i : c10::irange(begin, end)) {
       int64_t index = index_data[i];
       TORCH_CHECK(index >= 0 && index < index_upper_bound,
-                "index ", index,
-                " is out of bounds for dimension ", 0,
-                " with size ", index_upper_bound);
+                  "index ", index,
+                  " is out of bounds for dimension ", 0,
+                  " with size ", index_upper_bound);
       keys[i] = index;
       values[i] = i;
     }

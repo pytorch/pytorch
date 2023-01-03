@@ -704,29 +704,6 @@ infinitely_differentiable_native_group_norm_backward(
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask);
-Tensor prelu_jvp(
-    const Tensor& x,
-    const Tensor& dx,
-    const Tensor& w,
-    const Tensor& dw);
-std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
-    const Tensor& grad_grad_input,
-    const Tensor& grad_grad_weight,
-    const Tensor& grad_out,
-    const Tensor& input_,
-    const Tensor& weight_);
-Tensor prelu_backward_self_jvp(
-    const Tensor& x,
-    const Tensor& w,
-    const Tensor& dw,
-    const Tensor& g,
-    const Tensor& dg);
-Tensor prelu_backward_weight_jvp(
-    const Tensor& w,
-    const Tensor& x,
-    const Tensor& dx,
-    const Tensor& g,
-    const Tensor& dg);
 Tensor gelu_double_backward(
     const Tensor& ggI,
     const Tensor& gO,
@@ -852,11 +829,8 @@ Tensor linalg_det_jvp(
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& grad,
     const Tensor& A,
-    const Tensor& B,
-    const c10::optional<double> rcond,
-    const c10::optional<c10::string_view> driver,
+    const Tensor& B_,
     const std::array<bool, 2>& grad_input_mask);
-
 Tensor linalg_lu_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
@@ -1031,6 +1005,11 @@ Tensor take_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& indices);
+
+Tensor to_sparse_backward(
+    const Tensor& grad,
+    const c10::Layout self_layout,
+    const c10::OptionalArrayRef<c10::SymInt>& self_blocksize);
 
 } // namespace details
 } // namespace generated
