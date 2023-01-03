@@ -281,18 +281,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   // If the memory is not contiguous, it means that the tensor has strides and we would not be
   // able to do the copy using a single blit
   if (!dst_.is_contiguous()) {
-    Tensor tmp;
-    if (src.dtype() != dst_.dtype()) {
-      id<MTLBuffer> tmpBuffer = sourceBuffer;
-      if (src.element_size() < dst_.element_size()) {
-        tmp = at::native::empty_mps(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS);
-        tmpBuffer = getMTLBufferStorage(tmp);
-      }
-
-      copy_cast_mps(dst_, src, tmpBuffer, sourceBuffer);
-    }
-
-    return scatterViewTensor((src.dtype() != dst_.dtype() && tmp.has_storage()) ? tmp : src, dst_);
+    return scatterViewTensor(src, dst_);
   }
   src._set_conj(src_.is_conj());
   src._set_neg(src_.is_neg());

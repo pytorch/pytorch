@@ -837,7 +837,7 @@ void initJitScriptBindings(PyObject* module) {
                 try {
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  TORCH_CHECK_ATTRIBUTE(false, err.what());
                 }
               })
           .def(
@@ -858,7 +858,7 @@ void initJitScriptBindings(PyObject* module) {
                   }
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  TORCH_CHECK_ATTRIBUTE(false, err.what());
                 }
               })
           .def(
@@ -888,7 +888,7 @@ void initJitScriptBindings(PyObject* module) {
                   auto ivalue = toIValue(std::move(value), type);
                   self.setattr(name, ivalue);
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  TORCH_CHECK_ATTRIBUTE(false, err.what());
                 }
               })
           .def(
@@ -1011,9 +1011,8 @@ void initJitScriptBindings(PyObject* module) {
           mm_name,
           [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
             auto method = self.find_method(mm_name);
-            if (!method) {
-              throw NotImplementedError();
-            }
+            TORCH_CHECK_NOT_IMPLEMENTED(
+                method, "object has no attribute '", mm_name, "'");
             return invokeScriptMethodFromPython(
                 *method,
                 // NOLINTNEXTLINE(performance-move-const-arg)
@@ -1401,8 +1400,8 @@ void initJitScriptBindings(PyObject* module) {
             if (fn) {
               return StrongFunctionPtr(std::move(self), fn);
             } else {
-              throw AttributeError(
-                  "'CompilationUnit' has no attribute '%s'", name.c_str());
+              TORCH_CHECK_ATTRIBUTE(
+                  false, "'CompilationUnit' has no attribute '", name, "'");
             }
           })
       .def(

@@ -253,6 +253,12 @@ class C10_API NotImplementedError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for attribute reference or assignment errors.  These turn into
+// AttributeError when they cross to Python.
+class C10_API AttributeError : public Error {
+  using Error::Error;
+};
+
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
 class C10_API EnforceFiniteError : public Error {
@@ -557,6 +563,10 @@ namespace detail {
 // Like TORCH_CHECK, but raises NotImplementedErrors instead of Errors.
 #define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
+
+// Like TORCH_CHECK, but raises AttributeErrors instead of Errors.
+#define TORCH_CHECK_ATTRIBUTE(cond, ...) \
+  TORCH_CHECK_WITH_MSG(AttributeError, cond, "TYPE", __VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
 #define WARNING_MESSAGE_STRING(...) \
