@@ -270,7 +270,7 @@ class MaskedTensor(torch.Tensor):
 
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
-        with torch._C.DisableTorchFunctionSubclass():
+        with torch._C.DisableTorchFunction():
             ret = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return ret

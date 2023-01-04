@@ -782,7 +782,7 @@ def wrap_fx_proxy_cls(
                 # The legacy behavior for real value cache with subclasses was
                 # to perform a clone WITHOUT preserving the subclass.  It's
                 # not entirely clear this is what you actually want though.
-                with torch._C.DisableTorchFunctionSubclass():
+                with torch._C.DisableTorchFunction():
                     proxy.tracer.real_value_cache[proxy.node] = _clone_input(
                         example_value
                     )
