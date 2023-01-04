@@ -1,6 +1,5 @@
 #include <ATen/native/vulkan/api/QueryPool.h>
 #include <ATen/native/vulkan/api/Utils.h>
-#include <ATen/native/vulkan/ops/Tensor.h>
 #ifdef USE_KINETO
 #include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/csrc/profiler/orchestration/vulkan.h>
