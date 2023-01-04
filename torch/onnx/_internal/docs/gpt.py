@@ -7,6 +7,7 @@ import transformers
 from torch import _dynamo as torchdynamo
 from torch.utils._pytree import tree_flatten
 from transformers import AutoModel, AutoTokenizer
+import argparse
 
 try:
     from onnxruntime.capi import _pybind_state as ORTC
@@ -84,7 +85,7 @@ def run_ort(onnx_model, onnx_model_text, pytorch_inputs, pytorch_outputs):
         sess = onnxruntime.InferenceSession(
             onnx_model, providers=["CPUExecutionProvider"]
         )
-        input_names = [v.name for v in onnx_model_text.graph.input]
+        input_names = [i.name for i in sess.get_inputs()]
         return sess.run(
             None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
         )
@@ -113,24 +114,28 @@ def test_gpt2_one_shot(model_name):
     onnx_model = export_without_kwargs(model, **inputs, use_binary_format=True)
 
     ref_outputs, _ = tree_flatten(model(**inputs, return_dict=False))
-    pth_outputs = run_ort(
+    ort_outputs = run_ort(
         onnx_model, onnx_model_text, (input_ids, attention_mask), ref_outputs
     )
-    for _1, _2 in zip(ref_outputs, pth_outputs):
-        print(_1 - _2)
-        assert torch.allclose(_1, _2)
+    for _1, _2 in zip(ref_outputs, ort_outputs):
+        print(_1 - torch.tensor(_2))
+        assert torch.allclose(_1, torch.tensor(_2))
 
 
 def test_gpt2_auto_regressive(model_name):
     # NOTE: auto regressive uses generation algorithms such as greedy search or beam
     # search that involves loops and control flows.
 
+    import logging
+    torch._dynamo.config.log_level = logging.DEBUG
+    torch._dynamo.config.output_code = True
+    # torch._dynamo.config.output_graph_code = True
+
     model = transformers.GPT2LMHeadModel.from_pretrained(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    input_ids = inputs["input_ids"]
-
     # Transform input tokens
     inputs = tokenizer("Hello world!", return_tensors="pt")
+    input_ids = inputs["input_ids"]
 
     (
         explanation,
@@ -143,6 +148,24 @@ def test_gpt2_auto_regressive(model_name):
 
     print(explanation_verbose)
 
+    # for graph in graphs:
+    #     graph.print_readable()
 
-# test_gpt2_auto_regressive(model_name)
-test_gpt2_one_shot(model_name)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model_mode",
+        type=str,
+        default="oneshot",
+        choices=["oneshot", "autoregressive"],
+    )
+    args = parser.parse_args()
+    model_mode = args.model_mode
+
+    if model_mode == "oneshot":
+        test_gpt2_one_shot(model_name)
+    elif model_mode == "autoregressive":
+        test_gpt2_auto_regressive(model_name)
+    else:
+        raise ValueError(f"Unknown model mode: {model_mode}")
