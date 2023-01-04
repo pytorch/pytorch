@@ -134,7 +134,7 @@ void initONNXBindings(PyObject* module) {
                 ONNXShapeTypeInference(graph, params_dict, opset_version);
               }),
           py::arg("graph"),
-          py::arg("params_dict") = true,
+          py::arg("params_dict"),
           py::arg("opset_version"))
       .def(
           "_jit_pass_onnx_set_dynamic_input_shape",
