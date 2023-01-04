@@ -11,6 +11,7 @@ from transformers import AutoModel, AutoTokenizer
 try:
     from onnxruntime.capi import _pybind_state as ORTC
     from onnxruntime.training.torchdynamo.ort_backend import _get_onnx_devices
+
     HAS_ORT_TRAINING = True
 except ImportError:
     HAS_ORT_TRAINING = False
@@ -65,15 +66,28 @@ def run_ort(onnx_model, onnx_model_text, pytorch_inputs, pytorch_outputs):
         ort_outputs = ORTC.OrtValueVector()
         output_devices = create_ort_devices(pytorch_outputs)
 
-        sess = onnxruntime.InferenceSession(onnx_model, providers=["CPUExecutionProvider"])
-        sess.run_with_ortvaluevector(
-            run_options, input_names, ort_inputs, output_names, ort_outputs, output_devices
+        sess = onnxruntime.InferenceSession(
+            onnx_model, providers=["CPUExecutionProvider"]
         )
-        return onnxruntime.training.ortmodule._utils._ortvalues_to_torch_tensor(ort_outputs)
+        sess.run_with_ortvaluevector(
+            run_options,
+            input_names,
+            ort_inputs,
+            output_names,
+            ort_outputs,
+            output_devices,
+        )
+        return onnxruntime.training.ortmodule._utils._ortvalues_to_torch_tensor(
+            ort_outputs
+        )
     else:
-        sess = onnxruntime.InferenceSession(onnx_model, providers=["CPUExecutionProvider"])
+        sess = onnxruntime.InferenceSession(
+            onnx_model, providers=["CPUExecutionProvider"]
+        )
         input_names = [v.name for v in onnx_model_text.graph.input]
-        return sess.run(None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)})
+        return sess.run(
+            None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
+        )
 
 
 def test_gpt2_one_shot(model_name):
@@ -94,13 +108,9 @@ def test_gpt2_one_shot(model_name):
     # onnx_model = export(model, **inputs)
     input_ids = inputs["input_ids"]
     attention_mask = inputs["attention_mask"]
-    onnx_model_text = export_without_kwargs(
-        model, **inputs, use_binary_format=False
-    )
+    onnx_model_text = export_without_kwargs(model, **inputs, use_binary_format=False)
     onnx.save(onnx_model_text, "gpt2.onnx")
-    onnx_model = export_without_kwargs(
-        model, **inputs, use_binary_format=True
-    )
+    onnx_model = export_without_kwargs(model, **inputs, use_binary_format=True)
 
     ref_outputs, _ = tree_flatten(model(**inputs, return_dict=False))
     pth_outputs = run_ort(
