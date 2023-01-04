@@ -1675,9 +1675,19 @@ def new_constant(fill_value):
     return _new_constant
 
 
-register_lowering(aten.new_empty)(new_constant(0))
 register_lowering(aten.new_zeros)(new_constant(0))
 register_lowering(aten.new_ones)(new_constant(1))
+
+
+@register_lowering(aten.new_empty)
+def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None):
+    if dtype is None:
+        dtype = x.get_dtype()
+    if device is None:
+        device = x.get_device()
+    return empty_strided(
+        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_lowering(aten.empty_strided)
