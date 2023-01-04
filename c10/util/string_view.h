@@ -668,7 +668,7 @@ class basic_string_view final {
   };
 
   const_pointer begin_;
-  size_type size_;
+  size_type size_{};
 };
 
 template <class CharT>
