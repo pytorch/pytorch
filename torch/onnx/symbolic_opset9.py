@@ -6029,8 +6029,7 @@ def __contains_(g: jit_utils.GraphContext, self, element):
             "Constant",
             value_t=torch.tensor(
                 symbolic_helper._node_get(element.node(), "value")
-                in symbolic_helper._node_get(x.node(), "value")
-                for x in unpacked_list
+                in (symbolic_helper._node_get(x.node(), "value") for x in unpacked_list)
             ),
         )
 
