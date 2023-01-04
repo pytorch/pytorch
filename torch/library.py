@@ -14,6 +14,7 @@ _impls: Set[str] = set()
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ['prim']
 
+
 class Library:
     """
     A class to create libraries that can be used to register new operators or
@@ -57,6 +58,7 @@ class Library:
             name of the operator as inferred from the schema.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
             >>> my_lib = Library("foo", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         '''
@@ -79,7 +81,7 @@ class Library:
             >>> # xdoctest: +SKIP
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
-            >>>    return self * (1 / other)
+            >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", "CPU")
         '''
         if not callable(fn):
@@ -104,7 +106,6 @@ class Library:
             raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
                                "'s behavior for {} dispatch key and {} namespace.".
                                format(name.split("::")[-1], dispatch_key, self.ns))
-
 
         if dispatch_key == "Meta":
             dispatcher_op_name = name
@@ -135,6 +136,7 @@ class Library:
                 _impls.remove(key)
             del self.m
 
+
 # decorator to register python functions for library ops
 # Note: this decorator API should remain consistent with `Library.impl` API
 def impl(lib, name, dispatch_key=""):
@@ -142,6 +144,7 @@ def impl(lib, name, dispatch_key=""):
         lib.impl(name, f, dispatch_key)
         return f
     return wrap
+
 
 def define(lib, schema, alias_analysis=""):
     def wrap(f):
