@@ -4,6 +4,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -23,11 +24,11 @@ struct ShapeComputeGraphMapping {
       std::unordered_map<Value*, Value*>
           enclosing_graph_value_to_shape_graph_input,
       std::unordered_map<Value*, int64_t> graph_output_to_symbolic_shape_dim)
-      : partial_eval_shape_graph(partial_eval_shape_graph),
+      : partial_eval_shape_graph(std::move(partial_eval_shape_graph)),
         enclosing_graph_value_to_shape_graph_input_(
-            enclosing_graph_value_to_shape_graph_input),
+            std::move(enclosing_graph_value_to_shape_graph_input)),
         graph_output_to_symbolic_shape_dim_(
-            graph_output_to_symbolic_shape_dim){};
+            std::move(graph_output_to_symbolic_shape_dim)){};
 
   std::shared_ptr<Graph> partial_eval_shape_graph;
   std::unordered_map<Value*, Value*>

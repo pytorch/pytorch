@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <c10/util/string_utils.h>
@@ -72,14 +73,14 @@ class TORCH_API Cast : public ExprNode<Cast> {
   }
 
   void set_src_value(ExprPtr src_value) {
-    src_value_ = src_value;
+    src_value_ = std::move(src_value);
   }
 
   static ExprHandle make(Dtype dtype, const ExprHandle& src_value) {
     return ExprHandle(alloc<Cast>(dtype, src_value.node()));
   }
   Cast(Dtype dtype, ExprPtr src_value)
-      : ExprNodeBase(dtype, kCast), src_value_(src_value) {}
+      : ExprNodeBase(dtype, kCast), src_value_(std::move(src_value)) {}
 
   bool isConstant() const override {
     return src_value_->isConstant();
@@ -102,14 +103,14 @@ class TORCH_API BitCast : public ExprNode<BitCast> {
   }
 
   void set_src_value(ExprPtr src_value) {
-    src_value_ = src_value;
+    src_value_ = std::move(src_value);
   }
 
   static ExprHandle make(Dtype dtype, const ExprHandle& src_value) {
     return ExprHandle(alloc<BitCast>(dtype, src_value.node()));
   }
   BitCast(Dtype dtype, ExprPtr src_value)
-      : ExprNodeBase(dtype, kBitCast), src_value_(src_value) {
+      : ExprNodeBase(dtype, kBitCast), src_value_(std::move(src_value)) {
     TORCH_CHECK(src_value_->dtype().byte_size() == dtype.byte_size());
   }
 
@@ -140,11 +141,11 @@ class BinaryOpNode : public ExprNode<Op> {
   }
 
   void set_lhs(ExprPtr lhs) {
-    lhs_ = lhs;
+    lhs_ = std::move(lhs);
   }
 
   void set_rhs(ExprPtr rhs) {
-    rhs_ = rhs;
+    rhs_ = std::move(rhs);
   }
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -184,34 +185,39 @@ bool bin_op_deducer(...);
 
 class TORCH_API Add : public BinaryOpNode<Add> {
  public:
-  Add(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kAdd) {}
+  Add(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kAdd) {}
 };
 
 class TORCH_API Sub : public BinaryOpNode<Sub> {
  public:
-  Sub(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kSub) {}
+  Sub(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kSub) {}
 };
 
 class TORCH_API Mul : public BinaryOpNode<Mul> {
  public:
-  Mul(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kMul) {}
+  Mul(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMul) {}
 };
 
 class TORCH_API Div : public BinaryOpNode<Div> {
  public:
-  Div(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kDiv) {}
+  Div(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kDiv) {}
 };
 
 class TORCH_API Mod : public BinaryOpNode<Mod> {
  public:
-  Mod(ExprPtr lhs, ExprPtr rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kMod) {}
+  Mod(ExprPtr lhs, ExprPtr rhs)
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMod) {}
 };
 
 template <typename Op>
 class BitwiseOpNode : public BinaryOpNode<Op> {
  public:
   BitwiseOpNode(ExprPtr lhs, ExprPtr rhs, IRNodeType type)
-      : BinaryOpNode<Op>(lhs, rhs, type) {}
+      : BinaryOpNode<Op>(std::move(lhs), std::move(rhs), type) {}
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
     if (!lhs.dtype().is_integral()) {
@@ -259,7 +265,7 @@ class Max : public BinaryOpNode<Max> {
 
  public:
   Max(ExprPtr lhs, ExprPtr rhs, bool propagate_nans)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kMax),
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMax),
         propagate_nans_(propagate_nans) {}
 
   bool propagate_nans() const {
@@ -283,7 +289,7 @@ class Min : public BinaryOpNode<Min> {
 
  public:
   Min(ExprPtr lhs, ExprPtr rhs, bool propagate_nans)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kMin),
+      : BinaryOpNode(std::move(lhs), std::move(rhs), IRNodeType::kMin),
         propagate_nans_(propagate_nans) {}
 
   bool propagate_nans() const {
@@ -413,11 +419,11 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
   }
 
   void set_base(ExprPtr base) {
-    base_ = base;
+    base_ = std::move(base);
   }
 
   void set_stride(ExprPtr stride) {
-    stride_ = stride;
+    stride_ = std::move(stride);
   }
 
   static ExprHandle make(
@@ -436,7 +442,7 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
   Ramp(ExprPtr base, ExprPtr stride, int lanes)
       : ExprNodeBase(Dtype(base->dtype(), lanes)),
         base_(base),
-        stride_(stride),
+        stride_(std::move(stride)),
         lanes_(lanes) {}
 
  private:
@@ -462,11 +468,11 @@ class TORCH_API Load : public ExprNode<Load> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   void set_indices(std::vector<ExprPtr> indices) {
-    indices_ = indices;
+    indices_ = std::move(indices);
   }
 
   static ExprHandle make(
@@ -492,7 +498,7 @@ class TORCH_API Broadcast : public ExprNode<Broadcast> {
   }
 
   void set_value(ExprPtr value) {
-    value_ = value;
+    value_ = std::move(value);
   }
 
   int lanes() const {
@@ -528,15 +534,15 @@ class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
   }
 
   void set_condition(ExprPtr condition) {
-    condition_ = condition;
+    condition_ = std::move(condition);
   }
 
   void set_true_value(ExprPtr true_value) {
-    true_ = true_value;
+    true_ = std::move(true_value);
   }
 
   void set_false_value(ExprPtr false_value) {
-    false_ = false_value;
+    false_ = std::move(false_value);
   }
 
   static ExprHandle make(
@@ -556,7 +562,10 @@ class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
   }
 
   IfThenElse(ExprPtr c, ExprPtr t, ExprPtr f)
-      : ExprNodeBase(t->dtype()), condition_(c), true_(t), false_(f) {}
+      : ExprNodeBase(t->dtype()),
+        condition_(std::move(c)),
+        true_(t),
+        false_(std::move(f)) {}
 
  private:
   ExprPtr condition_;
@@ -583,19 +592,19 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   }
 
   void set_lhs(ExprPtr lhs) {
-    lhs_ = lhs;
+    lhs_ = std::move(lhs);
   }
 
   void set_rhs(ExprPtr rhs) {
-    rhs_ = rhs;
+    rhs_ = std::move(rhs);
   }
 
   void set_ret_val1(ExprPtr ret_val1) {
-    ret_val1_ = ret_val1;
+    ret_val1_ = std::move(ret_val1);
   }
 
   void set_ret_val2(ExprPtr ret_val2) {
-    ret_val2_ = ret_val2;
+    ret_val2_ = std::move(ret_val2);
   }
 
   CompareSelectBias bias() const {
@@ -646,10 +655,10 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased)
       : ExprNodeBase(ret_val1->dtype()),
-        lhs_(lhs),
-        rhs_(rhs),
+        lhs_(std::move(lhs)),
+        rhs_(std::move(rhs)),
         ret_val1_(ret_val1),
-        ret_val2_(ret_val2),
+        ret_val2_(std::move(ret_val2)),
         compare_op_(cmp_op),
         bias_(bias) {}
 
@@ -660,8 +669,8 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased)
       : ExprNodeBase(kInt),
-        lhs_(lhs),
-        rhs_(rhs),
+        lhs_(std::move(lhs)),
+        rhs_(std::move(rhs)),
         ret_val1_(alloc<IntImm>(1)),
         ret_val2_(alloc<IntImm>(0)),
         compare_op_(cmp_op),

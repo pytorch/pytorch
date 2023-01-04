@@ -48,6 +48,7 @@ class FunctionCtx(object):
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class Func(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x: torch.Tensor, y: torch.Tensor, z: int):
@@ -139,6 +140,7 @@ class FunctionCtx(object):
         modification.
 
         Examples::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class Inplace(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x):
@@ -202,14 +204,15 @@ class FunctionCtx(object):
         self.non_differentiable = args
 
     def set_materialize_grads(self, value: bool):
-        r"""Sets whether to materialize output grad tensors. Default is ``True``.
+        r"""Sets whether to materialize grad tensors. Default is ``True``.
 
         **This should be called only from inside the** :func:`forward` **method**
 
-        If ``True``, undefined output grad tensors will be expanded to tensors full
-        of zeros prior to calling the :func:`backward` method.
+        If ``True``, undefined grad tensors will be expanded to tensors full of zeros
+        prior to calling the :func:`backward` and :func:`jvp` methods.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class SimpleFunc(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x):
@@ -296,12 +299,36 @@ class FunctionMeta(type):
 class _SingleLevelFunction(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _HookMixin)):  # type: ignore[misc]
     @staticmethod
     def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
-        r"""Performs the operation.
+        r"""
+        This function is to be overridden by all subclasses. There are two ways
+        to define forward:
 
-        This function is to be overridden by all subclasses.
+        Usage 1 (Combined forward and ctx)::
 
-        It must accept a context ctx as the first argument, followed by any
-        number of arguments (tensors or other types).
+            @staticmethod
+            def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
+                pass
+
+        - It must accept a context ctx as the first argument, followed by any
+          number of arguments (tensors or other types).
+        - See :ref:`combining-forward-context` for more details
+
+        Usage 2 (Separate forward and ctx)::
+
+            @staticmethod
+            def forward(*args: Any, **kwargs: Any) -> Any:
+                pass
+
+            @staticmethod
+            def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
+                pass
+
+        - The forward no longer accepts a ctx argument.
+        - Instead, you must also define a setup_context staticmethod to handle setting up the
+          ``ctx`` object.
+          ``output`` is the output of the forward, ``inputs`` are a Tuple of inputs
+          to the forward.
+        - See :ref:`extending-autograd` for more details
 
         The context can be used to store arbitrary data that can be then
         retrieved during the backward pass. Tensors should not be stored
@@ -382,6 +409,7 @@ class Function(_SingleLevelFunction):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> class Exp(Function):
         >>>     @staticmethod
         >>>     def forward(ctx, i):
@@ -431,6 +459,7 @@ class Function(_SingleLevelFunction):
                 'In order to use an autograd.Function with functorch transforms ',
                 '(vmap, grad, jvp, jacrev, ...), it must have a setup_context ',
                 'staticmethod.')
+
         return custom_function_call(cls, *args, **kwargs)
 
 def once_differentiable(fn):
