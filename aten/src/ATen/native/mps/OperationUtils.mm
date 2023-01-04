@@ -7,60 +7,6 @@ namespace at {
 namespace native {
 namespace mps {
 
-uint64_t MPSGeneratorImpl::seed() {
-  auto random = c10::detail::getNonDeterministicRandom(true);
-  this->set_current_seed(random);
-  return random;
-}
-
-uint64_t MPSGeneratorImpl::current_seed() const {
-  return seed_;
-}
-
-void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
-  seed_ = seed;
-}
-
-MPSGeneratorImpl::MPSGeneratorImpl(DeviceIndex device_index)
-  : c10::GeneratorImpl{Device(DeviceType::MPS, device_index),
-              DispatchKeySet(c10::DispatchKey::MPS)} {
-}
-
-const Generator& getDefaultMPSGenerator() {
-  static auto gen = make_generator<MPSGeneratorImpl>(0);
-  gen.seed();
-  return gen;
-}
-DeviceType MPSGeneratorImpl::device_type() {
-  return DeviceType::MPS;
-}
-c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(int64_t);
-  static const size_t total_size = seed_size + offset_size;
-
-  auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
-
-  return state_tensor.getIntrusivePtr();
-}
-
-void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  static const size_t seed_size = sizeof(uint64_t);
-
-  detail::check_rng_state(new_state);
-
-  uint64_t input_seed;
-  auto new_rng_state = new_state.data<uint8_t>();
-  memcpy(&input_seed, new_rng_state, seed_size);
-  this->set_current_seed(input_seed);
-}
-
-MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
-  auto gen = new MPSGeneratorImpl(0);
-  gen->set_current_seed(this->seed_);
-  return gen;
-}
-
 void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
   mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
 }
