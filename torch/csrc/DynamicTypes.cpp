@@ -131,8 +131,8 @@ at::Storage createStorageGetType(
 
   if (is_typed_storage) {
     // NOTE: `PyObject_GetAttrString` increments the refcounts to `dtype` and
-    // `_storage`, so we must decrement them. The refcounts will still stay
-    // nonzero since the `TypedStorage` maintains a reference.
+    // `_untyped_storage`, so we must decrement them. The refcounts will still
+    // stay nonzero since the `TypedStorage` maintains a reference.
     PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
     TORCH_INTERNAL_ASSERT(dtype_obj);
     Py_DECREF(dtype_obj);
@@ -149,10 +149,12 @@ at::Storage createStorageGetType(
     untyped_storage_obj = obj;
   }
 
-  if (Py_TYPE(untyped_storage_obj) !=
-      reinterpret_cast<PyTypeObject*>(THPStorageClass)) {
-    throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      Py_TYPE(untyped_storage_obj) ==
+          reinterpret_cast<PyTypeObject*>(THPStorageClass),
+      "not a storage '",
+      Py_TYPE(obj)->tp_name,
+      "'");
 
   c10::StorageImpl* impl = static_cast<c10::StorageImpl*>(
       ((THPVoidStorage*)untyped_storage_obj)->cdata);

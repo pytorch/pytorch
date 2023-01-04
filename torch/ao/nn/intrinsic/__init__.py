@@ -20,6 +20,7 @@ __all__ = [
     'BNReLU3d',
     'LinearBn1d',
     'LinearLeakyReLU',
+    'LinearTanh',
     'ConvAdd2d',
     'ConvAddReLU2d',
 ]
