@@ -19,7 +19,7 @@ Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
   vTensor v_output{
       context,
       inferred_size,
-      self.options(),
+      self_arg.scalar_type(),
   };
 
   api::StorageBuffer buffer(context, at::kFloat, v_self.gpu_numel(), true);

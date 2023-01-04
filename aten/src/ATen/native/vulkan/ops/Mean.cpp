@@ -51,7 +51,7 @@ Tensor mean(
   vTensor v_output{
       context,
       output_sizes,
-      v_input.options(),
+      input_arg.scalar_type(),
   };
 
   const struct Block final {
