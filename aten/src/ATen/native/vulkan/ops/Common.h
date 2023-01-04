@@ -6,7 +6,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Convert.h>
-#include <ATen/native/vulkan/ops/Tensor.h>
 
 #define CONCAT_LITERALS(a, b) #a #b
 #ifdef USE_VULKAN_SHADERC_RUNTIME
