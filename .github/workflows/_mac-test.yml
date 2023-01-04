@@ -154,7 +154,7 @@ jobs:
         shell: bash
         if: always()
         run: |
-          cat test/**/*.log || exit 0
+          cat test/**/*.log || true
 
       - name: Get workflow job id
         id: get-job-id
