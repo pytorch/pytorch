@@ -31,15 +31,13 @@ createCustomAllocator(
 void changeCurrentAllocator(
     std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator);
 
-
 struct _AllocationMetadata {
-   _AllocationMetadata();
-   _AllocationMetadata(size_t size, int device_idx, cudaStream_t stream);
-   size_t size;
-   int device_idx;
-   cudaStream_t stream;
+  _AllocationMetadata();
+  _AllocationMetadata(size_t size, int device_idx, cudaStream_t stream);
+  size_t size;
+  int device_idx;
+  cudaStream_t stream;
 };
-
 
 struct CUDAPluggableAllocator
     : public c10::cuda::CUDACachingAllocator::CUDAAllocator {
@@ -135,8 +133,7 @@ struct CUDAPluggableAllocator
   std::function<void(int, c10::cuda::MempoolId_t)> capture_destroy_fn_;
   std::mutex allocator_mutex_;
   // We do the bookeeping here in order to simplify custom allocators
-  std::unordered_map<void*, _AllocationMetadata>
-      allocation_metadata_;
+  std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;
 
   bool initialized_ = false;
 };

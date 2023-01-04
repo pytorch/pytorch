@@ -12,14 +12,14 @@ int device_count = 0;
 
 void custom_raw_deleter(void* ptr);
 
-_AllocationMetadata::_AllocationMetadata() : size(0), device_idx(-1), stream(0) {
-}
+_AllocationMetadata::_AllocationMetadata()
+    : size(0), device_idx(-1), stream(0) {}
 
 _AllocationMetadata::_AllocationMetadata(
     size_t size,
     int device_idx,
-    cudaStream_t stream) : size(size), device_idx(device_idx), stream(stream) { 
-}
+    cudaStream_t stream)
+    : size(size), device_idx(device_idx), stream(stream) {}
 
 // This is a fast API to just register allocators
 // based on function pointers (ie. external .so libraries)
