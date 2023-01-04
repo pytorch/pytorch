@@ -220,7 +220,8 @@ void printTensorNDArray(const Tensor& t) {
   C10_CLANG_DIAGNOSTIC_POP()
 }
 
-Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape, bool gatherTensorData, MPSDataType dataType) : _tensor(src)
+Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape,
+                         bool gatherTensorData, MPSDataType dataType) : _tensor(src)
 {
   TORCH_CHECK(src.is_mps(), "Placeholder storage has not been allocated on MPS device!");
   // extract the pointer to MTLBuffer from the Tensor's storage
