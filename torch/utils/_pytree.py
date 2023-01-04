@@ -190,9 +190,10 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
 
     return unflatten_fn(child_pytrees, spec.context)
 
-def tree_map(fn: Any, pytree: PyTree) -> PyTree:
+def tree_map(fn: Any, pytree: PyTree, *rest: Any) -> PyTree:
     flat_args, spec = tree_flatten(pytree)
-    return tree_unflatten([fn(i) for i in flat_args], spec)
+    all_flat_args = [flat_args] + [r for r in rest]
+    return tree_unflatten([fn(*i) for i in zip(*all_flat_args)], spec)
 
 Type2 = Tuple[Type[T], Type[S]]
 TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]

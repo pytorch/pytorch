@@ -178,6 +178,7 @@ class TestPytree(TestCase):
                 {'a': ()},
                 {'a': 1, 'b': [{'c': 2}]},
                 {'a': 0, 'b': [2, {'c': 3}, 4], 'c': (5, 6)},
+                {'a': [5, 6], 'b': [[7, 9], [1, 2]]},
             ]
             for case in cases:
                 run_test(case)
