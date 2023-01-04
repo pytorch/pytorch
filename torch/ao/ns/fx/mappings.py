@@ -603,11 +603,8 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.LinearBn1d,
         nniqd.LinearReLU,
         nni.LinearLeakyReLU,
-<<<<<<< HEAD
         nni.LinearTanh,
-=======
         nni.ConvAdd2d,
->>>>>>> 92e158f87d4 ([Quant][FX] Lower QConvAdd2d for onednn backend)
     ])
 
     MODS_IO_TYPE_INT8: Set[NSNodeTargetType] = set([
