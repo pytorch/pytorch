@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import enum
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 from torch._guards import GuardSource, Source
 
@@ -115,7 +115,6 @@ class AttrSource(Source):
 
     def __init__(self, base, member):
         super().__init__()
-        assert base, "Can't construct an AttrSource without a valid base source"
         if "." in member:
             member_parts = member.split(".")
             self.base = AttrSource(base, ".".join(member_parts[:-1]))
@@ -123,6 +122,7 @@ class AttrSource(Source):
         else:
             self.base = base
             self.member = member
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return self.base.reconstruct(codegen) + codegen.create_load_attrs(self.member)
@@ -177,6 +177,9 @@ class TensorPropertySource(Source):
 class NegateSource(Source):
     base: Source
 
+    def __post_init__(self):
+        assert self.base is not None
+
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
@@ -189,51 +192,12 @@ class NegateSource(Source):
 
 
 @dataclasses.dataclass
-class DefaultsSource(Source):
-    base: Source
-    idx_key: Union[int, str]
-    is_kw: bool
-    field: str
-
-    def __init__(self, base, idx_key, is_kw=False):
-        super().__init__()
-        assert (
-            base
-        ), "Base must be a valid source in order to properly track and guard this Defaults to its origin."
-        self.base = base
-        self.idx_key = idx_key
-        self.is_kw = is_kw
-        if self.is_kw:
-            assert isinstance(idx_key, str)
-            self.field = "__kwdefaults__"
-            self._name = f"{self.base.name()}.{self.field}['{self.idx_key}']"
-        else:
-            assert isinstance(idx_key, int)
-            self.field = "__defaults__"
-            self._name = f"{self.base.name()}.{self.field}[{self.idx_key}]"
-
-    def reconstruct(self, codegen):
-        instrs = self.base.reconstruct(codegen)
-        instrs.extend(codegen.create_load_attrs(self.field))
-        instrs.extend(
-            [
-                codegen.create_load_const(self.idx_key),
-                create_instruction("BINARY_SUBSCR"),
-            ]
-        )
-        return instrs
-
-    def guard_source(self):
-        return self.base.guard_source()
-
-    def name(self):
-        return self._name
-
-
-@dataclasses.dataclass
 class GetItemSource(Source):
     base: Source
     index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
@@ -273,6 +237,9 @@ class TupleIteratorGetItemSource(GetItemSource):
 class TypeSource(Source):
     base: Source
 
+    def __post_init__(self):
+        assert self.base is not None
+
     def reconstruct(self, codegen):
         codegen.load_import_from("builtins", "type")
         return self.base.reconstruct(codegen) + [create_instruction("CALL_FUNCTION", 1)]
@@ -288,6 +255,9 @@ class TypeSource(Source):
 class ODictGetItemSource(Source):
     base: Source
     index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return (

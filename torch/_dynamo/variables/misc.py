@@ -68,16 +68,15 @@ class SuperVariable(VariableTracker):
             self, args, kwargs.values(), self.objvar, self.typevar
         )
         inner_fn = self.const_getattr(self, name)
-        source = AttrSource(self.source, name)
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
         elif isinstance(inner_fn, types.FunctionType):
-            return variables.UserFunctionVariable(
-                inner_fn, source=source, **options
-            ).call_function(tx, [self.objvar] + args, kwargs)
+            return variables.UserFunctionVariable(inner_fn, **options).call_function(
+                tx, [self.objvar] + args, kwargs
+            )
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=source, **options
+                inner_fn.__func__, self.objvar, **options
             ).call_function(tx, args, kwargs)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
@@ -104,9 +103,7 @@ class ComptimeVariable(VariableTracker):
         # To support the comptime.print_graph convenience accessors
         from .functions import UserFunctionVariable
 
-        return UserFunctionVariable(
-            getattr(comptime, name), source=AttrSource(self.source, name)
-        )
+        return UserFunctionVariable(getattr(comptime, name))
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -490,7 +487,6 @@ class AutogradFunctionVariable(VariableTracker):
     def __init__(self, fn_cls, **kwargs):
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
-        assert self.source, "No source!"
 
     def call_apply(self, tx, args, kwargs):
         requires_grad = False
@@ -513,10 +509,6 @@ class AutogradFunctionVariable(VariableTracker):
 
         args = [BlackHoleVariable()] + list(args)
         options = VariableTracker.propagate(self, args, kwargs.values())
-        assert (
-            self.source
-        ), "Can't propagate none source, and UserFunctionVariable requires valid source"
-        options["source"] = AttrSource(AttrSource(self.source, "__class__"), "forward")
         fn = self.fn_cls.forward
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, **options).call_function(
@@ -533,7 +525,7 @@ class AutogradFunctionVariable(VariableTracker):
 
     def call_function(self, tx, args, kwargs):
         options = VariableTracker.propagate(self, args, kwargs.values())
-        return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
+        return AutogradFunctionVariable(self.fn_cls, **options)
 
 
 class BlackHoleVariable(VariableTracker):
