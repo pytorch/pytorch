@@ -124,14 +124,23 @@ template <>
   struct hash<c10::AliasInfo> {
     size_t operator()(const c10::AliasInfo& aliasInfo) const {
       auto hash = std::hash<bool>()(aliasInfo.isWrite());
+
+      // NOTE: for unordered_set hashes, we couldn't use hash_combine
+      // because hash_combine is order dependent. Instead, we choose to
+      // use XOR as the combining function as XOR is commutative.
+      size_t before_set_hash_seed = 0;
       for (auto &e: aliasInfo.beforeSets()) {
         auto symbol_hash = std::hash<c10::Symbol>()(e);
-        hash = c10::hash_combine(hash, symbol_hash);
+        before_set_hash_seed = before_set_hash_seed ^ symbol_hash;
       }
+      size_t after_set_hash_seed = 0;
       for (auto &e: aliasInfo.afterSets()) {
         auto symbol_hash = std::hash<c10::Symbol>()(e);
-        hash = c10::hash_combine(hash, symbol_hash);
+        after_set_hash_seed = after_set_hash_seed ^ symbol_hash;
       }
+
+      hash = c10::hash_combine(hash, before_set_hash_seed);
+      hash = c10::hash_combine(hash, after_set_hash_seed);
       for (auto &e: aliasInfo.containedTypes()) {
         auto contained_type_hash = std::hash<c10::AliasInfo>()(e);
         hash = c10::hash_combine(hash, contained_type_hash);
