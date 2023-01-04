@@ -87,7 +87,7 @@ constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
-// Check workload to activate fast depthwise FP16 cudnn conv kernels
+// Check workload to activate fast depthwise cudnn conv kernels
 template <typename T>
 bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
   auto w = at::symint::size<T>(input, 3);  // same as h
@@ -447,7 +447,7 @@ struct ConvParams {
     if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
       long cudnn_version = detail::getCUDAHooks().versionCuDNN();
       if (cudnn_version >= 8200) {
-        bool type_cond = (input.scalar_type() == kHalf && // only for FP16
+        bool type_cond = (input.scalar_type() == kHalf &&
                              weight.scalar_type() == kHalf) || 
                          (input.scalar_type() == kBFloat16 && 
                              weight.scalar_type() == kBFloat16);
