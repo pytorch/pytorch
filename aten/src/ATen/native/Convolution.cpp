@@ -448,8 +448,8 @@ struct ConvParams {
       long cudnn_version = detail::getCUDAHooks().versionCuDNN();
       if (cudnn_version >= 8200) {
         bool type_cond = (input.scalar_type() == kHalf &&
-                             weight.scalar_type() == kHalf) || 
-                         (input.scalar_type() == kBFloat16 && 
+                             weight.scalar_type() == kHalf) ||
+                         (input.scalar_type() == kBFloat16 &&
                              weight.scalar_type() == kBFloat16);
         bool kernel_cond =  (use_cudnn(input, weight) &&
                              type_cond &&
