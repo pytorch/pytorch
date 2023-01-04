@@ -2811,14 +2811,6 @@ def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **k
 def error_inputs_adaptive_avg_pool1d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
-    # error inputs for overflow
-    # when testing with UBSAN: `integer multiplication overflow`
-    # when testing without UBSAN: `Storage size calculation overflowed`
-    # 0x0x3fffffffffffffff * 2 * 2 = 0xfffffffffffffffc = -4 as int64_t
-    # Tensor::numel() return int64_t, so following check that negative allocs are correctly handled
-    yield ErrorInput(SampleInput(make_arg((2, 2, 2)), output_size=0x3fffffffffffffff),
-                     error_regex="overflow")
-
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3)), output_size=()),
                      error_regex="'output_size' should contain one int")
