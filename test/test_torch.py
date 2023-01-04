@@ -6313,7 +6313,7 @@ class TestTorch(TestCase):
                                "received an invalid combination of arguments",
                                lambda: torch.LongTensor((6, 0), 1, 1, 0))
         self.assertRaisesRegex(TypeError,
-                               "missing 1 required positional arguments",
+                               r"tensor\(\) missing 1 required positional argument: \"data\"",
                                lambda: torch.tensor().new_zeros((5, 5), 0))
 
     @skipIfTorchDynamo("will be re-enabled after #90892")
