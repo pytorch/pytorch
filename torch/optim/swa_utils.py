@@ -9,6 +9,7 @@ from torch.optim.lr_scheduler import LRScheduler
 
 __all__ = ['AveragedModel', 'update_bn', 'SWALR']
 
+
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA).
 

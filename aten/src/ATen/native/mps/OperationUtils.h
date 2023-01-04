@@ -19,24 +19,6 @@ namespace at {
 namespace native {
 namespace mps {
 
-struct TORCH_CUDA_CPP_API MPSGeneratorImpl : public c10::GeneratorImpl {
-  MPSGeneratorImpl(DeviceIndex device_index = -1);
-  ~MPSGeneratorImpl() = default;
-
-  void set_current_seed(uint64_t seed) override;
-  uint64_t current_seed() const override;
-  uint64_t seed() override;
-  void set_state(const c10::TensorImpl& new_state) override;
-  c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
-  static DeviceType device_type();
-
-private:
-  MPSGeneratorImpl* clone_impl() const override;
-  uint64_t seed_ = default_rng_seed_val;
-};
-
-const Generator& getDefaultMPSGenerator();
-
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const { return __builtin_bit_cast(id<MTLBuffer>, buffer.get()); }
 
@@ -80,7 +62,8 @@ class Placeholder {
  public:
   Placeholder() : _placeholder(nullptr), _value(nullptr), _tensor(Tensor()) {}
   Placeholder(MPSGraphTensor* mpsGraphTensor) : _placeholder(mpsGraphTensor), _value(nullptr), _tensor(Tensor()) {}
-  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr, bool gatherTensorData = true, MPSDataType dataType = MPSDataTypeInvalid);
+  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr,
+              bool gatherTensorData = true, MPSDataType dataType = MPSDataTypeInvalid);
   MPSGraphTensor* getMPSGraphTensor() {
     return _placeholder;
   }

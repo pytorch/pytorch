@@ -9,6 +9,7 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
+import math
 import os
 import sys
 import platform
@@ -48,7 +49,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'compile', 'vmap',
+    'sym_int', 'sym_float', 'compile', 'vmap'
 ]
 
 ################################################################################
@@ -309,6 +310,39 @@ class SymFloat:
     def get_pyobj(self):
         return self.node
 
+def sym_float(a):
+    r""" SymInt-aware utility for float casting.
+
+    Args:
+        a (SymInt, SymFloat, or object): Object to cast
+    """
+    if isinstance(a, SymFloat):
+        return a
+    elif hasattr(a, '__sym_float__'):
+        return a.__sym_float__()
+    return py_float(a)  # type: ignore[operator]
+
+# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
+# directly usable, but this has a more relaxed type signature for mypy
+# (mypy requires SupportFloat which is too strict)
+def _sym_floor(x):
+    return math.floor(x)  # type: ignore[type]
+
+def _sym_ceil(x):
+    return math.ceil(x)  # type: ignore[type]
+
+def sym_int(a):
+    r""" SymInt-aware utility for int casting.
+
+    Args:
+        a (SymInt, SymFloat, or object): Object to cast
+    """
+    if isinstance(a, SymInt):
+        return a
+    elif isinstance(a, SymFloat):
+        return _sym_floor(a) if a > 0 else _sym_ceil(a)
+    return py_int(a)  # type: ignore[operator]
+
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
 try:
@@ -393,7 +427,7 @@ def is_tensor(obj):
         obj (Object): Object to test
     Example::
 
-        >>> x=torch.tensor([1,2,3])
+        >>> x = torch.tensor([1, 2, 3])
         >>> torch.is_tensor(x)
         True
 
@@ -593,10 +627,10 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
-        >>> # xdoctest: +SKIP
         >>> torch.randn(10, device='cuda').kthvalue(0)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...
@@ -965,6 +999,11 @@ def manager_path():
     return path.encode('utf-8')
 
 from torch.amp import autocast
+
+# Initializing the extension shadows the built-in python float / int classes;
+# store them for later use by SymInt / SymFloat.
+py_float = float
+py_int = int
 
 # Shared memory manager needs to know the exact location of manager executable
 _C._initExtension(manager_path())

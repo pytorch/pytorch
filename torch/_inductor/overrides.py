@@ -357,7 +357,8 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                     )
                     node.replace_all_uses_with(fused_node)
                     module.graph.erase_node(node)
-                    module.graph.erase_node(input_node)
+                    if len(input_node.users) == 0:
+                        module.graph.erase_node(input_node)
 
     module.graph.lint()
     module.recompile()
@@ -399,7 +400,8 @@ def permute_linear_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                     )
                     node.replace_all_uses_with(fused_node)
                     module.graph.erase_node(node)
-                    module.graph.erase_node(input_node)
+                    if len(input_node.users) == 0:
+                        module.graph.erase_node(input_node)
 
     module.graph.lint()
     module.recompile()
@@ -447,9 +449,9 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                     )
                 node.replace_all_uses_with(fused_node)
                 module.graph.erase_node(node)
-                if Atrans:
+                if Atrans and len(input_A_node.users) == 0:
                     module.graph.erase_node(input_A_node)
-                if Btrans:
+                if Btrans and len(input_B_node.users) == 0:
                     module.graph.erase_node(input_B_node)
 
     module.graph.lint()
