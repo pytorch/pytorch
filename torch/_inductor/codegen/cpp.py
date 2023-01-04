@@ -232,6 +232,30 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.sqrt()"
 
     @staticmethod
+    def eq(x, y):
+        return f"{x} == {y}"
+
+    @staticmethod
+    def ne(x, y):
+        return f"{x} != {y}"
+
+    @staticmethod
+    def lt(x, y):
+        return f"{x} < {y}"
+
+    @staticmethod
+    def gt(x, y):
+        return f"{x} > {y}"
+
+    @staticmethod
+    def le(x, y):
+        return f"{x} <= {y}"
+
+    @staticmethod
+    def ge(x, y):
+        return f"{x} >= {y}"
+
+    @staticmethod
     def rsqrt(x):
         return f"{x}.rsqrt()"
 
@@ -415,6 +439,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def expm1(x):
         return f"std::expm1({x})"
+
+    @staticmethod
+    def tanh(x):
+        return f"std::tanh({x})"
 
     @staticmethod
     def signbit(x):
