@@ -4340,7 +4340,7 @@ def linspace(
     computation_dtype, _ = utils.reduction_dtypes(
         rg, REDUCTION_OUTPUT_TYPE_KIND.SAME, dtype_red
     )
-    rg = _maybe_convert_to_dtype(rg, computation_dtype)
+    rg = _maybe_convert_to_dtype(rg, computation_dtype)  # type: ignore[assignment]
 
     out = rg * (end - start) / (steps - 1) + start
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
