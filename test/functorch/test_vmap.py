@@ -3512,7 +3512,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                               skip_inplace=inplace_failure_list)
 
     @_set_autograd_function_extension_enabled()
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
         tol1('linalg.det',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
@@ -3667,6 +3667,20 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
+
+        # hit the vmap fallback which is currently disabled
+        xfail('bitwise_and'),
+        xfail('bitwise_or'),
+        xfail('bitwise_xor'),
+        xfail('bitwise_left_shift'),
+        xfail('bitwise_right_shift'),
+        xfail('bincount'),
+        xfail('gcd'),
+        xfail('lcm'),
+
+        xfail('nn.functional.one_hot'), # please provide an explicit positive num_classes argument
+        xfail('tril_indices'), # Expected at least one Tensor to vmap over
+        xfail('triu_indices'), # Expected at least one Tensor to vmap over
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
