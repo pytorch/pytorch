@@ -1447,27 +1447,4 @@ workflows:
             branches:
               only:
                 - postnightly
-      - pytorch_ios_build:
-          build_environment: ios-12-5-1-x86-64
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
-          ios_arch: x86_64
-          ios_platform: SIMULATOR
-          lite_interpreter: "1"
-          name: ios-12-5-1-x86-64
-      - pytorch_ios_build:
-          build_environment: ios-12-5-1-x86-64-coreml
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
-          ios_arch: x86_64
-          ios_platform: SIMULATOR
-          lite_interpreter: "1"
-          name: ios-12-5-1-x86-64-coreml
-          use_coreml: "1"
     when: << pipeline.parameters.run_build >>
