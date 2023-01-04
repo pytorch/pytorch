@@ -963,7 +963,7 @@ __all__ = [
     'is_current_stream_capturing', 'is_initialized', 'jiterator', 'list_gpu_processes', 'make_graphed_callables',
     'manual_seed', 'manual_seed_all', 'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved',
     'mem_get_info', 'memory', 'memory_allocated', 'memory_cached', 'memory_reserved', 'memory_snapshot',
-    'memory_stats', 'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'temperature', 'power', 'clock_speed' 'nccl', 'nvtx', 'profiler',
+    'memory_stats', 'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'temperature', 'power', 'clock_speed', 'nccl', 'nvtx', 'profiler',
     'random', 'reset_accumulated_memory_stats', 'reset_max_memory_allocated', 'reset_max_memory_cached',
     'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction', 'set_rng_state',
     'set_rng_state_all', 'set_stream', 'set_sync_debug_mode', 'sparse', 'stream', 'streams', 'synchronize', 'utilization']
