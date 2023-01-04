@@ -282,7 +282,7 @@ optional_variable_list _process_backward_mode_ad(
                          bool is_differentiable) {
     if (!is_differentiable) {
       if (!var.requires_grad()) {
-        if (is_input) {
+        if (is_input && !is_modified) {
           var = _view_as_self_with_no_grad(var);
         }
         return;

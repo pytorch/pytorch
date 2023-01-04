@@ -16,44 +16,42 @@ from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 from torch.serialization import MAP_LOCATION
 
+class _Faketqdm(object):  # type: ignore[no-redef]
+
+    def __init__(self, total=None, disable=False,
+                 unit=None, *args, **kwargs):
+        self.total = total
+        self.disable = disable
+        self.n = 0
+        # Ignore all extra *args and **kwargs lest you want to reinvent tqdm
+
+    def update(self, n):
+        if self.disable:
+            return
+
+        self.n += n
+        if self.total is None:
+            sys.stderr.write("\r{0:.1f} bytes".format(self.n))
+        else:
+            sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
+        sys.stderr.flush()
+
+    def close(self):
+        self.disable = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.disable:
+            return
+
+        sys.stderr.write('\n')
+
 try:
-    from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
+    from tqdm import tqdm  # If tqdm is installed use it, otherwise use the fake wrapper
 except ImportError:
-    try:
-        from tqdm import tqdm
-    except ImportError:
-        # fake tqdm if it's not installed
-        class tqdm(object):  # type: ignore[no-redef]
-
-            def __init__(self, total=None, disable=False,
-                         unit=None, unit_scale=None, unit_divisor=None):
-                self.total = total
-                self.disable = disable
-                self.n = 0
-                # ignore unit, unit_scale, unit_divisor; they're just for real tqdm
-
-            def update(self, n):
-                if self.disable:
-                    return
-
-                self.n += n
-                if self.total is None:
-                    sys.stderr.write("\r{0:.1f} bytes".format(self.n))
-                else:
-                    sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
-                sys.stderr.flush()
-
-            def close(self):
-                self.disable = True
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc_val, exc_tb):
-                if self.disable:
-                    return
-
-                sys.stderr.write('\n')
+    tqdm = _Faketqdm
 
 __all__ = [
     'download_url_to_file',
@@ -390,6 +388,7 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
         list: The available callables entrypoint
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
     repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "list", verbose=True,
@@ -442,6 +441,7 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
 
             Default is ``None`` and will eventually change to ``"check"`` in v1.14.
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
     repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "help", verbose=True,
@@ -521,6 +521,7 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
         ``*args`` and ``**kwargs``.
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> # from a github repo
         >>> repo = 'pytorch/vision'
         >>> model = torch.hub.load(repo, 'resnet50', weights='ResNet50_Weights.IMAGENET1K_V1')
@@ -588,6 +589,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
             Default: True
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> # xdoctest: +REQUIRES(POSIX)
         >>> torch.hub.download_url_to_file('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth', '/tmp/temporary_file')
 
@@ -696,6 +698,7 @@ def load_state_dict_from_url(
         file_name (str, optional): name for the downloaded file. Filename from ``url`` will be used if not set.
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> state_dict = torch.hub.load_state_dict_from_url('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth')
 
     """
