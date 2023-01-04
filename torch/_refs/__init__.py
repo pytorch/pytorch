@@ -4346,7 +4346,9 @@ def linspace(
     # With this we get out[0] == start, out[-1] == end
     step = (end - start) / (steps - 1)
     out = torch.where(
-        rg < steps / 2, start + step * cast_rg(rg), end - step * cast_rg((steps - 1) - rg)
+        rg < steps / 2,
+        start + step * cast_rg(rg),  # type: ignore[arg-type,operator]
+        end - step * cast_rg((steps - 1) - rg),  # type: ignore[arg-type,operator]
     )
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
