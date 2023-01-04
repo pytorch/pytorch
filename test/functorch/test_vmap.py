@@ -3500,9 +3500,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         # The error inputs are vectors, that pass when batched as they are treated as a matrix
         xfail('trace'),
         xfail('as_strided', 'partial_views'),
-        xfail('nn.functional.one_hot'), # please provide an explicit positive num_classes argument.
-        xfail('tril_indices'), # Expected at least one Tensor to vmap over
-        xfail('triu_indices'), # Expected at least one Tensor to vmap over
+        xfail('nn.functional.one_hot'),  # please provide an explicit positive num_classes argument.
+        xfail('tril_indices'),  # Expected at least one Tensor to vmap over
+        xfail('triu_indices'),  # Expected at least one Tensor to vmap over
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3678,9 +3678,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('gcd'),
         xfail('lcm'),
 
-        xfail('nn.functional.one_hot'), # please provide an explicit positive num_classes argument
-        xfail('tril_indices'), # Expected at least one Tensor to vmap over
-        xfail('triu_indices'), # Expected at least one Tensor to vmap over
+        xfail('nn.functional.one_hot'),  # please provide an explicit positive num_classes argument
+        xfail('tril_indices'),  # Expected at least one Tensor to vmap over
+        xfail('triu_indices'),  # Expected at least one Tensor to vmap over
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
