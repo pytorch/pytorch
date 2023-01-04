@@ -24,7 +24,8 @@ from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
-    subtest
+    subtest,
+    TEST_WITH_UBSAN
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -41,6 +42,8 @@ from common_utils import (
     generate_vmap_inputs,
     compute_quantities_for_vmap_test,
     is_valid_inplace_sample_input,
+    expectedFailureIf,
+    decorate
 )
 import types
 from collections import namedtuple
@@ -3374,20 +3377,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 "special.shifted_chebyshev_polynomial_u",
                 "special.shifted_chebyshev_polynomial_v",
                 "special.shifted_chebyshev_polynomial_w",
-                # Leads to Illegal Memory Access on CUDA
-                # locally
-                "fft.fft",
-                "fft.fft2",
-                "fft.fftn",
-                "fft.hfft",
-                "fft.hfft2",
-                "fft.hfftn",
-                "fft.ifft",
-                "fft.ifft2",
-                "fft.ifftn",
-                "fft.ihfft",
-                "fft.ihfft2",
-                "fft.ihfftn",
             }
             if op.name in sample_inputs_op:
                 sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -3730,6 +3719,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Greatest absolute difference: 14.031710147857666 at index (0, 5) (up to 0.0001 allowed)
         # Greatest relative difference: 2.9177700113052603 at index (0, 3) (up to 0.0001 allowed)
         xfail('narrow_copy', device_type='cpu'),
+        # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
+        decorate('special.zeta', decorator=expectedFailureIf(TEST_WITH_UBSAN))
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
