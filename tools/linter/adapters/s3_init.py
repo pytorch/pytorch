@@ -14,7 +14,6 @@ from pathlib import Path
 
 # String representing the host platform (e.g. Linux, Darwin).
 HOST_PLATFORM = platform.system()
-HOST_PLATFORM_ARCH = platform.system() + "-" + platform.processor()
 
 # PyTorch directory root
 try:
@@ -200,15 +199,13 @@ if __name__ == "__main__":
     config = json.load(open(args.config_json))
     config = config[args.linter]
 
-    # Allow processor specific binaries for platform (namely Intel and M1 binaries for MacOS)
-    host_platform = HOST_PLATFORM if HOST_PLATFORM in config else HOST_PLATFORM_ARCH
     # If the host platform is not in platform_to_hash, it is unsupported.
-    if host_platform not in config:
-        logging.error(f"Unsupported platform: {HOST_PLATFORM}/{HOST_PLATFORM_ARCH}")
+    if HOST_PLATFORM not in config:
+        logging.error(f"Unsupported platform: {HOST_PLATFORM}")
         exit(1)
 
-    url = config[host_platform]["download_url"]
-    hash = config[host_platform]["hash"]
+    url = config[HOST_PLATFORM]["download_url"]
+    hash = config[HOST_PLATFORM]["hash"]
 
     ok = download(args.output_name, args.output_dir, url, hash)
     if not ok:

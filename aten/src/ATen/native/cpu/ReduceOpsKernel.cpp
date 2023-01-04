@@ -228,6 +228,9 @@ static void norm_kernel_tensor_iterator_impl(
     return;
   }
 
+  bool use_fast_path = is_reduce_lastdim(iter) && iter.dtype(0) == iter.input_dtype()
+      && (iter.input_dtype() == kFloat || iter.input_dtype() == kBFloat16);
+
   // In the dispatch code blocks below, reduction kernels accumulate results as
   // the type `acc_t`. When `scalar_t` is complex, `acc_t` is the downgraded
   // real number type. Otherwise, `acc_t` and `scalar_t` are the same type.
@@ -250,14 +253,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == 2) {
-    // If we can vectorize over the last dimension and the dtype
-    // of the output is the same as that of the input,
-    // then we go through the vectorised path.
-    if (is_reduce_lastdim(iter) &&
-        iter.dtype(0) == iter.input_dtype() &&
-        (iter.input_dtype() == kFloat ||
-         iter.input_dtype() == kDouble ||
-         iter.input_dtype() == kBFloat16)) {
+    if (use_fast_path) {
       AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
         // use float as accumulate type for BFloat16
         using acc_t = vec_scalar_t<scalar_t>;
