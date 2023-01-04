@@ -1,10 +1,8 @@
 # Owner(s): ["module: functorch"]
-from functools import wraps
 import typing
 import unittest
 
 from torch.testing._internal.common_utils import (
-    _TestParametrizer,
     TestCase,
     run_tests,
     instantiate_parametrized_tests,
