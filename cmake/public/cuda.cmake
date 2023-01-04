@@ -294,27 +294,12 @@ if(CAFFE2_USE_CUDNN)
     TARGET caffe2::cudnn-private PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
-    set_property(
-      TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
-      ${CUDNN_LIBRARY_PATH})
-    set_property(
-      TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+    target_link_libraries(caffe2::cudnn-private INTERFACE ${CUDNN_LIBRARY_PATH}
       "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
     # Add explicit dependency on cublas to cudnn
     get_target_property(__tmp caffe2::cublas INTERFACE_LINK_LIBRARIES)
-    set_property(
-      TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-      "${__tmp}")
-    # Lines below use target_link_libraries because we support cmake 3.5+.
-    # For cmake 3.13+, target_link_options to set INTERFACE_LINK_OPTIONS would be better.
-    # https://cmake.org/cmake/help/v3.5/command/target_link_libraries.html warns
-    # "Item names starting with -, but not -l or -framework, are treated as linker flags.
-    #  Note that such flags will be treated like any other library link item for purposes
-    #  of transitive dependencies, so they are generally safe to specify only as private
-    #  link items that will not propagate to dependents."
-    # Propagating to a dependent (torch_cuda) is exactly what we want here, so we are
-    # flouting the warning, but I can't think of a better (3.5+ compatible) way.
-    target_link_libraries(caffe2::cudnn-private INTERFACE
+    target_link_libraries(caffe2::cudnn-private INTERFACE "${__tmp}")
+    target_link_options(caffe2::cudnn-private INTERFACE
         "-Wl,--exclude-libs,libcudnn_static.a")
   else()
   set_property(
