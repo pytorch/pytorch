@@ -2,7 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
-#include <math.h>
+#include <cmath>
 #include <ATen/native/cuda/Loops.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
