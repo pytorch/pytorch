@@ -21,6 +21,8 @@ from time import sleep, time
 from typing import Any, Callable, Dict, List
 
 import torch
+
+from torch.hub import _Faketqdm, tqdm
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
 
@@ -411,6 +413,13 @@ class CppCodeCache:
                 global _libgomp
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
                 return cdll.LoadLibrary(path)
+            if "failed to map segment from shared object" in str(e):
+                raise OSError(
+                    f"{e}.  The most common reason this may occur is if the /tmp folder "
+                    "is mounted with noexec (e.g., by default Docker mounts tmp file systems "
+                    "as noexec).  Please remount /tmp with exec enabled, or set another "
+                    "temporary directory with TORCHINDUCTOR_CACHE_DIR environment variable."
+                ) from e
             raise
 
     @classmethod
@@ -595,7 +604,7 @@ class AsyncCompile:
         if hasattr(pool, "_start_queue_management_thread"):
             pool._start_queue_management_thread()
         else:
-            for i in range(config.compile_threads):
+            for _ in range(config.compile_threads):
                 pool._adjust_process_count()
             pool._start_executor_manager_thread()
         _compile_end()
@@ -633,10 +642,26 @@ class AsyncCompile:
         return self.submit(task)
 
     def wait(self, scope: Dict[str, Any]):
+        num_kernels = len(
+            [
+                value
+                for key, value in scope.items()
+                if isinstance(value, (Future, TritonFuture))
+            ]
+        )
+        pbar = tqdm(
+            total=num_kernels,
+            desc="Inductor Compilation",
+            disable=config.disable_progress,
+            delay=0,
+        )
         if config.compile_threads > 1:
-            for key, result in list(scope.items()):
+            for key, result in scope.items():
+                if config.verbose_progress and not isinstance(pbar, _Faketqdm):
+                    pbar.set_postfix_str(key)
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
+                    pbar.update(1)
 
         _compile_end()
 
