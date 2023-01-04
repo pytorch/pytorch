@@ -115,6 +115,7 @@ class AttrSource(Source):
 
     def __init__(self, base, member):
         super().__init__()
+        assert base, "Can't construct an AttrSource without a valid base source"
         if "." in member:
             member_parts = member.split(".")
             self.base = AttrSource(base, ".".join(member_parts[:-1]))
