@@ -692,7 +692,7 @@ Tensor ones_like(
   // It would make sense to call empty_like(self).fill_(1),
   // but empty_like for COO, unlike for sparse compressed,
   // returns empty tensors and does not allocate any memory.
-  if (layout == kSparse) {
+  if ((layout.has_value() && *layout == kSparse) || (!layout.has_value() && self.layout() == kSparse)) {
     if (self.layout() == kSparse) {
       TORCH_CHECK(self.is_coalesced(),
           "ones_like(Sparse): requires coalesced inputs. Please, call .coalesce() first.");
