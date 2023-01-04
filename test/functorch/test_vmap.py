@@ -26,7 +26,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     subtest,
     TEST_WITH_UBSAN,
-    TEST_WITH_ASAN
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -43,7 +42,6 @@ from common_utils import (
     generate_vmap_inputs,
     compute_quantities_for_vmap_test,
     is_valid_inplace_sample_input,
-    expectedFailureIf,
     decorate
 )
 import types
@@ -3543,6 +3541,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('bitwise_left_shift', device_type='cpu'),
         xfail('bitwise_right_shift', device_type='cpu'),
         xfail('narrow_copy', device_type='cpu'),
+
+        # UBSAN: runtime error: shift exponent -1 is negative
+        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3721,7 +3722,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Greatest relative difference: 2.9177700113052603 at index (0, 3) (up to 0.0001 allowed)
         xfail('narrow_copy', device_type='cpu'),
         # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
-        decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "expects contiguous inputs"))
+        decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error"))
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
