@@ -262,12 +262,12 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
   return dst;
 }
 
-ops::vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
+vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
   TORCH_CHECK(
       src.device().type() == at::kCPU,
       "Vulkan to_vulkan(): input tensor must be a CPU tensor!")
 
-  ops::vTensor v_ret{
+  vTensor v_ret{
       api::context(),
       src.sizes(),
       src.scalar_type(),
@@ -280,7 +280,7 @@ ops::vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
   return v_ret;
 }
 
-at::Tensor from_vulkan(ops::vTensor& v_src) {
+at::Tensor from_vulkan(vTensor& v_src) {
   at::TensorOptions opt(at::kCPU);
   opt = opt.dtype(v_src.dtype());
 
