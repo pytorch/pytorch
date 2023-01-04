@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("@//third_party:substitution.bzl", "template_rule")
+load("@pytorch//third_party:substitution.bzl", "template_rule")
 
 licenses(["notice"])  # Apache 2.0
 

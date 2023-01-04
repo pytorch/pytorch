@@ -92,6 +92,19 @@ class MemoryPlanningState:
         self.reuse_pool[key].append(item)
 
 
+@dataclasses.dataclass
+class EnterCudaDeviceContextManagerLine:
+    device_idx: int
+
+    def codegen(self, code: IndentedBuffer):
+        code.writeline(f"with torch.cuda.device({self.device_idx}):")
+
+
+class ExitCudaDeviceContextManagerLine:
+    def codegen(self, code: IndentedBuffer):
+        pass
+
+
 class MemoryPlanningLine:
     def plan(self, state: MemoryPlanningState) -> "MemoryPlanningLine":
         """First pass to find reuse"""
@@ -428,6 +441,12 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.write_reuse_line(input_buffer, output_buffer)
 
+    def codegen_cuda_device_guard_enter(self, device_idx):
+        self.lines.append(EnterCudaDeviceContextManagerLine(device_idx))
+
+    def codegen_cuda_device_guard_exit(self):
+        self.lines.append(ExitCudaDeviceContextManagerLine())
+
     def generate_return(self, output_refs):
         if output_refs:
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
@@ -477,9 +496,15 @@ class WrapperCodeGen(CodeGen):
                 if isinstance(self.lines[i], MemoryPlanningLine):
                     self.lines[i] = self.lines[i].plan(planning_state)
 
+            device_cm_stack = contextlib.ExitStack()
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
                     line.codegen(self.wrapper_call)
+                elif isinstance(line, EnterCudaDeviceContextManagerLine):
+                    line.codegen(self.wrapper_call)
+                    device_cm_stack.enter_context(self.wrapper_call.indent())
+                elif isinstance(line, ExitCudaDeviceContextManagerLine):
+                    device_cm_stack.close()
                 else:
                     self.wrapper_call.writeline(line)
 
@@ -509,7 +534,7 @@ class WrapperCodeGen(CodeGen):
                 f"{name} = rand_strided("
                 f"{V.graph.sizevars.codegen_benchmark_shape_tuple(shape)}, "
                 f"{V.graph.sizevars.codegen_benchmark_shape_tuple(stride)}, "
-                f"device='{device.type}', dtype={dtype})"
+                f"device='{device}', dtype={dtype})"
             )
 
         output.writelines(["", "", 'if __name__ == "__main__":'])
@@ -612,21 +637,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 output_types = "void"
 
+            inputs_types = "std::vector<at::Tensor>"
+            self.wrapper_call.writeline(
+                f"{output_types} call_{self._call_func_id}({inputs_types} args) {{"
+            )
             if inputs_len != 0:
-                inputs_args = ["at::Tensor&"] * len(V.graph.graph_inputs.keys())
-                inputs_args = ", ".join(inputs_args)
-                inputs_args = f"std::tuple<{inputs_args}>"
-
-                self.wrapper_call.writeline(
-                    f"{output_types} call_{self._call_func_id}({inputs_args} args) {{"
-                )
                 inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
                 self.wrapper_call.writeline(f"at::Tensor {inputs_keys_str};")
-                self.wrapper_call.writeline(f"std::tie({inputs_keys_str}) = args;")
-            else:
-                self.wrapper_call.writeline(
-                    f"{output_types} call_{self._call_func_id}(std::tuple<> args) {{"
-                )
+                for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
+                    self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
+
             for name in V.graph.randomness_seeds:
                 self.wrapper_call.writeline(f"at::Tensor {name};")
                 self.wrapper_call.writeline(

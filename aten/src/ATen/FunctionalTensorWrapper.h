@@ -248,8 +248,8 @@ TORCH_API void setFunctionalizationReapplyViewsTLS(bool reapply_views);
 
 class TORCH_API FunctionalizationReapplyViewsGuard {
  public:
-  FunctionalizationReapplyViewsGuard(bool reapply_views) {
-    prev_ = getFunctionalizationReapplyViewsTLS();
+  FunctionalizationReapplyViewsGuard(bool reapply_views)
+      : prev_(getFunctionalizationReapplyViewsTLS()) {
     setFunctionalizationReapplyViewsTLS(reapply_views);
   }
 

@@ -5,12 +5,14 @@
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 class HasRand : public IRVisitor {
  public:
-  HasRand(StmtPtr stmt) : stmt_(stmt) {
+  HasRand(StmtPtr stmt) : stmt_(std::move(stmt)) {
     stmt_->accept(this);
   }
 
@@ -113,7 +115,7 @@ class BufFinder : public IRVisitor {
 class WritesToBuf : public IRVisitor {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  WritesToBuf(BufPtr target) : target_(target) {}
+  WritesToBuf(BufPtr target) : target_(std::move(target)) {}
 
   std::vector<StmtPtr> writes() {
     return writes_;
@@ -145,7 +147,7 @@ class WritesToBuf : public IRVisitor {
 class StmtsReadingBuf : public IRVisitor {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  StmtsReadingBuf(BufPtr target) : target_(target) {}
+  StmtsReadingBuf(BufPtr target) : target_(std::move(target)) {}
 
   std::vector<StmtPtr> reads() {
     return reads_;
@@ -160,7 +162,7 @@ class StmtsReadingBuf : public IRVisitor {
  private:
   bool readsBuffer(StmtPtr s) {
     auto loads = NodeFinder<Load>::find(s);
-    for (auto l : loads) {
+    for (const auto& l : loads) {
       if (l->buf() == target_) {
         return true;
       }
@@ -227,7 +229,7 @@ class ExternalAllocBufFinder : public IRVisitor {
 // Traverses the IR to determine if a particular Var is modified within it.
 class ModifiesVarChecker : public IRVisitor {
  public:
-  ModifiesVarChecker(VarPtr v) : var_(v) {}
+  ModifiesVarChecker(VarPtr v) : var_(std::move(v)) {}
 
   static bool check(StmtPtr s, VarPtr v) {
     ModifiesVarChecker checker(v);
@@ -281,7 +283,7 @@ class ModifiesVarChecker : public IRVisitor {
 // stmt in block stmts that access to the buf.
 class BufLiveRange : public IRVisitor {
  public:
-  BufLiveRange(BufPtr b) : buf_(b) {}
+  BufLiveRange(BufPtr b) : buf_(std::move(b)) {}
 
   static std::tuple<int32_t, int32_t> liveRange(StmtPtr s, BufPtr b) {
     BlockPtr block = to<Block>(s);
@@ -302,22 +304,22 @@ class BufLiveRange : public IRVisitor {
 
   bool hasBufReads(StmtPtr s) {
     auto loads1 = NodeFinder<Load>::find(s);
-    for (auto l : loads1) {
+    for (const auto& l : loads1) {
       if (l->buf() == buf_) {
         return true;
       }
     }
     auto loads2 = NodeFinder<ExternalCall>::find(s);
-    for (auto l : loads2) {
-      for (auto lb : l->buf_args()) {
+    for (const auto& l : loads2) {
+      for (const auto& lb : l->buf_args()) {
         if (lb == buf_) {
           return true;
         }
       }
     }
     auto loads3 = NodeFinder<ExternalCallWithAlloc>::find(s);
-    for (auto l : loads3) {
-      for (auto lb : l->buf_args()) {
+    for (const auto& l : loads3) {
+      for (const auto& lb : l->buf_args()) {
         if (lb == buf_) {
           return true;
         }
@@ -328,20 +330,20 @@ class BufLiveRange : public IRVisitor {
 
   bool hasBufWrites(StmtPtr s) {
     auto writes1 = NodeFinder<Store>::find(s);
-    for (auto w : writes1) {
+    for (const auto& w : writes1) {
       if (w->buf() == buf_) {
         return true;
       }
     }
     auto writes2 = NodeFinder<ExternalCall>::find(s);
-    for (auto w : writes2) {
+    for (const auto& w : writes2) {
       if (w->buf() == buf_) {
         return true;
       }
     }
     auto writes3 = NodeFinder<ExternalCallWithAlloc>::find(s);
-    for (auto w : writes3) {
-      for (auto wb : w->buf_out_args()) {
+    for (const auto& w : writes3) {
+      for (const auto& wb : w->buf_out_args()) {
         if (wb == buf_) {
           return true;
         }
@@ -360,8 +362,8 @@ class BufLiveRange : public IRVisitor {
     }
   }
 
-  void visit(BlockPtr v) {
-    for (StmtPtr s : *v) {
+  void visit(BlockPtr v) override {
+    for (const StmtPtr& s : *v) {
       curr_index_ += 1;
       findAccAndUpdateLiveRange(s);
     }

@@ -20,9 +20,9 @@ CanonicalArgVec cannonicalizeVec(
   for (auto& arg : arg_vec) {
     if (const IValue* iv = c10::get_if<IValue>(&arg)) {
       if (deep_copy) {
-        canonical_args.push_back(iv->deepcopy());
+        canonical_args.emplace_back(iv->deepcopy());
       } else {
-        canonical_args.push_back(*iv);
+        canonical_args.emplace_back(*iv);
       }
     } else {
       auto& ss = c10::get<at::SymbolicShape>(arg);
@@ -38,7 +38,7 @@ std::vector<CanonicalizedSymbolicShape> cannonicalizeVec(
   std::vector<CanonicalizedSymbolicShape> canonical_rets;
   canonical_rets.reserve(ret_vec.size());
   for (auto& ss : ret_vec) {
-    canonical_rets.emplace_back(CanonicalizedSymbolicShape(ss, ss_map));
+    canonical_rets.emplace_back(ss, ss_map);
   }
   return canonical_rets;
 }

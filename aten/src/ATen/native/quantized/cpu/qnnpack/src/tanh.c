@@ -110,7 +110,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_tanh_nc_q8(
     /* Scale tanh(x) by 1 / output scale = 128.0
        Also, offset by the zero_point from the scaled value, as we assume UINT8
     */
-    float scaled_tanh_x = 128.0f * tanh(x) + 128.0f;
+    float scaled_tanh_x = 128.0f * tanhf(x) + 128.0f;
     if (scaled_tanh_x < scaled_min) {
       scaled_tanh_x = scaled_min;
     }

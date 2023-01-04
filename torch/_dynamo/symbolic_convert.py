@@ -1577,10 +1577,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
-        self._fake_mode = torch._subclasses.FakeTensorMode(
-            throw_on_data_dependent_ops=True,
-            shape_env=output.shape_env,
-        )
+        self._fake_mode = output.tracing_context.fake_mode
 
         self.checkpoint = None
         self.random_calls = []

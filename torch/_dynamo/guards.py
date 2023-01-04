@@ -15,7 +15,14 @@ import sympy
 
 import torch
 
-from torch._guards import Guard, GuardBuilderBase, GuardSource
+from torch._guards import (
+    DuplicateInputs,
+    Guard,
+    GuardBuilderBase,
+    GuardEnvExpr,
+    GuardSource,
+    Source,
+)
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -77,11 +84,13 @@ class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
         id_ref: Callable[[Type[object]], str],
+        source_ref: Callable[[Source], str],
         scope: Optional[Dict[str, object]],
         guarded_code: "CheckFunctionManager",
         renames=True,
     ):
         self.id_ref = id_ref
+        self.source_ref = source_ref
         if scope:
             if renames:
                 scope = {rename_implicit(k): v for k, v in scope.items()}
@@ -91,6 +100,11 @@ class GuardBuilder(GuardBuilderBase):
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
         self.code: List[str] = []
+        # shape_env_code is only used by local_builder and is used for
+        # shape env code.  This exists only because we need to make sure
+        # shape env guards get run after tensor match guards (since the
+        # tensor match guards make sure we actually have tensors)
+        self.shape_env_code: List[str] = []
 
         # Most of the time, we generate Python code in a guard to directly
         # check various properties.  However, tensors are a bit special;
@@ -110,9 +124,20 @@ class GuardBuilder(GuardBuilderBase):
         # TODO: tf is this naming
         self.guarded_code: CheckFunctionManager = guarded_code
 
+    # Warning: use this with care!  This lets you access what the current
+    # value of the value you are guarding on is.  You probably don't want
+    # to actually durably save this value though (because it's specific
+    # to this frame!)  Instead, you should be reading out some property
+    # (like its type) which is what you permanently install into the
+    # guard code.
     def get(self, name: str) -> Any:
         return eval(name, self.scope, CLOSURE_VARS)
 
+    # Registers the usage of the source name referenced by the
+    # string (or stored in the Guard) as being guarded upon.  It's important
+    # to call this before generating some code that makes use of 'guard',
+    # because without this call, we won't actually bind the variable
+    # you reference in the actual guard closure (oops!)
     def arg_ref(self, guard: Union[str, Guard]) -> str:
         name: str
         if isinstance(guard, str):
@@ -343,11 +368,21 @@ class GuardBuilder(GuardBuilderBase):
             code = "not ___is_grad_enabled()"
         self._produce_guard_code(guard, [code])
 
-    # This is a bit of a crutch for export case for symbolic shape guards.
-    # SYMBOL_MATCH is only ever, and must only ever, be used for setting this value on
-    # the create_fn field for tracking guards in export.
-    def SYMBOL_MATCH(self, guard: Guard):
-        raise AssertionError("this should not actually be called")
+    def SHAPE_ENV(self, guard: Guard):
+        # Let's handle ShapeEnv guards.  To do this, we will resolve
+        # shape variables to sources from tracked_fakes.  This must happen after
+        # tensor checks.
+        assert guard.name == ""
+        output_graph = self.guarded_code.output_graph
+        # NB: self.output_graph can be None in the debug_nops tests
+        fs = output_graph.tracked_fakes
+        code = output_graph.shape_env.codegen_guards(
+            [a.fake for a in fs],
+            [a.source for a in fs],
+            source_ref=self.source_ref,
+        )
+        if code != "True":
+            self._produce_guard_code(guard, [code], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -375,7 +410,9 @@ class GuardBuilder(GuardBuilderBase):
             )
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
-    def _produce_guard_code(self, guard, code_list, provided_guarded_object=None):
+    def _produce_guard_code(
+        self, guard, code_list, provided_guarded_object=None, shape_env=False
+    ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
         # than they should.  See TestMisc.test_release_module_memory
@@ -391,7 +428,10 @@ class GuardBuilder(GuardBuilderBase):
             self.__class__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
-        self.code.extend(code_list)
+        if shape_env:
+            self.shape_env_code.extend(code_list)
+        else:
+            self.code.extend(code_list)
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
@@ -450,10 +490,28 @@ class CheckFunctionManager:
 
             return {**left, **right}
 
+        def source_ref(source):
+            guard_source = source.guard_source()
+            if guard_source is GuardSource.CONSTANT:
+                # No need to track constants
+                return source.name()
+            builder = guard_source.select(w_local(), w_global())
+            assert builder is not None
+            return builder.arg_ref(source.name())
+
         local_builder = GuardBuilder(
-            self.id_ref, combine_scopes(f_globals, f_locals), self, renames=True
+            self.id_ref,
+            source_ref,
+            combine_scopes(f_globals, f_locals),
+            self,
+            renames=True,
         )
-        global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
+        global_builder = GuardBuilder(
+            self.id_ref, source_ref, f_globals, self, renames=False
+        )
+        # source_ref can cause a cycle, make sure we break it with weakref
+        w_local = weakref.ref(local_builder)
+        w_global = weakref.ref(global_builder)
         for guard in sorted(guards or [], key=Guard.sort_key):
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
@@ -506,33 +564,34 @@ class CheckFunctionManager:
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
-        # Let's handle ShapeEnv guards.  To do this, we will resolve
-        # shape variables to sources from GraphArgs.  This must happen after
-        # tensor checks.
-        # NB: self.output_graph can be None in the debug_nops tests
-        if self.output_graph and self.output_graph.shape_env:
-            # NB: use orig_graphargs, as we can have created guards for
-            # inputs that are ultimately unused in the graph, but we
-            # are still on the hook for guarding on them (because, e.g.,
-            # Dynamo may have gone down a different conditional branch
-            # because of it.)
-            graphargs = self.output_graph.orig_graphargs
-            expr_as_str = self.output_graph.shape_env.codegen_guards(
-                [a.fake_tensor for a in graphargs if a.is_tensor],
-                [a.source.name() for a in graphargs if a.is_tensor],
-            )
-            if expr_as_str != "True":
-                code_parts.append(expr_as_str)
-                verbose_code_parts.append(expr_as_str)
-                # TODO: this is a hack
-                guards_out.add(
-                    Guard(
-                        name="symbolic_shape_expression",
-                        source=GuardSource.SHAPE_ENV,
-                        create_fn=GuardBuilder.SYMBOL_MATCH,
-                        code_list=expr_as_str,
-                    )
-                )
+        aotautograd_guards: List[GuardEnvExpr] = (
+            self.output_graph.tracing_context.guards_context.aotautograd_guards
+            if self.output_graph
+            else []
+        )
+        for guard in aotautograd_guards:
+            if isinstance(guard, DuplicateInputs):
+                pos_a = guard.input_pos_a
+                pos_b = guard.input_pos_b
+                assert pos_b < len(self.output_graph.graphargs) and pos_a < len(
+                    self.output_graph.graphargs
+                ), "Deduped args out of bounds"
+                assert self.output_graph.graphargs[
+                    pos_a
+                ].is_tensor, "Deduped arg must be a tensor"
+                assert self.output_graph.graphargs[
+                    pos_b
+                ].is_tensor, "Deduped arg must be a tensor"
+
+                code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
+                code_parts.append(code_part)
+                verbose_code_parts.append(code_part)
+            else:
+                raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
+
+        code_parts.extend(local_builder.shape_env_code)
+        verbose_code_parts.extend(local_builder.shape_env_code)
+        assert not global_builder.shape_env_code
 
         def direct_equality(a, b):
             return a == b
@@ -569,6 +628,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
+        guard_fn.args = largs
         guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
         guard_fn.global_scope = global_builder.scope
@@ -632,6 +692,11 @@ def guard_error_hook(
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"
     )
+    # TODO: If we passed in the exception here, we could get a precise
+    # column number of which subexpression failed.  But that would also
+    # require us to have the TRUE code that was eval'ed, not a shoddy
+    # reconstruction (like is done here)
+    print("lambda " + ", ".join(guard_fn.args) + ":")
     print(" ", " and\n  ".join(guard_fn.code_parts))
 
 
