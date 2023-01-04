@@ -1415,11 +1415,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_round_robin(self):
         num_process_groups = 2
         store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
         pg = c10d._round_robin_process_groups(
             [
-                self._create_process_group_gloo(
-                    c10d.PrefixStore(str(i), store), self.rank, self.world_size, self.opts()
-                )
+                c10d.new_group(pg_options=self.opts())
                 for i in range(num_process_groups)
             ]
         )
@@ -1434,13 +1433,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_round_robin_create_destroy(self):
         store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
 
         def create(num, prefix):
             return c10d._round_robin_process_groups(
                 [
-                    self._create_process_group_gloo(
-                        c10d.PrefixStore("%s/%d" % (prefix, i), store), self.rank, self.world_size, self.opts()
-                    )
+                    c10d.new_group(pg_options=self.opts())
                     for i in range(num)
                 ]
             )
