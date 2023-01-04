@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("@//third_party:substitution.bzl", "header_template_rule")
+load("@pytorch//third_party:substitution.bzl", "header_template_rule")
 
 LIBUV_COMMON_SRCS = [
     "third_party/libuv/src/fs-poll.c",
