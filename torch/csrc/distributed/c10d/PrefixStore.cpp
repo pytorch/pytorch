@@ -1,11 +1,10 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <utility>
 
 namespace c10d {
 
-PrefixStore::PrefixStore(
-    const std::string& prefix,
-    c10::intrusive_ptr<Store> store)
-    : prefix_(prefix), store_(store) {}
+PrefixStore::PrefixStore(std::string prefix, c10::intrusive_ptr<Store> store)
+    : prefix_(std::move(prefix)), store_(std::move(store)) {}
 
 std::string PrefixStore::joinKey(const std::string& key) {
   return prefix_ + "/" + key;

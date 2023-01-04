@@ -32,6 +32,10 @@ NodeGuard::~NodeGuard() {
   current_evaluating_node = std::move(last_evaluating_node_);
 }
 
+std::shared_ptr<Node> get_current_node() {
+  return current_evaluating_node;
+}
+
 void Node::assign_parent() {
   metadata()->assign_parent(current_evaluating_node);
 }
@@ -100,7 +104,7 @@ void deleteNode(Node* function) {
 }
 
 namespace {
-bool kAutogradFunctionExtensionEnabled = false;
+bool kAutogradFunctionExtensionEnabled = true;
 }
 
 bool isAutogradFunctionExtensionEnabled() {
