@@ -1,14 +1,14 @@
 import os
 import textwrap
 from functools import lru_cache
-
+import tempfile
 from . import config
 
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
     @lru_cache(None)
     def _record_missing_op(target):
-        with open("/tmp/missing_ops.txt", "a") as fd:
+        with open(f"{tempfile.gettempdir()}/missing_ops.txt", "a") as fd:
             fd.write(str(target) + "\n")
 
 else:
