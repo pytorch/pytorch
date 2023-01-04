@@ -72,6 +72,17 @@ view_as_complex_batch_rule(const Tensor& self, optional<int64_t> self_bdim) {
 }
 
 std::tuple<Tensor,optional<int64_t>>
+linalg_vander_batch_rule(const Tensor& self, optional<int> N, optional<int64_t> self_bdim) {
+  // guard against the user passing in a batch of scalar tensors with batch
+  // size equal to 2.
+  TORCH_CHECK(self.sizes().size() > 1, "Input tensor must have one or more dimensions");
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto result = torch.linalg.vander(self_, N);
+  return std::make_tuple(result, 0);
+}
+
+std::tuple<Tensor,optional<int64_t>>
 to_other_batch_rule(const Tensor& self, optional<int64_t> self_bdim,
                     const Tensor& other, optional<int64_t> other_bdim,
                     bool non_blocking,
@@ -92,6 +103,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE(real);
   UNARY_POINTWISE(view_as_real);
   VMAP_SUPPORT(view_as_complex, view_as_complex_batch_rule);
+  VMAP_SUPPORT(torch.linalg.vander, linalg_vander_batch_rule);
   VMAP_SUPPORT(clone, clone_batch_rule);
   VMAP_SUPPORT2(to, device, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, device)));
   VMAP_SUPPORT2(to, dtype, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, dtype)));
