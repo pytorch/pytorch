@@ -158,7 +158,10 @@ std::vector<int> normalizeOld2New(
 // Warning: Removes connection of reference through provided Expr.
 // Warning: Creates new Expr connecting substitue.
 // Reference is found through direct pointer comparison.
-Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute);
+TORCH_CUDA_CU_API Expr* replaceValInExpr(
+    Expr* expr,
+    Val* reference,
+    Val* substitute);
 
 //! Replace Vals in an index Val as specified by replacement_map while
 //! cloning the given index Val. The index val is assumed to represent
