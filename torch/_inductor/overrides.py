@@ -19,8 +19,7 @@ from torch.overrides import TorchFunctionMode
 
 from . import config
 
-from .mkldnn import mkldnn_fuse_fx
-from .mkldnn_utils import matches_module_function_pattern
+from .mkldnn import mkldnn_fuse_fx, matches_module_function_pattern
 
 log = logging.getLogger(__name__)
 

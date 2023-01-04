@@ -20,6 +20,34 @@ from torch.nn.modules.utils import _pair
 from .mkldnn_utils import matches_module_function_pattern
 
 
+# check the pattern: (nn.module, F.function) matched.
+def matches_module_function_pattern(pattern, node, modules):
+    if len(node.args) == 0:
+        return False
+    if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
+        node, torch.fx.Node
+    ):
+        return False
+    # the first node is call_module
+    if node.args[0].op != "call_module":
+        return False
+    if not isinstance(node.args[0].target, str):
+        return False
+    if node.args[0].target not in modules:
+        return False
+    if type(modules[node.args[0].target]) is not pattern[0]:
+        return False
+    # the second node is call_function
+    if node.op != "call_function":
+        return False
+    if node.target != pattern[1]:
+        return False
+    # make sure node.args[0] output is only used by current node.
+    if len(node.args[0].users) > 1:
+        return False
+    return True
+
+
 class UnaryAttr(object):
     def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
         self.op_name = op_name
