@@ -1,6 +1,8 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import argparse
+from torch.onnx._internal import _fx as fx_onnx
+import onnx
 
 """
 
@@ -61,27 +63,32 @@ def run_model(model, inputs, tokenizer):
 
 
 # Export to ONNX
-def run_onnx_export(model, inputs, tokenizer):
-    torch.onnx.export(
-        model,
-        (inputs["input_ids"], {"attention_mask": inputs["attention_mask"]}),
-        "bloom.onnx",
-        opset_version=14,
-        do_constant_folding=True,
-        input_names=["input_ids", "attention_mask"],
-        output_names=["output"],
-    )
-
+def run_ort(model_path, inputs):
     import onnxruntime
 
-    ort_session = onnxruntime.InferenceSession("bloom.onnx")
-    outs = ort_session.run(
+    ort_session = onnxruntime.InferenceSession(model_path)
+    return ort_session.run(
         None,
         {
             "input_ids": inputs["input_ids"].cpu().numpy(),
             "attention_mask": inputs["attention_mask"].cpu().numpy(),
         },
     )
+
+# Export to ONNX
+def run_onnx_export(model, inputs, tokenizer):
+    save_model_path = "bloom.onnx"
+    torch.onnx.export(
+        model,
+        (inputs["input_ids"], {"attention_mask": inputs["attention_mask"]}),
+        save_model_path,
+        opset_version=14,
+        do_constant_folding=True,
+        input_names=["input_ids", "attention_mask"],
+        output_names=["output"],
+    )
+
+    outs = run_ort(save_model_path, inputs)
 
     token_id = outs[0][0][-1].argmax()
     answer = tokenizer.decode([token_id])
@@ -94,6 +101,8 @@ def run_onnx_export(model, inputs, tokenizer):
 
 
 # Inference in dynamo
+# NOTE: only work with '--no_large_model_support'.
+# See https://github.com/pytorch/torchdynamo/issues/1998
 def run_dynamo(model, inputs, tokenizer):
     from torch import _dynamo as torchdynamo
 
@@ -103,8 +112,18 @@ def run_dynamo(model, inputs, tokenizer):
 
 
 # Export to ONNX via dynamo
+# NOTE: Same as above, only work with '--no_large_model_support'.
+# TODO: Missing `aten.copy_.default`, and maybe more.
 def run_dynamo_onnx(model, inputs, tokenizer):
-    raise NotImplementedError("TODO: Implement this.")
+    save_model_path = "bloom_dynamo.onnx"
+    onnx_model = fx_onnx.export_without_kwargs(model, **inputs, use_binary_format=False)
+    onnx.save(onnx_model, save_model_path)
+
+    outs = run_ort(save_model_path, inputs)
+
+    token_id = outs[0][0][-1].argmax()
+    answer = tokenizer.decode([token_id])
+    print(f"{sentence}\n{answer}")
 
 
 if __name__ == "__main__":
