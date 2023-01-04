@@ -15,7 +15,6 @@ import pickle
 import warnings
 from typing import Any, Dict, List, Set, Tuple, Union, Callable
 
-
 import torch
 import torch._jit_internal as _jit_internal
 from torch.utils import set_module
@@ -1251,6 +1250,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         return obj
     if isinstance(obj, ScriptFunction):
         return obj
+    if isinstance(obj, torch._dynamo.eval_frame.OptimizedModule):
+        raise AttributeError("it is not possible to torch.jit.trace() a torch.compile() model")
+
 
     if example_inputs:
         # If MonkeyType is installed, enable profile directed type annotation
