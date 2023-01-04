@@ -17,6 +17,10 @@
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #endif
 
+#ifdef USE_MPS
+#include <ATen/mps/MPSGeneratorImpl.h>
+#endif
+
 using namespace at;
 using namespace torch;
 
@@ -52,25 +56,24 @@ static PyObject* THPGenerator_pynew(
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
 
   THPGeneratorPtr self((THPGenerator*)type->tp_alloc(type, 0));
-#ifdef USE_CUDA
   if (device.type() == at::kCPU) {
     self->cdata = make_generator<CPUGeneratorImpl>();
-  } else if (device.type() == at::kCUDA) {
+  }
+#ifdef USE_CUDA
+  else if (device.type() == at::kCUDA) {
     self->cdata = make_generator<CUDAGeneratorImpl>(device.index());
-  } else {
+  }
+#elif USE_MPS
+  else if (device.type() == at::kMPS) {
+    self->cdata = make_generator<MPSGeneratorImpl>();
+  }
+#endif
+  else {
     AT_ERROR(
         "Device type ",
         c10::DeviceTypeName(device.type()),
         " is not supported for torch.Generator() api.");
   }
-#else
-  TORCH_CHECK(
-      device.type() == at::kCPU,
-      "Device type ",
-      c10::DeviceTypeName(device.type()),
-      " is not supported for torch.Generator() api.");
-  self->cdata = make_generator<CPUGeneratorImpl>();
-#endif
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }
@@ -92,11 +95,10 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
   using namespace torch::autograd;
 
   HANDLE_TH_ERRORS
-  if (!THPVariable_Check(_new_state)) {
-    throw torch::TypeError(
-        "expected a torch.ByteTensor, but got %s",
-        Py_TYPE(_new_state)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      THPVariable_Check(_new_state),
+      "expected a torch.ByteTensor, but got ",
+      Py_TYPE(_new_state)->tp_name);
   auto self = (THPGenerator*)_self;
   auto& gen = self->cdata;
   const auto& new_state_tensor = THPVariable_Unpack(_new_state);
