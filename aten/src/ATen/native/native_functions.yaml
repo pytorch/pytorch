@@ -1069,6 +1069,7 @@
   dispatch:
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
+    MPS: _bincount_mps
   tags: dynamic_output_shape
   autogen: bincount.out
 
