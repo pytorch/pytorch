@@ -1280,6 +1280,83 @@ class TestTransformers(NNTestCase):
         model(x, x, x)
         # completes without error
 
+    @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
+    def test_unaligned_tensors(self):
+        device = 'cuda'
+        dtype = torch.float16
+        size = (2, 2, 8, 5)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        with sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=False):
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
+
+    @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
+    def test_flash_fail_fp32t(self):
+        device = 'cuda'
+        dtype = torch.float
+        size = (16, 16, 32, 32)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
+
+    @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
+    def test_flash_autocast_fp32_float16(self):
+        device = 'cuda'
+        dtype = torch.float
+        size = (16, 16, 32, 32)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        with torch.autocast(device_type='cuda', dtype=torch.float16):
+            with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
+                _ = torch.nn.functional._scaled_dot_product_attention(
+                    q, k, v, None, 0.0, False, False)
+
+    @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
+    def test_flash_autocast_fp32_bfloat16(self):
+        device = 'cuda'
+        dtype = torch.float
+        size = (16, 16, 32, 32)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
+                _ = torch.nn.functional._scaled_dot_product_attention(
+                    q, k, v, None, 0.0, False, False)
+
+    @parametrize("device", device_list)
+    @slowTest
+    def test_train_with_is_causal(self, device):
+        iters = 100
+        layer = nn.TransformerEncoderLayer(
+            d_model=2,
+            dim_feedforward=4,
+            nhead=2,
+            batch_first=True,
+            activation="gelu",
+            dropout=0,
+        )
+        criterion = nn.MSELoss()
+        encoder = nn.TransformerEncoder(layer, 2).to(device)
+        optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
+        encoder.train()
+        for i in range(iters):
+            encoder.train()
+            optimizer.zero_grad()
+            inputs = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
+
+            outputs = encoder(inputs, is_causal=True)
+
+            loss = criterion(outputs[:, 0:2, :], inputs[:, 0:2, :])
+            loss.backward()
+            optimizer.step()
+
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.

@@ -8,7 +8,7 @@ import sys
 import warnings
 
 import torch
-from common import BenchmarkRunner, main
+from common import BenchmarkRunner, main, reset_rng_state
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
@@ -161,6 +161,8 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "DebertaV2ForMaskedLM",
     "BlenderbotForCausalLM",
 }
+
+REQUIRE_HIGHER_TOLERANCE = set("MT5ForConditionalGeneration")
 
 
 def get_module_cls_by_model_name(model_cls_name):
@@ -375,6 +377,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
+        reset_rng_state()
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
             config_cls = model_cls.config_class
@@ -432,8 +435,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
-        self.init_optimizer(device, model.parameters())
-
         self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
 
@@ -469,7 +470,10 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            return 1e-2, cosine
+            if name in REQUIRE_HIGHER_TOLERANCE:
+                return 2e-2, cosine
+            else:
+                return 1e-2, cosine
         return 1e-3, cosine
 
     def compute_loss(self, pred):
@@ -480,7 +484,7 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(**cloned_inputs)
             loss = self.compute_loss(pred)

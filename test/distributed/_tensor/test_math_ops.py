@@ -1,17 +1,18 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import itertools
+
 import torch
-from torch.testing._internal.common_utils import run_tests
 
 from torch.distributed._tensor import distribute_tensor
-from torch.distributed._tensor.placement_types import Shard, Replicate
+from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    with_comms,
     skip_unless_torch_gpu,
+    with_comms,
 )
-import itertools
 
 
 class DistMathOpsTest(DTensorTestBase):
@@ -33,14 +34,10 @@ class DistMathOpsTest(DTensorTestBase):
                 dt_dim_sumed_tensor = mat1.sum(*sum_args).redistribute(
                     device_mesh, [Replicate()] * device_mesh.ndim
                 )
-                self.assertEqual(
-                    dt_dim_sumed_tensor.to_local(), dim_sumed_tensor
-                )
+                self.assertEqual(dt_dim_sumed_tensor.to_local(), dim_sumed_tensor)
 
         full_sumed_tensor = tensor_to_sum.sum()
-        dt_sum = mat1.sum().redistribute(
-            device_mesh, [Replicate()] * device_mesh.ndim
-        )
+        dt_sum = mat1.sum().redistribute(device_mesh, [Replicate()] * device_mesh.ndim)
         self.assertEqual(dt_sum.to_local(), full_sumed_tensor)
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
@@ -89,9 +86,7 @@ class DistMathOpsTest(DTensorTestBase):
 
         for params in test_list:
             softmax_dim, shard_dim = params
-            x = torch.rand(
-                8, 12, 16, device=self.device_type, requires_grad=True
-            )
+            x = torch.rand(8, 12, 16, device=self.device_type, requires_grad=True)
             self.assertTrue(x.requires_grad)
             local_y = torch.nn.functional.softmax(
                 x, dim=softmax_dim, dtype=torch.float32
@@ -107,18 +102,14 @@ class DistMathOpsTest(DTensorTestBase):
                     dist_softmax = dist_x.softmax(dim=softmax_dim)
             else:
                 dist_softmax = dist_x.softmax(dim=softmax_dim)
-                self.assertTrue(
-                    dist_softmax.placements[0].is_shard(dim=shard_dim)
-                )
+                self.assertTrue(dist_softmax.placements[0].is_shard(dim=shard_dim))
                 dist_y = dist_softmax.sum()
                 dist_y = dist_y.redistribute(device_mesh, [Replicate()])
                 self.assertEqual(dist_y.to_local(), local_y)
                 self.assertIsNone(dist_x.grad)
                 dist_y.backward()
                 self.assertIsNotNone(dist_x.grad)
-                dist_x_grad = dist_x.grad.redistribute(
-                    device_mesh, [Replicate()]
-                )
+                dist_x_grad = dist_x.grad.redistribute(device_mesh, [Replicate()])
                 self.assertEqual(dist_x_grad.to_local(), x.grad)
 
 

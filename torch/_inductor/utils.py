@@ -1,15 +1,17 @@
 import collections
 import contextlib
 import functools
+import math
 import operator
 import os
 import tempfile
+import textwrap
 import time
 from importlib import import_module
-from typing import Any, Dict, List
+from io import StringIO
+from typing import Any, Dict, List, Optional
 from unittest import mock
 
-import numpy as np
 import sympy
 
 import torch
@@ -55,83 +57,6 @@ def has_torchvision_roi_align():
 
 def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
-
-
-def do_bench(
-    fn,
-    warmup=25,
-    rep=100,
-    grad_to_none=None,
-    percentiles=(0.5, 0.2, 0.8),
-    record_clocks=False,
-    fast_flush=False,
-):
-    """
-    Benchmark the runtime of the provided function. By default, return the median runtime of :code:`fn` along with
-    the 20-th and 80-th performance percentile.
-
-    :param fn: Function to benchmark
-    :type fn: Callable
-    :param warmup: Warmup time (in ms)
-    :type warmup: int
-    :param rep: Repetition time (in ms)
-    :type rep: int
-    :param grad_to_none: Reset the gradient of the provided tensor to None
-    :type grad_to_none: torch.tensor, optional
-    :param percentiles: Performance percentile to return in addition to the median.
-    :type percentiles: list[float]
-    :param fast_flush: Use faster kernel to flush L2 between measurements
-    :type fast_flush: bool
-    """
-
-    # Estimate the runtime of the function
-    fn()
-    torch.cuda.synchronize()
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-    start_event.record()
-    for _ in range(5):
-        fn()
-    end_event.record()
-    torch.cuda.synchronize()
-    estimate_ms = start_event.elapsed_time(end_event) / 5
-    # compute number of warmup and repeat
-    n_warmup = max(1, int(warmup / estimate_ms))
-    n_repeat = max(1, int(rep / estimate_ms))
-    # We maintain a buffer of 256 MB that we clear
-    # before each kernel call to make sure that the L2
-    # doesn't contain any input data before the run
-    start_event = [torch.cuda.Event(enable_timing=True) for i in range(n_repeat)]
-    end_event = [torch.cuda.Event(enable_timing=True) for i in range(n_repeat)]
-    if fast_flush:
-        cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
-    else:
-        cache = torch.empty(int(256e6), dtype=torch.int8, device="cuda")
-    # Warm-up
-    for _ in range(n_warmup):
-        fn()
-    # Benchmark
-    for i in range(n_repeat):
-        # we don't want `fn` to accumulate gradient values
-        # if it contains a backward pass. So we clear the
-        # provided gradients
-        if grad_to_none is not None:
-            for x in grad_to_none:
-                x.grad = None
-        # we clear the L2 cache before each run
-        cache.zero_()
-        # record time of `fn`
-        start_event[i].record()
-        fn()
-        end_event[i].record()
-    # Record clocks
-    torch.cuda.synchronize()
-    times = torch.tensor([s.elapsed_time(e) for s, e in zip(start_event, end_event)])
-    if percentiles:
-        percentiles = torch.quantile(times, torch.tensor(percentiles)).tolist()
-        return tuple(percentiles)
-    else:
-        return torch.mean(times).item()
 
 
 def sympy_product(it):
@@ -194,8 +119,8 @@ def timed(model, example_inputs, times=1):
 
 
 def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
-    timings = [timed(fn, args, times) for _ in range(repeat)]
-    took = np.median(timings)
+    timings = torch.tensor([timed(fn, args, times) for _ in range(repeat)])
+    took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took
 
@@ -258,14 +183,20 @@ def cache_on_self(fn):
 def get_fused_kernel_name(node_schedule):
     return "_".join(
         ["fused"]
-        + [
-            str(origin.name)
-            for origin in functools.reduce(
-                operator.or_,
-                [node.node.origins for node in node_schedule if hasattr(node, "node")],
-            )
-            if origin.op == "call_function"
-        ][0 : config.kernel_name_max_ops]
+        + sorted(
+            [
+                str(origin.name)
+                for origin in functools.reduce(
+                    operator.or_,
+                    [
+                        node.node.origins
+                        for node in node_schedule
+                        if hasattr(node, "node")
+                    ],
+                )
+                if origin.op == "call_function"
+            ]
+        )[0 : config.kernel_name_max_ops]
     )
 
 
@@ -374,9 +305,130 @@ def fresh_inductor_cache(cache_entries=None):
 
 
 def argsort(seq):
-    return sorted(range(len(seq)), key=seq.__getitem__)
+    # preserve original order for equal strides
+    return list(reversed(sorted(range(len(seq)), key=seq.__getitem__, reverse=True)))
 
 
 @functools.lru_cache(8)
 def get_dtype_size(dtype):
     return torch.empty((), dtype=dtype).element_size()
+
+
+class IndentedBuffer:
+    tabwidth = 4
+
+    def __init__(self, initial_indent=0):
+        self._lines = []
+        self._indent = initial_indent
+
+    def getvalue(
+        self,
+    ):
+        buf = StringIO()
+        for line in self._lines:
+            if isinstance(line, DeferredLineBase):
+                line = line()
+                if line is None:
+                    continue
+            assert isinstance(line, str)
+            buf.write(line)
+            buf.write("\n")
+        return buf.getvalue()
+
+    def getrawvalue(self):
+        buf = StringIO()
+        for line in self._lines:
+            if isinstance(line, DeferredLineBase):
+                line = line()
+                if line is None:
+                    continue
+            assert isinstance(line, str)
+            # backslash implies line continuation
+            if line.endswith("\\"):
+                buf.write(line[:-1])
+            else:
+                buf.write(line)
+                buf.write("\n")
+        return buf.getvalue()
+
+    def clear(self):
+        self._lines.clear()
+
+    def __bool__(self):
+        return bool(self._lines)
+
+    def prefix(self):
+        return " " * (self._indent * self.tabwidth)
+
+    def writeline(self, line):
+        if isinstance(line, DeferredLineBase):
+            self._lines.append(line.with_prefix(self.prefix()))
+        elif line.strip():
+            self._lines.append(f"{self.prefix()}{line}")
+        else:
+            self._lines.append("")
+
+    def writelines(self, lines):
+        for line in lines:
+            self.writeline(line)
+
+    def indent(self, offset=1):
+        @contextlib.contextmanager
+        def ctx():
+            self._indent += offset
+            yield
+            self._indent -= offset
+
+        return ctx()
+
+    def splice(self, other_code, strip=False):
+        if isinstance(other_code, IndentedBuffer):
+            dedent = float("inf")
+            for line in other_code._lines:
+                if line:
+                    dedent = min(dedent, len(line) - len(line.lstrip()))
+            if math.isinf(dedent):
+                dedent = 0
+            for line in other_code._lines:
+                IndentedBuffer.writeline(self, line[dedent:])
+        else:
+            other_code = textwrap.dedent(other_code)
+            if strip:
+                other_code = other_code.lstrip()
+            if not other_code:
+                return
+            other_code = other_code.rstrip()
+            for line in other_code.split("\n"):
+                self.writeline(line)
+
+
+class DeferredLineBase:
+    """A line that can be 'unwritten' at a later time"""
+
+    def __init__(self, line):
+        if not line.strip():
+            line = ""
+        self.line = line
+
+    def __call__(self) -> Optional[str]:
+        """Returns either self.line or None to indicate the line has been 'unwritten'"""
+        raise NotImplementedError()
+
+    def _new_line(self, line: str) -> "DeferredLineBase":
+        """Returns a new deferred line with the same condition"""
+        raise NotImplementedError()
+
+    def with_prefix(self, prefix):
+        return self._new_line(f"{prefix}{self.line}")
+
+    def lstrip(self):
+        return self._new_line(self.line.lstrip())
+
+    def __getitem__(self, index):
+        return self._new_line(self.line[index])
+
+    def __bool__(self):
+        return bool(self.line)
+
+    def __len__(self):
+        return len(self.line)

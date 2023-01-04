@@ -2008,6 +2008,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
   }
 
+  bool initialized() override {
+    return device_allocator.size() > 0;
+  }
+
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
     TORCH_INTERNAL_ASSERT(

@@ -159,6 +159,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         monitor_interval=1.0,
         role="test_trainer",
         local_world_size=8,
+        local_addr=None,
     ):
         run_id = str(uuid.uuid4().int)
         port = get_free_port()
@@ -180,6 +181,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
             rdzv_handler=rdzv_handler,
             max_restarts=max_restarts,
             monitor_interval=monitor_interval,
+            local_addr=local_addr,
         )
         return spec
 
@@ -315,6 +317,30 @@ class SimpleElasticAgentTest(unittest.TestCase):
                 local_world_size * group_rank + w.local_rank, w.global_rank
             )
             self.assertSetEqual(set(range(w.world_size)), rank_set)
+
+    def test_rendezvous_default_master_addr(self):
+        spec = self._get_worker_spec(max_restarts=1)
+        agent = TestAgent(spec)
+        worker_group = agent.get_worker_group()
+        agent._rendezvous(worker_group)
+
+        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
+
+        self.assertEqual(_get_fq_hostname(), master_addr)
+        self.assertGreater(master_port, 0)
+
+    def test_rendezvous_master_addr_with_local_addr(self):
+        spec_local_addr = "1.2.3.4"
+        spec = self._get_worker_spec(max_restarts=1, local_addr=spec_local_addr)
+        agent = TestAgent(spec)
+        worker_group = agent.get_worker_group()
+        agent._rendezvous(worker_group)
+
+        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
+
+        self.assertNotEqual(_get_fq_hostname(), master_addr)
+        self.assertEqual(spec_local_addr, master_addr)
+        self.assertGreater(master_port, 0)
 
     def test_initialize_workers(self):
         spec = self._get_worker_spec(max_restarts=1)

@@ -50,7 +50,7 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
     case DeviceType::IPU:
       return lower_case ? "ipu" : "IPU";
     case DeviceType::PrivateUse1:
-      return get_privateuse1_backend(/*lowercase=*/lower_case);
+      return get_privateuse1_backend(/*lower_case=*/lower_case);
     default:
       TORCH_CHECK(
           false,

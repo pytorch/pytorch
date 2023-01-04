@@ -109,17 +109,50 @@ class ShapeProp(torch.fx.Interpreter):
 
     Args:
          module (GraphModule): The module to be executed
+         fake_mode (FakeTensorMode): A fake mode for copying the gm
 
     """
+    def __init__(self, gm, fake_mode=None):
+        super().__init__(gm)
+        if fake_mode is not None:
+            from torch._dynamo.utils import deepcopy_to_fake_tensor
+            # Note:
+            # We need fake execution cause the inputs are fake, however, we cannot fakify the module
+            # - because we need to write to the tensor_meta of the real module. So we fakify to
+            # produce a result (L131 below), to extract tensor meta, and then keep going.
+            #
+            # If we were to fakify, we would write to the wrong node, and then downstream fusion
+            # would be missing the tensor_meta.
+            #
+            # See torch/_inductor/overrides.py for where this is called upstream of fusion.
+            self.fake_module = deepcopy_to_fake_tensor(self.module, fake_mode)
+            self.fake_mode = fake_mode
+        else:
+            self.fake_module = None
+            self.fake_mode = None
+
+        self.real_module = self.module
+
     def run_node(self, n : Node) -> Any:
         try:
-            result = super().run_node(n)
-        except Exception:
+            if self.fake_module is not None:
+                # Hacky swap. Alternatively, we could do this with overriding
+                # call_module and get_attr.
+                self.module = self.fake_module
+            try:
+                if self.fake_mode is not None:
+                    with self.fake_mode:
+                        result = super().run_node(n)
+                else:
+                    result = super().run_node(n)
+            finally:
+                self.module = self.real_module
+        except Exception as e:
             traceback.print_exc()
             raise RuntimeError(
                 f"ShapeProp error for: node={n.format_node()} with "
                 f"meta={n.meta}"
-            )
+            ) from e
 
         found_tensor = False
 
