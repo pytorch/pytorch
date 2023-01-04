@@ -4105,10 +4105,26 @@ class TestSparseAny(TestCase):
                     nontrivial_blocksize = 1 not in blocksize
                 else:
                     nontrivial_blocksize = None
-                tested_combinations.add((t.layout, is_hybrid, is_batch, nontrivial_blocksize))
+                if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                    contiguous_indices = t.crow_indices().is_contiguous() and t.col_indices().is_contiguous()
+                    contiguous_values = t.values().is_contiguous()
+                elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+                    contiguous_indices = t.ccol_indices().is_contiguous() and t.row_indices().is_contiguous()
+                    contiguous_values = t.values().is_contiguous()
+                elif t.layout is torch.sparse_coo:
+                    contiguous_indices = t._indices().is_contiguous()
+                    contiguous_values = t._values().is_contiguous()
+                else:
+                    contiguous_indices = None
+                    contiguous_values = t.is_contiguous()
+
+                tested_combinations.add((t.layout, is_hybrid, is_batch, nontrivial_blocksize,
+                                         contiguous_indices, contiguous_values))
 
         # Ensure that the inputs generation covers all layout,
-        # non-hybrid/hybrid, and non-batch/batch combinations:
+        # non-hybrid/hybrid, non-batch/batch, and contiguity
+        # combinations:
+        untested_combinations = set()
         for layout in layouts:
             for is_hybrid in [False, True]:
                 if layout is torch.strided:
@@ -4119,8 +4135,43 @@ class TestSparseAny(TestCase):
                     for nontrivial_blocksize in [False, True]:
                         if layout not in {torch.sparse_bsr, torch.sparse_bsc}:
                             nontrivial_blocksize = None
-                        key = (layout, is_hybrid, is_batch, nontrivial_blocksize)
-                        assert key in tested_combinations, key
+                        for contiguous_indices in [False, True]:
+                            if layout is torch.strided:
+                                contiguous_indices = None
+                            elif not is_batch:
+                                # indices are contiguous per-patch
+                                contiguous_indices = True
+                            for contiguous_values in [False, True]:
+                                key = (layout, is_hybrid, is_batch, nontrivial_blocksize,
+                                       contiguous_indices, contiguous_values)
+                                if key not in tested_combinations:
+                                    untested_combinations.add(
+                                        f'layout={layout}, is_hybrid={is_hybrid}, is_batch={is_batch},'
+                                        f' nontrivial_blocksize={nontrivial_blocksize},'
+                                        f' contiguous_indices{contiguous_indices}, contiguous_values={contiguous_values}')
+        assert not untested_combinations, untested_combinations
+
+    @all_sparse_layouts('from_layout', include_strided=False)
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    def test_to_dense(self, from_layout, device, dtype, index_dtype):
+        """
+        This test tests conversion from any layout to any sparse layout.
+        """
+        for t in self.generate_simple_inputs(
+                from_layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            is_hybrid = t.dense_dim() > 0
+
+            # TODO: The following exception cases all correspond to
+            # not implemented conversions
+            if is_hybrid and from_layout is not torch.sparse_coo:
+                with self.assertRaisesRegex(RuntimeError, "sparse_compressed_to_dense: Hybrid tensors are not supported"):
+                    t.to_dense()
+
+            else:
+                r = t.to_dense()
+                self.assertEqual(r.layout, torch.strided)
+                self.assertEqual(r, t)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)
