@@ -3451,7 +3451,7 @@ class TestSparse(TestSparseBase):
             a_grad, b_grad = test_grad_dense(a, b, g)
 
             # We convert grad to dense since dense and sparse mm
-            # implementation handle materialized zeroes differently.
+            # implementations handle materialized zeroes differently.
             self.assertEqual(a.grad.to_dense(), a_grad.to_dense())
             self.assertEqual(b.grad.to_dense(), b_grad.to_dense())
 
