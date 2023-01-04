@@ -629,12 +629,6 @@ class BuiltinVariable(VariableTracker):
         return variables.ConstantVariable(val)
 
     def call_super(self, tx, a, b):
-        if not a.source:
-            print(a)
-            breakpoint()
-        if not b.source:
-            print(b)
-            breakpoint()
         return variables.SuperVariable(a, b, source=SuperSource(a.source, b.source))
 
     def call_next(self, tx, arg):
