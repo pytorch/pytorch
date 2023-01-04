@@ -28,7 +28,6 @@ class SuperVariable(VariableTracker):
         self.typevar = typevar
         self.objvar = objvar
         self.specialized = specialized  # directly get attr from self.typevar if true
-        assert self.source is not None
 
     def reconstruct(self, codegen):
         codegen(variables.BuiltinVariable(super))
