@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import operator
 from typing import Dict, List
 from unittest.mock import patch
 
@@ -1469,6 +1470,73 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         gm, _ = torch._dynamo.export(f, *inp, aten_graph=True, tracing_mode="symbolic")
 
         self.assertEqual(gm(*inp), f(*inp))
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing(self):
+        def f(x):
+            return x[: x.shape[0] - 2, x.shape[1] - 1 :: 2]
+
+        gm_aten_mode, _ = torch._dynamo.export(
+            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        inp = torch.randn(6, 7)
+        self.assertEqual(gm_aten_mode(inp).shape, f(inp).shape)
+
+        count = 0
+        # aten graph should flatten getitem calls to actual
+        # slice kernel call.
+        for node in gm_aten_mode.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.slice.Tensor
+            ):
+                count += 1
+
+        self.assertEqual(count, 2)
+
+        gm_torch_mode, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=False)
+
+        # In torch mode, the graph should contain 3 getitem methods
+        # one for x.shape[0]-2 and one for x.shape[1]-1 and one for slice
+        # this is because Tensor class has its' own getitem method
+        # which gets translated to aten.Slice later.
+        count = 0
+        for node in gm_torch_mode.graph.nodes:
+            if node.op == "call_function" and node.target == operator.getitem:
+                count += 1
+
+        self.assertEqual(count, 3)
+        self.assertEqual(gm_torch_mode(inp).shape, f(inp).shape)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing_invalid(self):
+        def g(x, y):
+            return x[y : x.shape[0]]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamic slicing on data-dependent value is not supported",
+        ):
+            torch._dynamo.export(
+                g,
+                torch.randn(4, 5),
+                torch.tensor(2),
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing_simple(self):
+        def f(x):
+            return x[slice(None, None, None)]
+
+        gm, _ = torch._dynamo.export(
+            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        inp = torch.randn(6, 7)
+        self.assertEqual(gm(inp), f(inp))
 
 
 if __name__ == "__main__":
