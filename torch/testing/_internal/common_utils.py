@@ -338,7 +338,7 @@ class parametrize(_TestParametrizer):
         name_fn (Callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
+        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',') if s != '']
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -371,7 +371,7 @@ class parametrize(_TestParametrizer):
         if len(self.arg_names) == 0:
             # No additional parameters needed for the test.
             test_name = ''
-            yield (test, test_name, {})
+            yield (test, test_name, {}, lambda _: [])
         else:
             # Each "values" item is expected to be either:
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
@@ -406,8 +406,6 @@ class parametrize(_TestParametrizer):
                 }
 
                 test_name = self._get_subtest_name(values, explicit_name=maybe_name)
-                if '.' in test_name:
-                    raise RuntimeError('Test name cannot contain periods, but got: {}'.format(test_name))
 
                 def decorator_fn(_, decorators=decorators):
                     return decorators

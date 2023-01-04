@@ -1626,6 +1626,49 @@ class TestTestParametrizationDeviceType(TestCase):
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
+    def test_empty_param_names(self, device):
+        # If no param names are passed, ensure things still work without parametrization.
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("", [])
+            def test_foo(self, device):
+                pass
+
+            @parametrize("", range(5))
+            def test_bar(self, device):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_bar_{}',
+            '{}.test_foo_{}')
+        ]
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
+
+    def test_empty_param_list(self, device):
+        # If no param values are passed, ensure a helpful error message is thrown.
+        # In the wild, this could indicate reuse of an exhausted generator.
+        device = self.device_type
+
+        generator = (a for a in range(5))
+
+        class TestParametrized(TestCase):
+            @parametrize("x", generator)
+            def test_foo(self, device, x):
+                pass
+
+            # Reuse generator from first test function.
+            @parametrize("y", generator)
+            def test_bar(self, device, y):
+                pass
+
+        with self.assertRaisesRegex(ValueError, 'An empty arg_values was passed'):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
     def test_default_names(self, device):
         device = self.device_type
 

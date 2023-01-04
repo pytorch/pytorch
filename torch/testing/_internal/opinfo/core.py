@@ -105,7 +105,11 @@ class DecorateInfo(object):
             and (self.device_type is None or self.device_type == device_type)
             and (self.dtypes is None or dtype in self.dtypes)
             # Support callables over kwargs to determine if the decorator is active.
-            and (self.active_if(param_kwargs) if isinstance(self.active_if, Callable) else self.active_if)
+            and (
+                self.active_if(param_kwargs)
+                if isinstance(self.active_if, Callable)
+                else self.active_if
+            )
         )
 
 
@@ -1208,7 +1212,9 @@ class OpInfo(object):
         result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
-                if decorator.is_active(test_class, test_name, device, dtype, param_kwargs):
+                if decorator.is_active(
+                    test_class, test_name, device, dtype, param_kwargs
+                ):
                     result.extend(decorator.decorators)
             else:
                 result.append(decorator)
