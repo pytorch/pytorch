@@ -1041,7 +1041,7 @@ jobs:
             export TCLLIBPATH="/usr/local/lib"
 
             # Install conda
-            curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+            curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-py39_4.12.0-MacOSX-x86_64.sh
             chmod +x ~/conda.sh
             /bin/bash ~/conda.sh -b -p ~/anaconda
             export PATH="~/anaconda/bin:${PATH}"
@@ -1447,27 +1447,4 @@ workflows:
             branches:
               only:
                 - postnightly
-      - pytorch_ios_build:
-          build_environment: ios-12-5-1-x86-64
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
-          ios_arch: x86_64
-          ios_platform: SIMULATOR
-          lite_interpreter: "1"
-          name: ios-12-5-1-x86-64
-      - pytorch_ios_build:
-          build_environment: ios-12-5-1-x86-64-coreml
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
-          ios_arch: x86_64
-          ios_platform: SIMULATOR
-          lite_interpreter: "1"
-          name: ios-12-5-1-x86-64-coreml
-          use_coreml: "1"
     when: << pipeline.parameters.run_build >>
