@@ -704,12 +704,8 @@ Tensor ones_like(
         device,
         pin_memory,
         /*non_blocking=*/false,
-        /*copy=*/false,
+        /*copy=*/true,
         optional_memory_format);
-
-    if (result.is_same(self)) {
-      result = result.clone();
-    }
 
     result.values().fill_(1.);
     return result;
