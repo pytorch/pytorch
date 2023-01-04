@@ -91,6 +91,7 @@
 #include <ATen/ops/zeros_like_native.h>
 #include <ATen/ops/zeros_like_ops.h>
 #include <ATen/ops/zeros_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #endif
 
 #include <c10/core/SymIntArrayRef.h>
@@ -688,6 +689,28 @@ Tensor ones_like(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // kSparse is complicated.
+  // It would make sense to call empty_like(self).fill_(1),
+  // but empty_like for COO, unlike for sparse compressed,
+  // return empty tensors and does not allocate any memory.
+  if (layout == kSparse) {
+    TORCH_CHECK(self.is_coalesced(),
+        "ones_like(Sparse): requires coalesced inputs. Please, call .coalesce() first.");
+    auto result = self.to(
+        dtype,
+        layout,
+        device,
+        pin_memory,
+        /*non_blocking=*/false,
+        /*copy=*/false,
+        optional_memory_format);
+    if (result.is_same(self)) {
+      result = result.clone();
+    }
+    result.values().fill_(1.);
+    return result;
+  }
+
   auto result = at::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
   return result.fill_(1.);
 }
