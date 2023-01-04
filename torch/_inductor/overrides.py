@@ -18,8 +18,9 @@ from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from torch.overrides import TorchFunctionMode
 
 from . import config
+from .fx_utils import matches_module_function_pattern
 
-from .mkldnn import matches_module_function_pattern, mkldnn_fuse_fx
+from .mkldnn import mkldnn_fuse_fx
 
 log = logging.getLogger(__name__)
 
