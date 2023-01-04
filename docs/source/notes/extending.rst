@@ -51,14 +51,15 @@ effect, consider registering a
 How to use
 ^^^^^^^^^^
 Take the following steps:
-1. Subclass :class:`~Function` and implement the :meth:`~Function.forward` and
+1. Subclass :class:`~Function` and implement the :meth:`~Function.forward`,
+(optional) ``setup_context`` and
 :meth:`~Function.backward` methods.
 2. Call the proper methods on the `ctx` argument.
 3. Declare whether your function supports
 `double backward <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_.
 4. Validate whether your gradients are correct using gradcheck.
 
-**Step 1:** After subclassing :class:`Function`, you'll need to define 2 methods:
+**Step 1:** After subclassing :class:`Function`, you'll need to define 3 methods:
 
 - :meth:`~Function.forward` is the code that performs the operation. It can take
   as many arguments as you want, with some of them being optional, if you
@@ -72,6 +73,14 @@ Take the following steps:
   tensors if there are multiple outputs. Also, please refer to the
   docs of :class:`Function` to find descriptions of useful methods that can be
   called only from :meth:`~Function.forward`.
+- ``setup_context`` (optional). One can either write a "combined" :meth:`~Function.forward` that
+  accepts a ``ctx`` object or (as of PyTorch 2.0) a separate :meth:`~Function.forward` that does
+  not accept ``ctx`` and a ``setup_context`` method where the ``ctx`` modification happens.
+  The :meth:`~Function.forward` should have the compute and ``setup_context`` should
+  only be responsible for the ``ctx`` modification (and not have any compute).
+  In general the separate :meth:`~Function.forward` and ``setup_context`` is closer to how
+  PyTorch native operations work and therefore more composable with various PyTorch subsystems.
+  See :ref:`combining-forward-context` for more details.
 - :meth:`~Function.backward` (or :meth:`~Function.vjp`) defines the gradient formula.
   It will be given as many :class:`Tensor` arguments as there were outputs, with each
   of them representing gradient w.r.t. that output. It is important NEVER to modify
@@ -84,7 +93,7 @@ Take the following steps:
   arguments to :meth:`~Function.forward` you can return more gradients than there
   were inputs, as long as they're all :any:`python:None`.
 
-**Step 2:** It is your responsibility to use the functions in the forward's `ctx`
+**Step 2:** It is your responsibility to use the functions in ``ctx``
 properly in order to ensure that the new :class:`Function` works properly with
 the autograd engine.
 
@@ -123,21 +132,26 @@ finite-differencing.
 Example
 ^^^^^^^
 
-Below you can find code for a ``Linear`` function from :mod:`torch.nn`, with
+Below you can find code for a ``Linear`` function, with
 additional comments::
 
     # Inherit from Function
     class LinearFunction(Function):
 
-        # Note that both forward and backward are @staticmethods
+        # Note that forward, setup_context, and backward are @staticmethods
         @staticmethod
-        # bias is an optional argument
-        def forward(ctx, input, weight, bias=None):
-            ctx.save_for_backward(input, weight, bias)
+        def forward(input, weight, bias):
             output = input.mm(weight.t())
             if bias is not None:
                 output += bias.unsqueeze(0).expand_as(output)
             return output
+
+        @staticmethod
+        # inputs is a Tuple of all of the inputs passed to forward.
+        # output is the output of the forward().
+        def setup_context(ctx, inputs, output):
+            input, weight, bias = inputs
+            ctx.save_for_backward(input, weight, bias)
 
         # This function has only a single output, so it gets only one gradient
         @staticmethod
@@ -163,21 +177,31 @@ additional comments::
 
             return grad_input, grad_weight, grad_bias
 
-Now, to make it easier to use these custom ops, we recommend aliasing their
-``apply`` method::
+Now, to make it easier to use these custom ops, we recommend either aliasing
+them or wrapping them in a function. Wrapping in a function lets us support
+default arguments and keyword arguments::
 
+    # Option 1: alias
     linear = LinearFunction.apply
+
+    # Option 2: wrap in a function, to support default args and keyword args.
+    def linear(input, weight, bias=None):
+        return LinearFunction.apply(input, weight, bias)
 
 Here, we give an additional example of a function that is parametrized by
 non-Tensor arguments::
 
     class MulConstant(Function):
         @staticmethod
-        def forward(ctx, tensor, constant):
+        def forward(tensor, constant):
+            return tensor * constant
+
+        @staticmethod
+        def setup_context(ctx, inputs, output):
             # ctx is a context object that can be used to stash information
             # for backward computation
+            tensor, constant = inputs
             ctx.constant = constant
-            return tensor * constant
 
         @staticmethod
         def backward(ctx, grad_output):
@@ -189,10 +213,14 @@ And here, we optimize the above example by calling set_materialize_grads(False):
 
     class MulConstant(Function):
         @staticmethod
-        def forward(ctx, tensor, constant):
+        def forward(tensor, constant):
+            return tensor * constant
+
+        @staticmethod
+        def setup_context(ctx, inputs, output):
+            tensor, constant = inputs
             ctx.set_materialize_grads(False)
             ctx.constant = constant
-            return tensor * constant
 
         @staticmethod
         def backward(ctx, grad_output):
@@ -204,6 +232,43 @@ And here, we optimize the above example by calling set_materialize_grads(False):
             # We return as many input gradients as there were arguments.
             # Gradients of non-Tensor arguments to forward must be None.
             return grad_output * ctx.constant, None
+
+If you need any "intermediate" Tensors computed in :meth:`~Function.forward` to be saved,
+either they must be returned as outputs, or combine ``forward`` and ``setup_context``
+(see :ref:`combining-forward-context`).
+Note that this means if you want gradients to flow through those intermediate values, you
+need to define the gradient formula for them (see also
+`the double backward tutorial <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_
+)::
+
+    class MyCube(torch.autograd.Function):
+        @staticmethod
+        def forward(x):
+            # We wish to save dx for backward. In order to do so, it must
+            # be returned as an output.
+            dx = 3 * x ** 2
+            result = x ** 3
+            return result, dx
+
+        @staticmethod
+        def setup_context(ctx, inputs, output):
+            x, = inputs
+            result, dx = output
+            ctx.save_for_backward(x, dx)
+
+        @staticmethod
+        def backward(ctx, grad_output, grad_dx):
+            x, dx = ctx.saved_tensors
+            # In order for the autograd.Function to work with higher-order
+            # gradients, we must add the gradient contribution of `dx`,
+            # which is grad_dx * 6 * x.
+            result = grad_output * dx + grad_dx * 6 * x
+            return result
+
+    # Wrap MyCube in a function so that it is clearer what the output is
+    def my_cube(x):
+        result, dx = MyCube.apply(x)
+        return result
 
 .. note::
     Inputs to ``backward``, i.e., :attr:`grad_output`, can also be tensors that
@@ -233,6 +298,55 @@ See :ref:`grad-check` for more details on finite-difference gradient comparisons
 If your function is used in higher order derivatives (differentiating the backward pass) you
 can use the ``gradgradcheck`` function from the same package to check higher order derivatives.
 
+.. _combining-forward-context:
+
+Combined or separate :meth:`~Function.forward` and ``setup_context``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+There are two main ways to define :class:`~Function`. Either:
+
+- define a :meth:`~Function.forward` that combines the forward compute logic with ``setup_context``
+- (as of PyTorch 2.0) define a separate :meth:`~Function.forward` and ``setup_context``.
+
+We recommend the second option (separate :meth:`~Function.forward` and ``setup_context``)
+because that is closer to how PyTorch native operations are implemented and it composes
+with :mod:`torch.func` transforms. However, we plan to support both approaches going forward;
+combining :meth:`~Function.forward` with ``setup_context``: leads to more flexibility since
+you are able to save intermediates without returning them as output.
+
+Please see the previous section for how to define :class:`~Function` with separate
+:meth:`~Function.forward` and ``setup_context``.
+
+Here is an example of how to define a :class:`Function` with combined :meth:`~Function.forward` and
+``setup_context``::
+
+    class LinearFunction(Function):
+        @staticmethod
+        # ctx is the first argument to forward
+        def forward(ctx, input, weight, bias=None):
+            # The forward pass can use ctx.
+            ctx.save_for_backward(input, weight, bias)
+            output = input.mm(weight.t())
+            if bias is not None:
+                output += bias.unsqueeze(0).expand_as(output)
+            return output
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            input, weight, bias = ctx.saved_tensors
+            grad_input = grad_weight = grad_bias = None
+
+            if ctx.needs_input_grad[0]:
+                grad_input = grad_output.mm(weight)
+            if ctx.needs_input_grad[1]:
+                grad_weight = grad_output.t().mm(input)
+            if bias is not None and ctx.needs_input_grad[2]:
+                grad_bias = grad_output.sum(0)
+
+            return grad_input, grad_weight, grad_bias
+
+.. _forward-ad-autograd-function:
+
 Forward mode AD
 ^^^^^^^^^^^^^^^
 
@@ -260,6 +374,11 @@ method, before the :meth:`~Function.apply` returns.
   always compute gradients for all the outputs.
 - The forward mode gradients do respect the flag set by :meth:`~torch.autograd.function.FunctionCtx.set_materialize_grads`
   and you can get `None` input gradients when this is disabled.
+
+:mod:`torch.func` transforms and/or :func:`torch.vmap`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Please see :ref:`func-autograd-function` for details.
 
 
 Extending :mod:`torch.nn`

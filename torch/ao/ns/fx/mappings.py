@@ -603,6 +603,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.LinearBn1d,
         nniqd.LinearReLU,
         nni.LinearLeakyReLU,
+        nni.LinearTanh,
         nni.ConvAdd2d,
         nni.ConvAddReLU2d,
     ])
@@ -636,6 +637,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniq.ConvReLU3d,
         nniq.LinearReLU,
         nniq.LinearLeakyReLU,
+        nniq.LinearTanh,
         nniq.ConvAdd2d,
         nniq.ConvAddReLU2d,
     ])
