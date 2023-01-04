@@ -1351,7 +1351,7 @@ void min_max_out_mps(const Tensor& input_t,
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = func_name + ":" + to_string(dim_) + ":" + getMPSTypeString(input_t.scalar_type());
+    string key = func_name + getTensorsStringKey({input_t, indices_t}) + ":" + to_string(dim_);
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if (!cachedGraph) {
