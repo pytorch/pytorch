@@ -48,4 +48,5 @@ cc_library(
         ":using_glog": ["@com_github_glog//:glog"],
         "//conditions:default": [],
     }),
+    visibility = ["//visibility:public"],
 )
