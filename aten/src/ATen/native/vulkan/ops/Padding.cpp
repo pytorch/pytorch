@@ -13,7 +13,7 @@ using namespace api::utils;
 Tensor pad2d(
     const Tensor& self_arg,
     IntArrayRef padding,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   const int pad_dim = padding.size();
   const IntArrayRef input_size = self_arg.sizes();
   const int input_dim = input_size.size();
