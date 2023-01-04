@@ -71,7 +71,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: chkimes/actions-ssh@v0.1
+        uses: huydhn/actions-ssh@try-remove-sudo
         with:
           sshUser: huydhn
 
