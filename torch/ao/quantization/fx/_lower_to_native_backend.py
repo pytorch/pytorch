@@ -1063,9 +1063,7 @@ def _lower_to_native_backend(
     operator signature so they can be lowered with the same function
     """
     _lower_static_weighted_ref_module(model, qconfig_map)
-    if torch.backends.quantized.engine == 'onednn':
-        # Currently, this pass only works for onednn with conv2d_add and conv2d_add_relu fusion
-        _lower_static_weighted_ref_module_with_two_dq_inputs(model, qconfig_map)
+    _lower_static_weighted_ref_module_with_two_dq_inputs(model, qconfig_map)
     _lower_dynamic_weighted_ref_module(model)
     _lower_weight_only_weighted_ref_module(model)
     _lower_static_weighted_ref_functional(model, qconfig_map)
