@@ -988,13 +988,6 @@ class CppVecKernelChecker(CppVecKernel):
         # The dtype is used for vectorization
         self.vec_dtype: torch.dtype = torch.float32
 
-    def decide_vec_dtype(self):
-        n_store_dtypes = len(self.store_dtypes)
-        if n_store_dtypes == 1:
-            self.vec_dtype = self.store_dtypes[0]
-
-        return self.vec_dtype
-
     def is_indirect_indexing(self, index: sympy.Expr):
         for _load_res in self.load_results:
             # The index expression cotains a value that loads from memory
@@ -1035,16 +1028,6 @@ class CppVecKernelChecker(CppVecKernel):
             self.simd_vec = False
             return var
 
-        def is_mask():
-            user_nodes = current_node.users
-            for __node in user_nodes.keys():
-                _node: torch.fx.Node = __node
-                if _node.target not in ["where", "masked"]:
-                    return False
-            return True
-
-        current_node.meta["is_mask"] = is_mask()
-
         index = self.rename_indexing(index)
         self.simd_vec = self.simd_vec and self.could_vec(name, index)
         return var
@@ -1057,7 +1040,7 @@ class CppVecKernelChecker(CppVecKernel):
 
         store_dtype = torch.float if store_dtype == torch.float32 else store_dtype
         self.store_dtypes.append(store_dtype)
-        if store_dtype not in [torch.float, torch.float32]:
+        if store_dtype not in self.store_supported_dtypes:
             self.simd_vec = False
             return self.simd_vec
 
