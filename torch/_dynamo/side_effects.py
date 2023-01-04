@@ -210,10 +210,13 @@ class SideEffects:
         options,
     ):
         obj = object_new(user_cls)
-        # TODO (whc) is this the right source?
         variable = variable_cls(
             obj,
             mutable_local=AttributeMutationNew(None, cls_source),
+            # TODO(whc) this is a hack, i'm not sure what to do.
+            # we need a valid source if this variable has functions
+            # called on it and those functions have default args we need to guard.
+            # But we're inlining, so what source is valid?
             source=cls_source,
             **options,
         )
