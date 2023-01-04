@@ -1472,6 +1472,7 @@ class ReinterpretView(BaseView):
             return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
         return f"{as_strided}({self.get_name()}, {size}, {stride})"
 
+
 class InplaceView(ReinterpretView):
     def codegen_reference(self):
         size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
@@ -1480,6 +1481,7 @@ class InplaceView(ReinterpretView):
         if offset != "0":
             return f"{self.get_name()}.as_strided_({size}, {stride}, {offset})"
         return f"{self.get_name()}.as_strided_({size}, {stride})"
+
 
 class SliceView(View):
     @classmethod

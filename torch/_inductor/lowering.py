@@ -813,6 +813,7 @@ def unsqueeze_(x, dim):
     new_shape.insert(dim, sympy.Integer(1))
     return TensorBox(View.create(x.data, new_shape, True))
 
+
 def _validate_dim(x, dim, offset=0):
     assert isinstance(dim, int)
     ndim = len(x.get_size())
