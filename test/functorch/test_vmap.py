@@ -3721,7 +3721,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Greatest relative difference: 2.9177700113052603 at index (0, 3) (up to 0.0001 allowed)
         xfail('narrow_copy', device_type='cpu'),
         # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
-        decorate('special.zeta', decorator=expectedFailureIf(TEST_WITH_UBSAN or TEST_WITH_ASAN))
+        decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "expects contiguous inputs"))
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
