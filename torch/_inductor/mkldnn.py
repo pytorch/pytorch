@@ -662,6 +662,7 @@ def fuse_binary(gm: torch.fx.GraphModule):
                         # Make sure the fused node is post node of node's inputs nodes.
                         node.append(node.args[index_node])
                         gm.graph.erase_node(node)
+                        break
     gm.graph.lint()
     gm.recompile()
     return gm
@@ -705,6 +706,7 @@ def fuse_binary_inplace(gm: torch.fx.GraphModule):
                     # Make sure the fused node is post node of node's inputs nodes.
                     node.append(node.args[1])
                     gm.graph.erase_node(node)
+                    break
     gm.graph.lint()
     gm.recompile()
     return gm
