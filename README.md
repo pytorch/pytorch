@@ -251,6 +251,8 @@ This is caused by `ld` from the Conda environment shadowing the system `ld`. You
 
 ```bash
 python3 setup.py develop
+```
+
 **On Windows**
 
 Choose Correct Visual Studio Version.
