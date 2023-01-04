@@ -293,6 +293,7 @@ class Conv1d(_ConvNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> m = nn.quantized.Conv1d(16, 33, 3, stride=2)
         >>> input = torch.randn(20, 16, 100)
         >>> # quantize input to quint8
@@ -401,6 +402,7 @@ class Conv2d(_ConvNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> # With square kernels and equal stride
         >>> m = nn.quantized.Conv2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
@@ -500,6 +502,7 @@ class Conv3d(_ConvNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> # With square kernels and equal stride
         >>> m = nn.quantized.Conv3d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
