@@ -201,14 +201,14 @@ if __name__ == "__main__":
     config = config[args.linter]
 
     # Allow processor specific binaries for platform (namely Intel and M1 binaries for MacOS)
-    platform = HOST_PLATFORM if HOST_PLATFORM in config else HOST_PLATFORM_ARCH
+    host_platform = HOST_PLATFORM if HOST_PLATFORM in config else HOST_PLATFORM_ARCH
     # If the host platform is not in platform_to_hash, it is unsupported.
-    if platform not in config:
+    if host_platform not in config:
         logging.error(f"Unsupported platform: {HOST_PLATFORM}/{HOST_PLATFORM_ARCH}")
         exit(1)
 
-    url = config[platform]["download_url"]
-    hash = config[platform]["hash"]
+    url = config[host_platform]["download_url"]
+    hash = config[host_platform]["hash"]
 
     ok = download(args.output_name, args.output_dir, url, hash)
     if not ok:
