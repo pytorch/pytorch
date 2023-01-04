@@ -1251,7 +1251,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
     if isinstance(obj, ScriptFunction):
         return obj
     if isinstance(obj, torch._dynamo.eval_frame.OptimizedModule):
-        raise AttributeError("it is not possible to torch.jit.trace() a torch.compile() model")
+        raise AttributeError("it is not possible to torch.jit.script() a torch.compile() model")
 
 
     if example_inputs:
