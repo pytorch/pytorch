@@ -1069,6 +1069,7 @@
   dispatch:
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
+    MPS: _bincount_mps
   tags: dynamic_output_shape
   autogen: bincount.out
 
@@ -4089,6 +4090,7 @@
 - func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   dispatch:
     CPU, CUDA: _cdist_forward
+    MPS: _cdist_forward_mps
   autogen: _cdist_forward.out
 
 - func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
@@ -5185,6 +5187,17 @@
   device_check: NoCheck
   device_guard: False
 
+
+- func: squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: squeeze
+    QuantizedCPU, QuantizedCUDA: squeeze_quantized
+    NestedTensorCPU, NestedTensorCUDA: squeeze_dim_nested
+  tags: canonical
+
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
   variants: method
   device_check: NoCheck
@@ -5194,6 +5207,14 @@
     CompositeExplicitAutograd: squeeze_
 
 - func: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  tags: inplace_view
+  dispatch:
+    CompositeExplicitAutograd: squeeze_
+
+- func: squeeze_.dims(Tensor(a!) self, int[] dim) -> Tensor(a!)
   variants: method
   device_check: NoCheck
   device_guard: False
@@ -6173,6 +6194,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: norm_dtype_out
+    MPS: norm_dtype_out_mps
 
 - func: norm.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -8520,6 +8542,7 @@
   dispatch:
     CPU: nonzero_out_cpu
     CUDA: nonzero_out_cuda
+    MPS: nonzero_out_mps
   tags: dynamic_output_shape
 
 - func: nonzero(Tensor self) -> Tensor
@@ -8527,6 +8550,7 @@
   dispatch:
     CPU: nonzero_cpu
     CUDA: nonzero_cuda
+    MPS: nonzero_mps
   tags: [dynamic_output_shape, canonical]
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
@@ -13365,6 +13389,12 @@
     CompositeExplicitAutogradNonFunctional: squeeze_copy_dim
   tags: view_copy
 
+- func: squeeze_copy.dims(Tensor self, int[] dim) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: squeeze_copy_dims
+  tags: view_copy
+
 - func: t_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
@@ -13575,6 +13605,12 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: squeeze_copy_dim_out
+
+
+- func: squeeze_copy.dims_out(Tensor self, int[] dim, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: squeeze_copy_dims_out
 
 
 - func: t_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
