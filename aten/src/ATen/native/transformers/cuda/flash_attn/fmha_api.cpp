@@ -26,9 +26,11 @@
  *
  ******************************************************************************/
 
+#include <tuple>
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
@@ -62,7 +64,7 @@ void set_params_fprop(FMHA_fprop_params &params,
                       bool is_causal) {
 
     // Reset the parameters
-    memset(&params, 0, sizeof(params));
+    params = {};
 
     params.is_bf16 = q.dtype() == at::kBFloat16;
 
@@ -114,7 +116,7 @@ void set_params_fprop(FMHA_fprop_params &params,
     params.is_causal = is_causal;
 }
 
-std::vector<at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor>
 mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
         const at::Tensor &k,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
         const at::Tensor &v,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -185,6 +187,9 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     int max_seqlen_q = ((max_seqlen_q_ + 16 - 1) / 16) * 16;
     bool loop = max_seqlen_k > blocksize_c;
 
+    // Otherwise the kernel will be launched from cuda:0 device
+    at::cuda::CUDAGuard device_guard{q.device()};
+
     auto opts = q.options();
 
     auto o = at::empty({ total_q, num_heads, head_size }, opts);
@@ -237,9 +242,7 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
 
     run_fmha_fprop(launch_params, /*configure=*/false);
 
-    std::vector<at::Tensor> result = {o, softmax_lse};
-    if (return_softmax) {result.push_back(s);}
-    return result;
+    return std::make_tuple(o, softmax_lse, s);
 }
 } // namespace fmha
 #endif

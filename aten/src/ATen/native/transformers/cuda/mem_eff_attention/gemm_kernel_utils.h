@@ -162,7 +162,7 @@ struct DefaultGemmType<
         cutlass::sizeof_bits<scalar_t>::value == 16>::type> {
   static constexpr int ThreadK = 32;
   static constexpr int WarpK = 32;
-  static constexpr int kMinimumAlignment = 4;
+  static constexpr int kMinimumAlignment = 8;
   using OpClass = cutlass::arch::OpClassTensorOp;
   using InstructionShape = cutlass::gemm::GemmShape<16, 8, 8>;
   using Operator = cutlass::arch::OpMultiplyAdd;

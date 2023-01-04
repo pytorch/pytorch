@@ -165,6 +165,11 @@ fi
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
+# Patch pocketfft (as Android does not have aligned_alloc even if compiled with c++17
+if [ -f third_party/pocketfft/pocketfft_hdronly.h ]; then
+  sed -i -e "s/#if __cplusplus >= 201703L/#if 0/" third_party/pocketfft/pocketfft_hdronly.h
+fi
+
 # Now, actually build the Android target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
 INSTALL_PREFIX=${BUILD_ROOT}/install

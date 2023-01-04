@@ -29,7 +29,7 @@ namespace tensorexpr {
 
 std::string buildErrorMessage(const std::string& s) {
   static const std::string generic_error_message =
-      "This error occured in the fuser. You can turn off the fuser with "
+      "This error occurred in the fuser. You can turn off the fuser with "
       "torch.jit.enable_fusion(False).";
   if (s.empty()) {
     return generic_error_message;
@@ -845,7 +845,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   }
 
   if (backendType == kCudaCodeGen) {
-    for (auto buf : bufOutputs_) {
+    for (const auto& buf : bufOutputs_) {
       std::vector<ForPtr> loops = l.getLoopStmtsFor(buf);
       if (loops.empty()) {
         // This happens when Buf is 0-dim
@@ -893,7 +893,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   }
 
   if (backendType == kBlockCodeGen) {
-    for (auto buf : bufOutputs_) {
+    for (const auto& buf : bufOutputs_) {
       const int default_fp16_blocksize = 16;
       const int default_uint8_blocksize = 32;
       int blockSize = default_fp16_blocksize;
@@ -1294,8 +1294,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
         std::vector<ExprHandle> new_axes(
             sorted_stride_indices_descending.size());
         for (size_t stride_index : sorted_stride_indices_descending) {
-          auto size = sizes[stride_index];
-          auto stride = strides[stride_index];
+          const auto& stride = strides[stride_index];
           auto index = absolute_position / ExprHandle(stride);
           // XXX, in symbolic output ordering, we do not the arbitrary
           // ordering of strides as in usual output ordering, just
@@ -1446,7 +1445,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   std::vector<ExprHandle> te_sizes;
   te_sizes.reserve(sizes.size());
   for (auto s : sizes) {
-    te_sizes.push_back(s);
+    te_sizes.emplace_back(s);
   }
   BufPtr buf = alloc<Buf>(
       "const_" + sanitizeName(v->debugName()),
@@ -1466,7 +1465,7 @@ std::vector<BufPtr> TensorExprKernel::preAllocIntermediateBufs(
     const std::vector<BufPtr>& interm_bufs) {
   std::vector<BufPtr> remaining_interm_bufs;
   std::vector<std::pair<BufPtr, void*>> allocated_bufs;
-  for (auto buf : interm_bufs) {
+  for (const auto& buf : interm_bufs) {
     // Check if buf shape is static and compute its size if static.
     bool is_static = true;
     size_t size =
@@ -1838,7 +1837,7 @@ void TensorExprKernel::compile() {
   BackendType backendType = inferBackendTypeFromDevice(device_);
   stmt_ = transformLoops(backendType, block);
 
-  for (auto c : constants_) {
+  for (const auto& c : constants_) {
     bufferArgs_.emplace_back(BufHandle(c.buf));
   }
 
@@ -2016,7 +2015,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     }
   }
 
-  for (auto c : constants_) {
+  for (const auto& c : constants_) {
     runArgs.emplace_back(c.ptr);
   }
 
@@ -2060,7 +2059,7 @@ void TensorExprKernel::runFast(
   args.insert(args.end(), outputs.begin(), outputs.end());
 
   // TODO: we can consider preallocating and pre-filling the args vector.
-  for (auto c : constants_) {
+  for (const auto& c : constants_) {
     args.push_back(c.ptr);
   }
 

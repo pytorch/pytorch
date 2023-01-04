@@ -11,6 +11,7 @@ from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
+    MixedPrecision,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
@@ -20,6 +21,7 @@ from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
     FSDPInitMode,
     FSDPTest,
+    NestedWrappedModule,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -71,7 +73,7 @@ class TestClipGradNorm(FSDPTest):
     def test_ddp_parity(self):
         """
         Tests FSDP with ``FullyShardedDataParallel.clip_grad_norm_()` against
-        DDP with ``torch.nn.utils.clip_grad_norm_()`.
+        DDP with ``torch.nn.utils.clip_grad_norm_()` when using full precision.
         """
         self.run_subtests(
             {
@@ -208,6 +210,95 @@ class TestClipGradNorm(FSDPTest):
             ):
                 self.assertEqual(n1, n2)
                 self.assertEqual(p1, p2)
+
+        if offload_params:
+            # TODO: Gradient computation on CPU and GPU differ slightly causing
+            # drift unrelated to `clip_grad_norm_()`.
+            # https://github.com/pytorch/pytorch/issues/89133
+            return
+
+        # Run a few more iterations
+        # TODO: We cannot run too many iterations, or else there is drift:
+        # https://github.com/pytorch/pytorch/issues/89136
+        for i in range(3):
+            set_to_none = i % 2 == 0  # exercise both
+            ddp_optim.zero_grad(set_to_none=set_to_none)
+            fsdp_optim.zero_grad(set_to_none=set_to_none)
+            inp = ddp_model.module.get_input(device)
+            for model in (ddp_model, fsdp_model):
+                out = model(*inp)
+                out.sum().backward()
+            ddp_total_norm = torch.nn.utils.clip_grad_norm_(
+                ddp_model.parameters(),
+                max_norm=max_norm,
+                norm_type=norm_type,
+            )
+            fsdp_total_norm = fsdp_model.clip_grad_norm_(
+                max_norm=max_norm, norm_type=norm_type
+            )
+            self.assertEqual(ddp_total_norm, fsdp_total_norm)
+            ddp_optim.step()
+            fsdp_optim.step()
+
+    @skip_if_lt_x_gpu(2)
+    def test_low_precision_grads(self):
+        """Tests ``clip_grad_norm_()`` when using low precision gradients."""
+        self.run_subtests(
+            {
+                "max_norm": [1, 2.5],
+                "norm_type": [1, 2, float("inf")],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.NO_SHARD,
+                ],
+                "use_orig_params": [False, True],
+            },
+            self._test_low_precision_grads,
+        )
+
+    def _test_low_precision_grads(
+        self,
+        max_norm: Union[float, int],
+        norm_type: Union[float, int],
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+    ):
+        fsdp_kwargs = {
+            "sharding_strategy": sharding_strategy,
+            "use_orig_params": use_orig_params,
+            "mixed_precision": MixedPrecision(
+                param_dtype=torch.float16,
+                reduce_dtype=torch.float16,
+                keep_low_precision_grads=True,
+            ),
+        }
+        fsdp_model = FSDP(
+            NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_BEFORE,
+                deterministic=True,
+                fsdp_kwargs=fsdp_kwargs,
+            ),
+            **fsdp_kwargs,
+        )
+        inp = fsdp_model.module.get_input(torch.device("cuda"))
+        out = fsdp_model(*inp)
+        out.sum().backward()
+        for param in fsdp_model.parameters():
+            if param.grad is not None:
+                self.assertEqual(param.grad.dtype, torch.float16)
+        total_norm = fsdp_model.clip_grad_norm_(max_norm=max_norm, norm_type=norm_type)
+        # Check that the total norm is in FP16 to match the gradient dtype
+        self.assertEqual(total_norm.dtype, torch.float16)
+        # As a best effort, check that each gradient has norm at most the max
+        # norm (since DDP does not support mixed precision natively, we cannot
+        # directly compare for parity)
+        for param in fsdp_model.parameters():
+            if param.grad is not None:
+                self.assertTrue(
+                    torch.linalg.vector_norm(param.grad, norm_type).item() <= max_norm,
+                )
 
 
 instantiate_parametrized_tests(TestClipGradNorm)

@@ -326,6 +326,9 @@ class intrusive_ptr final {
   intrusive_ptr() noexcept
       : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
 
+  intrusive_ptr(std::nullptr_t) noexcept
+      : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
+
   // This constructor will not increase the ref counter for you.
   // We use the tagged dispatch mechanism to explicitly mark this constructor
   // to not increase the refcount

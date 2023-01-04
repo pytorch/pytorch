@@ -598,7 +598,7 @@ def create_args(parser=None):
     _add_multi_instance_params(parser)
     # positional
     parser.add_argument("program", type=str,
-                        help="The full path to the proram/script to be launched. "
+                        help="The full path to the program/script to be launched. "
                              "followed by all the arguments for the script")
 
     # rest from the training program

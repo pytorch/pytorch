@@ -12,6 +12,7 @@ from math import inf, nan, isnan
 import random
 from random import randrange
 from itertools import product
+import operator
 from functools import reduce, partial, wraps
 
 from torch.testing._internal.common_utils import \
@@ -1357,17 +1358,16 @@ class TestLinalg(TestCase):
     def test_norm_fused_type_promotion(self, device, dtype):
         x = torch.randn(10, device=device, dtype=dtype)
 
-        def profile_and_check(fn, x, kwargs, fn_name):
+        def profile_and_check(fn, x, kwargs):
             with torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
                 fn(x, **kwargs, dtype=torch.float)
             # smoke check that profiler returned some events
-            self.assertTrue(fn_name in map(lambda e: e.name, p.events()))
+            self.assertTrue("aten::linalg_vector_norm" in (e.name for e in p.events()))
             # test that there was no explicit copy
-            self.assertFalse("aten::to" in map(lambda e: e.name, p.events()))
+            self.assertFalse("aten::to" in (e.name for e in p.events()))
 
-        for f, kwargs, fn_name in zip((torch.norm, torch.linalg.vector_norm), ({"p" : 2}, {}),
-                                      ("aten::norm", "aten::linalg_vector_norm")):
-            profile_and_check(f, x, kwargs, fn_name)
+        for f, kwargs, in zip((torch.linalg.vector_norm, torch.norm), ({}, {"p" : 2})):
+            profile_and_check(f, x, kwargs)
 
     @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
@@ -2310,10 +2310,10 @@ class TestLinalg(TestCase):
             x = torch.tensor(lst, dtype=torch.double, device=device)
             for axes in (), (0,):
                 self.assertRaises(RuntimeError, torch.norm, x, "nuc", axes)
-            self.assertRaises(IndexError, torch.norm, x, "nuc", (0, 1))
+            self.assertRaises(RuntimeError, torch.norm, x, "nuc", (0, 1))
 
         x = torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.double, device=device)
-        self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
+        self.assertRaisesRegex(RuntimeError, "must be different", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
     @skipCUDAIfNoCusolver
@@ -4010,6 +4010,8 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 1e-1, torch.complex64: 1e-1,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_linalg_solve_triangular(self, device, dtype):
+        if TEST_WITH_ROCM and dtype is torch.float32:
+            raise unittest.SkipTest("Skipping for ROCm for Magma backend; unskip when hipSolver backend is enabled")
         # This exercises the API + BLAS CPU + batched cuBLAS
         ks = (3, 1, 0)
         ns = (5, 0)
@@ -4342,6 +4344,62 @@ class TestLinalg(TestCase):
             x = make_arg(size_x, noncontiguous=nctg_x)
             y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
+
+    def test_matmul_should_fold(self, device):
+        make_arg = partial(make_tensor, dtype=torch.float, device=device)
+        shapes_x = ((11, 7, 5),
+                    (0, 7, 5),
+                    (7, 5, 5),
+                    (3, 5, 5),
+                    (0, 5, 5),
+                    (5, 5, 5),
+                    (11, 7, 3, 5),
+                    (7, 5, 3, 5),
+                    (0, 5, 3, 5),
+                    (7, 3, 5, 5),
+                    (0, 0, 5, 5),
+                    (5, 3, 5, 5),
+                    (3, 3, 5, 5),
+                    (5, 5, 5, 5))
+
+        def should_fold(t1, t2):
+            if t1.ndim == 2:
+                return False
+            t1_larger = t1.ndim >= t2.ndim
+            if not t1_larger:
+                t1, t2 = t2.mT, t1
+            if not (t1.ndim >= 3 and t2.ndim <= 3):
+                return False
+            if t1.numel() == 0:
+                return True
+            return all(t1.stride(i) == t1.stride(i + 1) * t1.size(i + 1) for i in range(t1.ndim - 2))
+
+
+        for shape_x, nctg_x, nctg_y in product(shapes_x, (True, False), (True, False)):
+            x = make_arg(shape_x, noncontiguous=nctg_x)
+            for p in itertools.permutations(range(len(shape_x))):
+                x = x.permute(p)
+                n = x.size(-1)
+                for s in ((), (n - 1,), (n,), (n + 1,), (0,)):
+                    if len(s) == 1 and s[0] < 0:
+                        continue
+                    y = make_arg((n,) + s, noncontiguous=nctg_y)
+                    self.check_single_matmul(x, y)
+                    self.check_single_matmul(y if y.ndim == 1 else y.mT, x.mT)
+
+                    # Check that the folding strategy is optimal
+                    def fold():
+                        return x.view(reduce(operator.mul, x.shape[:-1], 1), x.size(-1))
+
+                    if should_fold(x, y):
+                        fold()
+                    else:
+                        self.assertRaises(RuntimeError, fold)
+
+                    if should_fold(y if y.ndim == 1 else y.mT, x.mT):
+                        fold()
+                    elif y.ndim != 2:
+                        self.assertRaises(RuntimeError, fold)
 
     def test_linear_algebra_scalar_raises(self, device) -> None:
         m = torch.randn(5, 5, device=device)

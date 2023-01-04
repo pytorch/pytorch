@@ -9,14 +9,17 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
 
 __all__ = ['pack_weight_bias', 'PackedParameter', 'RNNBase', 'LSTM', 'GRU', 'RNNCellBase', 'RNNCell', 'LSTMCell',
-           'GRUCell']
+           'GRUCell', "apply_permutation"]
+
 
 def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
 
+
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
     return _apply_permutation(tensor, permutation, dim)
+
 
 def pack_weight_bias(qweight, bias, dtype):
 
@@ -39,6 +42,7 @@ def pack_weight_bias(qweight, bias, dtype):
 
         return packed_weight
 
+
 class PackedParameter(torch.nn.Module):
     def __init__(self, param):
         super(PackedParameter, self).__init__()
@@ -53,6 +57,7 @@ class PackedParameter(torch.nn.Module):
         self.param = state_dict[prefix + 'param']
         super(PackedParameter, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                            missing_keys, unexpected_keys, error_msgs)
+
 
 class RNNBase(torch.nn.Module):
 
@@ -347,7 +352,6 @@ class RNNBase(torch.nn.Module):
 
         return qRNNBase
 
-
     def _weight_bias(self):
         # Returns a dict of weights and biases
         weight_bias_dict: Dict[str, Dict] = {'weight' : {}, 'bias' : {}}
@@ -376,6 +380,7 @@ class RNNBase(torch.nn.Module):
     def get_bias(self):
         return self._weight_bias()['bias']
 
+
 class LSTM(RNNBase):
     r"""
     A dynamic quantized LSTM module with floating point tensor as inputs and outputs.
@@ -384,6 +389,7 @@ class LSTM(RNNBase):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> rnn = nn.LSTM(10, 20, 2)
         >>> input = torch.randn(5, 3, 10)
         >>> h0 = torch.randn(2, 3, 20)
@@ -610,6 +616,7 @@ class GRU(RNNBase):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> rnn = nn.GRU(10, 20, 2)
         >>> input = torch.randn(5, 3, 10)
         >>> h0 = torch.randn(2, 3, 20)
@@ -922,6 +929,7 @@ class RNNCellBase(torch.nn.Module):
         super(RNNCellBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                        missing_keys, unexpected_keys, error_msgs)
 
+
 class RNNCell(RNNCellBase):
     r"""An Elman RNN cell with tanh or ReLU non-linearity.
     A dynamic quantized RNNCell module with floating point tensor as inputs and outputs.
@@ -930,6 +938,7 @@ class RNNCell(RNNCellBase):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> rnn = nn.RNNCell(10, 20)
         >>> input = torch.randn(6, 3, 10)
         >>> hx = torch.randn(3, 20)
@@ -982,6 +991,7 @@ class LSTMCell(RNNCellBase):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> rnn = nn.LSTMCell(10, 20)
         >>> input = torch.randn(6, 3, 10)
         >>> hx = torch.randn(3, 20)
@@ -1014,6 +1024,7 @@ class LSTMCell(RNNCellBase):
     def from_float(cls, mod):
         return super(LSTMCell, cls).from_float(mod)
 
+
 class GRUCell(RNNCellBase):
     r"""A gated recurrent unit (GRU) cell
 
@@ -1023,6 +1034,7 @@ class GRUCell(RNNCellBase):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> rnn = nn.GRUCell(10, 20)
         >>> input = torch.randn(6, 3, 10)
         >>> hx = torch.randn(3, 20)

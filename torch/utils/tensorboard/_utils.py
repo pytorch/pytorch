@@ -8,7 +8,7 @@ def figure_to_image(figures, close=True):
     Note that this requires the ``matplotlib`` package.
 
     Args:
-        figure (matplotlib.pyplot.figure) or list of figures: figure or a list of figures
+        figures (matplotlib.pyplot.figure or list of figures): figure or a list of figures
         close (bool): Flag to automatically close the figure
 
     Returns:

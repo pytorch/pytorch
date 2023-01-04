@@ -12,7 +12,7 @@ install_protobuf_317() {
   #   g++: error: ./../lib64/crti.o: No such file or directory
   ln -s /usr/lib64 "$pb_dir/lib64"
 
-  curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v3.17.3/protobuf-all-3.17.3.tar.gz"
+  curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v3.17.3/protobuf-all-3.17.3.tar.gz" --retry 3
   tar -xvz -C "$pb_dir" --strip-components 1 -f protobuf-all-3.17.3.tar.gz
   # -j6 to balance memory usage and speed.
   # naked `-j` seems to use too much memory.

@@ -20,23 +20,27 @@ namespace jit {
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& filename,
-    c10::optional<c10::Device> device = c10::nullopt);
+    c10::optional<c10::Device> device = c10::nullopt,
+    bool load_debug_files = true);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
-    c10::optional<c10::Device> device = c10::nullopt);
+    c10::optional<c10::Device> device = c10::nullopt,
+    bool load_debug_files = true);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<caffe2::serialize::ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device = c10::nullopt);
+    c10::optional<c10::Device> device = c10::nullopt,
+    bool load_debug_files = true);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& filename,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_files,
+    bool load_debug_files = true);
 
 // For reading unified serialization format from torch.Package
 TORCH_API Module import_ir_module(
@@ -50,31 +54,37 @@ TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_files,
+    bool load_debug_files = true);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_files,
+    bool load_debug_files = true);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_files,
+    bool load_debug_files = true);
 
 /// Loads a serialized `Module` from the given `istream`.
 ///
 /// The istream must contain a serialized `Module`, exported via
 /// `torch::jit::ExportModule` in C++.
-TORCH_API Module
-load(std::istream& in, c10::optional<c10::Device> device = c10::nullopt);
+TORCH_API Module load(
+    std::istream& in,
+    c10::optional<c10::Device> device = c10::nullopt,
+    bool load_debug_files = true);
 
 TORCH_API Module load(
     std::istream& in,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_files,
+    bool load_debug_files = true);
 
 /// Loads a serialized `Module` from the given `filename`.
 ///
@@ -83,12 +93,14 @@ TORCH_API Module load(
 /// Python or `torch::jit::ExportModule` in C++.
 TORCH_API Module load(
     const std::string& filename,
-    c10::optional<c10::Device> device = c10::nullopt);
+    c10::optional<c10::Device> device = c10::nullopt,
+    bool load_debug_files = true);
 
 TORCH_API Module load(
     const std::string& filename,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_files,
+    bool load_debug_files = true);
 
 /// Loads a serialized `Module` from the given shared_ptr `rai`.
 ///
@@ -97,12 +109,14 @@ TORCH_API Module load(
 /// Python or `torch::jit::ExportModule` in C++.
 TORCH_API Module load(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device = c10::nullopt);
+    c10::optional<c10::Device> device = c10::nullopt,
+    bool load_debug_files = true);
 
 TORCH_API Module load(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_files,
+    bool load_debug_files = true);
 
 TORCH_API Module jitModuleFromSourceAndConstants(
     const IValue& ivalue,
@@ -110,19 +124,27 @@ TORCH_API Module jitModuleFromSourceAndConstants(
     const std::vector<IValue>& constants,
     int32_t version);
 
-extern Module (*_load_jit_module_from_flatbuffer_bytes)(
-    // comp unit
-    std::shared_ptr<char>,
-    size_t,
-    ExtraFilesMap&,
-    c10::optional<at::Device>);
+TORCH_API Module parse_and_initialize_jit_module(
+    std::shared_ptr<char> data,
+    size_t size,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device = c10::nullopt);
 
-extern Module (*_load_jit_module_from_flatbuffer_bytes)(
-    // comp unit
-    std::shared_ptr<char>,
-    size_t,
-    ExtraFilesMap&,
-    c10::optional<at::Device>);
+TORCH_API Module load_jit_module_from_file(
+    const std::string& filename,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device = c10::nullopt);
+
+TORCH_API Module load_jit_module_from_stream(
+    std::istream& in,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device = c10::nullopt);
+
+TORCH_API Module parse_and_initialize_jit_module(
+    std::shared_ptr<char> data,
+    size_t size,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device);
 
 } // namespace jit
 } // namespace torch
