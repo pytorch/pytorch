@@ -1,12 +1,10 @@
 #include <ATen/native/vulkan/api/Utils.h>
-#include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Tensor.h>
 #include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
-namespace ops {
 
 namespace {
 
@@ -175,9 +173,9 @@ api::utils::uvec3 create_image_extents(
         ndim >= 1 && ndim <= 3,
         "Texture storage only valid for 1 <= ndim <= 3!");
 
-    uint32_t width = get_dim<Dim4D::Width>(gpu_sizes);
-    uint32_t height = get_dim<Dim4D::Height>(gpu_sizes);
-    uint32_t depth = get_dim<Dim4D::Channel>(gpu_sizes);
+    uint32_t width = api::utils::val_at(-1, gpu_sizes);
+    uint32_t height = api::utils::val_at(-2, gpu_sizes);
+    uint32_t depth = api::utils::val_at(-3, gpu_sizes);
 
     TORCH_CHECK(depth % 4 == 0, "Channels must be divisible by 4!")
 
@@ -195,8 +193,8 @@ api::UniformParamsBuffer make_metadata_uniform(
   }
 
   vTensor::BufferMetadata metadata{
-      make_nchw_uvec4(sizes),
-      make_nchw_uvec4(strides),
+      api::utils::make_nchw_uvec4(sizes),
+      api::utils::make_nchw_uvec4(strides),
       api::utils::safe_downcast<uint32_t>(sizes.size()),
       api::utils::safe_downcast<uint32_t>(c10::multiply_integers(sizes)),
   };
@@ -308,8 +306,8 @@ api::VulkanBuffer& vTensor::buffer(
 
 vTensor::BufferMetadata vTensor::get_cpu_buffer_metadata() const {
   return {
-      make_nchw_uvec4(sizes_),
-      make_nchw_uvec4(strides_),
+      api::utils::make_nchw_uvec4(sizes_),
+      api::utils::make_nchw_uvec4(strides_),
       api::utils::safe_downcast<uint32_t>(sizes_.size()),
       api::utils::safe_downcast<uint32_t>(c10::multiply_integers(sizes_)),
   };
@@ -493,7 +491,6 @@ void add_buffer_barrier(
   }
 }
 
-} // namespace ops
 } // namespace vulkan
 } // namespace native
 } // namespace at
