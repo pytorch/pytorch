@@ -4,11 +4,8 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 
 __all__ = ['ConvReLU1d', 'ConvReLU2d', 'ConvReLU3d', 'LinearReLU', 'ConvBn1d', 'ConvBn2d',
            'ConvBnReLU1d', 'ConvBnReLU2d', 'ConvBn3d', 'ConvBnReLU3d', 'BNReLU2d', 'BNReLU3d',
-<<<<<<< HEAD
-           'LinearBn1d', 'LinearLeakyReLU', 'LinearTanh']
-=======
-           'LinearBn1d', 'LinearLeakyReLU', 'ConvAdd2d']
->>>>>>> 32c33881214 ([Quant] Add fused ConvAdd2d module for onednn backend)
+           'LinearBn1d', 'LinearLeakyReLU', 'LinearTanh', 'ConvAdd2d']
+
 # Used for identifying intrinsic modules used in quantization
 class _FusedModule(torch.nn.Sequential):
     pass
