@@ -75,7 +75,7 @@ bool use_mkldnn(const Tensor& input, const double dropout_p) {
     return false;
   }
   return input.options().backend() == at::Backend::CPU &&
-      input.scalar_type() == kFloat;
+      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16);
 #endif
   return false;
 }
