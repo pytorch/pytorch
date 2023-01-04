@@ -1963,6 +1963,11 @@ def uniform(
     )
 
 
+@register_decomposition(aten.exponential_)
+def exponential_(self, rate=1, generator=None):
+    return self.copy_(-1/rate * torch.log(1 - torch.rand_like(self)))
+
+
 # aten/src/ATen/native/UpSample.cpp compute_output_size
 def upsample_compute_output_size(input_size, output_size, scale_factors):
     spatial_dimensions = len(input_size) - 2
