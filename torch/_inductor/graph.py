@@ -77,9 +77,11 @@ class GraphLowering(torch.fx.Interpreter):
         Primarily used to weights
         """
         if ex.is_nested:
-            return None, None
-        size = [sympy.Integer(i) for i in ex.size()]
-        stride = [sympy.Integer(i) for i in ex.stride()]
+            size = [[sympy.Integer(i) for i in size] for size in ex._nested_tensor_size().unbind()]
+            stride = [[sympy.Integer(i) for i in stride] for stride in ex._nested_tensor_strides().unbind()]
+        else:
+            size = [sympy.Integer(i) for i in ex.size()]
+            stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
     def __init__(
@@ -258,12 +260,21 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
-        tensor = TensorBox.create(
-            InputBuffer(
-                target,
-                FixedLayout(example.device, example.dtype, sizes, strides),
+        if example.is_nested:
+            offsets = [sympy.Integer(i) for i in example._nested_tensor_offsets_tensor()]
+            tensor = TensorBox.create(
+                InputBuffer(
+                    target,
+                    FixedLayout(example.device, example.dtype, sizes, strides, nested_offsets=offsets)
+                )
             )
-        )
+        else:
+            tensor = TensorBox.create(
+                InputBuffer(
+                    target,
+                    FixedLayout(example.device, example.dtype, sizes, strides),
+                )
+            )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.device_types.add(example.device.type)

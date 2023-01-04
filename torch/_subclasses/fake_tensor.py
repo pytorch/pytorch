@@ -768,6 +768,9 @@ class FakeTensorMode(TorchDispatchMode):
             torch.ops.aten.is_coalesced.default,
             torch.ops.aten.dense_dim.default,
             torch.ops.aten.sparse_dim.default,
+            torch.ops.aten._nested_tensor_size.default,
+            torch.ops.aten._nested_tensor_strides.default,
+            torch.ops.aten._nested_tensor_offsets_tensor.default,
         }:
             # NB: no_dispatch is ok here too, this func is very simple
             with in_kernel_invocation_manager(self):

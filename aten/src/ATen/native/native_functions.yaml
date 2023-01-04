@@ -5691,13 +5691,13 @@
 - func: _nested_tensor_size(Tensor self) -> Tensor
   variants: method
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _nested_tensor_size
+    NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: _nested_tensor_size
   autogen: _nested_tensor_size.out
 
 - func: _nested_tensor_strides(Tensor self) -> Tensor
   variants: method
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _nested_tensor_strides
+    NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: _nested_tensor_strides
   autogen: _nested_tensor_strides.out
 
 - func: _nested_tensor_offsets(Tensor self) -> int[]
@@ -5709,7 +5709,7 @@
 - func: _nested_tensor_offsets_tensor(Tensor self) -> Tensor
   variants: method
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _nested_tensor_offsets_tensor
+    NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: _nested_tensor_offsets_tensor
 
 # _nested_from_padded is not usable from Python, so
 # _nested_from_padded_and_nested_example is available for testing.

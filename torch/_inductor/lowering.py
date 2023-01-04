@@ -3572,7 +3572,7 @@ exp = register_pointwise(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     use_libdevice_for_f64=True,
 )
-relu = register_pointwise(aten.relu)
+relu = register_pointwise(aten.relu, type_promotion_kind=None, broadcast=False)
 sigmoid = register_pointwise(
     aten.sigmoid,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -3623,7 +3623,9 @@ register_pointwise(
 
 register_pointwise(
     aten.tanh,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    # type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    type_promotion_kind=None,
+    broadcast=False
 )
 
 register_pointwise(

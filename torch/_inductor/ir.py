@@ -1601,57 +1601,87 @@ class Layout(IRNode):
         size: List[Expr],
         stride: List[Expr],
         offset: Expr = Integer(0),
+        # FIXME: is the best way to include this in a new class?
+        nested_offsets: List[Expr] = None,
     ):
         self.device = device
         self.dtype = dtype
         self.size = size
         self._stride = stride
         self.offset = offset
+        self.nested_offsets = nested_offsets
+        self.is_nested = self.nested_offsets is not None
 
     @property
     def stride(self):
         return self._stride
 
+    def get_nested_offsets(self):
+        return self.nested_offsets
+
     def __str__(self):
         offset = ""
         if self.offset != 0:
             offset = f", offset={self.offset}"
+        if not self.is_nested:
+            return (
+                f"{type(self).__name__}('{self.device.type}', {self.dtype}, "
+                f"size={self.size}, stride={self.stride}{offset})"
+            )
         return (
             f"{type(self).__name__}('{self.device.type}', {self.dtype}, "
-            f"size={self.size}, stride={self.stride}{offset})"
-        )
+            f"size={self.size}, stride={self.stride}{offset}," 
+            f"nested_offsets={self.nested_offsets})"
+        )      
 
     __repr__ = __str__
 
     def is_contiguous(self):
-        for left, right, size in zip(
-            self.stride, FlexibleLayout.contiguous_strides(self.size), self.size
-        ):
-            if size != 1 and left != right:
-                return False
-        return True
+        def is_contiguous_helper(size_vec, stride_vec):
+            for left, right, size in zip(
+                stride_vec, FlexibleLayout.contiguous_strides(size_vec), size_vec
+            ):
+                if size != 1 and left != right:
+                    return False
+            return True
+        if self.is_nested:
+            # FIXME: maybe checking the first size, stride pair is sufficient
+            # is there ever a case where one tensor constituent is contiguous but another isn't?
+            return all([is_contiguous_helper(size, stride) for size, stride in zip(self.size, self.stride)])
+        return is_contiguous_helper(self.size, self.stride)
 
     def is_transposed(self):
-        for left, right, size in zip(
-            self.stride,
-            reversed(FlexibleLayout.contiguous_strides(self.size)),
-            self.size,
-        ):
-            if size != 1 and left != right:
-                return False
-        return True
+        def is_transposed_helper(size, stride):
+            for left, right, size in zip(
+                self.stride,
+                reversed(FlexibleLayout.contiguous_strides(self.size)),
+                self.size,
+            ):
+                if size != 1 and left != right:
+                    return False
+            return True
+        if self.is_nested:
+            # FIXME: maybe checking the first size, stride pair is sufficient
+            # is there ever a case where one tensor constituent is transposed but another isn't?
+            return all([is_transposed_helper(size, stride) for size, stride in zip(self.size, self.stride)])
+        return is_transposed_helper(self.size, self.stride)
 
     def is_stride_ordered(self, order):
-        assert len(self.stride) == len(order)
-        # reorder the stride given order
-        stride_ordered = [None] * len(order)
-        for i in range(len(order)):
-            stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
-        # check if it is in ascending order
-        for i in range(len(order) - 1):
-            if stride_ordered[i] > stride_ordered[i + 1]:
-                return False
-        return True
+        def is_stride_ordered_helper(stride):
+            assert len(stride) == len(order)
+            # reorder the stride given order
+            stride_ordered = [None] * len(order)
+            for i in range(len(order)):
+                # FIME: check whether V.graph.sizevars.size_hint will work on nested
+                stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
+            # check if it is in ascending order
+            for i in range(len(order) - 1):
+                if stride_ordered[i] > stride_ordered[i + 1]:
+                    return False
+            return True
+        if self.is_nested:
+            return all([is_stride_ordered_helper(stride) for stride in self.stride])
+        return is_stride_ordered_helper(self.stride)      
 
     def is_channels_last_stride_ordered(self):
         # create channels_last order(NCHW, NCDHW, the C is the first order).
@@ -1666,6 +1696,7 @@ class Layout(IRNode):
             self.size,
             self.stride,
             self.offset,
+            self.nested_offsets
         )
 
     def make_indexer(self):
@@ -1681,6 +1712,7 @@ class Layout(IRNode):
             and self.size == other.size
             and self.stride == other.stride
             and self.offset == other.offset
+            and self.nested_offsets == other.nested_offsets
         )
 
 
@@ -1690,13 +1722,22 @@ class FixedLayout(Layout):
     def make_indexer(self):
         """A closure containing math to read a given element"""
 
-        def indexer(index):
-            assert len(index) == len(self.stride) == len(self.size)
-            result = self.offset
-            for idx, stride, sz in zip(index, self.stride, self.size):
-                if sz != 1:
-                    result = result + idx * stride
-            return result
+        if self.is_nested:
+            def indexer(index):
+                assert len(index) == len(self.stride[0]) == len(self.size[0])
+                result = self.nested_offsets[index[0]]
+                for idx, stride, sz in zip(index[1:], self.stride[index[0]], self.size[index[0]]):
+                    if sz != 1:
+                        result = result + idx * stride
+                return result
+        else:
+            def indexer(index):
+                assert len(index) == len(self.stride) == len(self.size)
+                result = self.offset
+                for idx, stride, sz in zip(index, self.stride, self.size):
+                    if sz != 1:
+                        result = result + idx * stride
+                return result
 
         return indexer
 
@@ -1708,12 +1749,16 @@ class FlexibleLayout(Layout):
 
     @staticmethod
     def contiguous_strides(sizes):
-        if len(sizes) == 0:
-            return []
-        reversed_strides = [sympy.Integer(1)]
-        for size in reversed(sizes[1:]):
-            reversed_strides.append(size * reversed_strides[-1])
-        return list(reversed(reversed_strides))
+        def contiguous_strides_helper(size_vec):  
+            reversed_strides = [sympy.Integer(1)]
+            for size in reversed(size_vec[1:]):
+                reversed_strides.append(size * reversed_strides[-1])
+            return list(reversed(reversed_strides))
+
+        # FIXME: somehow propagate is_nested property to FlexibleLayout
+        if isinstance(sizes[0], list):
+            return [contiguous_strides_helper(size) for size in sizes]
+        return contiguous_strides_helper(sizes)    
 
     @staticmethod
     def fill_ordered(sizes, order):
@@ -1784,12 +1829,12 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
-    def __init__(self, device, dtype, size, stride_order=None):
+    def __init__(self, device, dtype, size, stride_order=None, nested_offsets=None):
         if stride_order:
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
             strides = FlexibleLayout.contiguous_strides(size)
-        super(FlexibleLayout, self).__init__(device, dtype, size, strides)
+        super(FlexibleLayout, self).__init__(device, dtype, size, strides, nested_offsets=nested_offsets)
 
 
 class AliasedLayout(Layout):
@@ -3854,6 +3899,7 @@ class StorageBox(MutableBox):
                 device=self.data.get_device(),
                 dtype=self.data.get_dtype(),
                 size=self.data.get_size(),
+                nested_offsets=self.data.get_nested_offsets()
             ),
             data=self.data,
         )
@@ -3914,6 +3960,7 @@ class StorageBox(MutableBox):
                     device=data.get_device(),
                     dtype=data.get_dtype(),
                     size=data.get_size(),
+                    nested_offsets=data.get_nested_offsets()
                 ),
                 data=data,
             ).get_read_writes()
