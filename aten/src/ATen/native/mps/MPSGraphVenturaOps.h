@@ -14,4 +14,7 @@
 - (MPSGraphTensor *)argSortWithTensor:(MPSGraphTensor *)tensor
                                        axis:(NSInteger)axis
                                        name:(NSString *)name;
+
+- (MPSGraphTensor *)inverseOfTensor: (MPSGraphTensor *)tensor
+                                       name:(NSString *)name;
 @end
