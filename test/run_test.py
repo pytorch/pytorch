@@ -290,7 +290,9 @@ CI_SERIAL_LIST = [
     'test_tensor_creation_ops',
     'test_sparse_csr',
     'test_dispatch',
+    'test_spectral_ops',    # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/88916
     'nn/test_pooling',
+    'nn/test_convolution',  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     'distributions/test_distributions',
     'test_autograd',  # slow gradcheck runs a test that checks the cuda memory allocator
     'test_prims',  # slow gradcheck runs a test that checks the cuda memory allocator
@@ -657,10 +659,9 @@ def run_doctests(test_module, test_directory, options):
     import pathlib
     pkgpath = pathlib.Path(torch.__file__).parent
 
-    #
     enabled = {
         # TODO: expose these options to the user
-        # Temporary disable all feature-conditional tests
+        # For now disable all feature-conditional tests
         # 'lapack': 'auto',
         # 'cuda': 'auto',
         # 'cuda1': 'auto',
@@ -669,6 +670,9 @@ def run_doctests(test_module, test_directory, options):
         'cuda': 0,
         'cuda1': 0,
         'qengine': 0,
+        'autograd_profiler': 0,
+        'cpp_ext': 0,
+        'monitor': 0,
     }
 
     # Resolve "auto" based on a test to determine if the feature is available.
@@ -705,13 +709,34 @@ def run_doctests(test_module, test_directory, options):
     if enabled['qengine']:
         os.environ['TORCH_DOCTEST_QENGINE'] = '1'
 
+    if enabled['autograd_profiler']:
+        os.environ['TORCH_DOCTEST_AUTOGRAD_PROFILER'] = '1'
+
+    if enabled['cpp_ext']:
+        os.environ['TORCH_DOCTEST_CPP_EXT'] = '1'
+
+    if enabled['monitor']:
+        os.environ['TORCH_DOCTEST_MONITOR'] = '1'
+
+    if 0:
+        # TODO: could try to enable some of these
+        os.environ['TORCH_DOCTEST_QUANTIZED_DYNAMIC'] = '1'
+        os.environ['TORCH_DOCTEST_ANOMOLY'] = '1'
+        os.environ['TORCH_DOCTEST_AUTOGRAD'] = '1'
+        os.environ['TORCH_DOCTEST_HUB'] = '1'
+        os.environ['TORCH_DOCTEST_DATALOADER'] = '1'
+        os.environ['TORCH_DOCTEST_ONNX'] = '1'
+        os.environ['TORCH_DOCTEST_FUTURES'] = '1'
+
     pkgpath = os.path.dirname(torch.__file__)
+
     xdoctest_config = {
         'global_exec': r'\n'.join([
             'from torch import nn',
             'import torch.nn.functional as F',
             'import torch',
         ]),
+        'analysis': 'static',  # set to "auto" to test doctests in compiled modules
         'style': 'google',
         'options': '+IGNORE_WHITESPACE',
     }
@@ -1014,7 +1039,7 @@ def parse_args():
     )
     parser.add_argument(
         "--xdoctest-command",
-        default='list',
+        default='all',
         help=(
             "Control the specific doctest action. "
             "Use 'list' to simply parse doctests and check syntax. "
@@ -1074,6 +1099,7 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None, exact_matc
 
 def must_serial(file: str) -> bool:
     return (
+        os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1" or
         "distributed" in os.getenv("TEST_CONFIG", "") or
         "dynamo" in os.getenv("TEST_CONFIG", "") or
         "distributed" in file or
