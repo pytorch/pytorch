@@ -3,7 +3,6 @@ import collections
 import copy
 import inspect
 import itertools
-import operator
 import random
 import unittest
 from abc import ABC

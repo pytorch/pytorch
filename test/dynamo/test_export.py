@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import operator
 from typing import Dict, List
 from unittest.mock import patch
 
@@ -1470,7 +1471,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(gm(*inp), f(*inp))
 
-        def test_dynamic_slicing(self):
+    def test_dynamic_slicing(self):
         def f(x):
             return x[: x.shape[0] - 2, x.shape[1] - 1 :: 2]
 
