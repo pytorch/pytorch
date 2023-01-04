@@ -1,7 +1,8 @@
 import os
+import tempfile
 import textwrap
 from functools import lru_cache
-import tempfile
+
 from . import config
 
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":

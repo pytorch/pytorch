@@ -55,7 +55,8 @@ logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else loggin
 @functools.lru_cache(None)
 def cache_dir():
     return os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR", f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
+        "TORCHINDUCTOR_CACHE_DIR",
+        f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
     )
 
 
