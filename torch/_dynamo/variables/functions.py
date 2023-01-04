@@ -15,31 +15,42 @@ from .base import typestr, VariableTracker
 
 
 def wrap_bound_arg(tx, val, options, source=None):
+    # Source propagation is best effort since not every object we encounter has a source to begin with.
+    assert (
+        "source" not in options
+    ), "Source needs to be separate from options due to recursive calls for lists/dicts"
+
     if isinstance(val, dict):
         return variables.ConstDictVariable(
-            {k: wrap_bound_arg(tx, v, options) for k, v in val.items()}, dict, **options
+            {
+                k: wrap_bound_arg(tx, v, options, source=getattr(v, "source", None))
+                for k, v in val.items()
+            },
+            dict,
+            **options,
         )
     elif isinstance(val, (tuple, list)):
         cls = variables.BaseListVariable.cls_for(type(val))
-        return cls([wrap_bound_arg(tx, x, options) for x in val], **options)
-    elif variables.ConstantVariable.is_literal(val):
+        return cls(
+            [
+                wrap_bound_arg(tx, x, options, source=getattr(x, "source", None))
+                for x in val
+            ],
+            **options,
+        )
+
+    if variables.ConstantVariable.is_literal(val):
         return variables.ConstantVariable(val, **options)
     elif isinstance(val, types.FunctionType):
-        assert (
-            source
-        ), "Must provide a source if wrapping a tensor arg, otherwise can't guard"
         return variables.UserFunctionVariable(val, source=source, **options)
     elif isinstance(val, enum.Enum):
-        return variables.EnumVariable(val, **options)
+        return variables.EnumVariable(val, source=source, **options)
     elif isinstance(val, (type, abc.ABCMeta)):
-        return variables.UserDefinedClassVariable(val, **options)
+        return variables.UserDefinedClassVariable(val, source=source, **options)
     elif istensor(val):
         from torch._dynamo.variables.builder import VariableBuilder
 
-        assert (
-            source is not None
-        ), "Must provide a source if wrapping a tensor arg, otherwise can't guard"
-        return VariableBuilder(tx, source)(val)
+        return VariableBuilder(tx, source=source, **options)(val)
     else:
         assert isinstance(val, VariableTracker), typestr(val)
         return val
@@ -172,7 +183,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
             if name == "__class__":
-                result[name] = variables.UserDefinedClassVariable(cell.cell_contents)
+                result[name] = variables.UserDefinedClassVariable(
+                    cell.cell_contents, source=AttrSource(self.source, "__class__")
+                )
             else:
                 var = tx.match_nested_cell(name, cell)
                 if var is not None:

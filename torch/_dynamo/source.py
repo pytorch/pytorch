@@ -123,6 +123,7 @@ class AttrSource(Source):
         else:
             self.base = base
             self.member = member
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return self.base.reconstruct(codegen) + codegen.create_load_attrs(self.member)
@@ -176,6 +177,9 @@ class TensorPropertySource(Source):
 @dataclasses.dataclass
 class NegateSource(Source):
     base: Source
+
+    def __post_init__(self):
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         raise NotImplementedError()
@@ -235,6 +239,9 @@ class GetItemSource(Source):
     base: Source
     index: Any
 
+    def __post_init__(self):
+        assert self.base is not None
+
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
 
@@ -273,6 +280,9 @@ class TupleIteratorGetItemSource(GetItemSource):
 class TypeSource(Source):
     base: Source
 
+    def __post_init__(self):
+        assert self.base is not None
+
     def reconstruct(self, codegen):
         codegen.load_import_from("builtins", "type")
         return self.base.reconstruct(codegen) + [create_instruction("CALL_FUNCTION", 1)]
@@ -285,9 +295,36 @@ class TypeSource(Source):
 
 
 @dataclasses.dataclass
+class SuperSource(Source):
+    type: Source
+    obj: Source
+
+    def __post_init__(self):
+        assert self.type is not None
+        assert self.obj is not None
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", "super")
+        return (
+            self.type.reconstruct(codegen)
+            + self.obj.reconstruct(codegen)
+            + [create_instruction("CALL_FUNCTION", 2)]
+        )
+
+    def guard_source(self):
+        return self.obj.guard_source()
+
+    def name(self):
+        return f"super({self.type.name()}, {self.obj.name()})"
+
+
+@dataclasses.dataclass
 class ODictGetItemSource(Source):
     base: Source
     index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return (
