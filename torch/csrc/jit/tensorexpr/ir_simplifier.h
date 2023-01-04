@@ -165,12 +165,12 @@ class Term : public ExprNode<Term> {
 
   void addComponent() {}
   void addComponent(ExprPtr e) {
-    variables_.push_back(e);
+    variables_.push_back(std::move(e));
   }
   template <class... Es>
-  void addComponent(ExprPtr e, Es... es) {
+  void addComponent(ExprPtr e, Es&&... es) {
     addComponent(std::move(e));
-    addComponent(es...);
+    addComponent(std::forward<Es>(es)...);
   }
 
   // Sort by hash to normalize order of components.
@@ -242,12 +242,12 @@ class Polynomial : public ExprNode<Polynomial> {
   HashProvider& hasher_;
 
   void addTerm(TermPtr t) {
-    variables_.push_back(t);
+    variables_.push_back(std::move(t));
   }
   template <class... Ts>
-  void addTerm(TermPtr t, Ts... ts) {
+  void addTerm(TermPtr t, Ts&&... ts) {
     addTerm(std::move(t));
-    addTerm(ts...);
+    addTerm(std::forward<Ts>(ts)...);
   }
 
   // Sort by hash to normalize order of terms.
@@ -305,12 +305,12 @@ class MaxTerm : public ExprNode<MaxTerm> {
 
   void addComponent() {}
   void addComponent(ExprPtr e) {
-    variables_.push_back(e);
+    variables_.push_back(std::move(e));
   }
   template <class... Es>
-  void addComponent(ExprPtr e, Es... es) {
+  void addComponent(ExprPtr e, Es&&... es) {
     addComponent(std::move(e));
-    addComponent(es...);
+    addComponent(std::forward<Es>(es)...);
   }
 
   // Uniquefy the terms using their hash.
@@ -362,12 +362,12 @@ class MinTerm : public ExprNode<MinTerm> {
 
   void addComponent() {}
   void addComponent(ExprPtr e) {
-    variables_.push_back(e);
+    variables_.push_back(std::move(e));
   }
   template <class... Es>
-  void addComponent(ExprPtr e, Es... es) {
+  void addComponent(ExprPtr e, Es&&... es) {
     addComponent(std::move(e));
-    addComponent(es...);
+    addComponent(std::forward<Es>(es)...);
   }
 
   // Uniquefy the terms using their hash.
