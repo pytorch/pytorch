@@ -18,15 +18,10 @@ struct ViewCachedGraph : public MPSCachedGraph
   std::vector<MPSGraphTensor*> strideTensors;
 };
 
-static std::string getStridedKey(const ScalarType& self_dtype, const ScalarType& updates_dtype, const IntArrayRef& base_shape,
+static std::string getStridedKey(const ScalarType& dtype, const IntArrayRef& base_shape,
                           const IntArrayRef& new_shape, bool is_scatter)
 {
-  std::string dtype_key = getMPSTypeString(self_dtype);
-  if (is_scatter) {
-    dtype_key += ":" + getMPSTypeString(updates_dtype);
-  }
-
-  return (is_scatter ? "scatter:" : "gather:") + dtype_key + "[" +
+  return (is_scatter ? "scatter:" : "gather:") + getMPSTypeString(dtype) + "[" +
          getArrayRefString(base_shape) + "]:[" + getArrayRefString(new_shape) + "]";
 }
 
@@ -53,14 +48,9 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
                                                                                shape: inputShape
                                                                             dataType: inputType] autorelease];
     if (needsScatter) {
-      auto updatesType = getMPSScalarType(src.scalar_type());
-      if (updatesType == MPSDataTypeUInt8 || updatesType == MPSDataTypeBool) {
-        updatesType = MPSDataTypeInt8;
-      }
-
       feeds[cachedGraph->updatesTensor] = [[[MPSGraphTensorData alloc] initWithMTLBuffer: sourceBuffer
                                                                                    shape: getMPSShape(src.numel())
-                                                                                dataType: updatesType] autorelease];
+                                                                                dataType: inputType] autorelease];
     }
     MPSScalar storageOffsetScalar = getMPSScalar(storage_offset, ScalarType::Int);
     feeds[cachedGraph->storageOffsetTensor] = getMPSGraphTensorFromScalar(stream, storageOffsetScalar);
@@ -91,8 +81,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
 static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const IntArrayRef& size,
                                           const IntArrayRef& stride, int64_t offset,
                                           const IntArrayRef& base_shape, bool needsScatter,
-                                          const bool needsBoolCast,
-                                          MPSGraphTensor* updatesTensor)
+                                          const bool needsBoolCast)
 {
   MPSGraph* mpsGraph = cachedGraph->graph();
   MPSGraphTensor *outputTensor = nil;
@@ -151,7 +140,7 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
     if (needsScatter) {
       MPSGraphTensor* scatteredTensor = [mpsGraph scatterAlongAxis: (NSInteger) 0
                                                     withDataTensor: reshapedInputTensor
-                                                     updatesTensor: updatesTensor
+                                                     updatesTensor: cachedGraph->updatesTensor
                                                      indicesTensor: reshapedIndicesTensor
                                                               mode: MPSGraphScatterModeSet
                                                               name: nil];
@@ -199,7 +188,7 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
 //            |    /          \   |
 //            |   /            \  |
 //            NonView T         NonView T
-static ViewCachedGraph* createViewGraph(const Tensor& self, const Tensor &updates, IntArrayRef size, IntArrayRef stride, int64_t storage_offset, bool needsScatter)
+static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, IntArrayRef stride, int64_t storage_offset, bool needsScatter)
 {
   IntArrayRef base_shape = get_buffer_shape(self.storage().data());
   if (base_shape.size() == 0) {
@@ -216,7 +205,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, const Tensor &update
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    string key = getStridedKey(self.scalar_type(), updates.scalar_type(), base_shape, size, needsScatter);
+    string key = getStridedKey(self.scalar_type(), base_shape, size, needsScatter);
     ViewCachedGraph* cachedGraph = static_cast<ViewCachedGraph *>(cache_->LookUp(key));
 
     if (!cachedGraph) {
@@ -224,13 +213,12 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, const Tensor &update
         ViewCachedGraph *newCachedGraph = nil;
         @autoreleasepool {
             MPSGraph* mpsGraph = make_mps_graph();
-            MPSGraphTensor* updatesTensor = nil;
             newCachedGraph = new ViewCachedGraph(mpsGraph);
             // Workaround for MPSShaderLibrary bug
             // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
             auto inputType = getMPSScalarType(self.scalar_type());
-            if (inputType == MPSDataTypeUInt8) {
-                inputType = MPSDataTypeInt8;
+            if (inputType ==  MPSDataTypeUInt8) {
+                inputType =  MPSDataTypeInt8;
             }
             auto needsBoolCast = inputType == MPSDataTypeBool;
             // Self is the input tensor we are creating view of
@@ -240,19 +228,9 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, const Tensor &update
               newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@1]));
             }
             if (needsScatter) {
-              auto updatesType = getMPSScalarType(updates.scalar_type());
-              if (updatesType == MPSDataTypeUInt8) {
-                updatesType = MPSDataTypeInt8;
-              }
-              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, updatesType);
-              updatesTensor = newCachedGraph->updatesTensor;
-              if (inputType != updatesType) {
-                updatesTensor = [mpsGraph castTensor:updatesTensor
-                                              toType:inputType
-                                                name:@"castUpdatesTensor"];
-              }
+              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, inputType);
             }
-            newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, needsBoolCast, updatesTensor);
+            newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, needsBoolCast);
         }
         return newCachedGraph;
       }));
@@ -267,7 +245,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
 
   const IntArrayRef& base_shape = get_buffer_shape(src.storage().data());
   if (base_shape.size() > 0) {
-    string key = getStridedKey(src.scalar_type(), dst.scalar_type(), base_shape, src.sizes(), /*is_scatter*/ false);
+    string key = getStridedKey(src.scalar_type(), base_shape, src.sizes(), /*is_scatter*/ false);
     cachedGraph = static_cast<ViewCachedGraph *>(MPSGraphCache::getInstance()->LookUp(key));
   }
   // there are cases where gatherViewTensor() is called without having as_strided() called beforehand.
@@ -283,13 +261,12 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
     output = at::native::empty_mps(src.sizes(), src.scalar_type(), c10::nullopt, kMPS);
     requires_sync = true;
   }
-
   return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false, requires_sync);
 }
 
 Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output)
 {
-  ViewCachedGraph* cachedGraph = createViewGraph(output, src, output.sizes(), output.strides(),
+  ViewCachedGraph* cachedGraph = createViewGraph(output, output.sizes(), output.strides(),
                                                  output.storage_offset(), /*needsScatter*/ true);
   return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true, /*requires_sync*/  true);
 }
@@ -305,7 +282,7 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size, IntArrayR
 
   // 0 sizes won't result in any change in the shape of the Tensor so we can skip it.
   if (size.size() > 0)
-    mps::createViewGraph(self, self, size, stride, storage_offset, /*needsScatter*/ false);
+    mps::createViewGraph(self, size, stride, storage_offset, /*needsScatter*/ false);
 
   return result;
 }
