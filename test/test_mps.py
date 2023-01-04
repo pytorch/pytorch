@@ -3760,14 +3760,14 @@ class TestNLLLoss(TestCase):
             inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
 
             # align_corners is used for 2D interpolation only
-            if (align_corners == True and len(shape) > 3 and mode == 'bilinear'):
-                if (scales != None):
+            if (align_corners is True and len(shape) > 3 and mode == 'bilinear'):
+                if scales is not None:
                     outputCPU = nn.functional.interpolate(inputCPU, scale_factor=scales, mode=mode, align_corners=align_corners)
                     outputMPS = nn.functional.interpolate(inputMPS, scale_factor=scales, mode=mode, align_corners=align_corners)
                 else:
                     outputCPU = nn.functional.interpolate(inputCPU, size=output_size, mode=mode, align_corners=align_corners)
                     outputMPS = nn.functional.interpolate(inputMPS, size=output_size, mode=mode, align_corners=align_corners)
-            elif (scales != None):
+            elif scales is not None:
                 outputCPU = nn.functional.interpolate(inputCPU, scale_factor=scales, mode=mode)
                 outputMPS = nn.functional.interpolate(inputMPS, scale_factor=scales, mode=mode)
             else:
@@ -3783,16 +3783,16 @@ class TestNLLLoss(TestCase):
 
         # 1D interpolation
         for mode in ['nearest', 'nearest-exact']:
-            helper([2, 3, 4], [3], None, mode) # downsample with size
-            helper([2, 3, 4], [6], None, mode) # upsample with size
-            helper([2, 3, 4], None, [0.6], mode) # downsample with scale factor
-            helper([2, 3, 4], None, [1.7], mode) # upsample with scale factor
+            helper([2, 3, 4], [3], None, mode)  # downsample with size
+            helper([2, 3, 4], [6], None, mode)  # upsample with size
+            helper([2, 3, 4], None, [0.6], mode)  # downsample with scale factor
+            helper([2, 3, 4], None, [1.7], mode)  # upsample with scale factor
         # 2D interpolation
         for mode in ['nearest', 'nearest-exact', 'bilinear']:
-            helper([2, 3, 4, 5], [3, 4], None, mode) # downsample_nearest with size
-            helper([2, 3, 4, 5], [6, 7], None, mode) # upsample_nearest with size
-            helper([2, 3, 4, 5], None, [0.6, 0.7], mode) # downsample_nearest with scale factor
-            helper([2, 3, 4, 5], None, [1.4, 1.7], mode) # upsample_nearest with scale factor
+            helper([2, 3, 4, 5], [3, 4], None, mode)  # downsample_nearest with size
+            helper([2, 3, 4, 5], [6, 7], None, mode)  # upsample_nearest with size
+            helper([2, 3, 4, 5], None, [0.6, 0.7], mode)  # downsample_nearest with scale factor
+            helper([2, 3, 4, 5], None, [1.4, 1.7], mode)  # upsample_nearest with scale factor
         # align_corners=True
         helper([2, 3, 4, 5], [3, 4], None, 'bilinear', True)
         helper([2, 3, 4, 5], None, [1.4, 1.7], 'bilinear', True)

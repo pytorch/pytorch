@@ -1,4 +1,4 @@
-//  Copyright © 2022 Apple Inc.
+//  Copyright © 2023 Apple Inc.
 
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
@@ -17,17 +17,16 @@ void upsample_out_template(const Tensor& input,
                            c10::optional<double> scale_w_opt,
                            const Tensor& output,
                            bool align_corners,
-                           const c10::string_view resize_mode_str)
-{
-  if (input.numel() == 0)
+                           const c10::string_view resize_mode_str) {
+  if (input.numel() == 0) {
     return;
-
+  }
   const auto input_dim  = input.sizes();
-  if (input_dim.size() <= 3)
+  if (input_dim.size() <= 3) {
     native::upsample_1d_common_check(input.sizes(), output_size);
-  else
+  } else {
     native::upsample_2d_common_check(input.sizes(), output_size);
-
+  }
   bool centerResults = false;
   MPSGraphResizeMode resizeMode = MPSGraphResizeNearest;
   MPSGraphResizeNearestRoundingMode nearestRoundingMode = MPSGraphResizeNearestRoundingModeFloor;
@@ -49,8 +48,8 @@ void upsample_out_template(const Tensor& input,
   const bool is_macOS_13_0_or_newer = is_macos_13_or_newer();
   const int64_t output_width  = output_size.size() > 1 ? output_size[1] : output_size[0];
   const int64_t output_height = output_size.size() > 1 ? output_size[0] : 1;
-  const float scale_w = (scale_w_opt.has_value() && scale_w_opt.value() > 0.) ? static_cast<float>(scale_w_opt.value()) : 0.;
-  const float scale_h = (scale_h_opt.has_value() && scale_h_opt.value() > 0.) ? static_cast<float>(scale_h_opt.value()) : 1.;
+  const float scale_w = (scale_w_opt.value_or(0.) > 0.) ? static_cast<float>(scale_w_opt.value()) : 0.;
+  const float scale_h = (scale_h_opt.value_or(0.) > 0.) ? static_cast<float>(scale_h_opt.value()) : 1.;
   const float offset_y = centerResults ? (scale_h - 1.0f) / 2.0f : 0.0f;
   const float offset_x = centerResults ? (scale_w - 1.0f) / 2.0f : 0.0f;
 
@@ -221,7 +220,7 @@ static bool check_mps_compatibility(const c10::string_view resize_mode_str, c10:
   static const bool is_macOS_13_0_or_newer = is_macos_13_or_newer();
   if (!is_macOS_13_0_or_newer) {
     // passing scale factors to MPS's resize APIs is not supported on macOS < 13
-    if (scale.has_value() && scale.value() > 0.) {
+    if (scale.value_or(0.) > 0.) {
       TORCH_WARN_ONCE("MPS: passing scale factor to upsample ops is supported natively starting from macOS 13.0. ",
                       "Falling back on CPU. This may have performance implications.");
       return false;
