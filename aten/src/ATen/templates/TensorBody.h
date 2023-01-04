@@ -124,12 +124,16 @@ class TORCH_API Tensor: public TensorBase {
   Tensor conj() const {
     if (!this->is_complex()) {
       return *this;
-    } else {
-      if (this->is_sparse()) {
-        return this->conj_physical();
-      }
+    }
+
+    // Path for dense and nested.
+    // NOTE: conj() is not yet implemented for nested.
+    if (this->layout() == at::kStrided) {
       return this->_conj();
     }
+
+    // Path for sparse and sparse compressed layouts.
+    return this->conj_physical();
   }
 
   // Aliased by Dimname overloads, so need explicit using
