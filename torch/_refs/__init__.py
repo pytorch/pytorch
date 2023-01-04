@@ -4340,12 +4340,13 @@ def linspace(
     computation_dtype, _ = utils.reduction_dtypes(
         rg, REDUCTION_OUTPUT_TYPE_KIND.SAME, dtype_red
     )
-    cast = partial(torch.full, (), dtype=computation_dtype, **factory_kwargs)
+    cast_rg = partial(_maybe_convert_to_dtype, dtype=computation_dtype)
+
     # We implement torch.lerp without performing rg / (steps - 1) explicitly
     # With this we get out[0] == start, out[-1] == end
-    step = cast((end - start) / (steps - 1))
+    step = (end - start) / (steps - 1)
     out = torch.where(
-        rg < steps / 2, start + step * rg, end - step * ((steps - 1) - rg)
+        rg < steps / 2, start + step * cast_rg(rg), end - step * cast_rg((steps - 1) - rg)
     )
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
