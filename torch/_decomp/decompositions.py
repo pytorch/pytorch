@@ -1962,6 +1962,10 @@ def uniform(
         device=x.device,
     )
 
+@register_decomposition(aten.geometric_)
+def geometric(self, p):
+    return self.copy_(torch.floor(torch.log(1 - torch.rand_like(self)) / torch.log(torch.tensor(1 - p))) + 1)
+
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
 def upsample_compute_output_size(input_size, output_size, scale_factors):
