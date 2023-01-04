@@ -11,6 +11,9 @@ from torch.distributed.checkpoint.default_planner import (
     DefaultSavePlanner,
     DefaultLoadPlanner,
 )
+from torch.distributed.checkpoint.optimizer import (
+    load_sharded_optimizer_state_dict,
+)
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.tensor.parallel import (
@@ -68,8 +71,27 @@ def _distribute_and_fsdp_wrap_module(
     return FSDP(module, process_group=pg, use_orig_params=use_orig_params)
 
 
+def create_new_dist_group():
+    world_size = dist.get_world_size()
+    group1 = [i for i in range(world_size) if i % 2 == 0]
+    group2 = [i for i in range(world_size) if i % 2 != 0]
+
+    # create new fsdp group for resharding
+    fsdp_0 = dist.new_group(ranks=group1)
+    fsdp_1 = dist.new_group(ranks=group2)
+    if dist.get_rank() % 2 == 0:
+        my_fsdp = fsdp_0
+    else:
+        my_fsdp = fsdp_1
+
+    return my_fsdp
+
+
 def init_model(
-    model_parallel_size=TP_DEGREE, use_orig_params=False, fsdp_nested=False
+    model_parallel_size=TP_DEGREE,
+    use_orig_params=False,
+    fsdp_nested=False,
+    fsdp_pg=None,
 ):
     rank = dist.get_rank()
     torch.cuda.set_device(rank)
@@ -83,7 +105,10 @@ def init_model(
         mesh=torch.arange(0, world_size).view(model_parallel_size, -1),
     )
 
-    fsdp_pg = twod_mesh.get_dim_groups()[0]
+    if not fsdp_pg:
+        fsdp_pg = twod_mesh.get_dim_groups()[0]
+    else:
+        fsdp_pg = create_new_dist_group()
 
     # Create Input
     model = _distribute_and_fsdp_wrap_module(
@@ -93,17 +118,15 @@ def init_model(
     return model, fsdp_pg
 
 
-class Test2dModelStateCheckpoint(DTensorTestBase):
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    @with_temp_dir
-    def test_2d_model_state_checkpoint(self) -> None:
+class Test2dFsdpDtCheckpoint(DTensorTestBase):
+    def _test_fsdp_dt_checkpoint(self, fsdp_pg=None) -> None:
         if not is_available():
             self.skipTest("FSDP 2d parallel integration not available")
 
         CHECKPOINT_DIR = self.temp_dir
 
         model = init_model()[0]
+        optim = torch.optim.Adam(model.parameters(), lr=0.1)
 
         # Create Input
         input_seed = self.rank
@@ -111,10 +134,12 @@ class Test2dModelStateCheckpoint(DTensorTestBase):
         input = torch.rand(4, 5).cuda(self.rank)
 
         model(input).sum().backward()
+        optim.step()
 
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
             state_dict = {
                 "model": model.state_dict(),
+                "optim": FSDP.sharded_optim_state_dict(model, optim),
             }
 
             dist_cp.save_state_dict(
@@ -127,7 +152,8 @@ class Test2dModelStateCheckpoint(DTensorTestBase):
                 ),
             )
 
-        model_2 = init_model()[0]
+        model_2 = init_model(fsdp_pg=fsdp_pg)[0]
+        optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
         # Ensure the parameters are different before loading
         with FSDP.summon_full_params(model):
@@ -157,6 +183,17 @@ class Test2dModelStateCheckpoint(DTensorTestBase):
             )
             model_2.load_state_dict(state_dict["model"])
 
+            optim_state = load_sharded_optimizer_state_dict(
+                model_state_dict=state_dict["model"],
+                optimizer_key="optim",
+                storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
+            )
+
+            flattened_osd = FSDP.flatten_sharded_optim_state_dict(
+                optim_state["optim"], model_2, optim_2
+            )
+            optim_2.load_state_dict(flattened_osd)
+
         # Ensure the parameters are the same after loading
         with FSDP.summon_full_params(model):
             with FSDP.summon_full_params(model_2):
@@ -170,6 +207,29 @@ class Test2dModelStateCheckpoint(DTensorTestBase):
                         )
                     else:
                         self.assertEqual(n_p1[1], n_p2[1])
+
+        def opt_at(opt, idx):
+            return list(opt.state.values())[idx]
+
+        # Adam lazily creates its state
+        self.assertEqual(
+            opt_at(optim, 0)["exp_avg"], opt_at(optim_2, 0)["exp_avg"]
+        )
+        self.assertEqual(
+            opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
+        )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_2d_fsdp_dt_checkpoint_no_resharding(self) -> None:
+        self._test_fsdp_dt_checkpoint()
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_2d_fsdp_dt_checkpoint_resharding(self) -> None:
+        self._test_fsdp_dt_checkpoint(fsdp_pg=create_new_dist_group())
 
 
 if __name__ == "__main__":
