@@ -27,11 +27,10 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
                             IntArrayRef kernel_size, IntArrayRef stride,
                             IntArrayRef padding, IntArrayRef dilation,
                             bool ceil_mode, const c10::optional<float> divisor,
-                            PoolingOpBlock poolingBlock, const c10::string& op_name)
-{
-  if (input.numel() == 0)
+                            PoolingOpBlock poolingBlock, const c10::string& op_name) {
+  if (input.numel() == 0) {
     return;
-
+  }
   if (!is_macos_13_or_newer()) {
     TORCH_CHECK(input.scalar_type() != ScalarType::Long,
                 "MPS: ", op_name, " op with int64 input is supported natively starting from macOS 13.0.");
@@ -113,7 +112,7 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
     MPSShape* gradOutputShape = is_backward_pass ? getMPSShape(grad_output, memory_format) : nullptr;
     PoolingCachedGraph* cachedGraph = cache_->LookUpAs<PoolingCachedGraph>(key);
 
-    if(!cachedGraph) {
+    if (!cachedGraph) {
       cachedGraph = cache_->CreateCachedGraphAs<PoolingCachedGraph>(key, ^ MPSCachedGraph * () {
         PoolingCachedGraph *newCachedGraph = nil;
 
@@ -199,8 +198,8 @@ Tensor _mps_max_pool2d(
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
-    bool ceil_mode)
-{
+    bool ceil_mode) {
+
   Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
@@ -221,8 +220,8 @@ Tensor mps_max_pool2d_backward(
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
-    bool ceil_mode)
-{
+    bool ceil_mode) {
+
   Tensor grad_input = at::empty(input.sizes(), input.options(), MemoryFormat::Contiguous);
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
@@ -245,8 +244,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)(
     IntArrayRef dilation,
     bool ceil_mode,
     const Tensor& output,
-    const Tensor& indices)
-{
+    const Tensor& indices) {
+
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
     NSArray<MPSGraphTensor*>* poolOutputs = [mpsGraph maxPooling2DReturnIndicesWithSourceTensor: cachedGraph.inputTensor
@@ -268,8 +267,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)(
     IntArrayRef dilation,
     bool ceil_mode,
     const Tensor& indices,
-    const Tensor& grad_input)
-{
+    const Tensor& grad_input) {
+
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
     return [mpsGraph maxPooling2DGradientWithGradientTensor: cachedGraph.gradOutputTensor
@@ -292,8 +291,8 @@ TORCH_IMPL_FUNC(avg_pool2d_out_mps) (
    bool ceil_mode,
    bool count_include_pad,
    c10::optional<int64_t> divisor_override,
-   const Tensor& output)
-{
+   const Tensor& output) {
+
   const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
   float divisor = use_divisor ? float(kH * kW) / (float) divisor_override.value() : 1.0f;
   count_include_pad = use_divisor ? use_divisor : count_include_pad;
@@ -323,8 +322,8 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps) (
     bool ceil_mode,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override,
-    const Tensor& gradInput)
-{
+    const Tensor& gradInput) {
+
   const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
   float divisor = use_divisor ? float(kernel_size[0] * kernel_size[1]) / (float) divisor_override.value() : 1.0f;
   count_include_pad = use_divisor ? use_divisor : count_include_pad;
