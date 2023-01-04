@@ -4329,7 +4329,7 @@ def linspace(
     if start == end:
         return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
-    # Perform in arange in int for exactness, so that out[0] == start, out[-1] == end
+    # Perform in arange in int because some backends like ATen or Triton do not support all the dtypes
     rg = torch.arange(0, steps, **factory_kwargs)  # type: ignore[arg-type]
 
     # Small types need to be computed in higher precision as this is, at heart, an associative scan
@@ -4341,9 +4341,16 @@ def linspace(
     computation_dtype, _ = utils.reduction_dtypes(
         rg, REDUCTION_OUTPUT_TYPE_KIND.SAME, dtype_red
     )
-    rg = _maybe_convert_to_dtype(rg, computation_dtype)  # type: ignore[assignment]
+    cast_rg = partial(_maybe_convert_to_dtype, dtype=computation_dtype)
 
-    out = rg * (end - start) / (steps - 1) + start
+    # We implement torch.lerp without performing rg / (steps - 1) explicitly
+    # With this we get out[0] == start, out[-1] == end
+    step = (end - start) / (steps - 1)
+    out = torch.where(
+        rg < steps / 2,
+        start + step * cast_rg(rg),  # type: ignore[arg-type,operator]
+        end - step * cast_rg((steps - 1) - rg),  # type: ignore[arg-type,operator]
+    )
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
