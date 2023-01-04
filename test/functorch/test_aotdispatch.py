@@ -2103,7 +2103,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.pdist', ''),  # could not find kernel
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('nn.functional.prelu', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
     xfail('nn.functional.unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2301,10 +2300,19 @@ aot_autograd_module_failures = set({
                                 # of a tracing tensor with aten._local_scalar_dense.default -
                                 # erroring out! It's likely that this is caused by data-dependent
                                 # control flow or similar.
+    torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input
+                                  # to a causal mask tensor, to see if Boolean is_causal should be set
+                                  # for TrnasformerEncoder layers, MHA and sdp custom kernels
+    torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
+                           # to a causal mask tensor, to see if Boolean is_causal should be set
+                           # for TrnasformerEncoder layers, MHA and sdp custom kernels
+                           # (this bubbles up to Transformer)
 })
 
 symbolic_aot_autograd_module_failures = {
     torch.nn.GRU,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
+    torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoderLayer,  # RuntimeError: tried to get Double out of SymFloat
     torch.nn.TransformerDecoderLayer,  # RuntimeError: tried to get Double out of SymFloat
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool

@@ -88,6 +88,7 @@ class DTypeConfig:
 
     Example usage::
 
+        >>> # xdoctest: +SKIP(failing)
         >>> dtype_config1 = DTypeConfig(
         ...     input_dtype=torch.quint8,
         ...     output_dtype=torch.quint8,

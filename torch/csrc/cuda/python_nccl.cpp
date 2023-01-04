@@ -281,9 +281,11 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
 }
 
 static inline at::Tensor extract_tensor(PyObject* obj) {
-  if (!THPVariable_Check(obj)) {
-    throw torch::TypeError("expected Tensor (got %s)", Py_TYPE(obj)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      THPVariable_Check(obj),
+      "expected Tensor (got ",
+      Py_TYPE(obj)->tp_name,
+      ")");
   return THPVariable_Unpack(obj);
 }
 
@@ -299,10 +301,13 @@ static inline std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   }
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject* item = PySequence_Fast_GET_ITEM(seq.get(), i);
-    if (!THPVariable_Check(item)) {
-      throw torch::TypeError(
-          "expected Tensor at %d (got %s)", (int)i, Py_TYPE(item)->tp_name);
-    }
+    TORCH_CHECK_TYPE(
+        THPVariable_Check(item),
+        "expected Tensor at ",
+        i,
+        " (got ",
+        Py_TYPE(item)->tp_name,
+        ")");
     list.emplace_back(THPVariable_Unpack(item));
   }
   return list;
