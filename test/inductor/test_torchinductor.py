@@ -6054,7 +6054,10 @@ if HAS_CPU:
                 ((1, 1, 1, 12, 11, 3), (396, 396, 396, 33, 3, 1), torch.int64, "cpu")
             ]
             args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-            fn(*args)
+            out = fn(*args)
+            assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+            assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+            assert out.equal(args[0])
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:

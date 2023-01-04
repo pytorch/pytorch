@@ -142,6 +142,9 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
+            # For inplace ops changing the input's shape (unsqueeze_)
+            if self.fake_tensor.shape != self.example.shape:
+                self.fake_tensor = self.fake_tensor.reshape(self.example.shape)
             return [self.fake_tensor]
 
     def __len__(self):

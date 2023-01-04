@@ -1285,7 +1285,7 @@ class View(BaseView):
     __repr__ = __str__
 
     @classmethod
-    def create(cls, x, new_size):
+    def create(cls, x, new_size, inplace=False):
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
@@ -1304,6 +1304,8 @@ class View(BaseView):
                 FlexibleLayout.contiguous_strides(new_size),
                 old_layout.offset,
             )
+            if inplace:
+                return InplaceView(storage, new_layout)
             return ReinterpretView(storage, new_layout)
 
         reindex = cls.dynamic_reshape_indexer(old_size, new_size)
@@ -1470,6 +1472,14 @@ class ReinterpretView(BaseView):
             return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
         return f"{as_strided}({self.get_name()}, {size}, {stride})"
 
+class InplaceView(ReinterpretView):
+    def codegen_reference(self):
+        size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
+        stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
+        offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
+        if offset != "0":
+            return f"{self.get_name()}.as_strided_({size}, {stride}, {offset})"
+        return f"{self.get_name()}.as_strided_({size}, {stride})"
 
 class SliceView(View):
     @classmethod
