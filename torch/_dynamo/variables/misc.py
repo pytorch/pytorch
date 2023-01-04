@@ -491,7 +491,6 @@ class AutogradFunctionVariable(VariableTracker):
     def __init__(self, fn_cls, **kwargs):
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
-        assert self.source, "No source!"
 
     def call_apply(self, tx, args, kwargs):
         requires_grad = False
@@ -514,9 +513,6 @@ class AutogradFunctionVariable(VariableTracker):
 
         args = [BlackHoleVariable()] + list(args)
         options = VariableTracker.propagate(self, args, kwargs.values())
-        assert (
-            self.source
-        ), "Can't propagate none source, and UserFunctionVariable requires valid source"
         options["source"] = AttrSource(AttrSource(self.source, "__class__"), "forward")
         fn = self.fn_cls.forward
         if isinstance(fn, types.FunctionType):
@@ -622,7 +618,7 @@ class GetAttrVariable(VariableTracker):
             options = VariableTracker.propagate(self, new_args, new_kwargs.values())
             # Disable __torch_function__ here to prevent the clone of the
             # example tensor from going into the override.
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 if isinstance(args[0], TorchVariable):
                     return wrap_fx_proxy(
                         tx=tx,
