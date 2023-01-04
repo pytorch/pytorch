@@ -21,7 +21,6 @@
 from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
-import unittest
 
 from caffe2.python.transformations import Transformer
 from caffe2.python import core, workspace
@@ -161,7 +160,6 @@ class TestTransformations(tu.TestCase):
             atol=1e-03
         )
 
-    @unittest.skip("Test is flaky")
     @given(
         size=st.integers(7, 10),
         input_channels=st.integers(1, 10),

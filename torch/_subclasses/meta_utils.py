@@ -497,7 +497,7 @@ class MetaConverter:
                 # by hand, e.g., as is done in Dynamo
                 ctx = contextlib.nullcontext()
                 if ignore_subclass:
-                    ctx = torch._C.DisableTorchFunctionSubclass()
+                    ctx = torch._C.DisableTorchFunction()
                 with ctx:
                     r = self.meta_tensor(
                         t, shape_env=shape_env, callback=callback, source=source

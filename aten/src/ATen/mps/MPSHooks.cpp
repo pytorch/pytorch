@@ -2,7 +2,6 @@
 
 #include <ATen/mps/MPSHooks.h>
 #include <ATen/mps/MPSDevice.h>
-#include <ATen/mps/MPSGeneratorImpl.h>
 
 namespace at {
 namespace mps {
@@ -18,10 +17,6 @@ bool MPSHooks::hasMPS() const {
 
 Allocator* MPSHooks::getMPSDeviceAllocator() const {
   return at::mps::GetMPSAllocator();
-}
-
-const Generator& MPSHooks::getDefaultMPSGenerator() const {
-  return at::mps::detail::getDefaultMPSGenerator();
 }
 
 using at::MPSHooksRegistry;
