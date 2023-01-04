@@ -1619,9 +1619,27 @@ def tensor_constructor(fill_value):
     return inner
 
 
-empty = register_lowering([torch.empty, aten.empty])(tensor_constructor(0))
 zeros = register_lowering([torch.zeros, aten.zeros])(tensor_constructor(0))
 ones = register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
+
+
+@register_lowering([torch.empty, aten.empty])
+def empty(
+    *size,
+    names=None,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    memory_format=None,
+):
+    assert names is None
+    assert memory_format in (None, torch.contiguous_format)
+    if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
+        size = list(size[0])
+    return empty_strided(
+        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 def create_tensor_like(creation_fn):
