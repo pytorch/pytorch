@@ -1126,7 +1126,6 @@ class TritonKernel(Kernel):
             sizes[i] = ":"
         return f"[{', '.join(sizes)}]"
 
-
     def dense_size_str(self):
         sizes = []
         for tree in self.range_trees:
