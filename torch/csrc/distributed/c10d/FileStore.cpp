@@ -1,9 +1,9 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 
-#include <assert.h>
 #include <fcntl.h>
-#include <stdint.h>
 #include <sys/stat.h>
+#include <cassert>
+#include <cstdint>
 
 #ifdef _WIN32
 #include <c10/util/win32-headers.h>
@@ -22,6 +22,7 @@
 #include <sstream>
 #include <system_error>
 #include <thread>
+#include <utility>
 
 #include <c10/util/Exception.h>
 
@@ -125,7 +126,7 @@ class Lock {
 #ifdef _WIN32
     auto rv = syscall(std::bind(::flock_, fd_, operation));
 #else
-    auto rv = syscall(std::bind(::flock, fd_, operation));
+    auto rv = syscall([this, operation] { return ::flock(fd_, operation); });
 #endif
     SYSASSERT(rv, "flock");
   }
@@ -143,7 +144,9 @@ class File {
       fd_ = syscall(std::bind(
           ::open, path.c_str(), flags | _O_BINARY, _S_IREAD | _S_IWRITE));
 #else
-      fd_ = syscall(std::bind(::open, path.c_str(), flags, 0644));
+      fd_ = syscall([capture0 = path.c_str(), flags] {
+        return ::open(capture0, flags, 0644);
+      });
 #endif
       // Only retry when the file doesn't exist, since we are waiting for the
       // file to be created in this case to address the following issue:
@@ -174,13 +177,14 @@ class File {
   }
 
   off_t seek(off_t offset, int whence) {
-    auto rv = syscall(std::bind(lseek, fd_, offset, whence));
+    auto rv =
+        syscall([this, offset, whence] { return lseek(fd_, offset, whence); });
     SYSASSERT(rv, "lseek");
     return rv;
   }
 
   off_t tell() {
-    auto rv = syscall(std::bind(lseek, fd_, 0, SEEK_CUR));
+    auto rv = syscall([this] { return lseek(fd_, 0, SEEK_CUR); });
     SYSASSERT(rv, "lseek");
     return rv;
   }
@@ -194,7 +198,8 @@ class File {
 
   void write(const void* buf, size_t count) {
     while (count > 0) {
-      auto rv = syscall(std::bind(::write, fd_, buf, count));
+      auto rv =
+          syscall([this, buf, count] { return ::write(fd_, buf, count); });
       SYSASSERT(rv, "write");
       buf = (uint8_t*)buf + rv;
       count -= rv;
@@ -203,7 +208,7 @@ class File {
 
   void read(void* buf, size_t count) {
     while (count > 0) {
-      auto rv = syscall(std::bind(::read, fd_, buf, count));
+      auto rv = syscall([this, buf, count] { return ::read(fd_, buf, count); });
       SYSASSERT(rv, "read");
       buf = (uint8_t*)buf + rv;
       count -= rv;
@@ -225,7 +230,7 @@ class File {
   }
 
   void read(std::string& str) {
-    uint32_t len;
+    uint32_t len = 0;
     read(&len, sizeof(len));
     std::vector<uint8_t> buf(len);
     read(buf.data(), len);
@@ -233,7 +238,7 @@ class File {
   }
 
   void read(std::vector<uint8_t>& data) {
-    uint32_t len;
+    uint32_t len = 0;
     read(&len, sizeof(len));
     data.resize(len);
     read(data.data(), len);
@@ -270,9 +275,9 @@ off_t refresh(
 
 } // namespace
 
-FileStore::FileStore(const std::string& path, int numWorkers)
+FileStore::FileStore(std::string path, int numWorkers)
     : Store(),
-      path_(path),
+      path_(std::move(path)),
       pos_(0),
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
