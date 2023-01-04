@@ -1105,7 +1105,8 @@ def must_serial(file: str) -> bool:
         "distributed" in file or
         file in CUSTOM_HANDLERS or
         file in RUN_PARALLEL_BLOCKLIST or
-        file in CI_SERIAL_LIST
+        file in CI_SERIAL_LIST or
+        file in JIT_EXECUTOR_TESTS
     )
 
 
