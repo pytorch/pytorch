@@ -237,11 +237,17 @@ def _init_ignored_module_states(
     state: _FSDPState,
     module: nn.Module,
     ignored_modules: Optional[Iterable[torch.nn.Module]],
+    ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
 ) -> _FSDPState:
+    assert ignored_modules is None or ignored_parameters is None, (
+        "Can not pass `ignored_modules` and `ignored_parameters` at the same time. \
+        Please either pass `ignored_modules` or `ignored_parameters`."
+    )
     state._ignored_modules = _get_ignored_modules(module, ignored_modules)
     state._ignored_params = _get_ignored_params(
         module,
         state._ignored_modules,
+        ignored_parameters,
     )
     # TODO: FSDP's contract for buffers is not well-defined. They are
     # implicitly ignored for most functionality since they are not sharded;
@@ -585,17 +591,39 @@ def _get_ignored_modules(
 def _get_ignored_params(
     root_module: torch.nn.Module,
     ignored_modules: Set[torch.nn.Module],
+    ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
 ) -> Set[torch.nn.Parameter]:
     """
-    Returns the parameters of the modules in ``ignored_modules``,
-    excluding any :class:`FlatParameter` s.
+    Returns the parameters of the modules in ``ignored_modules`` and
+    the parameters in ``ignored_parameters``, excluding any :class:`FlatParameter` s.
     """
-    return set(
+    all_ignored_params: Set[torch.nn.Parameter] = set()
+
+    params_in_ignored_modules = set(
         p
         for m in ignored_modules
         for p in m.parameters()
         if not _is_fsdp_flattened(p)
     )
+
+    all_ignored_params.update(params_in_ignored_modules)
+
+    if ignored_parameters is not None:
+        params_in_ignored_parameters = set(
+            p
+            for p in ignored_parameters
+            if not _is_fsdp_flattened(p)
+        )
+        all_ignored_params.update(params_in_ignored_parameters)
+
+        # Include nested FSDP modules' ignored parameters
+        for submodule in root_module.modules():
+            optional_fsdp_state = _get_module_fsdp_state(submodule)
+            if optional_fsdp_state is not None:
+                assert hasattr(optional_fsdp_state, "_ignored_params")
+                all_ignored_params.update(optional_fsdp_state._ignored_params)
+
+    return all_ignored_params
 
 
 def _get_buffer_names(root_module: nn.Module) -> Set[str]:

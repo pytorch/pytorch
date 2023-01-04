@@ -50,6 +50,7 @@ class _FSDPState(_State):
         self.sharding_strategy = ShardingStrategy.FULL_SHARD
         self.compute_device = torch.device("cuda", torch.cuda.current_device())
         self.process_group: Optional[dist.ProcessGroup] = None
+        self._ignored_params: Set[nn.Parameter] = set()
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:

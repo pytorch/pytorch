@@ -313,6 +313,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             prevent too many in-flight all-gathers. This ``bool`` only affects
             the sharded strategies that schedule all-gathers. Enabling this can
             help lower the number of CUDA malloc retries.
+        ignored_parameters (Optional[Iterable[torch.nn.Parameter]]): Ignored
+            parameters will not be managed by this FSDP instance,
+            that means these parameters will not be flattened and sharded by FSDP,
+            their gradients will not be synchronized as well. With this newly added
+            argument, `ignored_modules` could be deprecated soon. For back compatiablity,
+            both `ignored_parameters` and `ignored_modules` are kept for now,
+            but only one of them could not be None.
     """
 
     def __init__(
@@ -331,10 +338,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         forward_prefetch: bool = False,
         limit_all_gathers: bool = False,
         use_orig_params: bool = False,
+        ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        _init_ignored_module_states(self, module, ignored_modules)
+        _init_ignored_module_states(self, module, ignored_modules, ignored_parameters)
 
         # Add module annotations for Dynamo support (see function for details)
         _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
@@ -404,9 +412,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         if not use_orig_params:
             _check_orig_params_flattened(self, self._ignored_params)
             _register_flat_param(self, self)
-
-        # Delete to avoid keeping references after the constructor
-        delattr(self, "_ignored_params")
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
