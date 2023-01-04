@@ -3,7 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
-#include <ATen/native/vulkan/ops/Tensor.h>
+#include <ATen/native/vulkan/api/Tensor.h>
 #include <c10/util/accumulate.h>
 
 namespace at {
