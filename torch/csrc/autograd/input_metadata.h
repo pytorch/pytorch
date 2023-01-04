@@ -45,7 +45,7 @@ struct InputMetadata {
       MetadataShape input_shape,
       bool is_tensor_subclass)
       : options_{options},
-        shape_{input_shape},
+        shape_{std::move(input_shape)},
         is_tensor_subclass_{is_tensor_subclass} {
     auto device_ = options.device();
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);

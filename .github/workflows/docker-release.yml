@@ -75,7 +75,7 @@ jobs:
       - name: Setup job specific variables
         run: |
           set -eou pipefail
-          # To get QEMU binaries in our PATh
+          # To get QEMU binaries in our PATH
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
           # Generate PyTorch version to use
           echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py)" >> "${GITHUB_ENV}"

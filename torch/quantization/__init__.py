@@ -18,8 +18,7 @@ def default_eval_fn(model, calib_data):
     for data, target in calib_data:
         model(data)
 
-# TODO(future PR): fix the typo, should be `__all__`
-_all__ = [
+__all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub',
     # Top level API for eager mode quantization
     'quantize', 'quantize_dynamic', 'quantize_qat',
