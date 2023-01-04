@@ -154,7 +154,11 @@ MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format) {
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format) {
   if (memory_format == MemoryFormat::ChannelsLast) {
     TORCH_INTERNAL_ASSERT(sizes.size() == 4, "ChannelsLast memory format must have 4 dimensions!");
-    return @[@(sizes[0]), @(sizes[2]), @(sizes[3]), @(sizes[1])];
+    const NSUInteger N = sizes[0];
+    const NSUInteger C = sizes[1];
+    const NSUInteger H = sizes[2];
+    const NSUInteger W = sizes[3];
+    return @[@(N), @(H), @(W), @(C)];
   }
   const int sz = sizes.size();
   const int sz_ = (sz > 0) ? sz : 1;
