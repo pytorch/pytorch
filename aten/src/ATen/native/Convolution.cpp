@@ -447,9 +447,12 @@ struct ConvParams {
     if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
       long cudnn_version = detail::getCUDAHooks().versionCuDNN();
       if (cudnn_version >= 8200) {
+        bool type_cond = (input.scalar_type() == kHalf && // only for FP16
+                             weight.scalar_type() == kHalf) || 
+                         (input.scalar_type() == kBFloat16 && 
+                             weight.scalar_type() == kBFloat16);
         bool kernel_cond =  (use_cudnn(input, weight) &&
-                             input.scalar_type() == kHalf && // only for FP16
-                             weight.scalar_type() == kHalf &&
+                             type_cond &&
                              is_depthwise(input, weight) &&
                              input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
                              !is_dilated() && // no dilation supported
