@@ -108,10 +108,12 @@ inline void transpose<float>(int64_t M, int64_t N, const float* src, int64_t ld_
 
 template <typename index_t, typename F>
 inline void parallel_sparse_csr(
-    const index_t* crow_data,
+    const TensorAccessor<index_t, 1>& crow_acc,
     const int64_t M,
     const int64_t nnz,
     const F& f) {
+  TORCH_CHECK(crow_acc.size(0) == M + 1);
+
   // directly parallel on `M` may lead to load imbalance,
   // statically determine thread partition here to average payload
   // for each thread.
@@ -124,8 +126,8 @@ inline void parallel_sparse_csr(
   int64_t sum = 0;
   int64_t t = 1;
   for (const auto m : c10::irange(M)) {
-    int64_t row_start = crow_data[m];
-    int64_t row_end = crow_data[m + 1];
+    int64_t row_start = crow_acc[m];
+    int64_t row_end = crow_acc[m + 1];
     sum += row_end - row_start;
     if (sum > t * thread_averge_payload) {
       thread_splits[t] = m;
