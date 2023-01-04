@@ -13,7 +13,7 @@ import math
 from torch._six import inf, nan
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests, set_default_dtype, \
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
     instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
