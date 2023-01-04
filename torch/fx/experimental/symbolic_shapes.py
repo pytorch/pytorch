@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 try:
     import sympy  # type: ignore[import]
-    from sympy.printing.precedence import precedence  # type: ignore[import]
+    from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
     from sympy.printing.str import StrPrinter  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
@@ -217,17 +217,13 @@ if HAS_SYMPY:
         2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
         """
         nargs = (2,)
+        precedence = 50  # precedence of mul  # noqa: F811
 
         def _sympystr(self, printer):
             lhs = self.args[0]
             rhs = self.args[1]
-            lhs_str = printer._print(lhs)
-            rhs_str = printer._print(rhs)
-            if precedence(lhs) < precedence(sympy.div):
-                lhs_str = f"({lhs_str})"
-            if precedence(rhs) < precedence(sympy.div):
-                rhs_str = f"({rhs_str})"
-
+            lhs_str = printer.parenthesize(lhs, self.precedence)
+            rhs_str = printer.parenthesize(rhs, self.precedence)
             return f"{lhs_str}//{rhs_str}"
 
         @classmethod
