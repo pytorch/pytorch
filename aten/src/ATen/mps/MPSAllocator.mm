@@ -22,8 +22,8 @@ void MPSHeapAllocatorImpl::init_allocator()
   static const char *verbosity_str = getenv("PYTORCH_DEBUG_MPS_ALLOCATOR");
   m_debug_verbosity = verbosity_str ? strtol(verbosity_str, nullptr, 0) : DebugVerbosity::SILENT;
 
-  // on unified memory, we set the allowed upper bound to twice the size of recommendedMaxWorkingSetSize.
-  const double high_watermark_upper_bound =  m_device.hasUnifiedMemory ? 2.0 : 1.0;
+  // we set the allowed upper bound to twice the size of recommendedMaxWorkingSetSize.
+  const double high_watermark_upper_bound = 2.0;
 
   static const char *high_watermark_ratio_str = getenv("PYTORCH_MPS_HIGH_WATERMARK_RATIO");
   m_high_watermark_ratio = high_watermark_ratio_str ? strtod(high_watermark_ratio_str, nullptr) : default_high_watermark_ratio;
@@ -386,7 +386,9 @@ bool MPSHeapAllocatorImpl::release_cached_buffers()
 
 void MPSHeapAllocatorImpl::garbage_collect_cached_buffers(AllocParams& params)
 {
-  TORCH_INTERNAL_ASSERT(current_allocated_size() >= m_low_watermark_limit);
+  // skip garbage collection if memory pressure has already relieved
+  if (current_allocated_size() < m_low_watermark_limit)
+    return;
   // attempt to collect garbage until we reach below low watermark limit
   const auto target_size = current_allocated_size() - m_low_watermark_limit;
   const BufferPool& pool = *params.pool;
