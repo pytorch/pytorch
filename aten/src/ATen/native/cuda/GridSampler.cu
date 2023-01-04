@@ -100,8 +100,8 @@ namespace {
           *out_ptr_NCHW = out_acc;
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        index_t ix_nearest = static_cast<index_t>(::nearbyint(ix));
-        index_t iy_nearest = static_cast<index_t>(::nearbyint(iy));
+        index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
+        index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
 
         // assign nearest neighor pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
