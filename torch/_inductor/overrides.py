@@ -55,6 +55,7 @@ def replace_fx(gm: torch.fx.GraphModule):
                     )
                 )
             gm.graph.erase_node(node)
+    gm.graph.lint()
     gm.recompile()
     return gm
 
@@ -174,7 +175,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     for pattern in module_function_patterns:
         for node in gm.graph.nodes:
             if matches_module_function_pattern(pattern, node, modules):
@@ -212,7 +213,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     gm.recompile()
 
     return gm
