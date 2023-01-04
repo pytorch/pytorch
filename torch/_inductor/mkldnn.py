@@ -17,8 +17,6 @@ from torch.fx.experimental.optimization import (
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.modules.utils import _pair
 
-from .mkldnn_utils import matches_module_function_pattern
-
 
 # check the pattern: (nn.module, F.function) matched.
 def matches_module_function_pattern(pattern, node, modules):
