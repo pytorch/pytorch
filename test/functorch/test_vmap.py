@@ -18,8 +18,11 @@ import warnings
 import unittest
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIfNoMagma,
+    OpDTypes,
+)
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
@@ -3477,7 +3480,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', (
         tol1('linalg.det',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
@@ -3497,6 +3500,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         # The error inputs are vectors, that pass when batched as they are treated as a matrix
         xfail('trace'),
         xfail('as_strided', 'partial_views'),
+        xfail('nn.functional.one_hot'), # please provide an explicit positive num_classes argument.
+        xfail('tril_indices'), # Expected at least one Tensor to vmap over
+        xfail('triu_indices'), # Expected at least one Tensor to vmap over
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
