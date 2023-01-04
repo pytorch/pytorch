@@ -71,6 +71,7 @@ except ImportError:
 import pickle
 
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
+from torch.profiler.profiler import _profile_using_dynolog
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -1050,6 +1051,7 @@ class TestProfiler(TestCase):
             self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
     def test_kineto_profiler_multiple_steppers(self):
+        _profile_using_dynolog(True)
         niters = 8
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         net = SimpleNet()
@@ -1060,10 +1062,6 @@ class TestProfiler(TestCase):
         with profile(activities=supported_activities()):
             self.payload(use_cuda=use_cuda)
 
-        def optimizer_step():
-            """This simulates a step() hook in the optimizer"""
-            KinetoStepTracker.increment_step("yet_another_step")
-
         initial_step = KinetoStepTracker.current_step()
 
         def run_batch():
@@ -1071,10 +1069,6 @@ class TestProfiler(TestCase):
             loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
             loss.backward()
             opt.step()
-            # Manually call the hook. TODO: Remove this once we add the
-            # profiler step hooks in the Optimizer class that will get triggered above.
-            # See https://github.com/pytorch/pytorch/issues/88446
-#            optimizer_step()
 
         for idx in range(niters):
             run_batch()
