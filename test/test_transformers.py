@@ -1304,6 +1304,7 @@ class TestTransformers(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
+    @unittest.skipIf(IS_WINDOWS, "Flash Attention was not built for this system")
     @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
     def test_flash_autocast_fp32_float16(self):
         device = 'cuda'
@@ -1317,6 +1318,7 @@ class TestTransformers(NNTestCase):
                 _ = torch.nn.functional._scaled_dot_product_attention(
                     q, k, v, None, 0.0, False, False)
 
+    @unittest.skipIf(IS_WINDOWS, "Flash Attention was not built for this system")
     @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
     def test_flash_autocast_fp32_bfloat16(self):
         device = 'cuda'
