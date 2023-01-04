@@ -3421,6 +3421,23 @@ class TestSparse(TestSparseBase):
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
         """
 
+        def check_is_coalesced(s):
+            self.assertTrue(s.is_coalesced())
+
+            indices = s.indices()
+            hash_coeffs = torch.tensor(s.shape[:s.sparse_dim()], device=s.device).cumprod(-1).flip(-1)
+            if s.sparse_dim() > 1:
+                hash_coeffs.unsqueeze_(-1)
+                hash_values = (indices * hash_coeffs).sum(0)
+            else:
+                hash_values = indices * hash_coeffs
+
+            # check if indices are sorted
+            self.assertEqual(hash_values, hash_values.sort()[0])
+
+            # check if there are no repeated indices
+            self.assertEqual(hash_values, hash_values.unique())
+
         def ref_sparse_mm(a, b):
             return a.to_dense() @ b.to_dense()
 
@@ -3462,6 +3479,7 @@ class TestSparse(TestSparseBase):
             # cpp implementation
             r2 = torch.sparse.mm(a, b)
             self.assertEqual(r1, r2.to_dense())
+            check_is_coalesced(r2)
 
             if dtype in [torch.double, torch.cdouble]:
                 a.requires_grad_(True)

@@ -48,6 +48,7 @@ class FunctionCtx(object):
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class Func(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x: torch.Tensor, y: torch.Tensor, z: int):
@@ -139,6 +140,7 @@ class FunctionCtx(object):
         modification.
 
         Examples::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class Inplace(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x):
@@ -210,6 +212,7 @@ class FunctionCtx(object):
         prior to calling the :func:`backward` and :func:`jvp` methods.
 
         Example::
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class SimpleFunc(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x):
@@ -382,6 +385,7 @@ class Function(_SingleLevelFunction):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> class Exp(Function):
         >>>     @staticmethod
         >>>     def forward(ctx, i):

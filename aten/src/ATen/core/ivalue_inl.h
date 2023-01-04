@@ -216,7 +216,15 @@ inline at::Generator IValue::toGenerator() const& {
   AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
   return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
 }
-inline c10::SymInt IValue::toSymInt() const {
+inline c10::SymInt IValue::toSymInt() && {
+  AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
+  if (isSymInt()) {
+    return c10::SymInt(moveToIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymInt(payload.u.as_int);
+  }
+}
+inline c10::SymInt IValue::toSymInt() const& {
   AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
   if (isSymInt()) {
     return c10::SymInt(toIntrusivePtr<c10::SymNodeImpl>());
@@ -224,8 +232,15 @@ inline c10::SymInt IValue::toSymInt() const {
     return c10::SymInt(payload.u.as_int);
   }
 }
-
-inline c10::SymFloat IValue::toSymFloat() const {
+inline c10::SymFloat IValue::toSymFloat() && {
+  AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
+  if (isSymFloat()) {
+    return c10::SymFloat(moveToIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymFloat(payload.u.as_double);
+  }
+}
+inline c10::SymFloat IValue::toSymFloat() const& {
   AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
   if (isSymFloat()) {
     return c10::SymFloat(toIntrusivePtr<c10::SymNodeImpl>());
@@ -1120,6 +1135,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
     std::vector<c10::Stream> streams;
+    streams.reserve(devices_.size());
     for (const c10::Device& device : devices_) {
       streams.push_back(impl_.getStreamFromGlobalPool(device));
     }
@@ -1486,7 +1502,7 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual std::string toStr() = 0;
   virtual std::vector<at::Tensor> extractTensors() = 0;
 
-  virtual ~PyObjectHolder(){};
+  virtual ~PyObjectHolder()= default;
 };
 
 struct ivalue::EnumHolder : c10::intrusive_ptr_target {
@@ -1695,8 +1711,8 @@ template <typename T>
 static T createVectorLikeFromList(const c10::detail::ListImpl* impl) {
   T result;
   result.reserve(impl->list.size());
-  for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
-    result.push_back(impl->list[i].to<typename T::value_type>());
+  for (const auto & i : impl->list) {
+    result.push_back(i.to<typename T::value_type>());
   }
   return result;
 }
@@ -2136,7 +2152,7 @@ inline IValue IValue::make_capsule(
 template <
     typename T,
     std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
-IValue::IValue(c10::intrusive_ptr<T> custom_class) {
+IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
   auto classType = []() {
     try {
       return c10::getCustomClassType<c10::intrusive_ptr<T>>();
@@ -2150,7 +2166,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(ivalue_obj.release());
-  tag = Tag::Object;
+
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)

@@ -989,7 +989,7 @@ class TestAutogradFunction(TestCase):
                 return x, y
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
+            def setup_context(ctx, inputs, output):
                 ctx.set_materialize_grads(False)
 
             @staticmethod
@@ -1016,7 +1016,7 @@ class TestAutogradFunction(TestCase):
                 return x * y
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
+            def setup_context(ctx, inputs, output):
                 return
 
             @staticmethod
@@ -1039,8 +1039,8 @@ class TestAutogradFunction(TestCase):
                 return torch.tensor(input_np ** 3, device=input.device), input_np
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
-                ctx.input_np = outputs[1]
+            def setup_context(ctx, inputs, output):
+                ctx.input_np = output[1]
                 ctx.device = inputs[0].device
 
             @staticmethod
@@ -1097,7 +1097,7 @@ class TestAutogradFunction(TestCase):
                 return x.clone()
 
             @staticmethod
-            def setup_context(ctx, inputs, outputs):
+            def setup_context(ctx, inputs, output):
                 return
 
             @staticmethod
@@ -1125,8 +1125,8 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 return torch.tensor(input_np ** 3, device=input.device), dinput
 
             @staticmethod
-            def setup_context(ctx, outputs, input):
-                ctx.save_for_backward(input, outputs[1])
+            def setup_context(ctx, inputs, output):
+                ctx.save_for_backward(inputs, output[1])
 
             @staticmethod
             def backward(ctx, grad_output, grad_saved):
@@ -1173,7 +1173,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 pass
 
             @staticmethod
-            def setup_context(ctx, outputs, input):
+            def setup_context(ctx, inputs, output):
                 pass
 
             @staticmethod
@@ -1199,7 +1199,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 pass
 
             @staticmethod
-            def setup_context(ctx, outputs, input):
+            def setup_context(ctx, inputs, output):
                 pass
 
             @staticmethod
@@ -1224,7 +1224,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 pass
 
             @staticmethod
-            def setup_context(ctx, outputs, x, y):
+            def setup_context(ctx, inputs, output):
                 pass
 
             @staticmethod
@@ -1249,7 +1249,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
                 return input
 
             @staticmethod
-            def setup_context(ctx, outputs, input):
+            def setup_context(ctx, inputs, output):
                 pass
 
             @staticmethod
@@ -1933,6 +1933,31 @@ class TestJac(TestCase):
         actual = vmap(jacrev(jacrev(f, chunk_size=chunk_size,
                              _preallocate_and_copy=_preallocate_and_copy), chunk_size=chunk_size))(x)
         self.assertEqual(actual, expected)
+
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
+        # With chunk_size=1, we shouldn't `vmap` and hence not be limited
+        # by it's constraints.
+
+        x = torch.randn(3, device=device)
+        idx_1 = torch.tensor([0, ], device=device)
+        idx_2 = torch.tensor([0, 1], device=device)
+        chunk_size = 1
+
+        def f(x, idx):
+            # `take` doesn't work with vmap
+            # as it returns an output with dynamic shape.
+            return torch.take(x, idx)
+
+        for fn, idx in ((f, idx_1), (f, idx_2)):
+            jacfn = jacrev(fn, chunk_size=chunk_size, _preallocate_and_copy=_preallocate_and_copy)
+            actual = jacfn(x, idx)
+            expected = torch.autograd.functional.jacobian(partial(fn, idx=idx), x, vectorize=False)
+            self.assertEqual(actual, expected)
+
+            msg = r"vmap: .* is not possible because there exists a Tensor"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
 
 
 class TestHessian(TestCase):

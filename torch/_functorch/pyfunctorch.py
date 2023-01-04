@@ -8,6 +8,7 @@ from torch._C._functorch import (
     RandomnessType,
     CInterpreter,
     CGradInterpreterPtr,
+    CFunctionalizeInterpreterPtr,
     CVmapInterpreterPtr,
     CJvpInterpreterPtr,
     pop_dynamic_layer_stack,
@@ -172,6 +173,20 @@ class JvpInterpreter(FuncTorchInterpreter):
         return self._cptr.prevFwdGradMode()
 
 
+class FunctionalizeInterpreter(FuncTorchInterpreter):
+    def __init__(self, cdata: CInterpreter):
+        assert cdata.key() == TransformType.Functionalize
+        self._cdata = cdata
+        self._cptr = CFunctionalizeInterpreterPtr(cdata)
+
+    def process(self, op, args, kwargs):
+        kernel = op.functorch_table[TransformType.Functionalize]
+        return kernel(self, *args, **kwargs)
+
+    def functionalize_add_back_views(self):
+        return self._cptr.functionalizeAddBackViews()
+
+
 def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
     key = cinterpreter.key()
     if key == TransformType.Grad:
@@ -180,6 +195,8 @@ def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
         return VmapInterpreter(cinterpreter)
     if key == TransformType.Jvp:
         return JvpInterpreter(cinterpreter)
+    if key == TransformType.Functionalize:
+        return FunctionalizeInterpreter(cinterpreter)
     raise RuntimeError(f"NYI: PyDispatcher has not implemented support for {key}")
 
 
