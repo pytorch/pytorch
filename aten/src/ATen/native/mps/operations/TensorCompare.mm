@@ -424,7 +424,7 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
 {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "nan_to_num: dtype of out: ",
               result.scalar_type(), " should be same as input: ", self.scalar_type());
-  if(result.numel() == 0) {
+  if (result.numel() == 0) {
     return result;
   }
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
