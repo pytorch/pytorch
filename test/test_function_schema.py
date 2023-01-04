@@ -45,6 +45,13 @@ class TestFunctionSchema(TestCase):
         alias_schema2 = parse_schema('foo(Tensor(b!) self, int a = 2) -> Tensor(a!)')
         self.assertNotEqual(hash(alias_schema), hash(alias_schema2))
 
+        # schema with different alias infos
+        alias_schema3 = parse_schema('foo(Tensor self, *, int a, int b=1, Tensor(a!) out, Tensor(b!) b) -> Tensor(a!)')
+        alias_schema4 = parse_schema('foo(Tensor self, *, int a, int b=1, Tensor(a!) out, Tensor(b!) b) -> Tensor(b!)')
+        alias_schema5 = parse_schema('foo(Tensor self, *, int a, int b=1, Tensor(b!) out, Tensor(a!) b) -> Tensor(a!)')
+        self.assertNotEqual(hash(alias_schema3), hash(alias_schema4))
+        self.assertNotEqual(hash(alias_schema3), hash(alias_schema5))
+
     def test_backward_compatible_structure(self):
         old_schema = parse_schema('any.over(Tensor self, *, Tensor b) -> Tensor')
         # BC: A new schema without changes.
