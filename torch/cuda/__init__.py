@@ -37,6 +37,11 @@ _queued_calls = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 
+# Python import statements in a function are local to that function
+try:
+    import pynvml  # type: ignore[import]
+except:
+    pass
 
 class _LazySeedTracker:
     # Since seeding is memory-less, only track the latest seed.
@@ -655,6 +660,20 @@ def get_sync_debug_mode() -> int:
     return torch._C._cuda_get_sync_debug_mode()
 
 
+def _setup_pynvml(device: Optional[Union[Device, int]] = None):
+    try:
+        import pynvml  # type: ignore[import]
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
+    from pynvml import NVMLError_DriverNotLoaded
+    try:
+        pynvml.nvmlInit()
+    except NVMLError_DriverNotLoaded as e:
+        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
+    device = _get_device_index(device, optional=True)
+    handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+    return handle
+
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     r"""Returns the percent of time over the past sample period during which global (device)
     memory was being read or written. as given by `nvidia-smi`.
@@ -667,17 +686,7 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    try:
-        import pynvml  # type: ignore[import]
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
-    from pynvml import NVMLError_DriverNotLoaded
-    try:
-        pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded as e:
-        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
-    device = _get_device_index(device, optional=True)
-    handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+    handle = _setup_pynvml()
     return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
 
 
@@ -693,18 +702,54 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    try:
-        import pynvml  # type: ignore[import]
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
-    from pynvml import NVMLError_DriverNotLoaded
-    try:
-        pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded as e:
-        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
-    device = _get_device_index(device, optional=True)
-    handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+    handle = _setup_pynvml(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+
+def temperature(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Returns the average temperature of the GPU sensor over the past sample period as given by `nvidia-smi`.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Warning: Each sample period may be between 1 second and 1/6 second,
+    depending on the product being queried.
+    """
+    handle = _setup_pynvml(device)
+    # 0 refers to the temperature sensor for the GPU die.
+    return pynvml.nvmlDeviceGetTemperature(handle, 0)
+
+def power(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Returns the average power draw of the GPU sensor over the past sample period as given by `nvidia-smi`.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Warning: Each sample period may be between 1 second and 1/6 second,
+    depending on the product being queried.
+    """
+    handle = _setup_pynvml(device)
+    return pynvml.nvmlDeviceGetPowerUsage(handle)
+
+def clock_speed(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Returns the clock speed of the GPU SM over the past sample period as given by `nvidia-smi`.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Warning: Each sample period may be between 1 second and 1/6 second,
+    depending on the product being queried.
+    """
+    handle = _setup_pynvml(device)
+    # Clocks documented here https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceEnumvs.html#group__nvmlDeviceEnumvs_1g805c0647be9996589fc5e3f6ff680c64
+    # I picked the SM clock domain
+    return pynvml.nvmlDeviceGetClockInfo(handle, 1)
+
 
 
 from .memory import *  # noqa: F403
