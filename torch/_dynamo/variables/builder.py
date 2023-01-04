@@ -524,7 +524,9 @@ class VariableBuilder:
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
             return UserDefinedClassVariable(
-                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(

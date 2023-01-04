@@ -27,6 +27,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        assert self.source is not None
 
     def as_python_constant(self):
         return self.value
