@@ -76,7 +76,7 @@ else:
     def _exchange_device(device: int) -> int:
         if device < 0:
             return -1
-        raise RuntimeError("PyTorch was compiled with CUDA support")
+        raise RuntimeError("PyTorch was compiled without CUDA support")
 
 
 # Global variables dynamically populated by native code
