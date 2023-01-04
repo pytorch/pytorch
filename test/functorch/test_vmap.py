@@ -3544,6 +3544,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
