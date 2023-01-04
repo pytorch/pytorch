@@ -12,6 +12,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
+    skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
@@ -251,6 +252,7 @@ class TestMetaConverter(TestCase):
         m = MetaConverter()(y)
         self.assertMetadataMatches(m, y)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_weakref(self):
         x = torch.randn(4, 4, 4)
         m = MetaConverter()
@@ -274,6 +276,7 @@ class TestMetaConverter(TestCase):
         m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_tensor_outlives_converter(self):
         m = MetaConverter()
         ref = weakref.ref(m)
@@ -288,13 +291,16 @@ CHECK_STRIDES = {
     torch.Tensor.__getitem__,
 }
 
+CHECK_ALL_STRIDES = {
+    aten.unsqueeze.default
+}
+
 CHECK_STRIDES_SKIPS = {
     aten._conj_physical.default,
     aten._fft_c2c.default,
     aten._fft_c2r.default,
     aten._fft_r2c.default,
     aten._linalg_svd.default,
-    aten._scaled_dot_product_attention_forward.default,
     aten.binary_cross_entropy.default,
     aten.complex.default,
     aten.copysign.Tensor,
@@ -320,22 +326,29 @@ CHECK_STRIDES_SKIPS = {
     # aten.view.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_unflatten_cuda_float32
 }
 
+class CheckStrides(Enum):
+    NONE = 0
+    SIGNIFICANT = 1
+    ALL = 2
+
 def should_check_strides(func):
+    if func in CHECK_ALL_STRIDES:
+        return CheckStrides.ALL
     if func in CHECK_STRIDES:
-        return True
+        return CheckStrides.SIGNIFICANT
     if func in CHECK_STRIDES_SKIPS:
-        return False
+        return CheckStrides.NONE
     if not isinstance(func, torch._ops.OpOverload):
-        return False
+        return CheckStrides.NONE
     # Prims are expected to model strides correctly
     if func.namespace == "prims":
-        return True
+        return CheckStrides.SIGNIFICANT
     # Check if it's a view, by testing if any of the returns have
     # a non-empty alias set
     if any(r.alias_info.before_set for r in func._schema.returns if r.alias_info):
-        return True
+        return CheckStrides.SIGNIFICANT
     # TODO: check for TensorIterator
-    return True
+    return CheckStrides.SIGNIFICANT
 
 def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
     flat_meta_rs, _ = tree_flatten(meta_rs)
@@ -351,7 +364,10 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
         test_assert(meta_r.dtype == r.dtype, f"but real dtype was {r.dtype}")
         test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
         # See https://github.com/pytorch/pytorch/issues/78050
-        if should_check_strides(func):
+        if should_check_strides(func) == CheckStrides.ALL:
+            same_strides, _ = torch._prims_common.check_all_strides(meta_r, r)
+            test_assert(same_strides, f"but real stride was {r.stride()}")
+        elif should_check_strides(func) == CheckStrides.SIGNIFICANT:
             same_strides, _ = torch._prims_common.check_significant_strides(meta_r, r)
             test_assert(same_strides, f"but real stride was {r.stride()}")
         test_assert(
@@ -468,7 +484,7 @@ def run_meta_crossref(
         # they're not tested outside of gradcheck which only checks
         # torch.float64 and torch.complex128 (which this second one
         # often skipped as well).
-        raise unittest.SkipTest("Original OpInfo is broken")
+        raise unittest.SkipTest("Original OpInfo is broken") from e
 
 
     # TODO: also handle cases where func raise an exception
@@ -622,7 +638,6 @@ meta_function_expected_failures = {
     torch.linalg.eig : {f64, f32, c128, c64},
     torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
-    torch.Tensor.conj_physical_: {c128, c32, c64},
 }
 
 meta_function_expected_failures_only_outplace = {
@@ -712,6 +727,7 @@ meta_function_device_skips = defaultdict(dict)
 
 meta_function_device_expected_failures['cpu'] = {
     torch.native_batch_norm: {bf16},
+    torch._native_batch_norm_legit: {bf16},
     torch.native_layer_norm: {bf16},
 }
 
@@ -746,6 +762,7 @@ meta_function_device_expected_failures_only_outplace['cuda'] = {
 
 meta_function_device_skips['cpu'] = {
     torch.native_batch_norm: {f32, f64},
+    torch._native_batch_norm_legit: {f32, f64},
 }
 
 meta_function_device_skips['cuda'] = {
@@ -893,7 +910,6 @@ meta_dispatch_expected_failures = {
     aten.unique_consecutive.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.unique_dim.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
-    aten.conj_physical_.default: {c128, c32, c64},
 }
 
 # these sometimes pass and sometimes fail
@@ -916,6 +932,13 @@ meta_dispatch_skips = {
 # For CompositeImplicitAutograd functions that fail before hitting the Mode
 meta_dispatch_early_skips = set({
     torch.Tensor.float_power_,
+    # Errors out in one of the tests, while ProxyTensor passes...
+    torch.Tensor.cumsum_,
+})
+
+meta_inplace_skips = set({
+    # Errors out in one of the tests, while ProxyTensor passes...
+    torch.Tensor.cumsum_,
 })
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
@@ -923,6 +946,8 @@ meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cpu'] = {
     aten.native_batch_norm.default: {bf16},
+    aten._native_batch_norm_legit.default: {bf16},
+    aten._native_batch_norm_legit.no_stats: {bf16},
     aten.native_layer_norm.default: {bf16},
 }
 
@@ -968,6 +993,8 @@ meta_dispatch_device_expected_failures['cuda'] = {
 meta_dispatch_device_skips['cpu'] = {
     aten._embedding_bag_forward_only.default: {f16, f32, f64},
     aten.native_batch_norm.default: {f32, f64},
+    aten._native_batch_norm_legit.default: {f32, f64},
+    aten._native_batch_norm_legit.no_stats: {f32, f64},
 }
 
 meta_dispatch_device_skips['cuda'] = {
@@ -1116,6 +1143,8 @@ class TestMeta(TestCase):
         func = op.get_inplace()
         if not func:
             self.skipTest("No inplace variable for this op")
+        if func in meta_inplace_skips:
+            self.skipTest("Skipped")
         func = self._get_safe_inplace(func)
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in samples:
@@ -1282,6 +1311,17 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
             self.assertEqual(ref_out[1].size(), meta_out[1].size())
             self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
+
+    def test_cdist_forward(self, device):
+        to_meta = MetaConverter()
+        x1 = torch.rand([3, 2], device=device)
+        x2 = torch.rand([2, 2], device=device)
+        p = 2.0
+        for compute_mode in (None, 1, 2):
+            ref = aten._cdist_forward.default(x1, x2, p, compute_mode)
+            res = aten._cdist_forward.default(to_meta(x1), to_meta(x2), p, compute_mode)
+            self.assertEqual(res.device.type, 'meta')
+            self.assertEqual(ref.shape, res.shape)
 
     # opinfo test is using aten.fill_, it's not testing aten.fill
     @onlyCUDA

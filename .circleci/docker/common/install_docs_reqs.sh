@@ -7,10 +7,10 @@ if [ -n "$KATEX" ]; then
   # Ignore error if gpg-agent doesn't exist (for Ubuntu 16.04)
   apt-get install -y gpg-agent || :
 
-  curl -sL https://deb.nodesource.com/setup_12.x | sudo -E bash -
+  curl --retry 3 -sL https://deb.nodesource.com/setup_12.x | sudo -E bash -
   sudo apt-get install -y nodejs
 
-  curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
+  curl --retry 3 -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
   echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
 
   apt-get update

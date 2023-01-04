@@ -493,7 +493,7 @@ void FusionKernelRuntime::startAsyncCompile(KernelArgumentHolder& args_old) {
 
     TORCH_INTERNAL_ASSERT(
         args.size() == segmented_fusion_->inputs().size(),
-        "Inputs were not set up correctly, recieved ",
+        "Inputs were not set up correctly, received ",
         args.size(),
         " inputs but expecting ",
         segmented_fusion_->inputs().size());
@@ -610,7 +610,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
 
   TORCH_INTERNAL_ASSERT(
       args.size() == segmented_fusion_->inputs().size(),
-      "Inputs were not set up correctly, recieved ",
+      "Inputs were not set up correctly, received ",
       args.size(),
       " inputs but expecting ",
       segmented_fusion_->inputs().size());

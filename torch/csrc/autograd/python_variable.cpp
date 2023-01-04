@@ -38,6 +38,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/utils/tensor_numpy.h>
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
@@ -680,8 +681,38 @@ PyObject* THPVariable_pynew(
 
 static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   const auto& var = THPVariable_Unpack(self);
-  THPVariable_Wrap(var);
+  Py_DECREF(THPVariable_Wrap(var));
   Py_RETURN_NONE;
+}
+
+static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  const auto& self = THPVariable_Unpack(self_);
+  TORCH_CHECK(
+      THPVariable_Check(arg),
+      "_view_func expect a single argument that is a Tensor");
+  const auto& new_base = THPVariable_Unpack(arg);
+
+  // Ensure that self is indeed a backward differentiable view
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  TORCH_CHECK(
+      diff_view_meta && diff_view_meta->has_bw_view(),
+      "_view_func can only be called on "
+      "a Tensor that is a backward differentiable view.");
+  const auto& view_info = diff_view_meta->get_backward_view();
+  // Ensure that the newly provided base is similar to the original base
+  TORCH_CHECK(
+      torch::autograd::utils::has_same_meta(new_base, view_info.base_),
+      "The new base passed to _view_func must have the same metadata as the Tensors's base");
+
+  // Do the actual view replay
+  if (view_info.has_view_fn()) {
+    return THPVariable_Wrap(view_info.view_fn()(new_base));
+  } else {
+    return THPVariable_Wrap(new_base.as_strided(
+        self.sizes(), self.strides(), self.storage_offset()));
+  }
+  END_HANDLE_TH_ERRORS
 }
 
 // Instantiates a subclass of self with the same data.
@@ -697,10 +728,11 @@ static PyObject* THPVariable_as_subclass(
   ParsedArgs<1> parsed_args{};
   auto r = parser.parse(_self, args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    throw torch::TypeError(
-        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       self.alias(),
@@ -719,10 +751,11 @@ static PyObject* THPVariable_make_subclass(
   ParsedArgs<7> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    throw torch::TypeError(
-        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
   // guard completely turns off torch dispatch modes, doesn't just pop off the
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
@@ -857,7 +890,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     if (sizes_strides_policy.has_value()) {
       TORCH_CHECK(
           false,
-          "Setting sizes_strides_policy isn't suppored for this overload")
+          "Setting sizes_strides_policy isn't supported for this overload")
     }
   }
 
@@ -1027,11 +1060,10 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   }
   THPUtils_assertRet(
       -1, data, "Deleting tensor data is not allowed. Delete tensor instead!");
-  if (!THPVariable_Check(data)) {
-    throw torch::TypeError(
-        "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
-  }
-
+  TORCH_CHECK_TYPE(
+      THPVariable_Check(data),
+      "Variable data has to be a tensor, but got ",
+      Py_TYPE(data)->tp_name);
   THPVariable_Unpack(self).set_data(THPVariable_Unpack(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -1645,6 +1677,7 @@ static PyMethodDef extra_methods[] = {
      METH_STATIC | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},
+    {"_view_func", THPVariable_view_func, METH_O, nullptr},
     {nullptr}};
 
 /* From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c
@@ -2174,6 +2207,7 @@ bool THPVariable_initModule(PyObject* module) {
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);
+  torch::utils::validate_numpy_for_dlpack_deleter_bug();
   return true;
 }
 

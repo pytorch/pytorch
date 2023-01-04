@@ -21,10 +21,6 @@
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
 
-#ifdef USE_MPS
-#include <ATen/mps/MPSDevice.h>
-#endif
-
 namespace at {
 
 Context::Context() = default;
@@ -254,6 +250,15 @@ void Context::setAllowFP16ReductionCuBLAS(bool b) {
   allow_fp16_reduction_cublas = b;
 }
 
+bool Context::allowBF16ReductionCuBLAS() const {
+  return allow_bf16_reduction_cublas;
+}
+
+void Context::setAllowBF16ReductionCuBLAS(bool b) {
+  allow_bf16_reduction_cublas = b;
+}
+
+
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;
@@ -265,14 +270,6 @@ bool Context::hasMKL() {
 bool Context::hasMKLDNN() {
 #if AT_MKLDNN_ENABLED()
   return true;
-#else
-  return false;
-#endif
-}
-
-bool Context::hasMPS() {
-#if USE_MPS
-  return at::mps::is_available();
 #else
   return false;
 #endif
@@ -295,8 +292,24 @@ bool Context::hasLAPACK() {
 }
 
 at::QEngine Context::qEngine() const {
-  // If wasn't explicitly set - take the last one available
-  return quantized_engine.value_or(supportedQEngines().back());
+  static auto _quantized_engine = []() {
+    at::QEngine qengine = at::kNoQEngine;
+#if defined(C10_MOBILE) && defined(USE_PYTORCH_QNNPACK)
+    qengine = at::kQNNPACK;
+#endif
+
+#if AT_MKLDNN_ENABLED()
+    qengine = at::kONEDNN;
+#endif
+
+#ifdef USE_FBGEMM
+    if (fbgemm::fbgemmSupportedCPU()) {
+      qengine = at::kFBGEMM;
+    }
+#endif
+    return qengine;
+  }();
+  return quantized_engine.value_or(_quantized_engine);
 }
 
 void Context::setQEngine(at::QEngine e) {
@@ -332,8 +345,8 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
-      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kX86);
+      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kFBGEMM);
     }
 #endif

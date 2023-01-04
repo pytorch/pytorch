@@ -47,6 +47,7 @@
 #include <ATen/Functions.h>
 #else
 $ops_headers
+#include <ATen/ops/_local_scalar_dense.h>
 #endif
 
 using at::DeviceGuard;
@@ -317,37 +318,22 @@ static Tensor dispatch_copy_(const Tensor & self, const Tensor & other, bool non
 static double dispatch_to_CDouble(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  if (self.numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
-  }
+  TORCH_CHECK_VALUE(self.sym_numel() == 1, "only one element tensors can be converted to Python scalars");
   return self.item<double>();
 }
 
 static c10::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  if (self.numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
-  }
+  TORCH_CHECK_VALUE(self.sym_numel() == 1, "only one element tensors can be converted to Python scalars");
   return self.item<c10::complex<double>>();
 }
 
 static int64_t dispatch_to_CLong(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  if (self.numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
-  }
+  TORCH_CHECK_VALUE(self.sym_numel() == 1, "only one element tensors can be converted to Python scalars");
   return self.item<int64_t>();
-}
-
-static bool dispatch_to_Bool(const Tensor & self) {
-  pybind11::gil_scoped_release no_gil;
-  OptionalDeviceGuard device_guard(device_of(self));
-  if (self.numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
-  }
-  return self.item<bool>();
 }
 
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
@@ -399,9 +385,10 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   auto& self_ = THPVariable_Unpack(self);
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
-  if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true) || self_.numel() != 1) {
-    throw TypeError("only integer tensors of a single element can be converted to an index");
-  }
+  TORCH_CHECK_TYPE(
+      isIntegralType(self_.scalar_type(), /*includeBool=*/true) &&
+          self_.sym_numel() == 1,
+      "only integer tensors of a single element can be converted to an index");
   return wrap(dispatch_to_CLong(self_));
   END_HANDLE_TH_ERRORS
 }
@@ -418,9 +405,9 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
     return handle_torch_function(self, "__invert__", args);
   }
   auto& self_ = THPVariable_Unpack(self);
-  if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true)) {
-    throw TypeError("~ (operator.invert) is only implemented on integer and Boolean-type tensors");
-  }
+  TORCH_CHECK_TYPE(
+      isIntegralType(self_.scalar_type(), /*includeBool=*/true),
+      "~ (operator.invert) is only implemented on integer and Boolean-type tensors");
   return THPVariable_Wrap(dispatch_invert(self_));
   END_HANDLE_TH_ERRORS
 }
@@ -883,15 +870,7 @@ static PyObject * THPVariable_item(PyObject* self, PyObject* args)
   }
   jit::tracer::warn("Converting a tensor to a Python number", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = THPVariable_Unpack(self);
-  if (self_.is_floating_point()) {
-    return wrap(dispatch_to_CDouble(self_));
-  } else if (self_.is_complex()) {
-    return wrap(dispatch_to_CComplexDouble(self_));
-  } else if (self_.scalar_type() == ScalarType::Bool) {
-    return wrap(dispatch_to_Bool(self_));
-  } else {
-    return wrap(dispatch_to_CLong(self_));
-  }
+  return py::cast(self_.item()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
@@ -979,7 +958,7 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "_storage");
+    return handle_torch_function(self, "untyped_storage");
   }
   auto& self_ = THPVariable_Unpack(self);
   return createPyObject(self_.storage());
@@ -1073,7 +1052,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else if (THPDtype_Check(obj)) {
     is_dtype = true;
   } else {
-    throw TypeError("dtype must be a type, str, or dtype object");
+    TORCH_CHECK_TYPE(false, "dtype must be a type, str, or dtype object");
   }
   ScalarType scalar_type;
   Device device = self_.device();
@@ -1296,7 +1275,7 @@ PyMethodDef variable_methods[] = {
   {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, NULL},
   {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"_storage", THPVariable_storage, METH_NOARGS, NULL},
+  {"untyped_storage", THPVariable_storage, METH_NOARGS, NULL},
   {"storage_offset", THPVariable_storage_offset, METH_NOARGS, NULL},
   {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, NULL},
   {"to", castPyCFunctionWithKeywords(THPVariable_to), METH_VARARGS | METH_KEYWORDS, NULL},

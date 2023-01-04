@@ -2,9 +2,11 @@
 
 import functools
 import sys
+import warnings
 from collections import namedtuple
 from contextlib import suppress
 from copy import deepcopy
+from typing import Any, Tuple
 
 import torch
 import torch.distributed as dist
@@ -15,6 +17,7 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
+from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
     ModuleWrapPolicy,
@@ -500,6 +503,94 @@ class TestFSDPMisc(FSDPTest):
         with fsdp.summon_full_params(fsdp):
             _assert_module_states(
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
+            )
+
+    @skip_if_lt_x_gpu(2)
+    def test_homogeneous_attributes(self):
+        """
+        Tests that passing heterogeneous values for attributes designated as
+        homogeneous raises an error.
+        """
+        # Manually construct this list but verify against the global list of
+        # homogeneous attribute names
+        all_attr_name_and_values = [
+            ("_use_orig_params", False, True),
+            ("limit_all_gathers", False, True),
+        ]
+        self.assertEqual(
+            [
+                attr_name_and_values[0]
+                for attr_name_and_values in all_attr_name_and_values
+            ],
+            HOMOGENEOUS_ATTR_NAMES,
+        )
+
+        self.run_subtests(
+            {"attr_name_and_values": all_attr_name_and_values},
+            self._test_homogeneous_attributes,
+        )
+
+    def _test_homogeneous_attributes(self, attr_name_and_values: Tuple[str, Any, Any]):
+        model = NestedWrappedModule.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            {},
+        )
+        attr_name = attr_name_and_values[0]
+        fsdp_kwargs_inner = {attr_name.lstrip("_"): attr_name_and_values[1]}
+        fsdp_kwargs_outer = {attr_name.lstrip("_"): attr_name_and_values[2]}
+        model.module[1] = FSDP(model.module[1], **fsdp_kwargs_inner)
+        fsdp_model = FSDP(model, **fsdp_kwargs_outer)
+
+        # Run a forward to trigger lazy initialization and the error
+        with self.assertRaisesRegex(
+            ValueError, f"Expects one homogeneous value for {attr_name}"
+        ):
+            inp = fsdp_model.module.get_input(torch.device("cuda"))
+            fsdp_model(*inp)
+
+
+class TestFSDPMiscWorldSize1(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_world_size_1_sharding_strategy_warning(self):
+        """
+        Tests that FSDP issues a warning when it switches to using ``NO_SHARD``
+        when the world size is 1.
+        """
+        warning_prefix = "FSDP is switching to use `NO_SHARD` instead of"
+        # If the user already passes `NO_SHARD`, then there should not be a
+        # warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")  # trigger all warnings
+            FSDP(nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.NO_SHARD)
+            for warning in w:
+                self.assertTrue(
+                    warning.category != UserWarning
+                    or not str(warning.message).startswith(warning_prefix)
+                )
+
+        # Check that a warning is issued
+        warning_suffix = " since the world size is 1."
+        # - Pass `FULL_SHARD` or `None`
+        expected_regex_full_shard = (
+            warning_prefix + " " + str(ShardingStrategy.FULL_SHARD) + warning_suffix
+        )
+        with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
+            FSDP(nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.FULL_SHARD)
+        with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
+            FSDP(nn.Linear(3, 3).cuda())
+        # - Pass `SHARD_GRAD_OP`
+        expected_regex_shard_grad_op = (
+            warning_prefix + " " + str(ShardingStrategy.SHARD_GRAD_OP) + warning_suffix
+        )
+        with self.assertWarnsRegex(UserWarning, expected_regex_shard_grad_op):
+            FSDP(
+                nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.SHARD_GRAD_OP
             )
 
 

@@ -1,11 +1,12 @@
 import sys
 import torch
 import contextlib
+from enum import IntEnum
 
 from typing import Union
 
 __all__ = ["is_built", "cuFFTPlanCacheAttrContextProp", "cuFFTPlanCache", "cuFFTPlanCacheManager",
-           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul", "enable_flash_sdp",
+           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul", "SDPBackend", "enable_flash_sdp",
            "flash_sdp_enabled", "enable_mem_efficient_sdp", "mem_efficient_sdp_enabled",
            "math_sdp_enabled", "enable_math_sdp", "sdp_kernel"]
 
@@ -96,6 +97,8 @@ class cuBLASModule:
             return torch._C._get_cublas_allow_tf32()
         elif name == "allow_fp16_reduced_precision_reduction":
             return torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
+        elif name == "allow_bf16_reduced_precision_reduction":
+            return torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
         raise AssertionError("Unknown attribute " + name)
 
     def __setattr__(self, name, value):
@@ -103,6 +106,8 @@ class cuBLASModule:
             return torch._C._set_cublas_allow_tf32(value)
         elif name == "allow_fp16_reduced_precision_reduction":
             return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
+        elif name == "allow_bf16_reduced_precision_reduction":
+            return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
         raise AssertionError("Unknown attribute " + name)
 
 _LinalgBackends = {
@@ -162,6 +167,20 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
         raise RuntimeError("Unknown input value type.")
 
     return torch._C._get_linalg_preferred_backend()
+
+
+class SDPBackend(IntEnum):
+    r"""Enum class for the scaled dot product attention backends.
+
+    .. warning:: This flag is experimental and subject to change.'
+
+    This class needs to stay inline with the enum defined in:
+    pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h
+    """
+    ERROR = -1
+    MATH = 0
+    FLASH_ATTENTION = 1
+    EFFICIENT_ATTENTION = 2
 
 
 def flash_sdp_enabled():

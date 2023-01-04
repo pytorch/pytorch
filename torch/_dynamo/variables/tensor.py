@@ -11,7 +11,6 @@ from ..guards import GuardBuilder
 from ..source import AttrSource
 
 from ..utils import (
-    fake_tensors_available,
     get_fake_value,
     get_real_value,
     product,
@@ -30,6 +29,7 @@ class TensorVariable(VariableTracker):
         "proxy",
         "dtype",
         "device",
+        "layout",
         "ndim",
         "size",
         "stride",
@@ -52,6 +52,7 @@ class TensorVariable(VariableTracker):
         proxy: torch.fx.Proxy,
         dtype=None,
         device=None,
+        layout=None,
         ndim=None,
         size=None,
         stride=None,
@@ -67,6 +68,7 @@ class TensorVariable(VariableTracker):
         self.proxy = proxy
         self.dtype = dtype
         self.device = device
+        self.layout = layout
         self.ndim = ndim
         self.size = size
         self.stride = stride
@@ -101,6 +103,7 @@ class TensorVariable(VariableTracker):
         props = {
             "dtype": value.dtype,
             "device": value.device,
+            "layout": value.layout,
             "ndim": int(value.ndim),
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
@@ -130,6 +133,8 @@ class TensorVariable(VariableTracker):
             result = TorchVariable(self.dtype, **options)
         elif name == "device" and self.device is not None:
             result = TorchVariable(self.device, **options)
+        elif name == "layout" and self.layout is not None:
+            result = TorchVariable(self.layout, **options)
         elif name == "is_cuda" and self.device is not None:
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
@@ -145,6 +150,8 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
             result = self.call_method(tx, "dim", [], {})
+        elif name == "data":
+            result = self.call_method(tx, "detach", [], {})
         elif name == "T":
             args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
             result = self.call_method(tx, "permute", args, {})
@@ -163,17 +170,16 @@ class TensorVariable(VariableTracker):
 
         return result
 
-    def unpack_var_sequence(self, tx):
-        options = VariableTracker.propagate(self)
-        if self.size:
-            return [
-                variables.BuiltinVariable(operator.getitem, **options).call_function(
-                    tx, [self, variables.ConstantVariable(i)], {}
-                )
-                for i in range(self.size[0])
-            ]
+    def unpack_var_sequence(self, tx, idxes=None):
+        from .builder import wrap_fx_proxy
 
-        return super(TensorVariable, self).unpack_var_sequence(tx)
+        if idxes is None:
+            if self.size:
+                idxes = range(self.size[0])
+            else:
+                return super(TensorVariable, self).unpack_var_sequence(tx)
+        options = VariableTracker.propagate(self)
+        return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
 
     def call_method(
         self,
@@ -182,7 +188,7 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, TupleVariable
+        from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
 
         kwargs = dict(kwargs)
@@ -198,12 +204,11 @@ class TensorVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_method",
                     name,
-                    *proxy_args_kwargs([self] + args, kwargs),
-                    current_tx=tx,
+                    *proxy_args_kwargs([self] + list(args), kwargs),
                 ),
                 **options,
             )
-        elif name == "numel" and self.size is not None:
+        elif name in ("numel", "nelement") and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
             constant_result = ConstantVariable(self.ndim, **options)
@@ -217,6 +222,26 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(
                 memory_format in self.is_contiguous, **options
             )
+        elif (
+            name == "type"
+            and self.dtype is not None
+            and len(args) == 0
+            and isinstance(self.device, torch.device)
+        ):
+            tensortype = [k for k, v in tensortype_to_dtype.items() if self.dtype in v][
+                0
+            ]
+            if self.device.type == "cuda":
+                constant_result = ConstantVariable(
+                    f"torch.cuda.{tensortype.__name__}", **options
+                )
+            else:
+                constant_result = ConstantVariable(
+                    f"torch.{tensortype.__name__}", **options
+                )
+        elif name == "get_device" and isinstance(self.device, torch.device):
+            index = self.device.index if self.device.type != "cpu" else -1
+            constant_result = ConstantVariable(index, **options)
         else:
             constant_result = None
 
@@ -237,23 +262,20 @@ class TensorVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
-        elif name in ("tolist", "numpy", "backward"):
+        elif name in ("tolist", "numpy", "backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "nonzero" and not config.dynamic_shapes:
             unimplemented(f"Tensor.{name}")
         elif name == "item":
             if config.capture_scalar_outputs:
-                use_fake_tensors = (
-                    fake_tensors_available and config.fake_tensor_propagation
-                )
-                if use_fake_tensors:
-                    example_value = get_fake_value(self.proxy.node, tx)
-                else:
-                    example_value = get_real_value(self.proxy.node, tx.output).item()
+                example_value = get_fake_value(self.proxy.node, tx)
                 return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
-                        "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
+                        "call_method",
+                        "item",
+                        (self.as_proxy(),),
+                        {},
                     ),
                     example_value=example_value,
                     **options,
@@ -268,7 +290,10 @@ class TensorVariable(VariableTracker):
                 return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
-                        "call_function", len, (self.as_proxy(),), {}, current_tx=tx
+                        "call_function",
+                        len,
+                        (self.as_proxy(),),
+                        {},
                     ),
                     **options,
                 )
@@ -277,8 +302,7 @@ class TensorVariable(VariableTracker):
             tx.output.create_proxy(
                 "call_function",
                 operator.setitem,
-                *proxy_args_kwargs([self] + args, kwargs),
-                current_tx=tx,
+                *proxy_args_kwargs([self] + list(args), kwargs),
             )
             return ConstantVariable(None, **options)
         elif name in ("resize_", "resize_as_"):
@@ -309,11 +333,28 @@ class TensorVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_method",
                     name,
-                    *proxy_args_kwargs([self] + args, kwargs),
-                    current_tx=tx,
+                    *proxy_args_kwargs([self] + list(args), kwargs),
                 ),
                 **options,
             )
+        elif (
+            name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
+        ):
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, args + [kwargs["alpha"]], {}
+            )
+            return self.call_method(tx, "add_", [result], {})
+        elif (
+            name == "addcdiv_"
+            and len(args) == 2
+            and len(kwargs) == 1
+            and "value" in kwargs
+        ):
+            result = TorchVariable(torch.div, **options).call_function(tx, args, {})
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, [result, kwargs["value"]], {}
+            )
+            return self.call_method(tx, "add_", [result], {})
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
@@ -329,8 +370,7 @@ class TensorVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_method",
                     name,
-                    *proxy_args_kwargs([self] + args, kwargs),
-                    current_tx=tx,
+                    *proxy_args_kwargs([self] + list(args), kwargs),
                 ),
                 **options,
             )
@@ -386,7 +426,6 @@ class DynamicShapeVariable(VariableTracker):
                 "call_method",
                 name,
                 *proxy_args_kwargs([self] + list(args), kwargs),
-                current_tx=tx,
             ),
             **options,
         )
@@ -424,6 +463,11 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         # insert unwrapped version of self as the first argument
+        # TODO: This is wrong!  When you call the internal __torch_function__,
+        # you still get the wrapped version of self, and if you call functions
+        # inside __torch_function__, they should come back here.  If we unwrap
+        # the tensor immediately, that will not happen.
+        # See https://github.com/pytorch/torchdynamo/issues/1951
         args = list(args)
         args.insert(0, self.tensor_variable)
         func_var = GetAttrVariable(self.tensor_variable, name)

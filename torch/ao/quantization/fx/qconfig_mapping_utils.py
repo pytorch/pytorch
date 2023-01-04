@@ -1,10 +1,11 @@
 import torch
+import re
 from collections import defaultdict, OrderedDict
-from typing import Callable, Any, Dict, Tuple, Set, List
+from typing import Callable, Any, Dict, Tuple, Set, List, Union
 from torch.ao.quantization import QConfig
 from torch.ao.quantization.qconfig import _add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
-from torch.ao.quantization.quantize import (
-    is_activation_post_process,
+from torch.ao.quantization.observer import (
+    _is_activation_post_process,
 )
 from torch.ao.quantization.backend_config import (
     DTypeConfig,
@@ -21,6 +22,7 @@ from torch.nn.intrinsic import _FusedModule
 from ..utils import (
     _parent_name,
     get_qconfig_dtypes,
+    get_combined_dict
 )
 from ..qconfig_mapping import (
     _OBJECT_TYPE_DICT_KEY,
@@ -28,25 +30,16 @@ from ..qconfig_mapping import (
     _MODULE_NAME_REGEX_DICT_KEY,
     QConfigMapping,
 )
-from ..qconfig_mapping_utils import (
-    _get_object_type_qconfig,
-    _maybe_adjust_qconfig_for_module_type_or_name,
+from ..quantization_mappings import (
+    get_default_qat_module_mappings,
 )
 
 
-# TODO: revisit this list. Many helper methods shouldn't be public
-__all__ = [
-    "check_is_valid_config_dict",
-    "compare_prepare_convert_qconfig_mappings",
-    "generate_node_name_to_qconfig",
-    "is_qconfig_supported_by_dtype_configs",
-    "maybe_adjust_qconfig_for_module_name_object_type_order",
-    "update_qconfig_for_fusion",
-]
+__all__: List[str] = []
 
 
 
-def maybe_adjust_qconfig_for_module_name_object_type_order(
+def _maybe_adjust_qconfig_for_module_name_object_type_order(
     qconfig_mapping: QConfigMapping,
     cur_module_path: str,
     cur_object_type: Callable,
@@ -63,7 +56,7 @@ def maybe_adjust_qconfig_for_module_name_object_type_order(
     return fallback_qconfig
 
 
-def update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMapping):
+def _update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMapping):
     """
     Update the QConfigMapping to account for fused modules such as LinearReLU.
     This assumes the QConfigMapping's attributes have already been converted to OrderedDicts.
@@ -100,7 +93,7 @@ def update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMappin
             if fused_qconfig is not None:
                 object_type_dict[type(maybe_fused_module)] = fused_qconfig
 
-def generate_node_name_to_qconfig(
+def _generate_node_name_to_qconfig(
         root: torch.nn.Module,
         modules: Dict[str, torch.nn.Module],
         input_graph: Graph,
@@ -137,7 +130,7 @@ def generate_node_name_to_qconfig(
             cur_object_type_idx = \
                 submodule_to_object_type_to_cur_idx[module_path][node.target]
             submodule_to_object_type_to_cur_idx[module_path][node.target] += 1
-            qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
+            qconfig = _maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_mapping, module_path, node.target, cur_object_type_idx, qconfig)
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
@@ -158,7 +151,7 @@ def generate_node_name_to_qconfig(
 
         elif node.op == 'call_module':
             # if the node is an observer, just continue - don't add it to the qconfig_map
-            if is_activation_post_process(modules[node.target]):
+            if _is_activation_post_process(modules[node.target]):
                 continue
             qconfig = _maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_mapping, type(modules[node.target]), node.target, global_qconfig)
@@ -171,7 +164,7 @@ def generate_node_name_to_qconfig(
             cur_object_type_idx = \
                 submodule_to_object_type_to_cur_idx[parent_name][module_type]
             submodule_to_object_type_to_cur_idx[parent_name][module_type] += 1
-            qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
+            qconfig = _maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_mapping, parent_name, module_type, cur_object_type_idx,
                 qconfig)
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
@@ -187,7 +180,7 @@ def generate_node_name_to_qconfig(
     return node_name_to_qconfig
 
 
-def check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_name: str) -> None:
+def _check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_name: str) -> None:
     r""" Checks if the given config_dict has the correct keys
 
     Args:
@@ -202,7 +195,7 @@ def check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_na
                 '\' instead.')
 
 
-def compare_prepare_convert_qconfig_mappings(
+def _compare_prepare_convert_qconfig_mappings(
         prepare_qconfig_mapping: QConfigMapping,
         convert_qconfig_mapping: QConfigMapping):
     r""" Compare the qconfig_mapping passed in convert to the one from prepare and check the values
@@ -233,7 +226,7 @@ def compare_prepare_convert_qconfig_mappings(
                 "Expected convert QConfigMapping to have the same qconfig as prepare for key {} {}; \
                 prepare: {}; convert: {}".format(dict_names[i], name, prepare_dicts[i][name], convert_dicts[i][name])
 
-def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[DTypeConfig]):
+def _is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[DTypeConfig]):
     for dtype_config in dtype_configs:
         is_dynamic = dtype_config.is_dynamic
         if is_dynamic is None:
@@ -242,7 +235,7 @@ def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[
         weight_dtype = dtype_config.weight_dtype or torch.float
         bias_dtype = dtype_config.bias_dtype or torch.float
         output_dtype = dtype_config.output_dtype or torch.float
-        qconfig_activation_dtype, qconfig_weight_dtype, qconfig_compute_dtype = \
+        qconfig_activation_dtype, qconfig_weight_dtype, qconfig_input_act_is_dynamic = \
             get_qconfig_dtypes(qconfig)
         qconfig_bias_dtype = torch.float16 \
             if (
@@ -252,7 +245,8 @@ def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[
             ) else torch.float
 
         if is_dynamic:
-            is_match = input_dtype == qconfig_compute_dtype and \
+            is_match = qconfig_input_act_is_dynamic and \
+                input_dtype == qconfig_activation_dtype and \
                 output_dtype == torch.float and \
                 weight_dtype == qconfig_weight_dtype
         else:
@@ -263,3 +257,89 @@ def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[
         if is_match:
             return True
     return False
+
+def _get_object_type_qconfig(
+        qconfig_mapping: QConfigMapping,
+        object_type: Union[Callable, str],
+        fallback_qconfig: QConfigAny) -> QConfigAny:
+    return qconfig_mapping.object_type_qconfigs.get(object_type, fallback_qconfig)
+
+
+def _get_module_name_regex_qconfig(qconfig_mapping, module_name, fallback_qconfig):
+    for regex_pattern, qconfig in qconfig_mapping.module_name_regex_qconfigs.items():
+        if re.match(regex_pattern, module_name):
+            # first match wins
+            return qconfig
+    return fallback_qconfig
+
+
+def _get_module_name_qconfig(qconfig_mapping, module_name, fallback_qconfig):
+    if module_name == '':
+        # module name qconfig not found
+        return fallback_qconfig
+    if module_name in qconfig_mapping.module_name_qconfigs:
+        return qconfig_mapping.module_name_qconfigs[module_name]
+    else:
+        parent, _ = _parent_name(module_name)
+        return _get_module_name_qconfig(qconfig_mapping, parent, fallback_qconfig)
+
+
+def _maybe_adjust_qconfig_for_module_type_or_name(qconfig_mapping, module_type, module_name, global_qconfig):
+    # get qconfig for module_name,
+    # fallback to module_name_regex_qconfig, module_type_qconfig,
+    # global_qconfig if necessary
+    module_type_qconfig = _get_object_type_qconfig(
+        qconfig_mapping, module_type, global_qconfig)
+    module_name_regex_qconfig = _get_module_name_regex_qconfig(
+        qconfig_mapping, module_name, module_type_qconfig)
+    module_name_qconfig = _get_module_name_qconfig(
+        qconfig_mapping, module_name, module_name_regex_qconfig)
+    return module_name_qconfig
+
+
+def _get_flattened_qconfig_dict(qconfig_mapping: QConfigMapping) -> Dict[Union[Callable, str], QConfigAny]:
+    """ flatten the global, object_type and module_name qconfig
+    to the same qconfig_dict so that it can be used by
+    propagate_qconfig_ function.
+    "module_name_regex" is ignored for now since it's not supported
+    in propagate_qconfig_, but it can be fixed later.
+
+    For example:
+    Input: {
+      "": qconfig,
+      "object_type": [
+        (torch.add, qconfig)
+      ],
+      "module_name": [
+        ("conv", qconfig)
+      ]
+    }
+
+    Output: {
+      "": qconfig,
+      torch.add: qconfig,
+      "conv": qconfig
+    }
+    """
+    flattened: Dict[Union[Callable, str], QConfigAny] = {"": qconfig_mapping.global_qconfig}
+    for obj, qconfig in qconfig_mapping.object_type_qconfigs.items():
+        flattened[obj] = qconfig
+    for obj, qconfig in qconfig_mapping.module_name_qconfigs.items():
+        flattened[obj] = qconfig
+    return flattened
+
+
+def _update_qconfig_for_qat(
+        qconfig_mapping: QConfigMapping,
+        additional_qat_module_mapping: Dict[Callable, Callable]):
+    """
+    Update the qconfig_dict to account for module swaps during QAT.
+    During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
+    """
+    all_qat_mappings = get_combined_dict(
+        get_default_qat_module_mappings(), additional_qat_module_mapping)
+    object_type_dict = qconfig_mapping.object_type_qconfigs
+    new_object_type_dict = object_type_dict.copy()
+    for k, v in new_object_type_dict.items():
+        if k in all_qat_mappings:
+            object_type_dict[all_qat_mappings[k]] = v

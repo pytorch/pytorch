@@ -597,7 +597,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
-                )
+                ) from e
 
     def test_minmax_int_ops(self):
         def apply(fn):
@@ -627,7 +627,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
-                )
+                ) from e
 
     def test_comparison_eq_ne(self):
         for device in self.devices:
@@ -1046,8 +1046,7 @@ class TestTEFuser(JitTestCase):
         script_f = torch.jit.script(fn_test_rand2)
         warmup_forward(script_f, x, y)
         out = script_f(x, y)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
+        self.assertEqual(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skip("rand_like is not supported yet")
@@ -1288,7 +1287,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(self_dtype), op.__name__, device, str(size)])
-                )
+                ) from e
 
     def test_isnan(self):
         x = torch.rand([4])
@@ -1321,7 +1320,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), 'isnan', device])
-                )
+                ) from e
 
     def test_gelu(self):
         def apply(fn):
@@ -1352,7 +1351,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
-                )
+                ) from e
 
     def test_unary_ops(self):
         with torch._jit_internal._disable_emit_hooks():
@@ -1435,7 +1434,7 @@ class TestTEFuser(JitTestCase):
                 except Exception as e:
                     raise RuntimeError(
                         " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
-                    )
+                    ) from e
 
     def test_binary_ops(self):
         def apply(fn):
@@ -1488,7 +1487,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
-                )
+                ) from e
 
     def test_binary_scalar_ops(self):
         def apply(fn):
@@ -1534,7 +1533,7 @@ class TestTEFuser(JitTestCase):
             try:
                 k = torch._C._te.TensorExprKernel(graph)
             except Exception as e:
-                raise RuntimeError(" ".join(["Compilation failed:", device, str(code)]))
+                raise RuntimeError(" ".join(["Compilation failed:", device, str(code)])) from e
 
             # Run the graph
             for x, y in product(values[dtype_x], values[dtype_y]):
@@ -1543,7 +1542,7 @@ class TestTEFuser(JitTestCase):
                     res = k.run((x, y))
                     self.assertEqual(ref, res)
                 except Exception as e:
-                    raise RuntimeError(" ".join(["Failed at runtime:", device, str(x), str(y), str(code)]))
+                    raise RuntimeError(" ".join(["Failed at runtime:", device, str(x), str(y), str(code)])) from e
 
     def test_matmul(self):
         if self.dynamic_shapes:
@@ -1599,7 +1598,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), device])
-                )
+                ) from e
 
     def test_binary_tensor_scalar_ops(self):
         with torch._jit_internal._disable_emit_hooks():
@@ -1643,7 +1642,7 @@ class TestTEFuser(JitTestCase):
                 except Exception as e:
                     raise RuntimeError(
                         " ".join(["Failed:", str(dtype), op.__name__, device])
-                    )
+                    ) from e
 
     def test_binary_div_ops(self):
         def apply_with_scalar(fn, scalar):
@@ -1676,7 +1675,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     "Failed: {} {} {} {}".format(dtype, op.__name__, device, scalar)
-                )
+                ) from e
 
     def test_binary_pow(self):
         def apply_with_scalar(fn, scalar):
@@ -1714,7 +1713,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
-                )
+                ) from e
 
     def test_ternary_ops(self):
         def apply(fn):
@@ -1746,7 +1745,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
-                )
+                ) from e
 
     def test_ternary_norm_ops(self):
         def apply(fn):
@@ -1777,7 +1776,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
-                )
+                ) from e
 
 
     @unittest.skip("FIXME: fuser doesn't include ListConstruct nodes to the group causing a failure")
@@ -1810,7 +1809,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
-                )
+                ) from e
 
     def test_where_ops(self):
         def apply(fn):
@@ -1843,7 +1842,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
-                )
+                ) from e
 
     def test_unsupported_dtypes(self):
         for device in self.devices:

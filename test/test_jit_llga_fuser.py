@@ -774,6 +774,36 @@ class TestEnableDisableLlgaFuser(JitTestCase):
         self.assertGraphContainsExactly(t_jit_3.graph_for(x, y), LLGA_FUSION_GROUP, 0)
 
 
+@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
+@unittest.skip("Enable when integration with dynamo aot_autograd is more stable")
+class TestDynamoAOT(JitTestCase):
+    def test_dynamo_aot_ts_onednn(self):
+        class Seq(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = nn.Sequential(
+                    nn.Linear(10, 10),
+                    nn.ReLU(),
+                    nn.Linear(10, 10),
+                    nn.ReLU(),
+                )
+
+            def forward(self, x):
+                return self.layers(x)
+
+        mod = Seq()
+
+        import torch._dynamo
+        aot_mod = torch._dynamo.optimize("aot_ts", nopython=True)(mod)
+
+        for _ in range(10):
+            with torch.jit.fuser("fuser3"):
+                loss = aot_mod(torch.rand([10, 10])).sum()
+                loss.backward()
+
+        torch._dynamo.reset()
+
+
 @unittest.skipIf(IS_AVX512_UNSUPPORTED, "This test fails for BF16 on machines without AVX512.")
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestModel(JitLlgaTestCase):
