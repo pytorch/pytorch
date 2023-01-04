@@ -76,12 +76,10 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   })
 #endif
 
-#define C10_UNUSED_DISPATCH_CUDA_WORKAROUND C10_UNUSED
-
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \
   case enum_type: {                                           \
     AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);              \
-    using HINT C10_UNUSED_DISPATCH_CUDA_WORKAROUND =          \
+    using HINT C10_UNUSED =                                   \
         c10::impl::ScalarTypeToCPPTypeT<enum_type>;           \
     return __VA_ARGS__();                                     \
   }
