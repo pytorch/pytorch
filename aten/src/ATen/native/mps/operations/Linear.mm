@@ -53,10 +53,9 @@ Tensor _mps_linear(
 
   @autoreleasepool {
     string key = "mps_linear" + getTensorsStringKey({input, weight, bias}) ;
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
 
         CachedGraph *newCachedGraph = nil;
         @autoreleasepool {
@@ -105,7 +104,6 @@ Tensor _mps_linear(
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
@@ -177,9 +175,9 @@ Tensor _mps_linear_backward_input(
   @autoreleasepool {
 
    string key = "mps_linear_backward_input" + getTensorsStringKey({grad_output, weight_reshaped});
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
         CachedGraph *newCachedGraph = nil;
 
         @autoreleasepool {
@@ -200,7 +198,6 @@ Tensor _mps_linear_backward_input(
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_reshaped);
@@ -271,9 +268,9 @@ std::tuple<Tensor, Tensor> _mps_linear_backward_weights(
 
    string key = "mps_linear_backward_weights:" + to_string(bias_defined) + ":" +
                                                  getTensorsStringKey({input_reshaped, weight, grad_output_reshaped});
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
         CachedGraph *newCachedGraph = nil;
 
         @autoreleasepool {
@@ -313,7 +310,6 @@ std::tuple<Tensor, Tensor> _mps_linear_backward_weights(
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_reshaped);
