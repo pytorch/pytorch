@@ -463,6 +463,9 @@ Attempted to convert a derivative formula for a mutable operator
                     # (2) may seem too strict, but currently the only ops that satisfy (1) also satisfy (2)
                     # If there is a need, we can relax (2) to allow any op that has an in-place variant
                     is_single_method_on_self_t = False
+                    directly_do_inplace = False
+                    op_name: Optional[str] = None
+                    between_parens: Optional[str] = None
                     match = re.fullmatch(r"self_t.([\w]*)\((.*)\)", formula)
                     if match:
                         op_name, between_parens = match.group(1), match.group(2)
@@ -485,11 +488,13 @@ Attempted to convert a derivative formula for a mutable operator
                         is_single_method_on_self_t = check_parens_nest_level_gt_zero(
                             between_parens
                         )
-                    directly_do_inplace = (
-                        is_single_method_on_self_t and op_name == info.name
-                    )
+                        directly_do_inplace = (
+                            is_single_method_on_self_t and op_name == info.name
+                        )
 
                     if directly_do_inplace:
+                        assert op_name is not None
+                        assert between_parens is not None
                         formula = f"self_t_raw.defined() ? self_t_raw.{op_name}_({between_parens}) : {formula}"
                     else:
                         # Make sure that the forward grad is modified inplace when the original formula
