@@ -1471,6 +1471,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(gm(*inp), f(*inp))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_dynamic_slicing(self):
         def f(x):
             return x[: x.shape[0] - 2, x.shape[1] - 1 :: 2]
