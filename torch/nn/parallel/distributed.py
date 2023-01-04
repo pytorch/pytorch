@@ -8,6 +8,7 @@ import itertools
 import logging
 import os
 import warnings
+import weakref
 from contextlib import contextmanager
 
 import torch
@@ -690,6 +691,59 @@ class DistributedDataParallel(Module, Joinable):
         if static_graph:
             self._set_static_graph()
 
+        # Check if user has used apply_optim_in_backward to overlap optimizer
+        # step + DDP backward. Current constraints:
+        # 1. Only allreduce is supported at the moment, no custom communication.
+        # 2. The reducer by default sets all grads for parameters DDP manages to
+        # None after they have been applied by the optimizer. There is no support
+        # for setting only some parameter grads to None, this must be done manually
+        # by user (and DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0 needs to be set.)
+        # If your use case requires some DDP managed parameters to run with
+        # an in-backward optimizer and some with a traditional optimizer, please
+        # ping https://github.com/pytorch/pytorch/issues/90052.
+
+        # NOTE: we use self._module_parameters instead of .parameters() since
+        # the former excludes ignored (non-DDP managed) parameters.
+        if any(
+            hasattr(p, '_in_backward_optimizers') for p in self._module_parameters
+        ):
+            # Remove hooks that apply_optim_in_backward had registered because
+            # DDP customizes how optimizer is overlapped with backward due to
+            # the allreduce.
+            for p in self._module_parameters:
+                for handle in getattr(p, '_optimizer_hook_handles', []):
+                    handle.remove()
+
+            # Need a weakref to the reducer in order to run all_reduce.
+            reducer_weakref = weakref.ref(self.reducer)
+            # Note: importing in function, otherwise this will cause a circular
+            # import.
+            from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
+                _apply_optim_in_backward_hook
+            )
+            self.register_comm_hook(
+                (reducer_weakref, self.process_group),
+                _apply_optim_in_backward_hook(
+                    gradient_is_bucket_view=self.gradient_as_bucket_view
+                ),
+            )
+
+            # TODO (rohan-varma): this is a workaround that allows users to
+            # disable the default behavior of DDP managed parameters with
+            # optimizer runing in backwards having their gradients all set to None.
+            # Currently, it is an "all or nothing behavior" where DDP will set
+            # no grads to None or all of them, relaxing this behavior will be
+            # done dependent on use cases.
+            if os.getenv("DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE", "1") != "0":
+                warnings.warn(
+                    "DDP + apply_optim_in_backward will currently set all "
+                    "parameter gradients to None. If this is not the desired "
+                    "behavior, please set env variable "
+                    "DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0, and manually set"
+                    "gradients to None/zero as desired."
+                )
+                self.reducer._set_grads_to_none()  # type: ignore[attr-defined]
+
     def _build_replicated_tensor_module(self):
         if self._use_replicated_tensor_module:
             # Create a module with ReplicatedTensor without copying tensors. Avoid
@@ -998,8 +1052,8 @@ class DistributedDataParallel(Module, Joinable):
             >>> # xdoctest: +SKIP("undefined variables")
             >>> ddp = torch.nn.parallel.DistributedDataParallel(model, pg)
             >>> with ddp.no_sync():
-            >>>   for input in inputs:
-            >>>     ddp(input).backward()  # no synchronization, accumulate grads
+            >>>     for input in inputs:
+            >>>         ddp(input).backward()  # no synchronization, accumulate grads
             >>> ddp(another_input).backward()  # synchronize grads
 
         .. warning::
@@ -1321,6 +1375,7 @@ class DistributedDataParallel(Module, Joinable):
 
         Example::
 
+            >>> # xdoctest: +SKIP("Distributed")
             >>> import torch
             >>> import torch.distributed as dist
             >>> import os
@@ -1494,28 +1549,26 @@ class DistributedDataParallel(Module, Joinable):
         Example::
             Below is an example of a noop hook that returns the same tensor.
 
+            >>> # xdoctest: +SKIP('undefined name')
             >>> def noop(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
             >>>     fut = torch.futures.Future()
             >>>     fut.set_result(bucket.buffer())
             >>>     return fut
-
-            >>> # xdoctest: +SKIP('undefined name')
             >>> ddp.register_comm_hook(state=None, hook=noop)
 
         Example::
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
             allreduce, and then decoded after allreduce.
 
+            >>> # xdoctest: +SKIP('undefined name')
             >>> def encode_and_decode(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
-            >>>     encoded_tensor = encode(bucket.buffer()) # encode gradients
+            >>>     encoded_tensor = encode(bucket.buffer())  # encode gradients
             >>>     fut = torch.distributed.all_reduce(encoded_tensor).get_future()
             >>>     # Define the then callback to decode.
             >>>     def decode(fut):
-            >>>         decoded_tensor = decode(fut.value()[0]) # decode gradients
+            >>>         decoded_tensor = decode(fut.value()[0])  # decode gradients
             >>>         return decoded_tensor
             >>>     return fut.then(decode)
-
-            >>> # xdoctest: +SKIP('undefined name')
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
