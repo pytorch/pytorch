@@ -81,8 +81,8 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   }
 
   const bool maybe_support_half = (
-    // Only CUDA supports half precision, and since meta devices don't have a tensor we
-    // err on the side of accepting it
+    // Only CUDA supports half precision, but since meta tensors don't have a
+    // device we err on the side of accepting it
     (device.is_cuda() || device.is_meta()) &&
     !at::detail::getCUDAHooks().hasROCM()
   );
