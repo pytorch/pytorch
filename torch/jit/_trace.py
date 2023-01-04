@@ -17,6 +17,7 @@ import warnings
 import inspect
 import re
 from typing import Any, Dict, List, Optional, Set
+from torch._dynamo.eval_frame import OptimizedModule
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
@@ -997,7 +998,7 @@ def trace_module(
     if not isinstance(mod, torch.nn.Module):
         raise AttributeError("expected torch.nn.Module as the first argument")
     
-    if isinstance(mod, torch._dynamo.eval_frame.OptimizedModule):
+    if isinstance(mod, OptimizedModule):
         raise AttributeError("it is not possible to torch.jit.trace() a torch.compile() model")
 
     if not isinstance(inputs, dict):
