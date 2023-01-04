@@ -31,9 +31,6 @@ __all__ = [
     'BNReLU3d',
     'LinearBn1d',
     'LinearLeakyReLU',
-<<<<<<< HEAD
     'LinearTanh',
-=======
     'ConvAdd2d',
->>>>>>> 32c33881214 ([Quant] Add fused ConvAdd2d module for onednn backend)
 ]
