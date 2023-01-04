@@ -531,7 +531,8 @@ std::tuple<Tensor, optional<int64_t>> diag_embed_batch_rule(const Tensor& self, 
 }
 
 Tensor trace_decomp(const Tensor& tensor) {
-  return tensor.diagonal().sum();
+  TORCH_CHECK(tensor.dim() == 2, "trace: expected a matrix, but got a tensor with dim ", tensor.dim());
+  return tensor.diagonal().sum() ;
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
