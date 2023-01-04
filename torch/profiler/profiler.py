@@ -58,9 +58,6 @@ def _profile_using_dynolog(override: bool = False):
     if os.environ.get("KINETO_USE_DAEMON", None) is not None or override is True:
         handle = register_optimizer_step_post_hook(_optimizer_post_hook)
         print("Registered optimizer step post hook")
-    else:
-        print("Attempt to register optimizer post hook failed. Check that\
-              the environment variable KINETO_USE_DAEMON is set to 1")
 
 
 class _KinetoProfile(object):
