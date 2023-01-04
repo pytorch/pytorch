@@ -41,11 +41,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
-
+        source = AttrSource(self.source, name)
         if isinstance(obj, staticmethod):
-            return variables.UserFunctionVariable(obj.__get__(self.value), **options)
+            return variables.UserFunctionVariable(
+                obj.__get__(self.value), source=source, **options
+            )
         elif isinstance(obj, classmethod):
-            return variables.UserMethodVariable(obj.__func__, self, **options)
+            return variables.UserMethodVariable(
+                obj.__func__, self, source=source, **options
+            )
 
         if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
             obj
@@ -179,7 +183,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:
                 method = None
-
+            source = AttrSource(AttrSource(self.source, "__class__"), name)
             if method is object.__init__:
                 return ConstantVariable(None, **options)
 
@@ -217,9 +221,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 # TODO(jansel): add a guard to check for monkey patching?
-                return UserMethodVariable(method, self, **options).call_function(
-                    tx, args, kwargs
-                )
+                return UserMethodVariable(
+                    method, self, source=source, **options
+                ).call_function(tx, args, kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -297,14 +301,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         except AttributeError:
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
-                    getattr_fn, self, **options
+                    getattr_fn, self, source=source, **options
                 ).call_function(tx, [ConstantVariable(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
             return variables.UserMethodVariable(
-                subobj.fget, self, **options
+                subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
 
         if (
@@ -342,7 +346,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
             return VariableBuilder(tx, source)(subobj).add_options(options)
-
+        options["source"] = source
         if isinstance(
             subobj,
             (
@@ -351,7 +355,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 torch.distributions.constraints.Constraint,
             ),
         ):
-            return UserDefinedObjectVariable(subobj, source=source, **options)
+            return UserDefinedObjectVariable(subobj, **options)
 
         if isinstance(subobj, staticmethod):
             return variables.UserFunctionVariable(subobj.__get__(self.value), **options)
@@ -359,9 +363,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(subobj.__func__, self, **options)
 
         if name == "__class__":
-            return UserDefinedClassVariable(type(self.value), source=source, **options)
+            return UserDefinedClassVariable(type(self.value), **options)
 
-        return variables.GetAttrVariable(self, name, source=source, **options)
+        return variables.GetAttrVariable(self, name, **options)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         if not self.source:
