@@ -8689,7 +8689,7 @@ class TestConsistency(TestCase):
 
             except Exception as e:
                 if any(s in str(e).lower() for s in ["int64", "macos 13"]):
-                  self.skipTest(f"{str(e)}")
+                    self.skipTest(f"{str(e)}")
 
                 if not generate_new_truth:
                     raise e
