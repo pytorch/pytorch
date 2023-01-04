@@ -28,9 +28,6 @@ void sampled_addmm_sparse_csr_kernel_impl(
 
   scalar_t* mat1_data = mat1.data_ptr<scalar_t>();
   scalar_t* mat2_data = mat2.data_ptr<scalar_t>();
-  scalar_t* value_data = result.values().data_ptr<scalar_t>();
-  index_t* crow_data = result.crow_indices().data_ptr<index_t>();
-  index_t* col_data = result.col_indices().data_ptr<index_t>();
 
   // mat1: {B, M, K}
   // mat2: {B, N, K}
@@ -41,24 +38,32 @@ void sampled_addmm_sparse_csr_kernel_impl(
   int64_t N = mat2.size(-2);
   int64_t B = mat1.numel() / M / K;
 
+  auto values = result.values().reshape({-1, nnz});
+  auto crow = result.crow_indices().reshape({-1, M + 1});
+  auto col = result.col_indices().reshape({-1, nnz});
+
+  auto values_acc = values.accessor<scalar_t, 2>();
+  auto crow_acc = crow.accessor<index_t, 2>();
+  auto col_acc = col.accessor<index_t, 2>();
+
   // usually, collapse B and M is a better option,
   // but for most commonly used case (mat1 and mat2 is 2d tensor), B = 1,
-  // so choose to parallel on M so that we don't have to handle b offset frequently
+  // balance partition M by using parallel_sparse_csr.
   using Vec = vec::Vectorized<scalar_t>;
-  utils::parallel_sparse_csr(crow_data, M, nnz, [&](int64_t begin, int64_t end) {
-    for (const auto b : c10::irange(B)) {
-      index_t* crow_ptr = crow_data + b * (M + 1);
-      index_t* col_ptr = col_data + b * nnz;
-      scalar_t* value_ptr = value_data + b * nnz;
-      scalar_t* mat1_ptr = mat1_data + b * M * K;
-      scalar_t* mat2_ptr = mat2_data + b * N * K;
+  for (const auto b : c10::irange(B)) {
+    auto crow_slice = crow_acc[b];
+    auto col_slice = col_acc[b];
+    auto values_slice = values_acc[b];
+    scalar_t* mat1_ptr = mat1_data + b * M * K;
+    scalar_t* mat2_ptr = mat2_data + b * N * K;
 
+    utils::parallel_sparse_csr(crow_slice, M, nnz, [&](int64_t begin, int64_t end) {
       for (const auto m : c10::irange(begin, end)) {
-        int64_t row_start = crow_ptr[m];
-        int64_t row_end = crow_ptr[m + 1];
+        int64_t row_start = crow_slice[m];
+        int64_t row_end = crow_slice[m + 1];
         for (const auto e : c10::irange(row_start, row_end)) {
-          int64_t n = col_ptr[e];
-          scalar_t val = value_ptr[e];
+          int64_t n = col_slice[e];
+          scalar_t val = values_slice[e];
           scalar_t dot = vec::map2_reduce_all<scalar_t>(
               [](Vec x, Vec y) { return x * y; },
               [](Vec x, Vec y) { return x + y; },
@@ -66,11 +71,11 @@ void sampled_addmm_sparse_csr_kernel_impl(
               mat2_ptr + n * K,
               K);
           val = alpha_ * dot + beta_ * val;
-          value_ptr[e] = val;
+          values_slice[e] = val;
         }
       }
-    }
-  });
+    });
+  }
 }
 
 void sampled_addmm_sparse_csr_kernel(
