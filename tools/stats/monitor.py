@@ -13,10 +13,15 @@ import pynvml  # type: ignore[import]
 # Must import from ROCm installation path.
 # Cannot use the high-level rocm_smi cmdline module due to its use of exit().
 # Must use the lower-level ctypes wrappers exposed through rsmiBindings.
-sys.path.append('/opt/rocm/libexec/rocm_smi')
+sys.path.append("/opt/rocm/libexec/rocm_smi")
 try:
     from ctypes import byref, c_uint32, c_uint64
-    from rsmiBindings import rocmsmi, rsmi_process_info_t, rsmi_status_t
+
+    from rsmiBindings import (  # type: ignore[import]
+        rocmsmi,
+        rsmi_process_info_t,
+        rsmi_status_t,
+    )
 except ImportError as e:
     pass
 
@@ -71,7 +76,7 @@ def get_per_process_gpu_info(handle: Any) -> List[Dict[str, Any]]:
     return per_process_info
 
 
-def rocm_ret_ok(ret) -> bool:
+def rocm_ret_ok(ret: int) -> Any:
     return ret == rsmi_status_t.RSMI_STATUS_SUCCESS
 
 
@@ -83,7 +88,7 @@ def rocm_list_devices() -> List[int]:
     return []
 
 
-def rocm_get_mem_use(device) -> float:
+def rocm_get_mem_use(device: int) -> float:
     memoryUse = c_uint64()
     memoryTot = c_uint64()
 
@@ -95,7 +100,7 @@ def rocm_get_mem_use(device) -> float:
     return 0.0
 
 
-def rocm_get_gpu_use(device) -> float:
+def rocm_get_gpu_use(device: int) -> float:
     percent = c_uint32()
     ret = rocmsmi.rsmi_dev_busy_percent_get(device, byref(percent))
     if rocm_ret_ok(ret):
@@ -142,7 +147,7 @@ if __name__ == "__main__":
     try:
         ret = rocmsmi.rsmi_init(0)
         rsmi_handles = rocm_list_devices()
-    except:
+    except Exception:
         # no rocmsmi available, probably because not rocm
         pass
 
