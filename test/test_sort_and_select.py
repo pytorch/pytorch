@@ -357,6 +357,16 @@ class TestSortAndSelect(TestCase):
         for shape in shapes:
             test(shape)
 
+    @dtypes(torch.float)
+    def test_sort_expanded_scalar(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/91420
+        s0 = torch.scalar_tensor(True, device=device, dtype=dtype)
+        s3 = s0.expand([1, 1, 1])
+        out = torch.sort(s3, stable=True, dim=1, descending=True)
+        t3 = torch.Tensor([[[True]]])
+        expected = torch.sort(t3, stable=True, dim=1, descending=True)
+        self.assertEqual(out, expected)
+
     def test_topk(self, device):
         def topKViaSort(t, k, dim, dir):
             sorted, indices = t.sort(dim, dir)

@@ -140,7 +140,7 @@ public:
   // 2. |other - this| / this.stride is an Integer.
   C10_HOST_DEVICE
   difference_type operator-(const ConstStridedRandomAccessor& other) const {
-    return (ptr - other.ptr) / stride;
+    return (ptr - other.ptr) / std::max(stride, index_t(1));
   }
   // }
 
