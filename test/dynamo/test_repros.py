@@ -2225,6 +2225,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_tensor_item(self):
+        def f(x, y):
+            val = y.item()
+            return x.sum() + val
+
+        gm, _ = torch._dynamo.export(
+            f,
+            torch.zeros(6, 4),
+            torch.tensor(1),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+        self.assertEqual(
+            f(torch.zeros(6, 4), torch.tensor(1)),
+            gm(torch.zeros(6, 4), torch.tensor(1)),
+        )
+        self.assertEqual(
+            f(torch.zeros(6, 4), torch.tensor(2)),
+            gm(torch.zeros(6, 4), torch.tensor(2)),
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
