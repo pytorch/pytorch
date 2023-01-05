@@ -318,6 +318,8 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
+    xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+    xfail('index_fill'),  # https://github.com/pytorch/pytorch/pull/91534
 }
 
 aliasing_ops = {
@@ -583,8 +585,6 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter'),
         xfail('_softmax_backward_data', device_type='cpu'),
         xfail('as_strided', 'partial_views'),
-        # https://github.com/pytorch/pytorch/pull/91534
-        xfail('index_fill', dtypes=(torch.float32,), device_type='cuda')
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
