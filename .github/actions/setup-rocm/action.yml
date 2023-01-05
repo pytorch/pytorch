@@ -9,6 +9,14 @@ runs:
       shell: bash
       run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
 
+    - name: Stop all running docker containers
+      if: always()
+      shell: bash
+      run: |
+        # ignore expansion of "docker ps -q" since it could be empty
+        # shellcheck disable=SC2046
+        docker stop $(docker ps -q) || true
+
     - name: Runner health check system info
       if: always()
       shell: bash

@@ -371,50 +371,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-          if [[ $ngpu -eq 0 ]]; then
-              echo "Error: Failed to detect any GPUs on the runner"
-              echo "$msg"
-              exit 1
-          fi
-          if [[ $ngpu -eq 1 ]]; then
-              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-              echo "$msg"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -454,14 +412,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_7-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm5_2-test
@@ -520,50 +472,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-          if [[ $ngpu -eq 0 ]]; then
-              echo "Error: Failed to detect any GPUs on the runner"
-              echo "$msg"
-              exit 1
-          fi
-          if [[ $ngpu -eq 1 ]]; then
-              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-              echo "$msg"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -603,14 +513,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_7-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm5_3-test
@@ -967,50 +871,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-          if [[ $ngpu -eq 0 ]]; then
-              echo "Error: Failed to detect any GPUs on the runner"
-              echo "$msg"
-              exit 1
-          fi
-          if [[ $ngpu -eq 1 ]]; then
-              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-              echo "$msg"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -1050,14 +912,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_8-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm5_2-test
@@ -1116,50 +972,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-          if [[ $ngpu -eq 0 ]]; then
-              echo "Error: Failed to detect any GPUs on the runner"
-              echo "$msg"
-              exit 1
-          fi
-          if [[ $ngpu -eq 1 ]]; then
-              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-              echo "$msg"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -1199,14 +1013,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_8-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm5_3-test
@@ -1563,50 +1371,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-          if [[ $ngpu -eq 0 ]]; then
-              echo "Error: Failed to detect any GPUs on the runner"
-              echo "$msg"
-              exit 1
-          fi
-          if [[ $ngpu -eq 1 ]]; then
-              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-              echo "$msg"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -1646,14 +1412,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_9-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm5_2-test
@@ -1712,50 +1472,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-          if [[ $ngpu -eq 0 ]]; then
-              echo "Error: Failed to detect any GPUs on the runner"
-              echo "$msg"
-              exit 1
-          fi
-          if [[ $ngpu -eq 1 ]]; then
-              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-              echo "$msg"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -1795,14 +1513,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_9-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm5_3-test
@@ -2159,50 +1871,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.2
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-          if [[ $ngpu -eq 0 ]]; then
-              echo "Error: Failed to detect any GPUs on the runner"
-              echo "$msg"
-              exit 1
-          fi
-          if [[ $ngpu -eq 1 ]]; then
-              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-              echo "$msg"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -2242,14 +1912,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.2
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_10-rocm5_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm5_2-test
@@ -2308,50 +1972,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.3
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-          if [[ $ngpu -eq 0 ]]; then
-              echo "Error: Failed to detect any GPUs on the runner"
-              echo "$msg"
-              exit 1
-          fi
-          if [[ $ngpu -eq 1 ]]; then
-              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-              echo "$msg"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v3
         name: Download Build Artifacts
         with:
@@ -2391,14 +2013,8 @@ jobs:
           docker-image: pytorch/manylinux-builder:rocm5.3
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
   manywheel-py3_10-rocm5_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm5_3-test
