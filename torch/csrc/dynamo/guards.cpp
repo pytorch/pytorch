@@ -30,7 +30,7 @@ class TensorCheck {
       : pytype(pt),
         dispatch_key_(state.apply(v.key_set()).raw_repr()),
         dtype_(v.dtype().toScalarType()),
-        device_index(v.device().index()),
+        device_index_(v.device().index()),
         requires_grad_(state.grad_mode_enabled && v.requires_grad()),
         dynamic_shapes_(dynamic_shapes) {
     auto ndim = v.ndimension();
@@ -47,7 +47,7 @@ class TensorCheck {
   bool check(const LocalState& state, const at::Tensor& v) {
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr() ||
         dtype_ != v.dtype().toScalarType() ||
-        || device_index_ != v.device().index() ||
+        device_index_ != v.device().index() ||
         requires_grad_ != (state.grad_mode_enabled && v.requires_grad())) {
       return false;
     }
@@ -88,10 +88,10 @@ class TensorCheck {
                   << v.dtype().toScalarType();
       return fail_reason.str();
     } else if (device_index_ != v.device().index()) {
-      fail_reason << "Tensor device index mismatch. Expected device index to be " << device_index_ 
-      << ", actual " << v.device().index();
-      return fail_reason.str()
-    }
+      fail_reason
+          << "Tensor device index mismatch. Expected device index to be "
+          << device_index_ << ", actual " << v.device().index();
+      return fail_reason.str();
     } else if (
         requires_grad_ != (state.grad_mode_enabled && v.requires_grad())) {
       // return fmt::format("tensor requires_grad mismatch. expected {}",
@@ -136,9 +136,9 @@ class TensorCheck {
   uint64_t dispatch_key_; // DispatchKeySet includes device/layout
   at::ScalarType dtype_;
   // Note(voz): While dispatch_key_ is sufficiently representative of a device
-  // In that keys are more granular AND device specific - they do not necessarily capture
-  // device indices correctly.
-  at::DeviceIndex device_index; 
+  // In that keys are more granular AND device specific - they do not
+  // necessarily capture device indices correctly.
+  at::DeviceIndex device_index_;
   bool requires_grad_;
   bool dynamic_shapes_;
   std::vector<int64_t> sizes_;
