@@ -17,6 +17,7 @@ Tensors
     is_nonzero
     set_default_dtype
     get_default_dtype
+    set_default_device
     set_default_tensor_type
     numel
     set_printoptions
@@ -613,6 +614,8 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
+    sym_float
+    sym_int
 
 Optimizations
 -------------
