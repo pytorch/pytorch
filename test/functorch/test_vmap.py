@@ -26,6 +26,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     subtest,
     TEST_WITH_UBSAN,
+    IS_MACOS,
+    IS_X86
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -42,7 +44,8 @@ from common_utils import (
     generate_vmap_inputs,
     compute_quantities_for_vmap_test,
     is_valid_inplace_sample_input,
-    decorate
+    decorate,
+    expectedFailureIf
 )
 import types
 from collections import namedtuple
@@ -3539,12 +3542,14 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('clamp'),
         # AssertionError: Tensor-likes are not equal!
         xfail('bitwise_left_shift', device_type='cpu'),
-        xfail('bitwise_right_shift', device_type='cpu'),
+        decorate('bitwise_right_shift', decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
         xfail('narrow_copy', device_type='cpu'),
 
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        # UBSAN: runtime error: -1e+20 is outside the range of representable values of type 'long'
+        decorate('special.hermite_polynomial_h', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
