@@ -169,7 +169,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda11_7-with-pypi-cudnn
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' | nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -396,13 +396,15 @@ jobs:
         if: always()
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          if [[ $ngpu -eq 0 ]]; then
+              echo "Error: Failed to detect any GPUs on the runner"
+              echo "$msg"
+              exit 1
+          fi
+          if [[ $ngpu -eq 1 ]]; then
+              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+              echo "$msg"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -543,13 +545,15 @@ jobs:
         if: always()
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          if [[ $ngpu -eq 0 ]]; then
+              echo "Error: Failed to detect any GPUs on the runner"
+              echo "$msg"
+              exit 1
+          fi
+          if [[ $ngpu -eq 1 ]]; then
+              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+              echo "$msg"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -761,7 +765,7 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_7-with-pypi-cudnn
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' | nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -988,13 +992,15 @@ jobs:
         if: always()
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          if [[ $ngpu -eq 0 ]]; then
+              echo "Error: Failed to detect any GPUs on the runner"
+              echo "$msg"
+              exit 1
+          fi
+          if [[ $ngpu -eq 1 ]]; then
+              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+              echo "$msg"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -1135,13 +1141,15 @@ jobs:
         if: always()
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          if [[ $ngpu -eq 0 ]]; then
+              echo "Error: Failed to detect any GPUs on the runner"
+              echo "$msg"
+              exit 1
+          fi
+          if [[ $ngpu -eq 1 ]]; then
+              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+              echo "$msg"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -1353,7 +1361,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_7-with-pypi-cudnn
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' | nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1580,13 +1588,15 @@ jobs:
         if: always()
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          if [[ $ngpu -eq 0 ]]; then
+              echo "Error: Failed to detect any GPUs on the runner"
+              echo "$msg"
+              exit 1
+          fi
+          if [[ $ngpu -eq 1 ]]; then
+              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+              echo "$msg"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -1727,13 +1737,15 @@ jobs:
         if: always()
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          if [[ $ngpu -eq 0 ]]; then
+              echo "Error: Failed to detect any GPUs on the runner"
+              echo "$msg"
+              exit 1
+          fi
+          if [[ $ngpu -eq 1 ]]; then
+              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+              echo "$msg"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -1945,7 +1957,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_7-with-pypi-cudnn
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' | nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2172,13 +2184,15 @@ jobs:
         if: always()
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          if [[ $ngpu -eq 0 ]]; then
+              echo "Error: Failed to detect any GPUs on the runner"
+              echo "$msg"
+              exit 1
+          fi
+          if [[ $ngpu -eq 1 ]]; then
+              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+              echo "$msg"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -2319,13 +2333,15 @@ jobs:
         if: always()
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+          if [[ $ngpu -eq 0 ]]; then
+              echo "Error: Failed to detect any GPUs on the runner"
+              echo "$msg"
+              exit 1
+          fi
+          if [[ $ngpu -eq 1 ]]; then
+              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+              echo "$msg"
               exit 1
           fi
       - name: Runner health check disconnect on failure
@@ -2537,7 +2553,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda11_7-with-pypi-cudnn
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-runtime-cu11; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' | nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' | nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' | nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
