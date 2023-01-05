@@ -791,10 +791,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # official from_list stub doesn't have new-style type
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-
-        # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
-        nn_module_stack_str = f"Module stack: {nn_module_stack}\n"
-        rv.node.stack_trace = nn_module_stack_str + " | ".join(msgs)
+        rv.node.stack_trace = " | ".join(msgs)
 
         return rv
 
