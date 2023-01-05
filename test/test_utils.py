@@ -14,17 +14,8 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 from torch.utils.data import DataLoader
-from torch.testing._internal.common_device_type import (
-    ops,
-    onlyCPU,
-    instantiate_device_type_tests,
-)
-from torch.testing._internal.common_methods_invocations import op_db
 import torch.cuda
-from torch.utils._pytree import tree_any, tree_all_only
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-from torch import set_default_device
-from torch.utils._device import set_device
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
@@ -803,74 +794,6 @@ class TestExtensionUtils(TestCase):
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module('xpu', DummyXPUModule)
-
-
-class TestDeviceUtils(TestCase):
-    def test_basic(self):
-        with torch.device('meta') as dev:
-            x = torch.empty(3, 3)
-        self.assertEqual(x.device.type, 'meta')
-        self.assertEqual(dev, torch.device('meta'))
-
-    def test_decorator(self):
-        @set_device('meta')
-        def f():
-            return torch.empty(3, 3)
-        self.assertEqual(f().device.type, 'meta')
-
-    def test_decorator_generator(self):
-        @set_device('meta')
-        def f():
-            yield torch.empty(3, 3)
-            yield torch.empty(3, 3)
-        r1, r2 = list(f())
-        self.assertEqual(r1.device.type, 'meta')
-        self.assertEqual(r2.device.type, 'meta')
-
-
-    def test_nn_module(self):
-        with torch.device('meta'):
-            m = nn.Linear(40, 50)
-        self.assertEqual(m.weight.device.type, 'meta')
-
-    def test_set_default_device(self):
-        try:
-            set_default_device('meta')
-            r = torch.empty(2, 2)
-        finally:
-            set_default_device(None)
-
-        self.assertEqual(r.device.type, 'meta')
-
-    @onlyCPU
-    @ops(op_db)
-    def test_device_mode_ops(self, device, dtype, op):
-        func = op.get_op()
-        samples = op.sample_inputs(device, dtype, requires_grad=False)
-        for sample in samples:
-            # Only test samples which don't have Tensor inputs.  However,
-            # we don't test the factory property on OpInfo as it is very,
-            # very incomplete
-            if tree_any(
-                lambda x: isinstance(x, torch.Tensor),
-                (sample.input, sample.args, sample.kwargs)
-            ):
-                continue
-            # Many OpInfos will explicitly pass in a device.  DeviceContext
-            # will respect device if it is explicitly specified.  To test
-            # DeviceContext, we have to remove the device kwarg in this case.
-            # NB: Can't pass None to sample_inputs, the function can't
-            # handle it.
-            kwargs = sample.kwargs.copy()
-            kwargs.pop('device', None)
-            with torch.device('meta'):
-                r = func(sample.input, *sample.args, **kwargs)
-            self.assertTrue(
-                tree_all_only(torch.Tensor, lambda x: x.device.type == 'meta', r)
-            )
-
-
-instantiate_device_type_tests(TestDeviceUtils, globals())
 
 
 class TestCppExtensionUtils(TestCase):
