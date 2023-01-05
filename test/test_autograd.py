@@ -8485,7 +8485,7 @@ class TestAutogradDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
                 other.detach().requires_grad_()._values().backward(torch.ones_like(other._values()))
 
-        for empty_i, empty_v, empty_nnz in product([False, False], repeat=3):
+        for empty_i, empty_v, empty_nnz in product([True, False], repeat=3):
             sparse_size = [] if empty_i else [2, 1]
             dense_size = [1, 0, 2] if empty_v else [1, 2]
             nnz = 0 if empty_nnz else 5
