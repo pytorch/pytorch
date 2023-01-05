@@ -616,8 +616,6 @@ struct CodeImpl {
         "<forked function>", node->g(attr::Subgraph), nullptr));
     forked_functions_.emplace_back(std::move(forked_fn));
     function_table_.emplace_back(forked_functions_.back().get());
-    awaitable_to_function_table_idx_.insert(
-        {node->output(), function_table_.size() - 1});
     insertInstruction(FORK, function_table_.size() - 1, node->inputs().size());
   }
 
@@ -627,6 +625,8 @@ struct CodeImpl {
         "<awaitable function>", node->g(attr::Subgraph), nullptr));
     awaited_functions_.emplace_back(std::move(await_fn));
     function_table_.emplace_back(awaited_functions_.back().get());
+    //awaitable_to_function_table_idx_.insert(
+    //    {node->output(), function_table_.size() - 1});
     insertInstruction(
         AWAITABLE, function_table_.size() - 1, node->inputs().size());
   }

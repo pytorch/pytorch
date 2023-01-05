@@ -343,3 +343,28 @@ class TestAwait(JitTestCase):
         aw = torch.jit.awaitable(delayed, t)
         self.assertTrue(isinstance(aw, torch._C.Await))
         self.assertTrue(t.dtype == aw.dtype)
+
+    def test_await_out_of_interpreter(self):
+        def delayed(x: Tensor) -> Tensor:
+            return 2 * (x + 1)
+
+        @torch.jit.script
+        def main(x: Tensor) -> Await[Tensor]:
+            aw = torch.jit.awaitable(delayed, x)
+            assert isinstance(aw, torch.jit.Await)
+            return aw
+
+        inp = torch.zeros(2)
+
+        sm = torch.jit.script(main)
+        out_aw = main(inp)
+        print(f"XXX out_aw:{out_aw}")
+        out = torch.jit.awaitable_wait(out_aw)
+        print(f"XXX out:{out}")
+
+        script_out_aw = sm(inp)
+        print(f"XXX script_out_aw:{script_out_aw}")
+        script_out = torch.jit.awaitable_wait(script_out_aw)
+        print(f"XXX script_out:{script_out}")
+
+        self.assertTrue(torch.allclose(script_out, out))

@@ -759,8 +759,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(AWAITABLE): {
             INST_GUARD;
-            auto& fn =
-                toGraphFunction(*frame.function->function_table_[inst.X]);
+            auto fn_ptr = frame.function->function_table_[inst.X];
+            auto& fn = toGraphFunction(*fn_ptr);
             auto num_outputs = fn.graph()->outputs().size();
             TypePtr out_type;
             if (num_outputs == 1) {
@@ -772,10 +772,31 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               }
               out_type = TupleType::create(out_types);
             }
+            auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
+            // How to avoid capture of interpreter?
+            // Do not do this lambda - frame already destructed, just for experiment
+            std::function<IValue()> init_fn = [args, fn_ptr, taskLauncher=taskLauncher_]
+              () -> IValue {
+                std::cout << "XXX " << __FILE__ << ":" << __LINE__ <<":" <<__FUNCTION__ << std::endl;
+              auto& fn = toGraphFunction(*fn_ptr);
+              auto n_out = fn.graph()->outputs().size();
+              torch::jit::Stack s;
+              for (const auto& arg : args) {
+                s.push_back(arg);
+              }
+              InterpreterState await_interpreter(
+                  fn.get_executor().getPlanFor(s).code, taskLauncher);
+              await_interpreter.run(s);
+              if (n_out == 1) {
+                return s.back();
+              } 
+              return c10::ivalue::Tuple::create(jit::last(s, n_out));
+            };
             auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
+            aw->setInitFunc(init_fn);
             // XXX: Avoid storing arguments this way - Closure must be created
             // with arguments at .awaitable()
-            aw->setArgs(std::vector<IValue>(stack.end() - inst.N, stack.end()));
+            aw->setArgs(args);
             drop(stack, inst.N);
             push(stack, std::move(aw));
           }
