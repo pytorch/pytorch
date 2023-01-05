@@ -1,10 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
 from typing import List, Optional, Sequence, TypeVar, Union
-from datetime import timedelta
 
 import torch
-from torch.distributed import TCPStore
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     all_gather,
