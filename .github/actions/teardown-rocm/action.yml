@@ -22,4 +22,3 @@ runs:
         else
             echo "Will not purge docker, only ${image_count} images found"
         fi
-
