@@ -5396,8 +5396,7 @@ Example::
    :noindex:
 
 Returns a sparse tensor with the specified layout and blocksize.  If
-the :attr:`self` is strided, and the layout specified is one of
-compressed layouts, the the number of dense dimensions could be
+the :attr:`self` is strided, the number of dense dimensions could be
 specified, and a hybrid sparse tensor will be created.
 
 .. note:: If the :attr:`self` layout and blocksize parameters match
@@ -5461,7 +5460,8 @@ to_sparse_csr(dense_dim=None) -> Tensor
 Convert a tensor to compressed row storage format (CSR).  Except for
 strided tensors, only works with 2D tensors.  If the :attr:`self` is
 strided, then the number of dense dimensions could be specified, and a
-hybrid CSR tensor will be created.
+hybrid CSR tensor will be created, with `dense_dim` dense dimensions
+and `self.dim() - 2 - dense_dim` batch dimension.
 
 Args:
 
@@ -5500,7 +5500,8 @@ to_sparse_csc() -> Tensor
 Convert a tensor to compressed column storage (CSC) format.  Except
 for strided tensors, only works with 2D tensors.  If the :attr:`self`
 is strided, then the number of dense dimensions could be specified,
-and a hybrid CSC tensor will be created.
+and a hybrid CSC tensor will be created, with `dense_dim` dense
+dimensions and `self.dim() - 2 - dense_dim` batch dimension.
 
 Args:
 
@@ -5539,7 +5540,8 @@ to_sparse_bsr(blocksize, dense_dim) -> Tensor
 Convert a tensor to a block sparse row (BSR) storage format of given
 blocksize.  If the :attr:`self` is strided, then the number of dense
 dimensions could be specified, and a hybrid BSR tensor will be
-created.
+created, with `dense_dim` dense dimensions and `self.dim() - 2 -
+dense_dim` batch dimension.
 
 Args:
 
@@ -5592,7 +5594,8 @@ to_sparse_bsc(blocksize, dense_dim) -> Tensor
 Convert a tensor to a block sparse column (BSC) storage format of
 given blocksize.  If the :attr:`self` is strided, then the number of
 dense dimensions could be specified, and a hybrid BSC tensor will be
-created.
+created, with `dense_dim` dense dimensions and `self.dim() - 2 -
+dense_dim` batch dimension.
 
 Args:
 

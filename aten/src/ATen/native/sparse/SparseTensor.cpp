@@ -526,14 +526,11 @@ SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layo
     if (self.layout() == *layout) {
       return self;
     }
-    if (dense_dim_opt.has_value() && !(*layout == kSparseCsr || *layout == kSparseCsc || *layout == kSparseBsr || *layout == kSparseBsc)) {
-      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not support specifying number of dense dimensions");
-    }
     switch (*layout) {
     case kStrided:
       return self;
     case kSparse:
-      return dense_to_sparse(self, self.dim());
+      return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
     case kSparseCsr:
       return self.to_sparse_csr(dense_dim_opt);
     case kSparseCsc:
@@ -555,7 +552,7 @@ SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layo
     }
     AT_ERROR("to_sparse not implemented for ", self.layout(), " to ", *layout, " conversion");
   }
-  return dense_to_sparse(self, self.dim());
+  return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
 }
 
 SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
