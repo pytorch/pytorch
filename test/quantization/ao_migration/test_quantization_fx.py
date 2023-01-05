@@ -15,6 +15,8 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
             '_prepare_fx',
             '_prepare_standalone_module_fx',
             'fuse_fx',
+            'Scope',
+            'ScopeContextManager',
             'prepare_fx',
             'prepare_qat_fx',
             '_convert_fx',
