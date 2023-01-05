@@ -870,29 +870,39 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     def test_export_with_stack_trace(self):
         inp = torch.tensor([0.1, 0.1])
-        linear = torch.nn.Linear(2, 2)
 
-        def func(x):
-            x = x + 1
-            y = x.t()
-            y = y.relu()
-            y = linear(y)
-            return y
+        class MyBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
 
-        exported = torch._dynamo.export(func, inp, aten_graph=False)
+            def forward(self, x):
+                return torch.cos(x).relu()
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = MyBlock()
+
+            def forward(self, x):
+                out = self.block(x)
+                return out
+
+        exported = torch._dynamo.export(MyModule(), inp, aten_graph=False)
         out_graph = exported[0]
 
         for node in out_graph.graph.nodes:
             if node.op not in {"placeholder", "output"}:
                 self.assertTrue(node.stack_trace is not None)
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
 
         torch._dynamo.reset()
 
-        exported = torch._dynamo.export(func, inp, aten_graph=True)
+        exported = torch._dynamo.export(MyModule(), inp, aten_graph=True)
         out_graph = exported[0]
         for node in out_graph.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(node.stack_trace is not None)
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
 
     def test_export_compare_optimize_with_make_fx(self):
         inp = torch.tensor([0.1, 0.1])
