@@ -1635,6 +1635,7 @@ def empty(
 ):
     assert names is None
     assert memory_format in (None, torch.contiguous_format)
+    device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = list(size[0])
     return empty_strided(
