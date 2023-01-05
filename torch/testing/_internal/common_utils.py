@@ -158,11 +158,12 @@ class _TestParametrizer(object):
                 if the tests are not part of a device-specific set
 
         Returns:
-            Generator object returning 3-tuples of:
+            Generator object returning 4-tuples of:
                 test (fn): Parametrized test function; must support a device arg and args for any params
                 test_name (str): Parametrized suffix for the test (e.g. opname_int64); will be appended to
                     the base name of the test
                 param_kwargs (dict): Param kwargs to pass to the test (e.g. {'op': 'add', 'dtype': torch.int64})
+                decorator_fn (callable): Callable[[Dict], List] for list of decorators to apply given param_kwargs
         """
         raise NotImplementedError
 
@@ -196,10 +197,9 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
     def composite_fn(test, generic_cls, device_cls,
                      old_parametrize_fn=old_parametrize_fn,
                      new_parametrize_fn=new_parametrize_fn):
-        old_tests = [(test, test_name, param_kwargs) for (test, test_name, param_kwargs) in
-                     old_parametrize_fn(test, generic_cls, device_cls)]
-        for (old_test, old_test_name, old_param_kwargs) in old_tests:
-            for (new_test, new_test_name, new_param_kwargs) in \
+        old_tests = list(old_parametrize_fn(test, generic_cls, device_cls))
+        for (old_test, old_test_name, old_param_kwargs, old_dec_fn) in old_tests:
+            for (new_test, new_test_name, new_param_kwargs, new_dec_fn) in \
                     new_parametrize_fn(old_test, generic_cls, device_cls):
                 redundant_params = set(old_param_kwargs.keys()).intersection(new_param_kwargs.keys())
                 if redundant_params:
@@ -211,7 +211,11 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
                 merged_test_name = '{}{}{}'.format(new_test_name,
                                                    '_' if old_test_name != '' and new_test_name != '' else '',
                                                    old_test_name)
-                yield (new_test, merged_test_name, full_param_kwargs)
+
+                def merged_decorator_fn(param_kwargs, old_dec_fn=old_dec_fn, new_dec_fn=new_dec_fn):
+                    return list(old_dec_fn(param_kwargs)) + list(new_dec_fn(param_kwargs))
+
+                yield (new_test, merged_test_name, full_param_kwargs, merged_decorator_fn)
 
     return composite_fn
 
@@ -250,9 +254,14 @@ def instantiate_parametrized_tests(generic_cls):
             assert not hasattr(generic_cls, name), "Redefinition of test {0}".format(name)
             setattr(generic_cls, name, instantiated_test)
 
-        for (test, test_suffix, param_kwargs) in class_attr.parametrize_fn(
+        for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
                 class_attr, generic_cls=generic_cls, device_cls=None):
             full_name = '{}_{}'.format(test.__name__, test_suffix)
+
+            # Apply decorators based on full param kwargs.
+            for decorator in decorator_fn(param_kwargs):
+                test = decorator(test)
+
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
     return generic_cls
 
@@ -329,7 +338,7 @@ class parametrize(_TestParametrizer):
         name_fn (Callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
+        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',') if s != '']
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -362,7 +371,7 @@ class parametrize(_TestParametrizer):
         if len(self.arg_names) == 0:
             # No additional parameters needed for the test.
             test_name = ''
-            yield (test, test_name, {})
+            yield (test, test_name, {}, lambda _: [])
         else:
             # Each "values" item is expected to be either:
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
@@ -370,19 +379,18 @@ class parametrize(_TestParametrizer):
             values = check_exhausted_iterator = object()
             for values in self.arg_values:
                 maybe_name = None
+
+                decorators = []
                 if isinstance(values, subtest):
                     sub = values
                     values = sub.arg_values
                     maybe_name = sub.name
 
-                    # Apply decorators.
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    for decorator in sub.decorators:
-                        test_wrapper = decorator(test_wrapper)
-
+                    decorators = sub.decorators
                     gen_test = test_wrapper
                 else:
                     gen_test = test
@@ -398,10 +406,11 @@ class parametrize(_TestParametrizer):
                 }
 
                 test_name = self._get_subtest_name(values, explicit_name=maybe_name)
-                if '.' in test_name:
-                    raise RuntimeError('Test name cannot contain periods, but got: {}'.format(test_name))
 
-                yield (gen_test, test_name, param_kwargs)
+                def decorator_fn(_, decorators=decorators):
+                    return decorators
+
+                yield (gen_test, test_name, param_kwargs, decorator_fn)
 
             if values is check_exhausted_iterator:
                 raise ValueError('An empty arg_values was passed to @parametrize. '
