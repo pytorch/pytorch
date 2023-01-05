@@ -465,7 +465,7 @@ class Optimizer:
                                 p.grad.detach_()
                             else:
                                 p.grad.requires_grad_(False)
-                            if (not foreach or p.grad.is_sparse):
+                            if p.grad.is_sparse:
                                 if p.grad.device.type == 'cuda':
                                     per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p)
                                 else:
