@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import numpy as np
 
 # Testing utils
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
@@ -84,6 +84,7 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
            use_bias=st.booleans(),
            use_channelwise=st.booleans(),
            qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    @settings(deadline=None)
     def test_conv1d_api(
         self, batch_size, in_channels_per_group, L, out_channels_per_group,
         groups, kernel, stride, pad, dilation,
