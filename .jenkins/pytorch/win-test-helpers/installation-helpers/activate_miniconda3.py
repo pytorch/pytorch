@@ -41,7 +41,7 @@ if install_fresh_conda == '1':
                 '--output', tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe'])
 
         subprocess.run([tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe',
-            '/InstallationType=JustMe', '/RegisterPython=0', '/S', '/AddToPath=0',
+            '/InstallationType=JustMe', '/RegisterPython=0', '/S', '/AddToPath=1',
                 '/D=' + conda_parent_dir + '\\Miniconda3'])
 
         subprocess.run(['echo', 'Installed conda to: ' + conda_parent_dir + '\\Miniconda3'])
@@ -64,7 +64,7 @@ if install_fresh_conda == '1':
 
     try:
 
-        subprocess.run(['conda', 'install', '-n', 'test_env', '-y', '-q', 'numpy"<1.23.5"', 'cffi', 'pyyaml', 'boto3', 'libuv'])
+        subprocess.run(['conda', 'install', '-n', 'test_env', '-y', '-q', 'numpy', 'cffi', 'pyyaml', 'boto3', 'libuv'])
 
         subprocess.run(['conda', 'install', '-n', 'test_env', '-y', '-q', '-c', 'conda-forge', 'cmake=3.22.3'])
 
