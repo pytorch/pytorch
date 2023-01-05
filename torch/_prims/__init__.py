@@ -1269,17 +1269,20 @@ broadcast_in_dim = _make_prim(
     doc=_broadcast_in_dim_doc,
 )
 
-def _collapsed_shape(a: ShapeType, start: int, end: int) -> Tuple[int, ...]:
+
+def _collapsed_shape(shape: ShapeType, start: int, end: int) -> Tuple[int, ...]:
     """
     Returns the shape of a with dims in [start, end) merged into a single dimension.
     """
+    if len(shape) == 0:
+        return (1,)
 
     dim_length = 1
     for idx in range(start, end):
-        dim_length = dim_length * a.shape[idx]
+        dim_length = dim_length * shape[idx]
 
-    # NOTE: 0d input gives a 1d output of shape (1,) here
-    return a.shape[0:start] + (dim_length,) + a.shape[end:]
+    return shape[0:start] + (dim_length,) + shape[end:]
+
 
 def _collapse_view_helper(
     a: TensorLikeType, start: int, end: int
@@ -1852,7 +1855,7 @@ See collapse_view for the corresponding view operation.
 collapse = _make_prim(
     schema="collapse(Tensor a, int start, int end) -> Tensor",
     meta=_collapse_meta,
-    impl_aten=_reshape_aten,
+    impl_aten=_collapse_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_collapse_doc,
 )
