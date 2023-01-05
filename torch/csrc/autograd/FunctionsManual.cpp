@@ -831,9 +831,9 @@ Tensor logcumsumexp_backward(
           return output_pos - output_neg;
         } else {
           // no trick separating the positive and negative required
-          auto log_grad = grad.log();
+          auto log_grad = grad.conj().log();
           auto output = (reverse_logcumsumexp(log_grad - result) + self).exp();
-          return output;
+          return output.conj();
         }
       });
 }
