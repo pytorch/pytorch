@@ -1016,15 +1016,41 @@ class CppVecKernelChecker(CppVecKernel):
         most_inner_var = self.itervars[-1]
         return self.is_legal_data_access(most_inner_var, index)
 
+    def is_mask(self, name: str, users: Dict[torch.fx.Node, None]):
+        load_type = V.graph.get_dtype(name)
+        if load_type in torch.bool:
+            user_nodes = set([_node.target for _node in users.keys()])
+            return user_nodes == set(["where", "masked"])
+        elif load_type == torch.uint8:
+            """
+            If the load value is torch.uint8, then we only support the loaded
+            value is as the mask.
+            """
+            user_nodes = set([_node.target for _node in users.keys()])
+            if not user_nodes == set(["to_dtype"]):
+                return False
+            for _node in users.keys():
+                _, dtype = *_node.args
+                if dtype != torch.bool:
+                    return False
+            return True
+        else:
+            return False
+
     def load(self, name: str, index: sympy.Expr):
         load_type = V.graph.get_dtype(name)
         current_node: torch.fx.Node = V.interpreter.current_node
         current_node.meta["dtype"] = load_type
+        current_node.meta["is_mask"] = self.is_mask(name, current_node.users)
 
         var = self.cse.newvar()
         self.load_results.append(var)
 
-        if not V.graph.get_dtype(name) in self.load_supported_dtypes:
+        if load_type in [torch.bool, torch.uint8] and not current_node.meta["is_mask"]:
+            self.simd_vec = False
+            return var
+
+        if load_type not in self.load_supported_dtypes:
             self.simd_vec = False
             return var
 
