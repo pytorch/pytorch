@@ -1343,7 +1343,7 @@ def linspace(start, end, steps, *, dtype=None, device=None, pin_memory=False):
     assert not pin_memory
     dtype = dtype or torch.get_default_dtype()
 
-    step_size = (end - start) / (steps - 1)
+    step_size = (end - start) / (steps - 1) if steps > 1 else 0.0
 
     def inner_fn(index):
         return ops.add(
@@ -1635,6 +1635,7 @@ def empty(
 ):
     assert names is None
     assert memory_format in (None, torch.contiguous_format)
+    device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = list(size[0])
     return empty_strided(
