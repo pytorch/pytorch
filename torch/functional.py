@@ -612,11 +612,11 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             a real tensor with an extra last dimension for the real and
             imaginary components.
 
-            .. versionchanged:: 1.14.0
+            .. versionchanged:: 2.0
                ``return_complex`` is now a required argument for real inputs,
                as the default is being transitioned to ``True``.
 
-            .. deprecated:: 1.14.0
+            .. deprecated:: 2.0
                ``return_complex=False`` is deprecated, instead use ``return_complex=True``
                Note that calling :func:`torch.view_as_real` on the output will
                recover the deprecated output format.
@@ -682,7 +682,7 @@ Args:
         output. That is a complex tensor of shape (``channel``, ``fft_size``, ``n_frame``),
         where the ``channel`` dimension is optional.
 
-        .. versionchanged:: 1.14.0
+        .. versionchanged:: 2.0
             Real datatype inputs are no longer supported. Input must now have a
             complex datatype, as returned by ``stft(..., return_complex=True)``.
     n_fft (int): Size of Fourier transform
