@@ -39,7 +39,7 @@ class DeviceMeshTest(DTensorTestBase):
         os.environ["MASTER_PORT"] = "25364"
         # mesh size can be smaller than world_size
         os.environ["WORLD_SIZE"] = f"{self.world_size}"
-        # this means user needs to set rank in env 
+        # this means user needs to set rank in env
         os.environ["RANK"] = f"{self.rank}"
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
