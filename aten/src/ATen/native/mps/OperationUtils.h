@@ -43,6 +43,7 @@ MPSDataType getMPSDataType(ScalarType scalar_type);
 MPSDataType getMPSScalarType(ScalarType scalar_type);
 MPSScalar   getMPSScalar(const Scalar& scalar, ScalarType type);
 std::string getMPSTypeString(ScalarType scalar_type);
+std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
 NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
 NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
