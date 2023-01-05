@@ -647,10 +647,10 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 
   const int64_t index_upper_bound = M;
 
-  std::unique_ptr<int64_t []> keys(new int64_t[nnz]);
-  std::unique_ptr<int64_t []> values(new int64_t[nnz]);
-  std::unique_ptr<int64_t []> keys_tmp(new int64_t[nnz]);
-  std::unique_ptr<int64_t []> values_tmp(new int64_t[nnz]);
+  auto keys = std::make_unique<int64_t[]>(nnz);
+  auto values = std::make_unique<int64_t[]>(nnz);
+  auto keys_tmp = std::make_unique<int64_t[]>(nnz);
+  auto values_tmp = std::make_unique<int64_t[]>(nnz);
   at::parallel_for(0, nnz, 1, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       int64_t index = index_data[i];
@@ -690,8 +690,8 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 
   // in case some rows are not written into, num_nonzero_rows will be smaller than M
   int64_t num_nonzero_rows = num_uniq[num_threads - 1];
-  std::unique_ptr<int64_t []> row_index_tmp(new int64_t[num_nonzero_rows]);
-  std::unique_ptr<int64_t []> row_index_offset_tmp(new int64_t[num_nonzero_rows + 1]);
+  auto row_index_tmp = std::make_unique<int64_t[]>(num_nonzero_rows);
+  auto row_index_offset_tmp = std::make_unique<int64_t[]>(num_nonzero_rows + 1);
   int64_t* row_index = row_index_tmp.get();
   int64_t* row_index_offset = row_index_offset_tmp.get();
   row_index[0] = sorted_col_index_keys[0];
