@@ -6025,14 +6025,11 @@ def __contains_(g: jit_utils.GraphContext, self, element):
     if all(
         [symbolic_helper._is_constant(x) for x in unpacked_list]
     ) and symbolic_helper._is_constant(element):
-        return g.op(
-            "Constant",
-            value_t=torch.tensor(
-                symbolic_helper._node_get(element.node(), "value")
-                in (symbolic_helper._node_get(x.node(), "value") for x in unpacked_list)
-            ),
-        )
-
+        element_value = symbolic_helper._node_get(element.node(), "value")
+        list_values = [
+            symbolic_helper._node_get(x.node(), "value") for x in unpacked_list
+        ]
+        return g.op("Constant", value_t=torch.tensor(element_value in list_values))
     raise errors.SymbolicValueError(
         "Unsupported: ONNX export of __contains__ for non-constant list or element.",
         self,
