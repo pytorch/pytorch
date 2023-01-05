@@ -47,25 +47,37 @@ static inline bool can_use_expanded_index_path(
     const Tensor& index,
     const Tensor& src,
     bool is_scatter_like) {
-  if (!self.device().is_cpu()) { return false; }
+  if (!self.device().is_cpu()) {
+    return false;
+  }
 
   const auto st = self.scalar_type();
-  if (!(st == ScalarType::Float || st == ScalarType::Double || st == ScalarType::BFloat16)) { return false; }
+  if (!(c10::isFloatingType(st) || st == ScalarType::Half)) {
+    return false;
+  }
 
-  if (!is_radix_sort_available()) { return false; }
+  if (!is_radix_sort_available()) {
+    return false;
+  }
 
   // skip when having empty tensor
-  if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) { return false; }
+  if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) {
+    return false;
+  }
 
   // skip when having scalar tensor
-  if (self.ndimension() == 0 || index.ndimension() == 0 || src.ndimension() == 0) { return false; }
+  if (self.ndimension() == 0 || index.ndimension() == 0 || src.ndimension() == 0) {
+    return false;
+  }
 
   if (is_scatter_like) {
     // using `spmm` for scatter would require sorting on index,
     // this is only perf beneficial when the inner dimension, aka, `channels`
     // is big enough.
     constexpr int64_t threshold = 16;
-    if (index.numel() / index.size(0) < threshold) { return false; }
+    if (index.numel() / index.size(0) < threshold) {
+      return false;
+    }
   }
 
   // usually the expanded index has stride on the first dimension to be 1,
