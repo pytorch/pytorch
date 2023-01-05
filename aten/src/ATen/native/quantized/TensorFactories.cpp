@@ -3,6 +3,8 @@
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 
+#include <utility>
+
 namespace at {
 namespace native {
 
@@ -63,7 +65,7 @@ Tensor empty_per_channel_affine_quantized(
   return new_qtensor(
       size,
       options,
-      quantizer);
+      std::move(quantizer));
 }
 
 Tensor empty_unknown_quantized(
@@ -85,7 +87,7 @@ Tensor empty_unknown_quantized(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
   QuantizerPtr quantizer = make_unknown_quantizer(typeMetaToScalarType(options.dtype()));
-  return new_qtensor(size, options, quantizer);
+  return new_qtensor(size, options, std::move(quantizer));
 }
 
 Tensor empty_strided_unknown_quantized(

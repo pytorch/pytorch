@@ -16,8 +16,8 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
     return MemOverlap::No;
   }
 
-  auto strides = t->strides();
-  auto sizes = t->sizes();
+  auto strides = t->sym_strides();
+  auto sizes = t->sym_sizes();
   for (const auto i : c10::irange(strides.size())) {
     if (strides[i] == 0 && sizes[i] > 1) {
       return MemOverlap::Yes;

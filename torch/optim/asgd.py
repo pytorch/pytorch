@@ -1,12 +1,17 @@
-import math
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value
+from torch._utils import is_compiling
 from typing import List, Optional
 
 __all__ = ["ASGD", "asgd"]
 
+def _to_tensor(x):
+    if not isinstance(x, torch.Tensor):
+        return torch.tensor(x)
+
+    return x
 
 class ASGD(Optimizer):
     """Implements Averaged Stochastic Gradient Descent.
@@ -221,6 +226,10 @@ def _single_tensor_asgd(
     maximize: bool,
     differentiable: bool,
 ):
+    def _to_tensor(x):
+        if not isinstance(x, torch.Tensor):
+            return torch.tensor(x)
+        return x
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -237,26 +246,27 @@ def _single_tensor_asgd(
 
         # update step
         step_t += 1
-        step = step_t.item()
+        step = _get_value(step_t)
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
+        eta_value = _get_value(eta)
         # decay term
-        param.mul_(1 - lambd * eta.item())
+        param.mul_(1 - lambd * eta_value)
 
         # update parameter
-        param.add_(grad, alpha=-eta.item())
+        param.add_(grad, alpha=-eta_value)
 
         # averaging
-        if mu.item() != 1:
+        if is_compiling() or mu.item() != 1:
             ax.add_(param.sub(ax).mul(mu))
         else:
             ax.copy_(param)
 
-        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * step), alpha))
+        new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
         eta.copy_(new_eta)
-        new_mu = torch.tensor(1 / max(1, step - t0))
+        new_mu = _to_tensor(1 / max(1, step - t0))
         mu.copy_(new_mu)
 
 
@@ -301,7 +311,7 @@ def _multi_tensor_asgd(
         grads = torch._foreach_add(grads, params, alpha=weight_decay)
 
     # decay term
-    eta = etas[0].item()
+    eta = _get_value(etas[0])
     torch._foreach_mul_(params, 1 - lambd * eta)
 
     # update parameter
@@ -309,16 +319,16 @@ def _multi_tensor_asgd(
 
     # averaging
     for i in range(len(axs)):
-        if mus[i].item() != 1:
+        if is_compiling() or mus[i].item() != 1:
             axs[i].add_(params[i].sub(axs[i]).mul(mus[i]))
         else:
             axs[i].copy_(params[i])
 
     # update eta and mu
     for i in range(len(mus)):
-        new_eta = torch.tensor(
-            lr / math.pow((1 + lambd * lr * state_steps[i].item()), alpha)
+        new_eta = _to_tensor(
+            lr / (1 + lambd * lr * _get_value(state_steps[i]) ** alpha)
         )
         etas[i].copy_(new_eta)
-        new_mu = torch.tensor(1 / max(1, state_steps[i].item() - t0))
+        new_mu = _to_tensor(1 / max(1, _get_value(state_steps[i]) - t0))
         mus[i].copy_(new_mu)

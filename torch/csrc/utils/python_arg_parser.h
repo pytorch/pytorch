@@ -339,12 +339,13 @@ inline PythonArgs PythonArgParser::parse(
     PyObject* args,
     PyObject* kwargs,
     ParsedArgs<N>& dst) {
-  if (N < max_args) {
-    throw ValueError(
-        "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
-        (int)max_args,
-        N);
-  }
+  TORCH_CHECK_VALUE(
+      N >= max_args,
+      "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
+      max_args,
+      " (got ",
+      N,
+      ")");
   return raw_parse(self, args, kwargs, dst.args);
 }
 
@@ -473,9 +474,8 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
-  if (size != N) {
-    throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
-  }
+  TORCH_CHECK_TYPE(
+      size == N, "expected tuple of ", N, " elements but got ", size);
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
                           : PyList_GET_ITEM(arg.get(), idx);
@@ -505,12 +505,16 @@ inline void throw_intlist_exception(
     size_t i,
     PyObject* obj,
     size_t idx) {
-  throw TypeError(
-      "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
-      args->signature.name.c_str(),
-      args->signature.params[i].name.c_str(),
-      args->signature.params[i].type_name().c_str(),
+  TORCH_CHECK_TYPE(
+      false,
+      args->signature.name,
+      "(): argument '",
+      args->signature.params[i].name,
+      "' must be ",
+      args->signature.params[i].type_name(),
+      ", but found element of type ",
       Py_TYPE(obj)->tp_name,
+      " at pos ",
       idx + 1);
 }
 
@@ -549,7 +553,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
       jit::tracer::ArgumentStash::stashIntArrayRefElem(
           signature.params[i].name, size2, idx, var);
       try {
-        res.push_back(var.item<int64_t>());
+        res.emplace_back(var.item<int64_t>());
         continue;
       } catch (std::exception& e) {
         throw_intlist_exception(this, i, obj, idx);
@@ -565,15 +569,15 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
                 var.dtype().toScalarType(), /*include_bool*/ true)) {
           throw_intlist_exception(this, i, obj, idx);
         }
-        // TODO: ideally, if this was a fake tensor this would
-        // result in a SymInt, but we don't have the API to do this
-        res.push_back(var.item<int64_t>());
+        auto scalar = var.item();
+        TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+        res.push_back(scalar.toSymInt());
       } else {
         try {
           if (is_symint(py::handle(obj))) {
             res.push_back(py::handle(obj).cast<c10::SymInt>());
           } else {
-            res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
+            res.emplace_back(THPUtils_unpackIndex(obj));
           }
         } catch (std::exception& e) {
           throw_intlist_exception(this, i, obj, idx);
@@ -665,12 +669,16 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     try {
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception& e) {
-      throw TypeError(
-          "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
-          signature.name.c_str(),
-          signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(),
+      TORCH_CHECK_TYPE(
+          false,
+          signature.name,
+          "(): argument '",
+          signature.params[i].name,
+          "' must be ",
+          signature.params[i].type_name(),
+          ", but found element of type ",
           Py_TYPE(obj)->tp_name,
+          " at pos ",
           idx + 1);
     }
   }
@@ -1019,10 +1027,11 @@ inline c10::Stream PythonArgs::stream(int i) {
   if (!args[i])
     return c10::Stream(
         c10::Stream::Default::DEFAULT, c10::Device(DeviceType::CPU, -1));
-  if (!THPStream_Check(args[i])) {
-    throw TypeError(
-        "expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      THPStream_Check(args[i]),
+      "expected Stream object. Got '",
+      Py_TYPE(args[i])->tp_name,
+      "'");
   return c10::Stream::unpack(((THPStream*)args[i])->cdata);
 }
 

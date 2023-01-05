@@ -2,7 +2,6 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Common.h>
@@ -82,6 +81,10 @@ class Context final {
 
   inline void enable_op_profiling() {
     enable_op_profiling_ = true;
+  }
+
+  inline void disable_op_profiling() {
+    enable_op_profiling_ = false;
   }
 
   inline bool op_profiling_enabled() {

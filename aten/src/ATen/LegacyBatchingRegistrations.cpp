@@ -8,6 +8,8 @@
 #include <c10/util/irange.h>
 #include <c10/core/SymIntArrayRef.h>
 
+#include <utility>
+
 namespace at {
 
 // NOTE: [What is a batching rule?]
@@ -143,7 +145,7 @@ Tensor binary_pointwise_batching_rule(
     logical_other = logical_other.to(result_type);
   }
   auto physical_args = BroadcastingVmapTransform::logicalToPhysical(
-      {logical_self, logical_other});
+      {std::move(logical_self), std::move(logical_other)});
   auto result = Func(physical_args[0].tensor(), physical_args[1].tensor(), args...);
   return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
@@ -291,6 +293,13 @@ Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = self_physical.tensor().squeeze(dim_physical);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
+Tensor squeeze_dims_batching_rule(const Tensor& self, IntArrayRef dims) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dims_physical = self_physical.getPhysicalDims(dims);
+  auto result = self_physical.tensor().squeeze(dims_physical);
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
@@ -1114,6 +1123,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
+  m.impl("squeeze.dims", squeeze_dims_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
   m.impl("trace", trace_batching_rule);
   m.impl("transpose.int", transpose_int_batching_rule);
