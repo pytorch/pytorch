@@ -42,7 +42,6 @@
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/ceil.h>
-#include <ATen/ops/chain_matmul_native.h>
 #include <ATen/ops/det_native.h>
 #include <ATen/ops/diag_embed.h>
 #include <ATen/ops/dot.h>
