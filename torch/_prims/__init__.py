@@ -1274,8 +1274,8 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> Tuple[int, ...]:
     """
     Returns the shape of a with dims in [start, end) merged into a single dimension.
     """
-    if len(shape) == 0:
-        return (1,)
+    # Special-case for zero dimensional tensors
+    shape = (1,) if len(shape) == 0 else tuple(shape)
 
     dim_length = 1
     for idx in range(start, end):
@@ -1349,6 +1349,7 @@ def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeTy
         msg = "Attempting to view a collapsed tensor, but no such view exists!"
         raise ValueError(msg)
 
+    assert new_strides is not None
     return a.as_strided(new_shape, new_strides, a.storage_offset())
 
 
@@ -1835,6 +1836,11 @@ as_strided_scatter = _make_prim(
 
 
 def _collapse_meta(a: Tensor, start: int, end: int) -> Tensor:
+    # Special-case for zero dimensional tensors
+    ndim = max(1, a.dim())
+    utils.validate_idx(ndim, start)
+    utils.validate_exclusive_idx(ndim, end)
+
     new_shape = _collapsed_shape(a.shape, start, end)
     return a.new_empty(new_shape)
 
