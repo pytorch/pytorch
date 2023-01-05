@@ -73,15 +73,15 @@ void all_types_complex_bool_half_bfloat16_(TensorList tensors, const Scalar& sca
 }
 
 template<template<class> class Op>
-std::vector<Tensor> all_types_bool_half_bfloat16(TensorList tensors, const Scalar& scalar) {
-    return AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda", [&]() {
+std::vector<Tensor> all_types_half_bfloat16(TensorList tensors, const Scalar& scalar) {
+    return AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda", [&]() {
         return foreach_binary_op<scalar_t, Op>(tensors, scalar);
     });
 }
 
 template<template<class> class Op>
-void all_types_bool_half_bfloat16_(TensorList tensors, const Scalar& scalar) {
-    AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda_", [&]() {
+void all_types_half_bfloat16_(TensorList tensors, const Scalar& scalar) {
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda_", [&]() {
         foreach_binary_op_<scalar_t, Op>(tensors, scalar);
     });
 }
@@ -139,7 +139,7 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, co
     });
 }
 
-FOREACH_BINARY_OP_SCALAR(all_types_bool_half_bfloat16, clamp_max, minimum, false);
-FOREACH_BINARY_OP_SCALAR(all_types_bool_half_bfloat16, clamp_min, maximum, false);
+FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_max, minimum, false);
+FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_min, maximum, false);
 
 }} // namespace at::native
