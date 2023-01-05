@@ -1191,7 +1191,6 @@ class TestOperators(TestCase):
         xfail('cfloat', ''),
         xfail('chalf', ''),
         xfail('index_reduce', ''),
-        xfail('linalg.vander', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
