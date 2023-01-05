@@ -1760,7 +1760,7 @@ struct FullOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const {
+  virtual void print(std::ostream& os, bool close_function = true) const override {
     RecordFunctor::print(os, false);
     os << ", shape=[";
     bool first_arg = true;
