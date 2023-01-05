@@ -6,6 +6,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -55,7 +56,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     explicit Options(
         std::string backend,
         std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
-        : timeout(timeout), backend(backend) {}
+        : timeout(timeout), backend(std::move(backend)) {}
     virtual ~Options() = default;
 
     std::chrono::milliseconds timeout;

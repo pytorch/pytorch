@@ -55,6 +55,7 @@ def replace_fx(gm: torch.fx.GraphModule):
                     )
                 )
             gm.graph.erase_node(node)
+    gm.graph.lint()
     gm.recompile()
     return gm
 
@@ -174,7 +175,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     for pattern in module_function_patterns:
         for node in gm.graph.nodes:
             if matches_module_function_pattern(pattern, node, modules):
@@ -212,7 +213,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     gm.recompile()
 
     return gm
@@ -357,7 +358,8 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                     )
                     node.replace_all_uses_with(fused_node)
                     module.graph.erase_node(node)
-                    module.graph.erase_node(input_node)
+                    if len(input_node.users) == 0:
+                        module.graph.erase_node(input_node)
 
     module.graph.lint()
     module.recompile()
@@ -399,7 +401,8 @@ def permute_linear_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                     )
                     node.replace_all_uses_with(fused_node)
                     module.graph.erase_node(node)
-                    module.graph.erase_node(input_node)
+                    if len(input_node.users) == 0:
+                        module.graph.erase_node(input_node)
 
     module.graph.lint()
     module.recompile()
@@ -447,9 +450,9 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                     )
                 node.replace_all_uses_with(fused_node)
                 module.graph.erase_node(node)
-                if Atrans:
+                if Atrans and len(input_A_node.users) == 0:
                     module.graph.erase_node(input_A_node)
-                if Btrans:
+                if Btrans and len(input_B_node.users) == 0:
                     module.graph.erase_node(input_B_node)
 
     module.graph.lint()
