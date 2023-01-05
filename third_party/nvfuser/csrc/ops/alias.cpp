@@ -148,7 +148,7 @@ TensorView* squeeze(TensorView* x, const std::vector<bool>& to_squeeze) {
   const auto ndims = static_cast<int>(x_dom.size());
 
   TORCH_INTERNAL_ASSERT(
-      ndims == to_squeeze.size(),
+      ndims == (int)to_squeeze.size(),
       "Invalid to_squeeze for squeeze: ",
       to_squeeze,
       ". Input tensor: ",

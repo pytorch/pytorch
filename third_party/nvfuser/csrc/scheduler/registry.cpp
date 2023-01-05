@@ -680,7 +680,7 @@ bool reductionInterferingView(
       auto rfactor_pos = std::distance(
           reduction_reference->getMaybeRFactorDomain().begin(), find_it);
       TORCH_INTERNAL_ASSERT(
-          rfactor_pos < disjoint_set_information.disjoint_set_ids.size(),
+          rfactor_pos < (int)disjoint_set_information.disjoint_set_ids.size(),
           "Error computing disjoint group on the rfactor domain of ",
           reduction_reference->toString());
       disjoint_id_sets.push_back(
@@ -1479,7 +1479,7 @@ class TransposeScheduler : public SchedulerEntry {
       }
       auto root = TensorDomain::noReductions(
           torch_gather->input(0)->as<TensorView>()->getMaybeRFactorDomain());
-      if (torch_gather->dim() == root.size() - 1) {
+      if (torch_gather->dim() == (int)root.size() - 1) {
         scheduler_debug_utils::canScheduleRejectReason(
             ScheduleHeuristic::Transpose,
             "TorchGatherOp on inner dim is not supported by transpose scheduler yet."

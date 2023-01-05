@@ -155,6 +155,7 @@ else()
 endif()
 if(NOT MSVC)
   target_compile_options(${NVFUSER_CODEGEN} PRIVATE -Wno-unused-variable)
+  target_compile_options(${NVFUSER_CODEGEN} PRIVATE -Werror)
 endif()
 target_include_directories(${NVFUSER_CODEGEN}
                            PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>)
@@ -201,6 +202,7 @@ if(BUILD_PYTHON)
   set_target_properties(${NVFUSER} PROPERTIES PREFIX "" DEBUG_POSTFIX "")
   if(NOT MSVC)
     target_compile_options(${NVFUSER} PRIVATE -Wno-unused-variable)
+    target_compile_options(${NVFUSER} PRIVATE -Werror)
     set_target_properties(${NVFUSER} PROPERTIES SUFFIX ".so")
   else()
     set_target_properties(${NVFUSER} PROPERTIES SUFFIX ".pyd")
@@ -310,16 +312,19 @@ if(USE_CUDA)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_tensorcore.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_view.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_transpose.cpp)
-  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_rng.cu)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_utils.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_indexing_ops.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_indexing.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_gather_ops.cpp)
 
+  set(JIT_TEST_CU_SRCS)
+  list(APPEND JIT_TEST_CU_SRCS ${NVFUSER_ROOT}/test/test_gpu_rng.cu)
+
   add_executable(${NVFUSER_TESTS}
              ${TORCH_ROOT}/test/cpp/common/main.cpp
              ${TORCH_ROOT}/test/cpp/jit/test_utils.cpp
-             ${JIT_TEST_SRCS})
+             ${JIT_TEST_SRCS}
+             ${JIT_TEST_CU_SRCS})
 
   target_compile_definitions(${NVFUSER_TESTS} PRIVATE USE_GTEST)
   if(NOT USE_ROCM)
@@ -331,6 +336,7 @@ if(USE_CUDA)
   target_link_libraries(${NVFUSER_TESTS} PRIVATE ${NVFUSER_CODEGEN} torch ${TORCHLIB_FLAVOR} gtest_main gmock_main)
   if(NOT MSVC)
     target_compile_options(${NVFUSER_TESTS} PRIVATE -Wno-unused-variable)
+    set_property(SOURCE ${JIT_TEST_SRCS} APPEND PROPERTY COMPILE_OPTIONS "-Werror")
   endif()
 
   install(TARGETS ${NVFUSER_TESTS} DESTINATION bin)

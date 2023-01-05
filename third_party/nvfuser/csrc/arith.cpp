@@ -489,7 +489,7 @@ TensorView* select(TensorView* tv, int dim, Int* index) {
   }
 
   TORCH_CHECK(
-      dim >= 0 && dim < dom.size(),
+      dim >= 0 && dim < (int)dom.size(),
       "Select on invalid axis, received: ",
       dim,
       " however tensor view only has ",
@@ -497,7 +497,7 @@ TensorView* select(TensorView* tv, int dim, Int* index) {
       " non-reduction dims.");
 
   for (auto i : c10::irange(dom.size())) {
-    if (i != dim) {
+    if ((int)i != dim) {
       new_root.emplace_back(dom[i]->cloneWithoutRFactor());
     }
   }
@@ -505,7 +505,7 @@ TensorView* select(TensorView* tv, int dim, Int* index) {
   auto td = IrBuilder::create<TensorDomain>(
       new_root, TensorDomain::getContiguousContiguity(new_root));
   auto out = IrBuilder::create<TensorView>(td, *tv->getDataType());
-  IrBuilder::create<SelectOp>(out, tv, dom[dim], index);
+  IrBuilder::create<SelectOp>(out, tv, dom.at(dim), index);
   return out;
 }
 
@@ -529,7 +529,7 @@ TensorView* index_select(TensorView* lookup_tv, int dim, TensorView* index_tv) {
   std::vector<IterDomain*> new_root;
   new_root.reserve(lookup_dom.size() - 1);
   TORCH_CHECK(
-      dim >= 0 && dim < lookup_dom.size(),
+      dim >= 0 && dim < (int)lookup_dom.size(),
       "index_select on invalid axis, received: ",
       dim,
       " however tensor view only has ",
@@ -537,7 +537,7 @@ TensorView* index_select(TensorView* lookup_tv, int dim, TensorView* index_tv) {
       " non-reduction dims.");
 
   for (auto i : c10::irange(lookup_dom.size())) {
-    if (i != dim) {
+    if ((int)i != dim) {
       new_root.emplace_back(lookup_dom[i]->cloneWithoutRFactor());
     } else {
       new_root.emplace_back(index_dom[0]->cloneWithoutRFactor());
@@ -569,14 +569,14 @@ TensorView* torch_gather(TensorView* inp, int dim, TensorView* index) {
     dim += idx_domain.size();
   }
   TORCH_CHECK(
-      dim >= 0 && dim < inp_domain.size(),
+      dim >= 0 && dim < (int)inp_domain.size(),
       "torch.gather on invalid axis, received: ",
       dim,
       " however tensor view only has ",
       inp_domain.size(),
       " non-reduction dims.");
   std::vector<IterDomain*> out_domain;
-  for (int i = 0; i < idx_domain.size(); ++i) {
+  for (int i = 0; i < (int)idx_domain.size(); ++i) {
     out_domain.push_back(
         IterDomainBuilder(idx_domain[i])
             .iter_type(
@@ -1442,7 +1442,7 @@ TensorView* maybeFullInsteadOfReduction(
       new_root.reserve(keep_dim ? ndims : ndims - axes.size());
       int cur_pos = 0;
       for (auto j : c10::irange(ndims)) {
-        bool is_reduction = cur_pos < axes.size() && axes[cur_pos] == j;
+        bool is_reduction = cur_pos < (int)axes.size() && (int)axes.at(cur_pos) == j;
         if (is_reduction) {
           cur_pos++;
           if (keep_dim) {

@@ -646,7 +646,7 @@ Val* unflattenRule(Val* value, const std::list<ValInfo>& variables) {
     // FlattenedAdd(a, b, FlattenedMul(c, d, e))
     Val* lhs = unflatten(sorted_inputs.at(0), variables);
     int64_t next = 1;
-    while (next < sorted_inputs.size()) {
+    while (next < (int)sorted_inputs.size()) {
       auto rhs = unflatten(sorted_inputs.at(next), variables);
       auto output = IrBuilder::newScalar(*value->getDataType());
       IrBuilder::create<BinaryOp>(fop->getOpType(), output, lhs, rhs);

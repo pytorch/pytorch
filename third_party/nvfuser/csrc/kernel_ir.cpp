@@ -778,7 +778,7 @@ GroupedGridReduction::GroupedGridReduction(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
   TORCH_INTERNAL_ASSERT(
-      attributes().size() == numGroupedReductionOpAttr(),
+      (int)attributes().size() == numGroupedReductionOpAttr(),
       "The numGroupedReductionOpAttr() does not match the number of attributes GroupedReductionOp has."
       "If you changed GroupedReductionOp, please change numGroupedReductionOpAttr() accordingly.");
   addAttribute(sync_buffer);
@@ -980,7 +980,7 @@ GroupedGridWelford::GroupedGridWelford(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
   TORCH_INTERNAL_ASSERT(
-      attributes().size() == numGroupedWelfordOpAttr(),
+      (int)attributes().size() == numGroupedWelfordOpAttr(),
       "The numGroupedWelfordOpAttr() does not match the number of attributes GroupedWelfordOp has."
       "If you changed GroupedReductionOp, please change numGroupedWelfordOpAttr() accordingly.");
   addAttribute(sync_buffer);

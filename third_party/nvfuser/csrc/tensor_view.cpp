@@ -528,7 +528,7 @@ void TensorView::computeWith(int pos, bool best_effort) {
   }
 
   TORCH_INTERNAL_ASSERT(
-      pos >= 0 && pos <= nDims(),
+      pos >= 0 && pos <= (int)nDims(),
       "Invalid inline position for ",
       toString(),
       ": ",
@@ -547,7 +547,7 @@ void TensorView::computeWith(int pos, bool best_effort) {
   }
 
   TORCH_CHECK(
-      pos <= max_inline_pos,
+      pos <= (int)max_inline_pos,
       "Invalid computeWith position for T",
       name(),
       ": ",
@@ -557,7 +557,7 @@ void TensorView::computeWith(int pos, bool best_effort) {
 
   // The position must be right of the computeAt position
   TORCH_CHECK(
-      pos >= getComputeAtPosition(),
+      pos >= (int)getComputeAtPosition(),
       "Position must be right of the computeAt position. Position: ",
       pos,
       ", computeAt position: ",
@@ -565,7 +565,7 @@ void TensorView::computeWith(int pos, bool best_effort) {
 
   // If it's already set to be computed with the consumer and the
   // position is higher, nothing to change
-  if (getComputeWithPosition() >= pos) {
+  if ((int)getComputeWithPosition() >= pos) {
     return;
   }
 
@@ -578,7 +578,7 @@ void TensorView::computeWith(int pos, bool best_effort) {
 
   // If the given position is the same as the computeAt position, this
   // is a no-op
-  if (pos == getComputeAtPosition()) {
+  if (pos == (int)getComputeAtPosition()) {
     return;
   }
 
