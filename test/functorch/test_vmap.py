@@ -3667,16 +3667,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
-
-        # hit the vmap fallback which is currently disabled
-        xfail('bitwise_and'),
-        xfail('bitwise_or'),
-        xfail('bitwise_xor'),
-        xfail('bitwise_left_shift'),
-        xfail('bitwise_right_shift'),
         xfail('bincount'),
-        xfail('gcd'),
-        xfail('lcm'),
 
         xfail('nn.functional.one_hot'),  # please provide an explicit positive num_classes argument
         xfail('tril_indices'),  # Expected at least one Tensor to vmap over
@@ -3700,6 +3691,14 @@ class TestVmapOperatorsOpInfo(TestCase):
             'atan',
             'atanh',
             'baddbmm',
+            'bitwise_and',
+            'bitwise_or',
+            'bitwise_xor',
+            'bitwise_left_shift',
+            'bitwise_right_shift',
+            'gcd',
+            'lcm',
+
             'clamp',
             'conj_physical',
             'cumprod',
