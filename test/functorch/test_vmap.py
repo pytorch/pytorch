@@ -3542,7 +3542,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('clamp'),
         # AssertionError: Tensor-likes are not equal!
         xfail('bitwise_left_shift', device_type='cpu'),
-        decorate('bitwise_right_shift', decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
+        decorate('bitwise_right_shift', device_type='cpu',
+                 decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
         xfail('narrow_copy', device_type='cpu'),
 
         # UBSAN: runtime error: shift exponent -1 is negative
