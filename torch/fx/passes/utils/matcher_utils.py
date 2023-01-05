@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from collections import defaultdict
 import copy
+import torch
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
@@ -97,8 +98,12 @@ class SubgraphMatcher:
             return True
 
         if pn.op == gn.op:
-            if pn.op == "placeholder" or pn.op == "output" or pn.op == "get_attr":
+            if pn.op == "placeholder" or pn.op == "output":
                 return True
+            elif pn.op == "get_attr":
+                pn_value = getattr(pn.graph.owning_module, pn.target)
+                gn_value = getattr(gn.graph.owning_module, gn.target)
+                return isinstance(pn_value, torch.Tensor) and isinstance (gn_value, torch.Tensor)
             return pn.target == gn.target
         return False
 
