@@ -1363,6 +1363,11 @@ Tensor sparse_coo_constructor_backward(
 
     const auto nonzero_values_grad = grad.coalesce().mul(at::ones_like(result.coalesce()));
 
+    // Short circuit on empty intersection
+    if (nonzero_values_grad._nnz() == 0) {
+      return at::zeros_like(result._values());
+    }
+
     const auto sparse_dims = at::DimVector(result.sizes().slice(0, result.sparse_dim()));
     const auto nonzero_grad_indices_hash = at::sparse::flatten_indices(nonzero_values_grad._indices(), sparse_dims);
     const auto result_indices_hash = at::sparse::flatten_indices(result._indices(), sparse_dims);
