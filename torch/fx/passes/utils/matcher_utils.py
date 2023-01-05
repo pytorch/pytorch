@@ -92,6 +92,18 @@ class SubgraphMatcher:
             # and should be matched against as an anchor
             self.pattern_anchors = [n for n in output_node.all_input_nodes if len(n.users) == 1]
 
+    def _match_attributes(self, pn: Node, gn: Node) -> bool:
+        # Attributes matching is compilcated. Right now we only support matching constant tensor
+        pn_value = getattr(pn.graph.owning_module, pn.target)
+        gn_value = getattr(gn.graph.owning_module, gn.target)
+        if type(pn_value) != type(gn_value):
+            return False
+        if isinstance(pn_value, torch.Tensor):
+            return isinstance (gn_value, torch.Tensor)
+        else:
+            raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
+        return False
+
     def _nodes_are_equal(self, pn: Node, gn: Node) -> bool:
         # if exact match for placeholder is not required, then use placeholder as a wildcard
         if not self.match_placeholder and pn.op == "placeholder":
@@ -101,9 +113,7 @@ class SubgraphMatcher:
             if pn.op == "placeholder" or pn.op == "output":
                 return True
             elif pn.op == "get_attr":
-                pn_value = getattr(pn.graph.owning_module, pn.target)
-                gn_value = getattr(gn.graph.owning_module, gn.target)
-                return isinstance(pn_value, torch.Tensor) and isinstance (gn_value, torch.Tensor)
+                return self._match_attributes(pn, gn)
             return pn.target == gn.target
         return False
 
