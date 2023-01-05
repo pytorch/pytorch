@@ -14632,6 +14632,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
+           supports_sparse=True,
            skips=(
            )),
     OpInfo('randn',
