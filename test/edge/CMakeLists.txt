@@ -56,16 +56,10 @@ set(TEST_DEPENDENCIES gtest unbox_lib)
 target_link_libraries(test_edge_op_registration PRIVATE
   ${TEST_DEPENDENCIES}
 )
-if(CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+if(APPLE)
   target_link_options(test_edge_op_registration PRIVATE
           "-Wl,-force_load,$<TARGET_FILE:unbox_lib>"
           )
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  if(APPLE)
-    target_link_options(test_edge_op_registration PRIVATE
-            "-Wl,-force_load,$<TARGET_FILE:unbox_lib>"
-            )
-  endif()
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   target_link_options(test_edge_op_registration PRIVATE
           "-Wl,--whole-archive,$<TARGET_FILE:unbox_lib>,--no-whole-archive"
