@@ -302,7 +302,7 @@ class _DeviceGuard:
         return False
 
 
-class device(_DeviceGuard):
+class device:
     r"""Context-manager that changes the selected device.
 
     Args:
@@ -311,8 +311,15 @@ class device(_DeviceGuard):
     """
 
     def __init__(self, device: Any):
-        idx = _get_device_index(device, optional=True)
-        super().__init__(idx)
+        self.idx = _get_device_index(device, optional=True)
+        self.prev_idx = -1
+
+    def __enter__(self):
+        self.prev_idx = torch.cuda._exchange_device(self.idx)
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        torch.cuda._exchange_device(self.prev_idx)
+        return False
 
 
 class device_of(device):
