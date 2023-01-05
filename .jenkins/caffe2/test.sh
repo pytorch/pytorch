@@ -170,17 +170,3 @@ if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
     "$caffe2_pypath/python" \
     "${EXTRA_TESTS[@]}"
 fi
-
-##############
-# ONNX tests #
-##############
-if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  pip install -q --user --no-use-pep517 "git+https://github.com/pytorch/vision.git@$(cat .github/ci_commit_pins/vision.txt)"
-  pip install -q --user ninja flatbuffers==2.0 numpy==1.21.5 onnxruntime==1.12.1 beartype==0.10.4
-  # numba requires numpy <= 1.20, onnxruntime requires numpy >= 1.21.
-  # We don't actually need it for our tests, but it's imported if it's present, so uninstall.
-  pip uninstall -q --yes numba
-  # JIT C++ extensions require ninja, so put it into PATH.
-  export PATH="/var/lib/jenkins/.local/bin:$PATH"
-  "$ROOT_DIR/scripts/onnx/test.sh"
-fi

@@ -75,6 +75,9 @@ table XNNGraph {
   xnodes:[XNode];
   xvalues:[XValue];
 
+  // Number of external inputs/outputs
+  num_externs:uint;
+
   // Ids of external inputs
   input_ids:[uint];
 

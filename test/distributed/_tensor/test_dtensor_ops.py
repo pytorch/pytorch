@@ -1,34 +1,37 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-import torch
 import sys
 import unittest
 import warnings
 
+import torch
+import torch.distributed as dist
+import torch.testing._internal.common_methods_invocations as common_ops
+
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
+
 from torch.overrides import resolve_name
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    ops,
+)
+from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
+    run_tests,
     suppress_warnings,
     TEST_WITH_ASAN,
-    run_tests,
 )
-import torch.distributed as dist
-from torch.testing._internal.common_device_type import (
-    ops,
-    instantiate_device_type_tests,
-)
-import torch.testing._internal.common_methods_invocations as common_ops
-from torch.testing._internal.common_methods_invocations import DecorateInfo
-
-from torch.distributed._tensor import DTensor, DeviceMesh, Replicate
-from torch.testing._internal.distributed._tensor.dtensor_lagging_op_db import dtensor_lagging_op_db
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DEVICE_TYPE,
+    DTensorConverter,
     DTensorTestBase,
     TEST_SKIPS,
-    DTensorConverter,
-    DEVICE_TYPE,
 )
+from torch.testing._internal.distributed._tensor.dtensor_lagging_op_db import (
+    dtensor_lagging_op_db,
+)
+from torch.utils._pytree import tree_flatten, tree_map
 
 # rewrite common size variables to sth can be sharded evenly
 # we can enable uneven shards later, but need to adjust more on
@@ -695,9 +698,7 @@ class TestDTensorOps(DTensorTestBase):
 
 
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)
-instantiate_device_type_tests(
-    TestDTensorOps, globals(), only_for=(DEVICE_TYPE,)
-)
+instantiate_device_type_tests(TestDTensorOps, globals(), only_for=(DEVICE_TYPE,))
 
 
 if __name__ == "__main__":

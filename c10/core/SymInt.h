@@ -190,6 +190,11 @@ class C10_API SymInt {
     return i > MAX_UNREPRESENTABLE_INT;
   }
 
+  // Return the min represetable integer as a SymInt
+  static constexpr int64_t min_representable_int() {
+    return MAX_UNREPRESENTABLE_INT + 1;
+  }
+
  private:
   // Constraints on the internal representation:
   //
@@ -231,6 +236,19 @@ inline c10::SymInt multiply_integers(const C& container) {
   return std::accumulate(
       container.begin(),
       container.end(),
+      c10::SymInt(1),
+      [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
+}
+
+template <
+    typename Iter,
+    typename = std::enable_if_t<std::is_same<
+        typename std::iterator_traits<Iter>::value_type,
+        c10::SymInt>::value>>
+inline c10::SymInt multiply_integers(Iter begin, Iter end) {
+  return std::accumulate(
+      begin,
+      end,
       c10::SymInt(1),
       [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
 }

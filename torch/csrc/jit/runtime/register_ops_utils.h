@@ -302,8 +302,8 @@ inline bool tensor_list_equal(
   }
 
   for (const auto i : c10::irange(a.size())) {
-    at::Tensor a_element = a[i];
-    at::Tensor b_element = b[i];
+    const at::Tensor& a_element = a[i];
+    const at::Tensor& b_element = b[i];
     // This preserves Python's semantics, which uses eq() to compare two
     // elements, then passes the result to bool().
     // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__

@@ -687,7 +687,11 @@ struct AttentionBackwardKernel {
   static CUTLASS_DEVICE void kernel(Params& p_) {
     // Hint to nvcc to store points & tensor shapes in registers
     // as we use them a lot
+#if __cplusplus < 201703L
     register const Params p = p_;
+#else
+    const Params p = p_;
+#endif
 
     extern __shared__ char smem_buffer[];
     SharedStorage& shared_storage = *((SharedStorage*)smem_buffer);
@@ -721,7 +725,11 @@ struct AttentionBackwardKernel {
       __syncthreads();
     }
 
+#if __cplusplus < 201703L
     OutputFragments register output_frags;
+#else
+    OutputFragments output_frags;
+#endif
     int32_t key_start = 0;
     int32_t key_end = p.num_keys / kBlockSizeJ * kBlockSizeJ;
     for (; key_start < key_end; key_start += kBlockSizeJ) {

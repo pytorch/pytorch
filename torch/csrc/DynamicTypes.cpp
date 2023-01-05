@@ -13,6 +13,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FunctionalStorageImpl.h>
 
 #include <array>
 #include <memory>
@@ -77,7 +78,11 @@ THPLayout* getTHPLayout(at::Layout layout) {
 
 PyObject* createPyObject(const at::Storage& storage) {
   if (storage.device_type() != at::DeviceType::Meta &&
-      storage.data() == nullptr && storage.nbytes() != 0) {
+      storage.data() == nullptr && storage.sym_nbytes() != 0 &&
+      // Grabbing storage() from FunctionalTensorWrapper is allowed.
+      // This is useful for checking aliasing info from python
+      dynamic_cast<at::functionalization::FunctionalStorageImpl*>(
+          storage.unsafeGetStorageImpl()) == nullptr) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
@@ -126,8 +131,8 @@ at::Storage createStorageGetType(
 
   if (is_typed_storage) {
     // NOTE: `PyObject_GetAttrString` increments the refcounts to `dtype` and
-    // `_storage`, so we must decrement them. The refcounts will still stay
-    // nonzero since the `TypedStorage` maintains a reference.
+    // `_untyped_storage`, so we must decrement them. The refcounts will still
+    // stay nonzero since the `TypedStorage` maintains a reference.
     PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
     TORCH_INTERNAL_ASSERT(dtype_obj);
     Py_DECREF(dtype_obj);
@@ -144,10 +149,12 @@ at::Storage createStorageGetType(
     untyped_storage_obj = obj;
   }
 
-  if (Py_TYPE(untyped_storage_obj) !=
-      reinterpret_cast<PyTypeObject*>(THPStorageClass)) {
-    throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      Py_TYPE(untyped_storage_obj) ==
+          reinterpret_cast<PyTypeObject*>(THPStorageClass),
+      "not a storage '",
+      Py_TYPE(obj)->tp_name,
+      "'");
 
   c10::StorageImpl* impl = static_cast<c10::StorageImpl*>(
       ((THPVoidStorage*)untyped_storage_obj)->cdata);

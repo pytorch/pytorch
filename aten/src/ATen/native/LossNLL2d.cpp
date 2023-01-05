@@ -16,6 +16,8 @@
 #include <ATen/ops/nll_loss2d_forward_native.h>
 #include <ATen/ops/nll_loss2d_native.h>
 #include <ATen/ops/zeros_like.h>
+
+#include <utility>
 #endif
 
 namespace at {
@@ -489,7 +491,7 @@ Tensor nll_loss2d_symint(const Tensor & self, const Tensor & target, const c10::
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, std::move(ignore_index)));
 }
 
 // Duplicate of above code for non-symbolic ints. Kept for BC purposes and to minimize breakages.

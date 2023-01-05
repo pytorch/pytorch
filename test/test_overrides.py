@@ -760,7 +760,7 @@ class Wrapper:
         val = getattr(self._data, name)
 
         # If it's a method
-        if callable(val):
+        if not isinstance(val, torch.device) and callable(val):
             c = getattr(type(self._data), name)
             # Don't append self to args if classmethod/staticmethod
             if c is val:
@@ -901,7 +901,6 @@ class TestGradCheckOverride(TestCase):
                 'dtype',
                 'is_floating_point',
                 'is_sparse',
-                'is_sparse_csr',
                 'layout',
                 'new_zeros',
                 'numel',
@@ -1448,7 +1447,7 @@ class TestTorchFunctionMode(TestCase):
 
         x = B(torch.randn(5))
         with A():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
@@ -1460,7 +1459,7 @@ class TestTorchFunctionMode(TestCase):
             pass
 
         x = A(torch.randn(5))
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             g = torch._C._EnableTorchFunction()
             try:
                 self.assertIsInstance(torch.sum(x), A)

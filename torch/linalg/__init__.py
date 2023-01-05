@@ -371,8 +371,8 @@ the output has the same batch dimensions.
 
 .. seealso::
 
-        :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
-        absolute value of the determinant of real-valued (resp. complex) square matrices.
+        :func:`torch.linalg.slogdet` computes the sign and natural logarithm of the absolute
+        value of the determinant of square matrices.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -396,7 +396,7 @@ linalg.slogdet(A, *, out=None) -> (Tensor, Tensor)
 
 Computes the sign and natural logarithm of the absolute value of the determinant of a square matrix.
 
-For complex :attr:`A`, it returns the angle and the natural logarithm of the modulus of the
+For complex :attr:`A`, it returns the sign and the natural logarithm of the modulus of the
 determinant, that is, a logarithmic polar decomposition of the determinant.
 
 The determinant can be recovered as `sign * exp(logabsdet)`.
@@ -1015,9 +1015,8 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if the inputs are batches of matrices then
 the output has the same batch dimensions.
 
-:attr:`driver` chooses the LAPACK/MAGMA function that will be used.
+:attr:`driver` chooses the backend function that will be used.
 For CPU inputs the valid values are `'gels'`, `'gelsy'`, `'gelsd`, `'gelss'`.
-For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank.
 To choose the best driver on CPU consider:
 
 - If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
@@ -1029,6 +1028,8 @@ To choose the best driver on CPU consider:
 
   - `'gelsd'` (tridiagonal reduction and SVD)
   - But if you run into memory issues: `'gelss'` (full SVD).
+
+For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank.
 
 See also the `full description of these drivers`_
 

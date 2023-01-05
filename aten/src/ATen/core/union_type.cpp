@@ -1,13 +1,14 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <ATen/core/grad_mode.h>
-#include <ATen/core/function.h>
 #include <iostream>
+#include <utility>
 
 namespace c10 {
 
@@ -178,8 +179,8 @@ OptionalType::OptionalType(TypePtr contained)
   } else if (contained == NumberType::get() || is_numbertype) {
     contained_ = NumberType::get();
     types_.clear();
-    types_.push_back(NumberType::get());
-    types_.push_back(NoneType::get());
+    types_.emplace_back(NumberType::get());
+    types_.emplace_back(NoneType::get());
   } else {
     std::vector<TypePtr> to_subtract{NoneType::get()};
     auto without_none = subtractTypeSetFrom(to_subtract, types_);
@@ -227,7 +228,7 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : SharedType
 }
 
 UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
-  auto union_type = new UnionType(std::move(reference));
+  UnionTypePtr union_type(new UnionType(std::move(reference)));
 
   // Some very special-cased logic for `Optional`. This will be deleted
   // in a later PR
@@ -262,11 +263,11 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
       auto not_none = union_type->containedTypes()[0] != NoneType::get()
                       ? union_type->containedTypes()[0]
                       : union_type->containedTypes()[1];
-      return OptionalType::create(not_none);
+      return OptionalType::create(std::move(not_none));
     }
   }
 
-  return UnionTypePtr(union_type);
+  return union_type;
 }
 
 c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
@@ -396,7 +397,7 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
       ss << ", ";
     }
     if (is_annotation_str) {
-      ss << NumberType::get()->annotation_str(printer);
+      ss << NumberType::get()->annotation_str(std::move(printer));
     } else {
       ss << NumberType::get()->str();
     }
@@ -410,7 +411,7 @@ std::string UnionType::str() const {
 }
 
 std::string UnionType::annotation_str_impl(TypePrinter printer) const {
-  return this->unionStr(printer, /*is_annotation_str=*/true);
+  return this->unionStr(std::move(printer), /*is_annotation_str=*/true);
 }
 
 bool UnionType::canHoldType(const Type& type) const {

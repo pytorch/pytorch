@@ -94,13 +94,7 @@ void setSoftAssertRaises(c10::optional<bool> value) {
 }
 
 bool softAssertRaises() {
-  return soft_assert_raises_.value_or(
-#ifdef NDEBUG
-      false
-#else
-      true
-#endif
-  );
+  return soft_assert_raises_.value_or(false);
 }
 
 // ----------------------------------------------------------------------------

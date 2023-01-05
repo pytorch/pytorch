@@ -56,7 +56,7 @@ class SyncBatchNorm(Function):
                                         combined_size * world_size,
                                         dtype=combined.dtype,
                                         device=combined.device)
-            dist._all_gather_base(combined_flat, combined, process_group, async_op=False)
+            dist.all_gather_into_tensor(combined_flat, combined, process_group, async_op=False)
             combined = torch.reshape(combined_flat, (world_size, combined_size))
             # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)

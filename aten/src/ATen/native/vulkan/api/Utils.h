@@ -69,7 +69,7 @@ inline constexpr To safe_downcast(const From v) {
 }
 
 //
-// Vector
+// Vector Types
 //
 
 namespace detail {
@@ -98,6 +98,24 @@ using vec = detail::vec<float, N>;
 using vec2 = vec<2u>;
 using vec3 = vec<3u>;
 using vec4 = vec<4u>;
+
+//
+// IntArrayRef Handling
+//
+
+/*
+ * Utility function to perform indexing on an IntArrayRef. Negative indexing is
+ * allowed. For instance, passing an index of -1 will retrieve the last element.
+ * If the requested index is out of bounds, then 1u will be returned.
+ */
+inline uint32_t val_at(int32_t index, const IntArrayRef sizes) {
+  const int32_t ndim = sizes.size();
+  if (index >= 0) {
+    return index >= ndim ? 1 : safe_downcast<uint32_t>(sizes[index]);
+  } else {
+    return ndim + index < 0 ? 1 : safe_downcast<uint32_t>(sizes[ndim + index]);
+  }
+}
 
 inline ivec2 make_ivec2(IntArrayRef ints, bool reverse = false) {
   TORCH_CHECK(ints.size() == 2);
@@ -132,6 +150,19 @@ inline ivec3 make_ivec3(uvec3 ints) {
       safe_downcast<int32_t>(ints.data[0u]),
       safe_downcast<int32_t>(ints.data[1u]),
       safe_downcast<int32_t>(ints.data[2u])};
+}
+
+/*
+ * Given an IntArrayRef of up to 4 elements, constructs a uvec4 containing those
+ * elements in reverse order.
+ */
+inline uvec4 make_nchw_uvec4(const IntArrayRef arr) {
+  uint32_t w = val_at(-1, arr);
+  uint32_t h = val_at(-2, arr);
+  uint32_t c = val_at(-3, arr);
+  uint32_t n = val_at(-4, arr);
+
+  return {w, h, c, n};
 }
 
 } // namespace utils

@@ -280,13 +280,12 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   AutogradMeta(
       at::TensorImpl* self_impl = nullptr,
       bool requires_grad = false,
-      Edge gradient_edge = Edge()) {
-    grad_fn_ = std::move(gradient_edge.function);
-    requires_grad_ = false;
-    retains_grad_ = -1;
-    is_view_ = false;
-    output_nr_ = gradient_edge.input_nr;
-
+      Edge gradient_edge = Edge())
+      : grad_fn_(std::move(gradient_edge.function)),
+        requires_grad_(false),
+        retains_grad_(-1),
+        is_view_(false),
+        output_nr_(gradient_edge.input_nr) {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
       TORCH_INTERNAL_ASSERT(self_impl);
@@ -791,6 +790,11 @@ inline Variable make_variable(
   return Variable();
 }
 
+namespace utils {
+
+TORCH_API bool has_same_meta(const Variable& base, const Variable& other);
+
+} // namespace utils
 } // namespace autograd
 } // namespace torch
 

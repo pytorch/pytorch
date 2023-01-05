@@ -79,10 +79,10 @@ Tensor new_with_sizes(
     c10::TensorOptions options,
     at::ScalarType scalar_type,
     const optional<Device>& device,
-    IntArrayRef sizes) {
+    c10::SymIntArrayRef sizes) {
   maybe_initialize_cuda(options.device());
   pybind11::gil_scoped_release no_gil;
-  return torch::empty(sizes, build_options(options, scalar_type, device));
+  return at::empty_symint(sizes, build_options(options, scalar_type, device));
 }
 
 Tensor new_with_storage(
@@ -106,17 +106,19 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
       length /= elementSize(scalar_type);
     }
     sizes.push_back(length);
-    if (sizes.size() > MAX_DIMS) {
-      throw ValueError("too many dimensions '%s'", Py_TYPE(seq)->tp_name);
-    }
+    TORCH_CHECK_VALUE(
+        sizes.size() <= MAX_DIMS,
+        "too many dimensions '",
+        Py_TYPE(seq)->tp_name,
+        "'");
     if (length == 0)
       break;
     handle = THPObjectPtr(PySequence_GetItem(seq, 0));
-    if (!handle) {
-      throw ValueError(
-          "could not determine the shape of object type '%s'",
-          Py_TYPE(seq)->tp_name);
-    }
+    TORCH_CHECK_VALUE(
+        handle,
+        "could not determine the shape of object type '",
+        Py_TYPE(seq)->tp_name,
+        "'");
     seq = handle.get();
   }
 
@@ -124,6 +126,12 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
 }
 
 ScalarType infer_scalar_type(PyObject* obj) {
+  if (torch::is_symint(obj)) {
+    return ScalarType::Long;
+  }
+  if (torch::is_symfloat(obj)) {
+    return ScalarType::Double;
+  }
 #ifdef USE_NUMPY
   if (is_numpy_available()) {
     if (PyArray_Check(obj)) {
@@ -161,9 +169,11 @@ ScalarType infer_scalar_type(PyObject* obj) {
     const auto& var = THPVariable_Unpack(obj);
     return var.scalar_type();
   }
-  if (THPUtils_checkString(obj)) {
-    throw TypeError("new(): invalid data type '%s'", Py_TYPE(obj)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      !THPUtils_checkString(obj),
+      "new(): invalid data type '",
+      Py_TYPE(obj)->tp_name,
+      "'");
   if (PySequence_Check(obj)) {
     c10::optional<ScalarType> scalarType;
     auto length = PySequence_Length(obj);
@@ -177,8 +187,8 @@ ScalarType infer_scalar_type(PyObject* obj) {
       if (!handle)
         throw python_error();
       auto cur_item = handle.get();
-      if (cur_item == obj)
-        throw TypeError("new(): self-referential lists are incompatible");
+      TORCH_CHECK_TYPE(
+          cur_item != obj, "new(): self-referential lists are incompatible");
       ScalarType item_scalarType = infer_scalar_type(cur_item);
       scalarType = (scalarType) ? at::promoteTypes(*scalarType, item_scalarType)
                                 : item_scalarType;
@@ -204,7 +214,21 @@ void recursive_store(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(data != nullptr);
 
   int64_t ndim = sizes.size();
+  bool is_symfloat = torch::is_symfloat(obj);
+  bool is_symint = torch::is_symint(obj);
   if (dim == ndim) {
+    if (is_symfloat) {
+      auto new_obj = py::reinterpret_borrow<py::object>(obj);
+      auto val = new_obj.cast<c10::SymFloat>();
+      *(double*)data = val.guard_float(__FILE__, __LINE__);
+      return;
+    }
+    if (is_symint) {
+      auto new_obj = py::reinterpret_borrow<py::object>(obj);
+      auto val = new_obj.cast<c10::SymInt>();
+      *(int64_t*)data = val.guard_int(__FILE__, __LINE__);
+      return;
+    }
     torch::utils::store_scalar(data, scalarType, obj);
     return;
   }
@@ -215,13 +239,15 @@ void recursive_store(
     throw python_error();
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto seq_size = PySequence_Fast_GET_SIZE(seq.get());
-  if (seq_size != n) {
-    throw ValueError(
-        "expected sequence of length %lld at dim %lld (got %lld)",
-        (long long)n,
-        (long long)dim,
-        (long long)seq_size);
-  }
+  TORCH_CHECK_VALUE(
+      seq_size == n,
+      "expected sequence of length ",
+      n,
+      " at dim ",
+      dim,
+      " (got ",
+      seq_size,
+      ")");
 
   PyObject** items = PySequence_Fast_ITEMS(seq.get());
   for (const auto i : c10::irange(n)) {
@@ -248,9 +274,11 @@ Tensor internal_new_from_data(
     bool copy_numpy,
     bool type_inference,
     bool pin_memory = false) {
-  if (THPUtils_checkString(data)) {
-    throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      !THPUtils_checkString(data),
+      "new(): invalid data type '",
+      Py_TYPE(data)->tp_name,
+      "'");
 
   if (THPVariable_Check(data)) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");
@@ -440,10 +468,11 @@ Tensor legacy_new_from_sequence(
     at::ScalarType scalar_type,
     c10::optional<Device> device,
     PyObject* data) {
-  if (!PySequence_Check(data)) {
-    throw TypeError(
-        "new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PySequence_Check(data),
+      "new(): data must be a sequence (got ",
+      Py_TYPE(data)->tp_name,
+      ")");
   return internal_new_from_data(
       options,
       scalar_type,
@@ -531,7 +560,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
       "new(*, int64_t cdata)|hidden",
       "new(Tensor indices, Tensor values, *, Device? device=None)",
       "new(Tensor indices, Tensor values, IntArrayRef size, *, Device? device=None)",
-      "new(IntArrayRef size, *, Device? device=None)",
+      "new(SymIntArrayRef size, *, Device? device=None)",
   });
   if (ctor_or_new == CtorOrNew::NEW)
     check_base_legacy_new(dispatch_key, c10::kSparse);
@@ -566,18 +595,17 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
         arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      if (ctor_or_new == CtorOrNew::CTOR) {
-        throw TypeError(
-            "torch.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
-            "or construct a strided tensor and convert it to sparse via to_sparse.");
-      } else {
-        throw TypeError(
-            "SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
-            "or construct a strided tensor and convert it to sparse via to_sparse.");
-      }
+      TORCH_CHECK_TYPE(
+          ctor_or_new != CtorOrNew::CTOR,
+          "torch.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
+          "or construct a strided tensor and convert it to sparse via to_sparse.");
+      TORCH_CHECK_TYPE(
+          false,
+          "SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
+          "or construct a strided tensor and convert it to sparse via to_sparse.");
     }
     return new_with_sizes(
-        options, scalar_type, r.deviceOptional(1), r.intlist(0));
+        options, scalar_type, r.deviceOptional(1), r.symintlist(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
@@ -615,7 +643,7 @@ Tensor legacy_tensor_generic_ctor_new(
                                                           // matching with
                                                           // IntArrayRef,
                                                           // PyObject*
-      "new(IntArrayRef size, *, Device? device=None)",
+      "new(SymIntArrayRef size, *, Device? device=None)",
       "new(PyObject* data, *, Device? device=None)",
   });
 
@@ -690,7 +718,7 @@ Tensor legacy_tensor_generic_ctor_new(
           options, scalar_type, deviceOptional, r.pyobject(0));
     }
     return new_with_sizes(
-        options, scalar_type, r.deviceOptional(1), r.intlist(0));
+        options, scalar_type, r.deviceOptional(1), r.symintlist(0));
   } else if (r.idx == 6) {
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
@@ -1647,11 +1675,22 @@ Tensor tensor_fromDLPack(PyObject* data) {
       "Note that DLTensor capsules can be consumed only once, "
       "so you might have already constructed a tensor from it once.");
 
+  auto deleter_with_gil = [dlMTensor](void*) {
+    if (dlMTensor->deleter) {
+      pybind11::gil_scoped_acquire gil;
+      dlMTensor->deleter(dlMTensor);
+    }
+  };
+
   // atensor steals the ownership of the underlying storage. It also passes a
   // destructor function that will be called when the underlying storage goes
   // out of scope. When the destructor is called, the dlMTensor is destructed
   // too.
-  auto atensor = at::fromDLPack(dlMTensor);
+  // HACK: Ensure that we hold the GIL here just in case the
+  // managed tensor originating from a buggy NumPy build.
+  auto atensor = torch::utils::is_numpy_dlpack_deleter_bugged()
+      ? at::fromDLPack(dlMTensor, std::move(deleter_with_gil))
+      : at::fromDLPack(dlMTensor);
 
   // Make sure this capsule will never be used again.
   PyCapsule_SetName(data, "used_dltensor");

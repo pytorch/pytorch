@@ -1,19 +1,22 @@
-// (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
 
 #include <caffe2/torch/csrc/jit/backends/xnnpack/compiler/xnn_compiler.h>
 #include <torch/csrc/jit/backends/xnnpack/serialization/schema_generated.h>
 
 #include <ATen/Utils.h>
-#include <unordered_set>
 
 namespace torch {
 namespace jit {
 namespace xnnpack {
 namespace delegate {
 
-XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
-  const char* buffer_pointer = ser_model.data();
-
+void XNNCompiler::compileModel(
+    const void* buffer_pointer,
+    size_t num_bytes,
+    XNNExecutor* executor) {
   auto output_min = -std::numeric_limits<float>::infinity();
   auto output_max = std::numeric_limits<float>::infinity();
 
@@ -24,17 +27,8 @@ XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
 
   // create xnnpack subgraph
   xnn_subgraph_t subgraph_ptr = nullptr;
-
-  // TODO: @maxren serialize extern_ids in flatbuffer schema
-  std::unordered_set<uint32_t> extern_ids;
-  for (auto input_id : *flatbuffer_graph->input_ids()) {
-    extern_ids.insert(input_id);
-  }
-  for (auto output_id : *flatbuffer_graph->output_ids()) {
-    extern_ids.insert(output_id);
-  }
   status = xnn_create_subgraph(
-      /*external_value_ids=*/extern_ids.size(),
+      /*external_value_ids=*/flatbuffer_graph->num_externs(),
       /*flags=*/0,
       &subgraph_ptr);
   TORCH_CHECK(xnn_status_success == status, "Failed to create xnn subgraph");
@@ -51,24 +45,23 @@ XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
       case fb_xnnpack::XValueUnion::XNNTensorValue: {
         auto tensor_value = value->xvalue_as_XNNTensorValue();
 
-        const void* data_ptr = nullptr;
-        auto buffer_idx = tensor_value->constant_buffer_idx();
-        if (buffer_idx != 0) {
-          // TODO: @maxren implement data handling
-          TORCH_CHECK(false, "Constant data handling not yet implemented")
-        }
         std::vector<size_t> dims_data;
         for (auto dim : *tensor_value->dims()) {
           dims_data.push_back(static_cast<size_t>(dim));
         }
 
         uint32_t id = XNN_INVALID_VALUE_ID;
+        const auto& constant_buffer = *flatbuffer_graph->constant_buffer();
+        auto buffer_idx = tensor_value->constant_buffer_idx();
+        const auto buffer_ptr = buffer_idx == 0
+            ? nullptr
+            : constant_buffer[buffer_idx]->storage()->data();
         status = xnn_define_tensor_value(
             /*subgraph=*/subgraph_ptr,
             /*datatype=*/xnn_datatype_fp32,
             /*num_dims=*/tensor_value->num_dims(),
             /*dims=*/dims_data.data(),
-            /*data=*/data_ptr,
+            /*data=*/buffer_ptr,
             /*external_id=*/tensor_value->external_id(),
             /*flags=*/tensor_value->flags(),
             /*id_out=*/&id);
@@ -109,17 +102,17 @@ XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
   status = xnn_create_runtime_v2(subgraph_ptr, nullptr, 0, &runtime_ptr);
   TORCH_CHECK(xnn_status_success == status);
 
-  XNNExecutor executor(runtime_ptr);
+  executor->runtime_ =
+      std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)>(
+          runtime_ptr, xnn_delete_runtime);
 
   for (auto old_id : *flatbuffer_graph->input_ids()) {
-    executor.input_ids_.push_back(remapped_ids.at(old_id));
+    executor->input_ids_.emplace_back(remapped_ids.at(old_id));
   }
 
   for (auto old_id : *flatbuffer_graph->output_ids()) {
-    executor.output_ids_.push_back(remapped_ids.at(old_id));
+    executor->output_ids_.emplace_back(remapped_ids.at(old_id));
   }
-
-  return executor;
 };
 
 } // namespace delegate
