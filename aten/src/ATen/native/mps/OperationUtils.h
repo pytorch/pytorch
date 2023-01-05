@@ -19,24 +19,6 @@ namespace at {
 namespace native {
 namespace mps {
 
-struct TORCH_CUDA_CPP_API MPSGeneratorImpl : public c10::GeneratorImpl {
-  MPSGeneratorImpl(DeviceIndex device_index = -1);
-  ~MPSGeneratorImpl() = default;
-
-  void set_current_seed(uint64_t seed) override;
-  uint64_t current_seed() const override;
-  uint64_t seed() override;
-  void set_state(const c10::TensorImpl& new_state) override;
-  c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
-  static DeviceType device_type();
-
-private:
-  MPSGeneratorImpl* clone_impl() const override;
-  uint64_t seed_ = default_rng_seed_val;
-};
-
-const Generator& getDefaultMPSGenerator();
-
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const { return __builtin_bit_cast(id<MTLBuffer>, buffer.get()); }
 
@@ -61,6 +43,8 @@ MPSDataType getMPSDataType(ScalarType scalar_type);
 MPSDataType getMPSScalarType(ScalarType scalar_type);
 MPSScalar   getMPSScalar(const Scalar& scalar, ScalarType type);
 std::string getMPSTypeString(ScalarType scalar_type);
+NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
+NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
 std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value = false);
 std::string getArrayRefString(const IntArrayRef s);
@@ -145,6 +129,13 @@ struct MPSUnaryCachedGraph : public MPSCachedGraph
   MPSGraphTensor *outputTensor_ = nil;
 };
 
+struct MPSBinaryCachedGraph : public MPSCachedGraph
+{
+  MPSBinaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *otherTensor_ = nil;
+  MPSGraphTensor *outputTensor_ = nil;
+};
 
 // TODO: Improve the overall design of MPSGraphCache.
 // https://github.com/pytorch/pytorch/issues/77176
