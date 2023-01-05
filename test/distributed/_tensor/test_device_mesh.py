@@ -8,6 +8,7 @@ from torch.distributed._tensor.placement_types import Shard
 from torch.distributed.distributed_c10d import (
     get_global_rank,
     get_world_size,
+    is_initialized,
     new_group,
     ProcessGroup,
 )
@@ -22,6 +23,15 @@ class DeviceMeshTest(DTensorTestBase):
     @property
     def world_size(self):
         return 8
+
+    def test_init_process_group(self):
+        self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        backend = "nccl" if self.device_type == "cuda" else "gloo"
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        self.assertTrue(not is_initialized())
+        mesh = DeviceMesh(self.device_type, mesh_tensor, world_size=self.world_size, rank=self.rank)
+        self.assertTrue(is_initialized())
+        self.destroy_pg()
 
     @with_comms
     def test_device_mesh_2d(self):

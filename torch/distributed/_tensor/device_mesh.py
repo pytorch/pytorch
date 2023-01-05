@@ -1,8 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
 from typing import List, Optional, Sequence, TypeVar, Union
+from datetime import timedelta
 
 import torch
+from torch.distributed import TCPStore
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     all_gather,
@@ -13,6 +15,8 @@ from torch.distributed.distributed_c10d import (
     get_rank,
     get_world_size,
     GroupMember,
+    init_process_group,
+    is_initialized,
     new_group,
     ProcessGroup,
     reduce_scatter,
@@ -46,6 +50,19 @@ MeshExprT = Union[
     torch.Tensor,
     NDIntList,
 ]
+
+
+def _get_or_create_default_group(device_type, world_size, rank):
+    if not is_initialized():
+        _backend = "gloo" if device_type == "cpu" else "nccl"
+        hostname = "localhost"
+        port = 25364
+        is_master = rank == 0
+        # TODO: actually mesh size can be smaller than world_size, right???
+        # world_size = math.prod(self.mesh.size())
+        store = TCPStore(hostname, port, world_size, is_master, timedelta(minutes=5))
+        init_process_group(backend=_backend, world_size=world_size, rank=rank, store=store)
+    return _get_default_group()
 
 
 class DeviceMesh(object):
@@ -102,6 +119,8 @@ class DeviceMesh(object):
         device_type: str,
         mesh: MeshExprT,
         dim_groups: Optional[List[ProcessGroup]] = None,
+        world_size: Optional[int] = 1,
+        rank: Optional[int] = 0,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
@@ -109,7 +128,7 @@ class DeviceMesh(object):
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
-        default_pg = _get_default_group()
+        default_pg = _get_or_create_default_group(device_type, world_size, rank)
         self._backend = default_pg._get_backend_name()
         # TODO: if user want to pass pg_options, offer a way to do it
         # check default pg backend, should support device_type
