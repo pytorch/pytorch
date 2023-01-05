@@ -207,7 +207,7 @@ def _add_op(
     This function is monkey-patched onto Graph.
 
     Args:
-        g: The Torch Graph or Block.
+        graph_context: The Torch Graph or Block.
         opname: The ONNX operator name, e.g., `Abs` or `Add`, or an operator qualified
             with a namespace, e.g., `aten::add`.
         args: The inputs to the operator; usually provided

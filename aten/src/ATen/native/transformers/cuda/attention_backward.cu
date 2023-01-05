@@ -76,7 +76,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     const at::Tensor& value,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
-    bool causal) {
+    bool causal,
+    bool chunk_grad_outputs) {
   #if defined(USE_FLASH_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
@@ -130,10 +131,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
   bool grad_kv_needs_init = causal && N > M;
   at::Tensor grad_q, grad_k, grad_v;
   int8_t gQKV_strideM_multiplier = 1;
-  if (!grad_kv_needs_init && query.size(1) == key.size(1) &&
-      query.size(3) == value.size(3) &&
-      query.storage().is_alias_of(key.storage()) &&
-      query.storage().is_alias_of(value.storage())) {
+  if (chunk_grad_outputs) {
     // Create one big contiguous chunk
     // This is because q, k and v usually come from a single
     // output of a linear layer that is chunked.
@@ -270,7 +268,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
     const at::Tensor& value,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
-    bool causal){
+    bool causal,
+    bool chunk_grad_outputs){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -281,7 +280,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
   auto v_t = value.transpose(1, 2);
 
   Tensor grad_q, grad_k, grad_v;
-  std::tie(grad_q, grad_k, grad_v) = at::_efficient_attention_backward(grad_out, q_t, k_t, v_t, out_t, logsumexp, causal);
+  std::tie(grad_q, grad_k, grad_v) = at::_efficient_attention_backward(grad_out, q_t, k_t, v_t, out_t, logsumexp, causal, chunk_grad_outputs);
   return std::make_tuple(grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
 }
 

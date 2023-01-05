@@ -52,6 +52,7 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8  # not tested
+c64 = torch.complex64
 
 _ops = partial(
     ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
@@ -124,6 +125,27 @@ inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
+    # fft ops sometimes succeed locally and fail on CI.
+    # they return complex values which is known unsupported,
+    # so there is not much point in testing them currently.
+    "fft.fft": {b8, f16, f32, f64, i32, i64},
+    "fft.fft2": {b8, f16, f32, f64, i32, i64},
+    "fft.fftn": {b8, f16, f32, f64, i32, i64},
+    "fft.hfft": {b8, f16, f32, f64, i32, i64},
+    "fft.hfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.hfftn": {b8, f16, f32, f64, i32, i64},
+    "fft.ifft": {f16, f32, f64, b8, i32, i64},
+    "fft.ifft2": {b8, f16, f32, f64, i32, i64},
+    "fft.ifftn": {b8, f16, f32, f64, i32, i64},
+    "fft.ihfft": {f16, f32, f64, c64, b8, i32, i64},
+    "fft.ihfft2": {f16, f32, f64, c64, b8, i32, i64},
+    "fft.ihfftn": {f16, f32, f64, c64, b8, i32, i64},
+    "fft.irfft": {b8, f16, f32, f64, i32, i64},
+    "fft.irfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.irfftn": {b8, f16, f32, f64, i32, i64},
+    "fft.rfft": {f16, f32, f64, b8, i32, i64},
+    "fft.rfft2": {f16, f32, f64},
+    "fft.rfftn": {f16, f32, f64},
 }
 
 inductor_skips["cuda"] = {
@@ -136,6 +158,27 @@ inductor_skips["cuda"] = {
     # flaky
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
+    # fft ops sometimes succeed locally and fail on CI.
+    # they return complex values which is known unsupported,
+    # so there is not much point in testing them currently.
+    "fft.fft": {b8, f16, f32, f64, i32, i64},
+    "fft.fft2": {b8, f16, f32, f64, i32, i64},
+    "fft.fftn": {b8, f16, f32, f64, i32, i64},
+    "fft.hfft": {b8, f16, f32, f64, i32, i64},
+    "fft.hfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.hfftn": {b8, f16, f32, f64, i32, i64},
+    "fft.ifft": {f16, f32, f64, b8, i32, i64},
+    "fft.ifft2": {b8, f16, f32, f64, i32, i64},
+    "fft.ifftn": {b8, f16, f32, f64, i32, i64},
+    "fft.ihfft": {f16, f32, f64, c64, b8, i32, i64},
+    "fft.ihfft2": {f16, f32, f64, c64, b8, i32, i64},
+    "fft.ihfftn": {f16, f32, f64, c64, b8, i32, i64},
+    "fft.irfft": {b8, f16, f32, f64, i32, i64},
+    "fft.irfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.irfftn": {b8, f16, f32, f64, i32, i64},
+    "fft.rfft": {f16, f32, f64, b8, i32, i64},
+    "fft.rfft2": {f16, f32, f64},
+    "fft.rfftn": {f16, f32, f64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -166,24 +209,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
-    "fft.fft": {f32, f64},
-    "fft.fft2": {b8, f32, f64, i32, i64},
-    "fft.fftn": {b8, f32, f64, i32, i64},
-    "fft.hfft": {b8, f32, f64, i32, i64},
-    "fft.hfft2": {b8, f32, f64, i32, i64},
-    "fft.hfftn": {b8, f32, f64, i32, i64},
-    "fft.ifft": {f16, f32, f64},
-    "fft.ifft2": {b8, f32, f64, i32, i64},
-    "fft.ifftn": {b8, f32, f64, i32, i64},
-    "fft.ihfft": {f16, f32, f64},
-    "fft.ihfft2": {f32, f64},
-    "fft.ihfftn": {f32, f64},
-    "fft.irfft": {b8, f32, f64, i32, i64},
-    "fft.irfft2": {b8, f32, f64, i32, i64},
-    "fft.irfftn": {b8, f32, f64, i32, i64},
-    "fft.rfft": {f32, f64},
-    "fft.rfft2": {f32, f64},
-    "fft.rfftn": {f32, f64},
     "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
@@ -238,7 +263,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     "tril": {f16},
     "triu": {f16},
@@ -274,24 +298,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
-    "fft.fft": {f16, f32, f64},
-    "fft.fft2": {b8, f16, f32, f64, i32, i64},
-    "fft.fftn": {b8, f16, f32, f64, i32, i64},
-    "fft.hfft": {b8, f16, f32, f64, i32, i64},
-    "fft.hfft2": {b8, f16, f32, f64, i32, i64},
-    "fft.hfftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ifft": {f16, f32, f64},
-    "fft.ifft2": {b8, f16, f32, f64, i32, i64},
-    "fft.ifftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ihfft": {f16, f32, f64},
-    "fft.ihfft2": {f16, f32, f64},
-    "fft.ihfftn": {f16, f32, f64},
-    "fft.irfft": {b8, f16, f32, f64, i32, i64},
-    "fft.irfft2": {b8, f16, f32, f64, i32, i64},
-    "fft.irfftn": {b8, f16, f32, f64, i32, i64},
-    "fft.rfft": {f16, f32, f64},
-    "fft.rfft2": {f16, f32, f64},
-    "fft.rfftn": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     "linalg.eig": {f32, f64},
@@ -337,7 +343,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
@@ -365,8 +370,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.local_response_norm": {f16},
     "outer": {f16},
     "quantile": {f32, f64},
-    "scatter_reduce.amax": {f16, f32, f64},
-    "scatter_reduce.amin": {f16, f32, f64},
     "tanh": {f16},
 }
 
