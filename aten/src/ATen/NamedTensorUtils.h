@@ -1,7 +1,6 @@
 #pragma once
 #include <ATen/NamedTensor.h>
 #include <ATen/TensorNames.h>
-#include <ATen/WrapDimUtilsMulti.h>
 
 #include <ATen/core/DimVector.h>
 #include <ATen/core/Tensor.h>
@@ -145,9 +144,6 @@ TORCH_API std::vector<Dimname> compute_bmm_outnames(
     const Tensor& other);
 
 TORCH_API std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor);
-TORCH_API std::vector<Dimname> compute_squeeze_outnames(
-    const Tensor& tensor,
-    std::bitset<dim_bitset_size> dims);
 
 std::vector<Dimname> compute_diagonal_outnames(
     const Tensor& tensor,

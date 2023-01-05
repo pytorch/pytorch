@@ -12,7 +12,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch import _prims_common
 from torch._prims_common import (
-    canonicalize_dims,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -488,17 +487,16 @@ def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
+    offset = len(x.get_size()) == 0
+    dim = _validate_dim(x, dim, offset)
+    new_shape = list(x.get_size())
+    if len(new_shape) > 0:
+        removed = new_shape.pop(dim)
+        if V.graph.sizevars.maybe_guard_equals(removed, 1):
+            return view(x, new_shape)
 
-    dim = canonicalize_dims(len(x.get_size()), dim)
-    dims = set((dim,) if not isinstance(dim, tuple) else dim)
-
-    new_shape = [
-        s
-        for d, s in enumerate(x.get_size())
-        if not (d in dims and V.graph.sizevars.maybe_guard_equals(s, 1))
-    ]
     # squeeze does nothing if the size isn't 1
-    return view(x, new_shape) if new_shape != x.get_size() else x
+    return x
 
 
 @register_lowering([aten.squeeze_])
