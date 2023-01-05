@@ -511,6 +511,7 @@ def _lower_static_weighted_ref_module(
         setattr(modules[parent_name], module_name, q_module)
 
         # Step 2: Reroute around dq_node, and remove q_node and its args
+        assert(len(ref_node.args) == 1)
         dq_node = ref_node.args[0]
         assert(isinstance(dq_node, Node))
         ref_node.replace_input_with(dq_node, dq_node.args[0])
