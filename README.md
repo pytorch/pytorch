@@ -250,8 +250,7 @@ This is caused by `ld` from the Conda environment shadowing the system `ld`. You
 **On macOS**
 
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py develop
+python3 setup.py develop
 ```
 
 **On Windows**
