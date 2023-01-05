@@ -7791,6 +7791,60 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
+    def _test_GroupNorm_cpu_mixed_dtype(self):
+        def helper(self, size, groups, memory_format):
+            channels = size[1]
+            input = torch.empty(size, dtype=torch.bfloat16).cpu().random_(1, 10)
+            input_bf1 = input.contiguous(memory_format=memory_format).detach().requires_grad_(True)
+            input_bf2 = input_bf1.clone().detach().requires_grad_(True)
+            input_f = input_bf1.float().detach().requires_grad_(True)
+            m_bf = nn.GroupNorm(groups, channels).cpu().bfloat16()
+            m_f = deepcopy(m_bf).float()
+            m_f2 = deepcopy(m_f)
+            # bfloat16 input and bfloat16 parameters
+            out = m_bf(input_bf1)
+            # bfloat16 input and float parameters
+            out2 = m_f(input_bf2)
+            # float input and float parameters
+            out3 = m_f2(input_f)
+            self.assertEqual(out, out2, atol=5e-3, rtol=5e-3)
+            self.assertEqual(out2.float(), out3, atol=5e-3, rtol=5e-3)
+            grad_out = torch.randn(out2.shape, dtype=torch.bfloat16).cpu()
+            grad_out_bf1 = grad_out.contiguous(memory_format=memory_format).detach().requires_grad_(True)
+            grad_out_bf2 = grad_out_bf1.clone().detach().requires_grad_(True)
+            grad_out_f = grad_out_bf2.clone().float().detach().requires_grad_(True)
+            # bfloat16 input grad and float parameters
+            out2.backward(grad_out_bf2, retain_graph=True)
+            # float input grad and float parameters
+            out3.backward(grad_out_f, retain_graph=True)
+            self.assertEqual(m_f.weight.grad, m_f2.weight.grad, atol=1e-5, rtol=1e-5)
+            self.assertEqual(input_bf2.grad.float(), input_f.grad, atol=5e-5, rtol=5e-3)
+
+        helper(self, (1, 8, 4, 3), 2, torch.contiguous_format)
+        helper(self, (1, 8, 4, 3), 2, torch.channels_last)
+        helper(self, (1, 8, 3, 4), 4, torch.contiguous_format)
+        helper(self, (1, 8, 3, 4), 4, torch.channels_last)
+        helper(self, (4, 8, 40, 40), 4, torch.contiguous_format),
+        helper(self, (4, 8, 40, 40), 4, torch.channels_last),
+        helper(self, (4, 40, 40, 40), 2, torch.contiguous_format)
+        helper(self, (4, 40, 40, 40), 2, torch.channels_last)
+        helper(self, (1, 8, 40, 40), 4, torch.contiguous_format)
+        helper(self, (1, 8, 40, 40), 2, torch.channels_last)
+        helper(self, (1, 8, 40, 40), 2, torch.contiguous_format)
+        helper(self, (1, 8, 50, 50), 2, torch.channels_last)
+        helper(self, (1, 8, 50, 50), 4, torch.contiguous_format)
+        helper(self, (1, 8, 50, 50), 4, torch.channels_last)
+        helper(self, (1, 40, 50, 50), 2, torch.contiguous_format)
+        helper(self, (1, 40, 50, 50), 2, torch.channels_last)
+        helper(self, (1, 9, 3, 4, 5), 3, torch.contiguous_format)
+        helper(self, (1, 9, 3, 4, 5), 3, torch.channels_last_3d)
+        helper(self, (1, 60, 10, 10, 10), 3, torch.contiguous_format)
+        helper(self, (1, 60, 10, 10, 10), 3, torch.channels_last_3d)
+        helper(self, (1, 9, 10, 50, 50), 3, torch.contiguous_format)
+        helper(self, (1, 9, 10, 50, 50), 3, torch.channels_last_3d)
+        helper(self, (1, 60, 10, 50, 50), 3, torch.contiguous_format)
+        helper(self, (1, 60, 10, 50, 50), 3, torch.channels_last_3d)
+
     def _test_module_empty_inputs(self, module, inputs):
         for _inp in inputs:
             _inp.requires_grad_(True)
@@ -8202,6 +8256,9 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_GroupNorm_cuda_half()
 
+        if self.device_type == 'cpu':
+            self._test_GroupNorm_cpu_mixed_dtype()
+
     def test_GroupNorm_raises_error_if_one_value_per_group(self, device):
         x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
@@ -8216,24 +8273,29 @@ class TestNNDeviceType(NNTestCase):
                 _test_module_empty_input(self, mod, inp)
 
     @onlyCPU
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_groupnorm_nhwc(self, device, dtype):
-        def helper(self, size, groups, memory_format):
+        def helper(self, size, groups, memory_format, is_mixed):
             channels = size[1]
             input = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
             input = input.contiguous(memory_format=memory_format)
             input.retain_grad()
             grad = torch.randn(size, dtype=dtype, device=device)
             grad = grad.contiguous(memory_format=memory_format)
-            gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
+            if dtype == torch.bfloat16 and is_mixed:
+                gn = nn.GroupNorm(groups, channels).to(device).to(torch.float)
+            else:
+                gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
             gn.weight.data.uniform_()
             gn.bias.data.uniform_()
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
+            if dtype == torch.bfloat16 and is_mixed:
+                ref_gn = nn.GroupNorm(groups, channels).to(device).to(torch.float)
+            else:
+                ref_gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
             ref_gn.load_state_dict(gn.state_dict())
-
             out = gn(input)
             out.backward(grad)
             ref_out = ref_gn(ref_input)
@@ -8242,13 +8304,31 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
             self.assertTrue(ref_out.is_contiguous())
             self.assertEqual(out, ref_out)
-            self.assertEqual(gn.weight.grad, ref_gn.weight.grad)
-            self.assertEqual(gn.bias.grad, ref_gn.bias.grad)
-            self.assertEqual(input.grad, ref_input.grad)
+            # parameters in bfloat16 is not recommended
+            if dtype != torch.bfloat16 or is_mixed:
+                self.assertEqual(gn.weight.grad, ref_gn.weight.grad, atol=5e-4, rtol=5e-4)
+                self.assertEqual(gn.bias.grad, ref_gn.bias.grad, atol=5e-4, rtol=5e-4)
+                self.assertEqual(input.grad, ref_input.grad, atol=5e-4, rtol=8e-3)
 
-        helper(self, (4, 8, 10, 10), 4, torch.channels_last)
-        helper(self, (2, 30, 9, 9), 3, torch.channels_last)
-        helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d)
+        helper(self, (4, 8, 10, 10), 4, torch.channels_last, False)
+        helper(self, (2, 30, 9, 9), 3, torch.channels_last, False)
+        helper(self, (4, 8, 40, 40), 4, torch.channels_last, False)
+        helper(self, (4, 40, 40, 40), 2, torch.channels_last, False)
+        helper(self, (2, 30, 50, 50), 3, torch.channels_last, False)
+        helper(self, (2, 60, 50, 50), 3, torch.channels_last, False)
+        helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d, False)
+        helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, False)
+        helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, False)
+
+        helper(self, (4, 8, 10, 10), 4, torch.channels_last, True)
+        helper(self, (2, 30, 9, 9), 3, torch.channels_last, True)
+        helper(self, (4, 8, 40, 40), 4, torch.channels_last, True)
+        helper(self, (4, 40, 40, 40), 2, torch.channels_last, True)
+        helper(self, (2, 30, 50, 50), 3, torch.channels_last, True)
+        helper(self, (2, 60, 50, 50), 3, torch.channels_last, True)
+        helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d, True)
+        helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, True)
+        helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, True)
 
     @onlyNativeDeviceTypes
     def test_GroupNorm_numeric(self, device):
