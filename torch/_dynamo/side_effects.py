@@ -217,7 +217,7 @@ class SideEffects:
             # we need a valid source if this variable has functions
             # called on it and those functions have default args we need to guard.
             # But we're inlining, so what source is valid?
-            source=cls_source,
+            source=None,
             **options,
         )
         self.id_to_variable[id(obj)] = variable
