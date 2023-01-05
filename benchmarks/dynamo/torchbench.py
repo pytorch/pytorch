@@ -192,6 +192,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
         super(TorchBenchmarkRunner, self).__init__()
         self.suite_name = "torchbench"
+        self.optimizer = None
 
     @property
     def skip_models(self):
@@ -297,6 +298,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
+
+        if self.args.trace_on_xla:
+            # work around for: https://github.com/pytorch/xla/issues/4174
+            import torch_xla  # noqa: F401
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 
