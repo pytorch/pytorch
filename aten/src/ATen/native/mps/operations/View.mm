@@ -130,9 +130,9 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
     // E.g: x = torch.randn((3,6))[1, 1:3]
     int nextSliceOffset = src.storage_offset() % view_numel;
 
-    [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), src.sizes()[firstDimToSlice]}];
+    [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
     if (nextSliceOffset) {
-      [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), src.sizes()[firstDimToSlice+1]}];
+      [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
     }
   }
   else {
@@ -169,7 +169,7 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
     // starting point from where the slice should start
     int sliceOffset = src_ndim_view == 1 ? 1 : dim0;
     int view_numel = src_ndim_view == 1 ? 1 : src_view_numel;
-    [srcTensorNDArrayDesc sliceDimension:finalShapeSize - 1 withSubrange:{static_cast<NSUInteger>((src.storage_offset() / view_numel) * sliceOffset), totalSlices}];
+    [srcTensorNDArrayDesc sliceDimension:finalShapeSize - 1 withSubrange:{static_cast<NSUInteger>((src.storage_offset() / view_numel) * sliceOffset), static_cast<NSUInteger>(totalSlices)}];
   }
 
   srcTensorNDArrayView = [srcTensorNDArray arrayViewWithCommandBuffer:commandBuffer
