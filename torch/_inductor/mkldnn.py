@@ -772,6 +772,7 @@ unary_ops = [
     # functional
     F.relu,
     F.sigmoid,
+    F.tanh,
     F.hardswish,
     F.leaky_relu,
     F.hardtanh,
