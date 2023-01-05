@@ -69,7 +69,7 @@ class Scope(torch.fx.proxy.Scope):
 
 
 class ScopeContextManager(torch.fx.proxy.ScopeContextManager):
-    def __init__( self, scope: Scope, current_scope: Scope):
+    def __init__(self, scope: Scope, current_scope: Scope):
         super().__init__(scope, current_scope)
 
 
