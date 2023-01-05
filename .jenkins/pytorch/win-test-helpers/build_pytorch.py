@@ -78,20 +78,13 @@ subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py'
 subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
 
 try:
+    os.environ['PATH'] = os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Library\\bin;' + os.environ['CONDA_PARENT_DIR'] +\
+        '\\Miniconda3;' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts;' + os.environ['PATH']
+
     subprocess.run(['conda', 'env', 'list'], shell=True)
-    subprocess.run(['echo', 'running conda succeded'], shell=True)
+
 except Exception as e:
-    subprocess.run(['echo', 'running conda failed'], shell=True)
-    subprocess.run(['echo', e], shell=True)
-
-    try:
-        os.environ['PATH'] = os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Library\\bin;' + os.environ['CONDA_PARENT_DIR'] +\
-            '\\Miniconda3;' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts;' + os.environ['PATH']
-
-        subprocess.run(['conda', 'env', 'list'], shell=True)
-
-    except Exception as e:
-        None
+    None
 
 # Install ninja and other deps
 if 'REBUILD' not in os.environ:
@@ -237,8 +230,7 @@ else:
 
     # export test times so that potential sharded tests that'll branch off this build will use consistent data
     subprocess.call('conda run -n test_env' + ' python tools/stats/export_test_times.py', shell=True)
-    # shutil.copy(".pytorch-test-times.json", os.environ['PYTORCH_FINAL_PACKAGE_DIR'])
-    shutil.copy(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN'] + '\\.pytorch-test-times.json', os.environ['PYTORCH_FINAL_PACKAGE_DIR'])
+    shutil.copy(".pytorch-test-times.json", os.environ['PYTORCH_FINAL_PACKAGE_DIR'])
 
     # Also save build/.ninja_log as an artifact
     shutil.copy("build\\.ninja_log", os.environ['PYTORCH_FINAL_PACKAGE_DIR'] + '\\')
