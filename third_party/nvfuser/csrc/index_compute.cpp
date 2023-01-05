@@ -1,8 +1,8 @@
 #include <index_compute.h>
 
+#include <arith.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <arith.h>
 #include <contiguity.h>
 #include <instrumentation.h>
 #include <ir_all_nodes.h>
@@ -34,8 +34,10 @@ int getProducerHaloOffset(
     const TensorView* producer_tv,
     size_t producer_axis,
     const TensorView* consumer_tv) {
+  // For indexing, having same extents is not required for root
+  // domains
   auto p2c =
-      PairwiseRootDomainMap(producer_tv, consumer_tv)
+      PairwiseRootDomainMap(producer_tv, consumer_tv, false, false)
           .mapProducerToConsumer(producer_tv->domain(), consumer_tv->domain());
 
   auto producer_id = producer_tv->getMaybeRFactorDomain()[producer_axis];
@@ -1339,8 +1341,7 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
 
   // Replay producer to look like consumer so we can index on producer since
   // our loop nests look like consumer
-  auto pairwise_map =
-      PairwiseRootDomainMap(producer_tv, consumer_tv, false, true);
+  auto pairwise_map = PairwiseRootDomainMap(producer_tv, consumer_tv, false);
 
   TensorDomain* producerAsC =
       TransformReplay::replayPasC(producer_tv, consumer_tv, -1, pairwise_map)
@@ -1352,7 +1353,7 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   // Map sent to best effort replay needs to match the exact incantation for
   // compute_at_mode.cpp with MappingMode::Index
   auto c2p_root_map =
-      PairwiseRootDomainMap(producer_tv, consumer_tv, true, true)
+      PairwiseRootDomainMap(producer_tv, consumer_tv, true)
           .mapConsumerToProducer(consumer_tv->domain(), producer_tv->domain());
 
   // This replay has to be consistent with compute at index map.
@@ -1364,8 +1365,15 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   auto c2p_map = replay_producer_as_consumer.getReplay();
 
   // Make sure at least root domains are mapped even when extents may
-  // be different. This mapping is important for the indexing of torch.gather
-  // operator. Note that when the consumer has swizzle, the swizzle are skipped,
+  // be different. This mapping is important for the indexing lookup
+  // tensors of PyTorch gather as a producer. The IDs of a lookup
+  // tensor may have larger extents than those of the corresponding
+  // output tensor, but the index expressions to those output IDs can
+  // still be used for the producer. Note that we always do not map
+  // the indirectly accessed ID and its corresponding output ID. The
+  // above relaxed mapping is only for the rest of the IDs.
+  //
+  // Note that when the consumer has swizzle, the swizzle are skipped,
   // for this case, we should allow the root unmapped, otherwise the c2p_map
   // might no longer be injective.
   const auto p2c_map_ = invertOneToOneMap(c2p_map);

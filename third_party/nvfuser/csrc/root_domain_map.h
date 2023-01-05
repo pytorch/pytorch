@@ -78,13 +78,20 @@ class TORCH_CUDA_CU_API RootDomainMap : public PolymorphicBase {
 //! should be valid otherwise.
 class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
  public:
+  //! When require_same_extent is false, domains that may have
+  //! different extents are also mapped. For example, IDs of lookup
+  //! tensors in gather may have larger extents than the corresponding
+  //! IDs of the output and index tensors. This relaxation is
+  //! necessary when indexing into lookup tensors as producers.
+  //!
   //! \param producer The producer tensor of a producer-consumer pair.
   //! \param consumer The consumer tensor of a producer-consumer pair.
+  //! \param is_exact If true, broadcast andnon-broadcast IDs are not mapped
   explicit PairwiseRootDomainMap(
       const TensorView* producer,
       const TensorView* consumer,
       bool is_exact = false,
-      bool require_same_extent = false);
+      bool require_same_extent = true);
 
   const TensorView* producerTv() const {
     return producer_tv_;
