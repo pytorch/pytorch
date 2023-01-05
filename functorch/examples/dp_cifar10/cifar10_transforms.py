@@ -116,6 +116,9 @@ def train(args, model, train_loader, optimizer, epoch, device):
         # the loss, and the auxiliary value.
         grads_loss_output = grad_and_value(compute_loss_and_output, has_aux=True)
         weights = {k: v for k, v in model.named_parameters()}
+
+        # detaching weights since we don't need to track gradients outside of transforms
+        # and this is more performant
         detached_weights = {k: v.detach() for k, v in weights.items()}
         sample_grads, (sample_loss, output) = \
             vmap(grads_loss_output, (None, 0, 0))(detached_weights, images, target)
