@@ -478,7 +478,7 @@ class Reduction(Loops):
 
     @cache_on_self
     def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(MockHandler())
+        formatter = V.KernelFormatterHandler(V.MockHandler())
         with V.set_ops_handler(formatter), patch.object(
             FlexibleLayout, "allow_indexing", True
         ):
