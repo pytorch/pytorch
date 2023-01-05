@@ -951,6 +951,71 @@ void dumpCompiledCodeToFile(
 }
 #endif
 
+#ifndef USE_ROCM
+// Get the max register count passed as -maxrregcount ptxas
+// option. The count is determined based on block sizes, an optional
+// heuristic and an environment variable.
+c10::optional<int> getMaxRegCount(
+    c10::optional<int> opt_block_size,
+    const int max_register_heuristic) {
+  // The maximum possible count allowed by ptxas is 255
+  constexpr int max_register_limit = 255;
+
+  // Temporary set the max register count to be larger than the
+  // limit.
+  int max_register = max_register_limit + 1;
+
+  // If the block size is known, set the maximum that at least allows
+  // one block to be resident on an SM
+  if (opt_block_size.has_value() && opt_block_size.value() > 0) {
+    int num_partition = 0;
+    int reg_allocation_granularity = 0;
+    const auto prop = at::cuda::getCurrentDeviceProperties();
+    cudaOccDeviceProp occ_prop(*prop);
+    cudaOccSubPartitionsPerMultiprocessor(&num_partition, &occ_prop);
+    cudaOccRegAllocationGranularity(&reg_allocation_granularity, &occ_prop);
+    int warp_size = prop->warpSize;
+    int num_warps = ceilDiv(opt_block_size.value(), warp_size);
+
+    // warps could be distributed unevenly across partition
+    int max_warps_per_sm_partition = ceilDiv(num_warps, num_partition);
+    // registers are evenly distributed across partitions, partition with most
+    // wraps determins the maximum register available per warp
+    int max_reg_per_warp =
+        prop->regsPerBlock / num_partition / max_warps_per_sm_partition;
+    // clamp down to register allocation granularity at warp level
+    int effective_max_reg_per_warp = max_reg_per_warp /
+        reg_allocation_granularity * reg_allocation_granularity;
+    max_register =
+        std::min(max_register_limit, effective_max_reg_per_warp / warp_size);
+  }
+
+  // If a heuristic value is given, i.e., max_register_heuristic is
+  // less than the limit, use that value if it's smaller than the
+  // block-size based count
+  if (max_register_heuristic < max_register_limit) {
+    max_register = std::min(max_register, max_register_heuristic);
+  }
+
+  // Overwrite the count by the environment variable
+  if (auto env_count = getenv("PYTORCH_NVFUSER_MAX_REG_COUNT")) {
+    auto env_max_reg_count = std::atoi(env_count);
+    TORCH_CHECK(
+        env_max_reg_count > 0 && env_max_reg_count <= max_register_limit,
+        "Invalid max register count specified by PYTORCH_NVFUSER_MAX_REG_COUNT: ",
+        env_max_reg_count);
+    max_register = env_max_reg_count;
+  }
+
+  // At this point, max_register should be <= max_register_limit if set
+  if (max_register <= max_register_limit) {
+    return max_register;
+  } else {
+    return c10::optional<int>();
+  }
+}
+#endif // USE_ROCM
+
 } // namespace
 
 std::pair<NvrtcFunction, std::string> nvrtcCompile(
@@ -1104,51 +1169,31 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   }
 
 #ifndef USE_ROCM
+  const auto max_register =
+      getMaxRegCount(opt_block_size, max_register_heuristic);
+
   // keeping the string outside the loop for lifetime
   std::string max_register_usage = "--maxrregcount=";
-  // The maximum possible count allowed by ptxas is 255
-  int max_register = 255;
-  bool valid_block_size =
-      opt_block_size.has_value() && opt_block_size.value() > 0;
-  if (max_register_heuristic < 255 || valid_block_size) {
-    if (valid_block_size) {
-      int num_partition = 0;
-      int reg_allocation_granularity = 0;
-      cudaOccDeviceProp occ_prop(*prop);
-      cudaOccSubPartitionsPerMultiprocessor(&num_partition, &occ_prop);
-      cudaOccRegAllocationGranularity(&reg_allocation_granularity, &occ_prop);
-      int warp_size = prop->warpSize;
-      int num_warps = ceilDiv(opt_block_size.value(), warp_size);
 
-      // warps could be distributed unevenly across partition
-      int max_warps_per_sm_partition = ceilDiv(num_warps, num_partition);
-      // registers are evenly distributed across partitions, partition with most
-      // wraps determins the maximum register available per warp
-      int max_reg_per_warp =
-          prop->regsPerBlock / num_partition / max_warps_per_sm_partition;
-      // clamp down to register allocation granularity at warp level
-      int effective_max_reg_per_warp = max_reg_per_warp /
-          reg_allocation_granularity * reg_allocation_granularity;
-      max_register =
-          std::min(max_register, effective_max_reg_per_warp / warp_size);
-    }
-
-    max_register = std::min(max_register, max_register_heuristic);
-
+  // If the max register count is set
+  if (max_register.has_value()) {
     if (compile_to_sass) {
-      max_register_usage += std::to_string(max_register);
+      max_register_usage += std::to_string(*max_register);
       args.push_back("--ptxas-options");
       args.push_back(max_register_usage.c_str());
     } else {
+      // TODO: Why max register is set when compiled to PTX?
       options.push_back(CU_JIT_MAX_REGISTERS);
-      option_vals.push_back((void*)(intptr_t)max_register);
+      option_vals.push_back((void*)(intptr_t)*max_register);
     }
+  }
 
+  if (compile_to_sass) {
     ptxas_log << "\nCompile options: ";
     for (auto arg : args) {
       ptxas_log << arg << " ";
     }
-    if (valid_block_size) {
+    if (opt_block_size.has_value()) {
       ptxas_log << " ; block size=" << opt_block_size.value() << "\n";
     }
   }
@@ -1176,8 +1221,8 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
 
     ptxas_log << log.data() << std::endl;
     if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
-      if (max_register > 0) {
-        std::cout << "Max register count: " << max_register << std::endl;
+      if (max_register.has_value()) {
+        std::cout << "Max register count: " << *max_register << std::endl;
       }
       std::cout << log.data() << std::endl;
     }
