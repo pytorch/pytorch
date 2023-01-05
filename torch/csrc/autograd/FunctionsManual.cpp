@@ -1369,6 +1369,36 @@ Tensor sparse_sparse_matmul_backward(
   return _sparse_matrix_mask(b_grad.coalesce(), b.coalesce());
 }
 
+Tensor sparse_coo_constructor_backward(
+    const Tensor& grad,
+    const Tensor& result) {
+  if (grad.device().type() == c10::kCPU) {
+    auto values_grad = result.clone();
+    values_grad._values().fill_(1.);
+    const auto nonzero_values_grad = grad.mul(values_grad);
+    values_grad._values().zero_();
+    values_grad.add_(nonzero_values_grad);
+    return values_grad._values();
+  } else {
+    // add_ CPU modifies values in-place on the CPU, while the CUDA version allocates new values.
+
+    const auto nonzero_values_grad = grad.coalesce().mul(at::ones_like(result.coalesce()));
+
+    const auto sparse_dims = at::DimVector(result.sizes().slice(0, result.sparse_dim()));
+    const auto nonzero_grad_indices_hash = at::sparse::flatten_indices(nonzero_values_grad._indices(), sparse_dims);
+    const auto result_indices_hash = at::sparse::flatten_indices(result._indices(), sparse_dims);
+
+    const auto match_table = nonzero_grad_indices_hash.unsqueeze(-1).eq(result_indices_hash.unsqueeze(0));
+    const auto matched_idx = match_table.nonzero().select(1, 1);
+    const auto num_matches = match_table.sum(-1);
+
+    auto values_grad = at::zeros_like(result._values());
+    values_grad.index_add_(0, matched_idx, nonzero_values_grad._values().repeat_interleave(num_matches, 0));
+    return values_grad;
+  }
+}
+
+
 Tensor renorm_backward(
     const Tensor& grad,
     const Tensor& self,
