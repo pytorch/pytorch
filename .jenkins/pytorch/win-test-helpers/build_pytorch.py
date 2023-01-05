@@ -157,6 +157,7 @@ os.environ['CXX'] = 'sccache-cl'
 
 os.environ['CMAKE_GENERATOR'] = 'Ninja'
 os.environ['CMAKE_INCLUDE_PATH'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\include'
+os.environ['CMAKE_TRY_COMPILE_TARGET_TYPE'] = "STATIC_LIBRARY"
 
 
 if os.environ['USE_CUDA'] == '1':
