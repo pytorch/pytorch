@@ -85,7 +85,7 @@ def run_ort(onnx_model, onnx_model_text, pytorch_inputs, pytorch_outputs):
         sess = onnxruntime.InferenceSession(
             onnx_model, providers=["CPUExecutionProvider"]
         )
-        input_names = [i.name for i in sess.get_inputs()]
+        input_names = [ort_input.name for ort_input in sess.get_inputs()]
         return sess.run(
             None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
         )
@@ -117,9 +117,9 @@ def test_gpt2_one_shot(model_name):
     ort_outputs = run_ort(
         onnx_model, onnx_model_text, (input_ids, attention_mask), ref_outputs
     )
-    for _1, _2 in zip(ref_outputs, ort_outputs):
-        print(_1 - torch.tensor(_2))
-        assert torch.allclose(_1, torch.tensor(_2))
+    for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+        print(ref_output - torch.tensor(ort_output))
+        assert torch.allclose(ref_output, torch.tensor(ort_output))
 
 
 def test_gpt2_auto_regressive(model_name):
