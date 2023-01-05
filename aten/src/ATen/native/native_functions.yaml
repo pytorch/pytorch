@@ -12706,7 +12706,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_cross_out
+    CPU, CUDA, MPS: linalg_cross_out
 
 # linalg.lu_factor
 - func: linalg_lu_factor(Tensor A, *, bool pivot=True) -> (Tensor LU, Tensor pivots)

@@ -50,7 +50,7 @@ bool dispatchIndexKernel(TensorIteratorBase& iter,
 
   dispatch_sync(mpsStream->queue(), ^(){
     @autoreleasepool {
-    NSError* error = nil;
+      NSError* error = nil;
       constexpr uint32_t nOffsets = 3;
       const int64_t num_indices = index_size.size();
       const uint32_t numThreads = iter.numel();
