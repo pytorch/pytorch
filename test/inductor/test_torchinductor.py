@@ -5321,6 +5321,30 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_vec_cpu_only_for_all_available_isa(self):
+            def fn(x):
+                return (torch.erf(x),)
+
+            x = torch.randn((2, 9))
+            x[0, 0] = torch.nan
+            x[1, -1] = torch.nan
+
+            bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()] + [
+                None
+            ]
+            for item in bit_widths:
+                with patch.object(config.cpp, "simdlen", item):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x)
+                    compiled = compile_fx_inner(traced, [x])
+                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_vec_compare_op_cpu_only(self):
             def fn(x):
                 y1 = torch.eq(x, 1.0)
