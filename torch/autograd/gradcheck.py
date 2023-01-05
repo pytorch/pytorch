@@ -1192,7 +1192,7 @@ def _to_real_dtype(dtype):
     else:
         return dtype
 
-def _vec_from_tensor(x, generator, downcast_complex=False):
+def _vec_from_tensor(x, downcast_complex=False):
     # Create a random vector with the same number of elements as x and the same
     # dtype/device. If x is complex and downcast_complex is False, we create a
     # complex tensor with only real component.
@@ -1201,7 +1201,7 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
         # indices. Make sure size is set so that it isn't inferred to be smaller.
         x_values = x._values()
         dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
-        values = torch.rand(x_values.numel(), generator=generator) \
+        values = torch.rand(x_values.numel()) \
             .to(dtype=dtype, device=x.device) \
             .view(x_values.shape)
         values /= values.norm()
@@ -1213,14 +1213,14 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
             compressed_indices, plain_indices = x.ccol_indices(), x.row_indices()
         x_values = x.values()
         dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
-        values = torch.rand(x_values.numel(), generator=generator) \
+        values = torch.rand(x_values.numel()) \
             .to(dtype=dtype, device=x.device) \
             .view(x_values.shape)
         values /= values.norm()
         vec = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, x.size(), layout=x.layout)
     else:
         dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
-        vec = torch.rand(x.numel(), generator=generator).to(dtype=dtype, device=x.device)
+        vec = torch.rand(x.numel()).to(dtype=dtype, device=x.device)
         vec /= vec.norm()
     return vec
 
@@ -1300,22 +1300,20 @@ def _to_flat_dense_if_sparse(tensor):
 
 
 def _make_vectors(inp_tensors, outputs, *, use_forward_ad):
-    # Use our own generator to avoid messing with the user's RNG state
-    g_cpu = torch.Generator()
     all_u = []
     all_u_dense = []
     for inp in inp_tensors:
-        ur = _vec_from_tensor(inp, g_cpu, True)
+        ur = _vec_from_tensor(inp, True)
         ur_dense = _to_flat_dense_if_sparse(ur)
         if inp.is_complex():
-            ui = _vec_from_tensor(inp, g_cpu, True)
+            ui = _vec_from_tensor(inp, True)
             all_u.append((ur, ui))
             ui_dense = _to_flat_dense_if_sparse(ui)
             all_u_dense.append((ur_dense, ui_dense))
         else:
             all_u.append(ur)
             all_u_dense.append(ur_dense)
-    all_v = None if use_forward_ad else [_vec_from_tensor(out, g_cpu) for out in outputs]
+    all_v = None if use_forward_ad else [_vec_from_tensor(out) for out in outputs]
     return all_v, all_u, all_u_dense
 
 
