@@ -316,6 +316,7 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
+        assert "dtype" in V.interpreter.current_node.meta
         proposed_dtype = V.interpreter.current_node.meta["dtype"]
         if val == float("inf"):
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
@@ -405,6 +406,7 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def masked(mask, body, other):
+        assert "is_masked_load" in V.interpreter.current_node.meta
         assert V.interpreter.current_node.meta["is_masked_load"]
         code = BracesBuffer()
 
@@ -433,6 +435,8 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def index_expr(expr, dtype):
         assert dtype == torch.int64
+        assert "dtype" in V.interpreter.current_node.meta
+        assert "most_inner_loop_irrevelant" in V.interpreter.current_node.meta
         assert V.interpreter.current_node.meta["dtype"] == torch.int32
         assert V.interpreter.current_node.meta["most_inner_loop_irrevelant"]
         return f"at::vec::Vectorized<int>(static_cast<int>({cexpr(V.kernel.rename_indexing(expr))}))"
@@ -1137,11 +1141,11 @@ class CppVecKernelChecker(CppVecKernel):
                     and val >= i32_iinfo.min
                 ):
                     current_node.meta["dtype"] = torch.int32
-                f64_iinfo = numpy.finfo(numpy.float32)
+                f32_iinfo = numpy.finfo(numpy.float32)
                 if (
                     dtype == torch.double
-                    and val <= f64_iinfo.max
-                    and val >= f64_iinfo.min
+                    and val <= f32_iinfo.max
+                    and val >= f32_iinfo.min
                 ):
                     current_node.meta["dtype"] = torch.float32
 
