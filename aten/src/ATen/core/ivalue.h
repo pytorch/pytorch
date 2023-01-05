@@ -879,11 +879,7 @@ public:
     return c10::Device(payload.u.as_device.type, payload.u.as_device.index);
   }
 
-  //Stream
-//  IValue(c10::Stream stream)
-//    : tag(Tag::Stream) {
-//    payload.u.as_int = stream.pack();
-//  }
+  // Stream
   IValue(c10::Stream s)
     : tag(Tag::Stream) {
     auto v = c10::make_intrusive<ivalue::StreamData3Holder>(s.pack3());

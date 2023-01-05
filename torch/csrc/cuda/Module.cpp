@@ -207,12 +207,6 @@ PyObject* THCPModule_setStream_wrap(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  // THPUtils_assert(PyLong_Check(obj), "invalid stream");
-  // uint64_t bits = PyLong_AsUnsignedLongLong(obj);
-  // if (bits == static_cast<uint64_t>(-1) && PyErr_Occurred()) {
-  //  throw python_error();
-  //}
-  // auto stream = at::cuda::CUDAStream::unpack(bits);
   int64_t stream_id = 0;
   int64_t device_index = 0;
   int64_t device_type = 0;
