@@ -9,7 +9,7 @@ Backend::Backend(int rank, int size)
   C10_LOG_API_USAGE_ONCE("c10d.backend");
 }
 
-Backend::~Backend() {}
+Backend::~Backend() = default;
 
 void Backend::init() {
   C10_LOG_API_USAGE_ONCE(fmt::format("c10d.backend_{}", getBackendName()));

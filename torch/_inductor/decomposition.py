@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 decompositions = get_decompositions(
     [
+        aten.linspace,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
@@ -35,6 +36,7 @@ decompositions = get_decompositions(
         aten.embedding_dense_backward,
         aten.expand_as,
         aten.eye,
+        aten.fill,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
@@ -43,6 +45,7 @@ decompositions = get_decompositions(
         aten.grid_sampler_2d,
         aten.hardsigmoid,
         aten.hardsigmoid_backward,
+        aten.upsample_bilinear2d,
         aten.hardswish,
         aten.hardswish_backward,
         aten.hardtanh,
@@ -124,11 +127,6 @@ def clamp(x, min=None, max=None):
     if max is not None:
         x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
     return x
-
-
-@register_decomposition([aten.tanh])
-def tanh(x):
-    return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
 
 
 # TorchInductor-only decomposition. It should not be taken to core.
@@ -515,17 +513,6 @@ def conj_physical(self):
 @register_decomposition([aten.lift, aten.detach_])
 def lift(self):
     return self
-
-
-@register_decomposition([aten.fill.Scalar])
-def fill_scalar(self, value):
-    return torch.full_like(self, value)
-
-
-@register_decomposition([aten.fill.Tensor])
-def fill_tensor(self, value: Tensor):
-    assert value.dim() == 0, "aten.fill.Tensor only supports 0-dimension value tensor"
-    return torch.full_like(self, value.item())
 
 
 @register_decomposition([aten.bernoulli.default])

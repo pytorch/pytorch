@@ -5679,6 +5679,54 @@ class TestTorch(TestCase):
                     added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor, alpha=-1)
                     self.assertEqual(added, -tensor)
 
+    def test_index_add_correctness(self):
+        # Check whether index_add can get correct result when
+        # alpha is 1, and dtype of index is torch.long,
+        # i.e., using scatter_add
+        def helper(dim, dtype, device, size_result, size_source):
+            tensor = torch.zeros(size_result, dtype=dtype, device=device)
+            index = torch.randint(0, size_result[dim], (size_source[dim],),
+                                  dtype=torch.long, device=device)
+            if dtype.is_floating_point or dtype.is_complex:
+                source = torch.rand(size_source, dtype=dtype, device=device)
+            elif dtype.is_signed:
+                source = torch.randint(-2, 5, size_source, dtype=dtype, device=device)
+            else:
+                source = torch.randint(0, 5, size_source, dtype=dtype, device=device)
+
+            ref_out = tensor.index_add(dim, index, source, alpha=2.) / 2.
+            ref_out = ref_out.to(dtype=dtype)
+            out = tensor.index_add(dim, index, source)
+            if device == 'cuda':
+                self.assertEqual(out, ref_out, atol=1e-2, rtol=1e-2)
+            else:
+                self.assertEqual(out, ref_out.to(dtype=dtype))
+
+        for dim in [-1, -2, -3]:
+            for dtype in all_types_and_complex_and(torch.half, torch.bfloat16):
+                for device in get_all_device_types():
+                    for size in [(2, 512, 256), (5, 256, 256)]:
+                        helper(dim, dtype, device, size, size)
+
+                # Check broadcast cases on CPU
+                size_result = (2, 512, 256)
+                size_source = (1, 512, 256)
+                helper(dim, dtype, 'cpu', size_result, size_source)
+                size_result = (2, 512, 512)
+                size_source = (1, 512, 1)
+                helper(dim, dtype, 'cpu', size_result, size_source)
+                size_result = (2, 512, 256)
+                size_source = (2, 1, 256)
+                helper(dim, dtype, 'cpu', size_result, size_source)
+
+                # Check bound
+                result = torch.zeros(1, 512, 256, dtype=dtype)
+                source = torch.ones(1, 512, 256, dtype=dtype)
+                index = torch.ones(257).to(dtype=torch.long)
+                self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
+                index = (torch.ones(256) * 257).to(dtype=torch.long)
+                self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
+
     # FIXME: move to shape ops test suite
     def test_unflatten(self):
         # test args: tensor, int, sizes
@@ -6265,9 +6313,10 @@ class TestTorch(TestCase):
                                "received an invalid combination of arguments",
                                lambda: torch.LongTensor((6, 0), 1, 1, 0))
         self.assertRaisesRegex(TypeError,
-                               "missing 1 required positional arguments",
+                               r"tensor\(\) missing 1 required positional argument: \"data\"",
                                lambda: torch.tensor().new_zeros((5, 5), 0))
 
+    @skipIfTorchDynamo("will be re-enabled after #90892")
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
         self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])

@@ -5,7 +5,29 @@
 #include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/api.h>
-#include <ATen/native/vulkan/ops/Tensor.h>
+#include <ATen/native/vulkan/ops/Convert.h>
+
+#define CONCAT_LITERALS(a, b) #a #b
+#ifdef USE_VULKAN_SHADERC_RUNTIME
+#include <ATen/native/vulkan/glsl.h>
+#define VK_KERNEL(name)                          \
+  ::at::native::vulkan::api::ShaderSource {      \
+    CONCAT_LITERALS(vulkan., name), name##_glsl, \
+  }
+#else
+#include <ATen/native/vulkan/spv.h>
+#define VK_KERNEL(name)                                         \
+  ::at::native::vulkan::api::ShaderSource {                     \
+    CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len, \
+        name##_spv_layout                                       \
+  }
+#define VK_SHADER(name)                                                        \
+  ::at::native::vulkan::api::ShaderInfo {                                      \
+    CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len,                \
+        name##_spv_layout, name##_spv_tile_size, name##_spv_bias_storage_type, \
+        name##_spv_weight_storage_type,                                        \
+  }
+#endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 namespace at {
 namespace native {
@@ -105,12 +127,6 @@ template <uint32_t N>
 uint32_t get_dim(const vTensor& v_in) {
   return get_dim<N>(v_in.sizes());
 }
-
-/*
- * Given an IntArrayRef of up to 4 elements, constructs a uvec4 containing those
- * elements in reverse order.
- */
-api::utils::uvec4 make_nchw_uvec4(const IntArrayRef arr);
 
 inline c10::optional<Tensor> get_optional_tensor(
     const c10::impl::GenericList& gen_list,
