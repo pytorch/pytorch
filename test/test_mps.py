@@ -5451,6 +5451,13 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 3, 5), 0.1)
         helper((2, 8, 3, 5), 0.2)
 
+    def test_nan_to_num(self):
+        inputCPU = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
+        inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
+        outputCPU = torch.nan_to_num(inputCPU, nan=2.0, posinf=1.0, neginf=-1.0)
+        outputMPS = torch.nan_to_num(inputMPS, nan=2.0, posinf=1.0, neginf=-1.0)
+        self.assertEqual(outputMPS, outputCPU)
+
     # Test where
     def test_where(self):
         def helper(shape, x_shape, y_shape, cond_dtype=torch.bool, x_dtype=torch.float):
@@ -8195,6 +8202,7 @@ class TestConsistency(TestCase):
         'matmul': ['f32'],
         'mm': ['f32'],
         'mv': ['f32'],
+        'nan_to_num': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.adaptive_max_pool1d': ['f32'],
         'nn.functional.adaptive_max_pool2d': ['f32'],
