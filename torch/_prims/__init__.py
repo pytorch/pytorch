@@ -709,20 +709,12 @@ def _fill_meta(a: TensorLikeType, value: NumberType) -> TensorLikeType:
     )
 
 
-# See https://github.com/pytorch/pytorch/issues/77932 for out-of-place fill request
-def _fill_aten(a: Tensor, value: NumberType) -> Tensor:
-    t = a * False
-    with torch.no_grad():
-        t.fill_(value)  # type: ignore[arg-type]
-    return t
-
-
 # NOTE: fill uses _make_prim directly because it has a value parameter
 fill = _make_prim(
     schema="fill(Tensor self, Scalar value) -> Tensor",
     return_type=RETURN_TYPE.NEW,
     meta=_fill_meta,
-    impl_aten=_fill_aten,
+    impl_aten=torch.fill,
     doc="",
 )
 
