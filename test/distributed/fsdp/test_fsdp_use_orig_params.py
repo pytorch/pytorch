@@ -4,7 +4,7 @@ import copy
 import functools
 import itertools
 import sys
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
 import torch.nn as nn
@@ -979,7 +979,9 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 nonlocal param_shapes
                 # Allow for FSDP prefixes
-                param_names = [clean_tensor_name(tup[0]) for tup in self.named_parameters()]
+                param_names = [
+                    clean_tensor_name(tup[0]) for tup in self.named_parameters()
+                ]
                 params = [tup[1] for tup in self.named_parameters()]
                 assert (
                     param_shapes[0] is not None and param_shapes[1] is not None
