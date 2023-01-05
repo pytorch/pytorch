@@ -503,7 +503,7 @@ class record_function(_ContextDecorator):
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
         if not torch.jit.is_scripting():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 torch.ops.profiler._record_function_exit._RecordFunction(record)
         else:
             torch.ops.profiler._record_function_exit(record)
@@ -541,7 +541,7 @@ class record_function(_ContextDecorator):
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
         if not torch.jit.is_scripting():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut._RecordFunction(
                     record, fut)
         else:
