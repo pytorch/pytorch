@@ -2979,7 +2979,7 @@ TEST_F(NVFuserTest, FusionWelfordShmoo_CUDA) {
   //   Detected abs error of: 3.8062
   //     absolute tolerance was set to 2.23704e-06
   //     and relative tolerance set to 2.23704e-08
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);
   }
@@ -7268,7 +7268,7 @@ TEST_F(NVFuserTest, FusionForceFp16Simple_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionForceBf16Simple_CUDA) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   // requires ampere+ GPU
   if (!deviceMajorMinorCheck(8)) {
     GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
@@ -7365,7 +7365,7 @@ TEST_F(NVFuserTest, FusionForceFp16NotAllCast_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionForceBf16NotAllCast_CUDA) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   // requires ampere+ GPU
   if (!deviceMajorMinorCheck(8)) {
     GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
