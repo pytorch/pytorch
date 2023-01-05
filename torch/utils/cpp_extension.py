@@ -1086,7 +1086,11 @@ def CUDAExtension(name, sources, *args, **kwargs):
                                  hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
 
         sources = list(hipified_sources)
-
+        relative_sources = set()
+        for source in sources:
+            relative_sources.add("." + source.replace(build_dir, ""))
+        sources = list(relative_sources)
+        
     include_dirs += include_paths(cuda=True)
     kwargs['include_dirs'] = include_dirs
 
