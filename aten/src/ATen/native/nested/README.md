@@ -3,7 +3,7 @@ So you decided to look at the source code.. let's give you a quick overview of t
 
 ## NestedTensor Data Structure
 
-NestedTensors are a generalization of torch Tensors which eases working with data of different shapes and lengths. NestedTenosrs are mainly used to represent a list of N tensor_components. The N tensor_components are flattened and concatenated into a single tensor. The NestedTensor data structure contains the following information to recover the original tensor_components:
+NestedTensors are a generalization of torch Tensors which eases working with data of different shapes and lengths. NestedTensors are mainly used to represent a list of N tensor_components. The N tensor_components are flattened and concatenated into a single tensor. The NestedTensor data structure contains the following information to recover the original tensor_components:
 
 - size_tensor: 2d tensor of n_tensor_components x n_dims
 - stride_tensor: 2d tensor of n_tensor_components x n_dims
@@ -24,7 +24,7 @@ The NestedTensor code is split into two parts: the C++ code and the Python code.
 - `NestedTensorFactories.h | NestedTensorFactories.cpp`: Functions for creating NestedTensors (e.g. empty_like)
 - `NestedTensorMath.h | NestedTensorMath.cpp`: Math functions on NestedTensors (e.g. softmax, embedding)
 - `NestedTensorMatmul.cpp`: Matmul functions on NestedTensors (e.g. matmul, linear, bmm)
-- `NestedTensorTransformerFunctions.h | NestedTensorTransformerFunctions.cpp`: Functions for enabling the BetterTransformer workstream
+- `NestedTensorTransformerFunctions.h | NestedTensorTransformerFunctions.cpp`: Functions for enabling the BetterTransformer work stream
 - `cuda/`: CUDA implementations of the NestedTensor functions
 
 ##  Implementing new functions
@@ -46,9 +46,9 @@ Tensor map_nt(const Tensor& nt, Func f) {
 4. Call the function f on the dense tensor.
 5. Construct a new NestedTensor from the output of f and the sizes of the input NestedTensor.
 
-There are also important functions that under certain conditions of regularity they can be implemented effictevly by acccesing the underlying buffer and viewing it in a special manner. For a good example of this see the implementation of `linear` in [NestedTensorTransformerFunctions.cpp](NestedTensorTransformerFunctions.cpp).
+There are also important functions that, under certain conditions of regularity, can be implemented effectively by accessing the underlying buffer and viewing it in a special manner. For a good example of this see the implementation of `linear` in [NestedTensorTransformerFunctions.cpp](NestedTensorTransformerFunctions.cpp).
 
-The second class of functions can't be efficeintly implemented by viewing the NestedTensor as a dense tensor. An example of this is `softmax_nested`. The implementation of this function can be found in [NestedTensorMath.cpp](NestedTensorMath.cpp). This can occur when there are strict problem boundaries that occur at the tensor_component level. For example, when computing the softmax of a NestedTensor we need to compute the softmax of each tensor_component individually. This is because the softmax function is not defined on tensors of different shapes. In this case we can't view the NestedTensor as a dense tensor and apply the softmax function to the entire tensor at once. Instead we need to apply the softmax function to each tensor_component individually.
+The second class of functions can't be efficiently implemented by viewing the NestedTensor as a dense tensor. An example of this is `softmax_nested`. The implementation of this function can be found in [NestedTensorMath.cpp](NestedTensorMath.cpp). This can occur when there are strict problem boundaries that occur at the tensor_component level. For example, when computing the softmax of a NestedTensor we need to compute the softmax of each tensor_component individually. This is because the softmax function is not defined on tensors of different shapes. In this case we can't view the NestedTensor as a dense tensor and apply the softmax function to the entire tensor at once. Instead we need to apply the softmax function to each tensor_component individually.
 
 The problem with this though is that iterating over a potentially large number of tensor_components and launching individual cuda kernels for each one is very inefficient. Ideally we would launch one kernel that operates on all the tensor_components in parallel.
 
