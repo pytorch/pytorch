@@ -1286,6 +1286,7 @@ class TestMkldnn(TestCase):
             input = input.to(torch.bfloat16)
         return input
 
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_lstm(self):
         rand_seed = int(get_rand_seed())
         print("{} rand sed: {}".format(sys._getframe().f_code.co_name, rand_seed))
@@ -1293,13 +1294,14 @@ class TestMkldnn(TestCase):
 
         params_list = self._lstm_params_list()
         for dtype in types:
-            bf16 = True if dtype == torch.bfloat16 else False
-            rtol=1.3e-6
-            atol=1e-5
+            bf16 = True if dtype == torch.bfloat16 and has_bf16_support() else False
+            rtol = 1.3e-6
+            atol = 1e-5
             if bf16:
-                rtol=0.02
-                atol=0.02
-            for input_size, hidden_size, num_layers, bidirectional, bias, batch_first, dropout, batch_size, seq_len, training in itertools.product(*params_list):
+                rtol = 0.02
+                atol = 0.02
+            for input_size, hidden_size, num_layers, bidirectional, bias, batch_first, dropout, batch_size, seq_len, training \
+                    in itertools.product(*params_list):
                 num_directions = 2 if bidirectional else 1
                 if batch_first:
                     input = torch.randn(batch_size, seq_len, input_size, dtype=torch.float32)
@@ -1309,7 +1311,7 @@ class TestMkldnn(TestCase):
                 c = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
 
                 model = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional,
-                                        bias=bias, dropout=dropout, batch_first=batch_first).float()
+                                      bias=bias, dropout=dropout, batch_first=batch_first).float()
                 model.train() if training else model.eval()
                 input1 = input.clone().requires_grad_(training)
                 input2 = input.clone().requires_grad_(training)
@@ -1324,7 +1326,8 @@ class TestMkldnn(TestCase):
                 with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16):
                     torch._C._set_mkldnn_enabled(False)
                     torch.manual_seed(rand_seed)
-                    output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16), (self._cast_dtype(h1, bf16), self._cast_dtype(c1, bf16)))
+                    output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
+                                                                         (self._cast_dtype(h1, bf16), self._cast_dtype(c1, bf16)))
 
                     torch._C._set_mkldnn_enabled(True)
                     torch.manual_seed(rand_seed)
