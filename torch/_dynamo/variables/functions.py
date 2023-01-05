@@ -144,7 +144,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         fn: types.FunctionType = self.fn
         defaults = fn.__defaults__ or []
         defaults_sources = [
-            None if self.source is None else DefaultsSource(self.source, idx) for idx, _ in enumerate(defaults)
+            None if self.source is None else DefaultsSource(self.source, idx)
+            for idx, _ in enumerate(defaults)
         ]
         fake_func = types.FunctionType(
             fn.__code__,
@@ -160,7 +161,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
         if fn.__kwdefaults__:
             kwdefaults_sources = {
-                k: None if self.source is None else DefaultsSource(self.source, k, is_kw=True) for k in fn.__kwdefaults__
+                k: None
+                if self.source is None
+                else DefaultsSource(self.source, k, is_kw=True)
+                for k in fn.__kwdefaults__
             }
             fake_func.__kwdefaults__ = {
                 k: wrap(val=v, source=kwdefaults_sources[k])
@@ -179,9 +183,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
             if name == "__class__":
-                source = None if self.source is None else AttrSource(self.source, "__class__")
+                source = (
+                    None
+                    if self.source is None
+                    else AttrSource(self.source, "__class__")
+                )
                 result[name] = variables.UserDefinedClassVariable(
-                    cell.cell_contents, source=source,
+                    cell.cell_contents,
+                    source=source,
                 )
             else:
                 var = tx.match_nested_cell(name, cell)

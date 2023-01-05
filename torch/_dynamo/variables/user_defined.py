@@ -219,7 +219,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
-                source = None if self.source is None else AttrSource(AttrSource(self.source, "__class__"), name)
+                source = (
+                    None
+                    if self.source is None
+                    else AttrSource(AttrSource(self.source, "__class__"), name)
+                )
                 # TODO(jansel): add a guard to check for monkey patching?
                 return UserMethodVariable(
                     method, self, source=source, **options
