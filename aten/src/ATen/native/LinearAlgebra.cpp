@@ -1420,6 +1420,16 @@ static void addmm_impl_cpu_(
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
+        #if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+        // On AArch64 if LHS matrix in BLAS routine is transposed but RHS is not then
+        // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
+        // that will call then into ACL GEMM kernel and also additionally have support
+        // for running kernel with BF16 instructions
+        if(transpose_a && !transpose_b) {
+            mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
+            return;
+        }
+        #endif
         using opmath_t = at::opmath_type<scalar_t>;
         at::native::cpublas::gemm(
             transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
