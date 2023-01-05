@@ -41,6 +41,7 @@ from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
 import torch
 import torch.utils._pytree as pytree
+from itertools import product
 
 
 # Copied from `test_ops.py` for the purposes of duplicating `test_numpy_ref`
@@ -1882,6 +1883,156 @@ class TestMPS(TestCase):
         x = torch.tensor([[]], device='mps')
         y = -x
         self.assertEqual(x, y)
+
+    def _test_unique_scalar_empty(self, dtype, device, f):
+        # test scalar
+        x = torch.tensor(0, dtype=dtype, device=device)
+        unique, inverse, counts = f(x, return_inverse=True, return_counts=True)
+        expected_unique = torch.tensor([0], dtype=dtype, device=device)
+        expected_inverse = torch.tensor(0, device=device)
+        expected_counts = torch.tensor([1], device=device)
+        self.assertEqual(unique, expected_unique)
+        self.assertEqual(inverse, expected_inverse)
+        self.assertEqual(counts, expected_counts)
+
+        # test zero sized tensor
+        x = torch.zeros((0, 0, 3), dtype=dtype, device=device)
+        unique, inverse, counts = f(x, return_inverse=True, return_counts=True)
+        expected_unique = torch.tensor([], dtype=dtype, device=device)
+        expected_inverse = torch.empty((0, 0, 3), dtype=torch.long, device=device)
+        expected_counts = torch.tensor([], dtype=torch.long, device=device)
+        self.assertEqual(unique, expected_unique)
+        self.assertEqual(inverse, expected_inverse)
+        self.assertEqual(counts, expected_counts)
+
+    def _test_unique_with_expects(self, device, dtype, f, x, expected_unique, expected_inverse, expected_counts, additional_shape):
+        def ensure_tuple(x):
+            if isinstance(x, torch.Tensor):
+                return (x,)
+            return x
+
+        for return_inverse in [True, False]:
+            for return_counts in [True, False]:
+                # test with expected
+                ret = ensure_tuple(f(x, return_inverse=return_inverse, return_counts=return_counts))
+                self.assertEqual(len(ret), 1 + int(return_inverse) + int(return_counts))
+                self.assertEqual(expected_unique, ret[0])
+                if return_inverse:
+                    self.assertEqual(expected_inverse, ret[1])
+                if return_counts:
+                    count_index = 1 + int(return_inverse)
+                    self.assertEqual(expected_counts, ret[count_index])
+
+                # tests per-element unique on a higher rank tensor.
+                y = x.view(additional_shape)
+                y_unique, y_inverse, y_counts = f(y, return_inverse=True, return_counts=True)
+                self.assertEqual(expected_unique, y_unique)
+                self.assertEqual(expected_inverse.view(additional_shape), y_inverse)
+                self.assertEqual(expected_counts, y_counts)
+
+    def test_unique_all_dtypes(self, device="mps"):
+        def helper(dtype):
+            def ensure_tuple(x):
+                if isinstance(x, torch.Tensor):
+                    return (x,)
+                return x
+
+            if dtype is torch.bool:
+                x = torch.tensor([True, False, False, False, True, False, True, False], dtype=torch.bool, device=device)
+                expected_unique = torch.tensor([False, True], dtype=torch.bool, device=device)
+                expected_inverse = torch.tensor([1, 0, 0, 0, 1, 0, 1, 0], dtype=torch.long, device=device)
+                expected_counts = torch.tensor([5, 3], dtype=torch.long, device=device)
+            else:
+                x = torch.tensor([1, 2, 3, 2, 8, 5, 2, 3], dtype=dtype, device=device)
+                expected_unique = torch.tensor([1, 2, 3, 5, 8], dtype=dtype, device=device)
+                expected_inverse = torch.tensor([0, 1, 2, 1, 4, 3, 1, 2], device=device)
+                expected_counts = torch.tensor([1, 3, 2, 1, 1], device=device)
+
+            # test sorted unique
+            fs = (
+                lambda x, **kwargs: torch.unique(x, sorted=True, **kwargs),
+                lambda x, **kwargs: x.unique(sorted=True, **kwargs),
+            )
+            x_sliced = torch.empty(x.size(0) * 2, dtype=dtype, device=device)[::2].copy_(x)
+            xs = (x, x_sliced)
+            for f, x in product(fs, xs):
+                self._test_unique_with_expects(device, dtype, f, x, expected_unique, expected_inverse, expected_counts, (2, 2, 2))
+                self._test_unique_scalar_empty(dtype, device, f)
+
+            # test unsorted unique
+            fs = (
+                lambda x, **kwargs: torch.unique(x, sorted=False, **kwargs),
+                lambda x, **kwargs: x.unique(sorted=False, **kwargs)
+            )
+            for f, x in product(fs, xs):
+                self._test_unique_scalar_empty(dtype, device, f)
+                for return_inverse, return_counts in product((True, False), repeat=2):
+                    ret = ensure_tuple(f(x, return_inverse=return_inverse, return_counts=return_counts))
+                    self.assertEqual(len(ret), 1 + int(return_inverse) + int(return_counts))
+                    x_list = x.tolist()
+                    x_unique_list = ret[0].tolist()
+                    self.assertEqual(expected_unique.tolist(), sorted(x_unique_list))
+                    if return_inverse:
+                        x_inverse_list = ret[1].tolist()
+                        for i, j in enumerate(x_inverse_list):
+                            self.assertEqual(x_list[i], x_unique_list[j])
+                    if return_counts:
+                        count_index = 1 + int(return_inverse)
+                        x_counts_list = ret[count_index].tolist()
+                        for i, j in zip(x_unique_list, x_counts_list):
+                            count = 0
+                            for k in x_list:
+                                if k == i:
+                                    count += 1
+                            self.assertEqual(j, count)
+        [helper(dtype) for dtype in [torch.float32, torch.int64, torch.int32, torch.int16, torch.uint8]]
+
+    def test_unique(self):
+        def helper(x, return_inverse, return_counts):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            result = torch.unique(x, return_inverse=return_inverse, return_counts=return_counts)
+            result_cpu = torch.unique(cpu_x, return_inverse=return_inverse, return_counts=return_counts)
+
+            self.assertEqual(result, result_cpu)
+        helper(torch.tensor([1, 2, 4, 2, 1]), False, False)
+        helper(torch.randint(3, (10, )), False, False)
+        helper(torch.randint(3, (10, )), True, False)
+        helper(torch.randint(3, (10, )), False, True)
+        helper(torch.randint(3, (10, )), True, True)
+        helper(torch.randint(3, (1, )), True, True)
+        helper(torch.randint(3, (0, )), True, True)
+
+    def test_unique_consecutive(self):
+        def helper(x, dim, return_inverse, return_counts):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            result = torch.unique_consecutive(x, dim=dim, return_inverse=return_inverse, return_counts=return_counts)
+            result_cpu = torch.unique_consecutive(cpu_x, dim=dim, return_inverse=return_inverse, return_counts=return_counts)
+
+            self.assertEqual(result, result_cpu)
+        helper(torch.tensor([1, 2, 4, 2, 1]), 0, False, False)
+        helper(torch.randint(3, (10, )), 0, False, False)
+        helper(torch.randint(3, (10, )), 0, True, False)
+        helper(torch.randint(3, (10, )), 0, False, True)
+        helper(torch.randint(3, (10, )), 0, True, True)
+        helper(torch.randint(3, (10, )), 0, True, True)
+        helper(torch.randint(3, (1, )), 0, True, True)
+        helper(torch.randint(3, (0, )), 0, True, True)
+
+        helper(torch.tensor([[1, 1, 2, 3, 3, 2], [1, 1, 1, 2, 2, 1]]), 0, False, False)
+        helper(torch.tensor([[1, 1, 2, 3, 3, 2], [1, 1, 1, 2, 2, 1]]), 0, True, True)
+        helper(torch.randint(2, (20, 2)), 0, True, True)
+        helper(torch.randint(2, (1, 2)), 0, True, True)
+        helper(torch.randint(2, (0, 2)), 0, True, True)
+
+        helper(torch.tensor([[1, 1, 2, 3, 3, 2], [1, 1, 1, 2, 2, 1]]), 1, False, False)
+        helper(torch.tensor([[1, 1, 2, 3, 3, 2], [1, 1, 1, 2, 2, 1]]), 1, True, True)
+        helper(torch.randint(2, (2, 20)), 1, True, True)
+        helper(torch.randint(2, (2, 1)), 1, True, True)
+        helper(torch.randint(2, (2, 0)), 1, True, True)
 
     # See https://github.com/pytorch/pytorch/issues/85675
     def test_cat_non_contiguous(self):
@@ -4107,6 +4258,8 @@ class TestNLLLoss(TestCase):
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
         # input size < pad size
         helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
+        # check the workaround for the right padding bug in Monterey
+        helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
     # Test stack forward
     def test_stack(self):
@@ -7967,6 +8120,7 @@ class TestConsistency(TestCase):
         'combinations': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'conj': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'conj_physical': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'constant_pad_nd': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'contiguous': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'corrcoef': ['f32'],
         'cos': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
@@ -7978,7 +8132,7 @@ class TestConsistency(TestCase):
         'diag_embed': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'diagflat': ['f32', 'i32'],
         'diagonal_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'diff': ['f16', 'f32', 'i16', 'i32', 'i64'],
+        'diff': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'dist': ['f32'],
         'dot': ['f32', 'i16', 'i32', 'i64', 'u8'],
         'einsum': ['f32'],
@@ -7996,6 +8150,7 @@ class TestConsistency(TestCase):
         'floor': ['f32', 'f16', 'i16', 'i32', 'i64'],
         'floor_divide': ['f32', 'f16'],
         'frac': ['f16', 'f32'],
+        'gather': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'gradient': ['f16', 'f32', 'i16'],
         'half': ['f16'],
         'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8058,12 +8213,11 @@ class TestConsistency(TestCase):
         'nn.functional.local_response_norm': ['f32'],
         'nn.functional.margin_ranking_loss': ['f32', 'i16', 'i32'],
         'nn.functional.mse_loss': ['f16', 'f32'],
-        'nn.functional.pad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'nn.functional.pairwise_distance': ['f16',
-                                            'f32',
-                                            'i16',
-                                            'i32',
-                                            'i64'],
+        'nn.functional.pad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'nn.functional.padconstant': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'nn.functional.padreflect': ['f32'],
+        'nn.functional.padreplicate': ['f32'],
+        'nn.functional.pairwise_distance': ['f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.poisson_nll_loss': ['f32', 'i16', 'i32', 'u8'],
         'nn.functional.prelu': ['f32'],
         'nn.functional.relu': ['f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8078,10 +8232,7 @@ class TestConsistency(TestCase):
         'nn.functional.tanhshrink': ['f32', 'i16', 'i32', 'u8'],
         'nn.functional.threshold': ['f32', 'i16', 'i32', 'i64', 'u8'],
         'nn.functional.triplet_margin_loss': ['f32', 'i16', 'i32', 'i64'],
-        'nn.functional.triplet_margin_with_distance_loss': ['f32',
-                                                            'i16',
-                                                            'i32',
-                                                            'i64'],
+        'nn.functional.triplet_margin_with_distance_loss': ['f32', 'i16', 'i32', 'i64'],
         'nn.functional.upsample_bilinear': ['f32'],
         'norm': ['f32', 'f16'],
         'positive': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8090,13 +8241,7 @@ class TestConsistency(TestCase):
         'real': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'reciprocal': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'repeat': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'repeat_interleave': ['b8',
-                              'f16',
-                              'f32',
-                              'i16',
-                              'i32',
-                              'i64',
-                              'u8'],
+        'repeat_interleave': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'resize_': ['b8', 'i16', 'i32', 'i64', 'u8'],
         'resize_as_': ['b8', 'i16', 'i32', 'i64', 'u8'],
         'resolve_conj': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8104,6 +8249,8 @@ class TestConsistency(TestCase):
         'rot90': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'round': ['f32', 'f16', 'i16', 'i32', 'i64'],
         'rsqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
+        'scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'scatter_add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'select_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'sgn': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'short': ['i16'],
@@ -8146,7 +8293,8 @@ class TestConsistency(TestCase):
         'vstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nonzero': ['f32', 'i16', 'i32', 'i64']
+        'nonzero': ['f32', 'i16', 'i32', 'i64'],
+        'unique_consecutive': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
     }
 
 
@@ -8336,7 +8484,6 @@ class TestConsistency(TestCase):
 
         # Functions that hard crash
         'nn.functional.nll_loss': [torch.float32],
-        'nn.functional.padreflect': [torch.float32], 'nn.functional.padreplicate': [torch.float32],
         'std': [torch.float16],
         'stft': [torch.float32], 'var': [torch.float16],
         # + forward when requires_grad=True or running backward
@@ -8370,11 +8517,8 @@ class TestConsistency(TestCase):
         'sigmoid': [torch.int64],
         'slice_scatter': [torch.uint8],
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8],  # moved from section below
-
         # count_nonzero returns wrong results for these dtypes
         'nonzero': [torch.uint8, torch.float16],
-        # ALLOW_LIST doesn't know about variants
-        'nn.functional.padconstant': None,
 
         # These were moved from ALLOWLIST to BLOCK as they are not working
         # locally
