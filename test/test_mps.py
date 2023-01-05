@@ -1343,6 +1343,12 @@ class TestMPS(TestCase):
                 actual_pts[i, j] = X[pts[i, j], j]
                 self.assertEqual(actual_pts[i, j], actual_pts_mps[i, j])
 
+    def test_slice_scatter(self):
+        shape = (4, 4)
+        tensor = torch.randint(10, shape, device="mps")
+        tensor_before = tensor.clone()
+        torch.empty(shape[0], shape[1] * 2, device="mps")[:, ::2].copy_(tensor)
+        torch.testing.assert_close(tensor, tensor_before)
 
     def test_slice(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]

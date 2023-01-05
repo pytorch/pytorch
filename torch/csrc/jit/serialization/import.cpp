@@ -290,9 +290,11 @@ Module ScriptModuleDeserializer::deserialize(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
-    c10::optional<at::Device> device) {
+    c10::optional<at::Device> device,
+    bool load_debug_files) {
   ExtraFilesMap extra_files;
-  return import_ir_module(std::move(cu), in, device, extra_files);
+  return import_ir_module(
+      std::move(cu), in, device, extra_files, load_debug_files);
 }
 
 static Module _load_jit_module_from_bytes(
@@ -344,12 +346,14 @@ Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    bool load_debug_files) {
   in.seekg(0, in.beg);
   // NOTE: Zipformat can be large files. So using stream version directly
   // instead of reading the file all at once.
   if (getFileFormat(in) != FileFormat::FlatbufferFileFormat) {
     auto reader = torch::make_unique<PyTorchStreamReader>(&in);
+    reader->setShouldLoadDebugSymbol(load_debug_files);
     ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
     return deserializer.deserialize(device, extra_files);
   }
@@ -379,20 +383,24 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& filename,
-    c10::optional<at::Device> device) {
+    c10::optional<at::Device> device,
+    bool load_debug_files) {
   ExtraFilesMap extra_files;
-  return import_ir_module(std::move(cu), filename, device, extra_files);
+  return import_ir_module(
+      std::move(cu), filename, device, extra_files, load_debug_files);
 }
 
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& filename,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    bool load_debug_files) {
   // NOTE: Zipformat can be large files. So using stream version directly
   // instead of reading the file all at once.
   if (getFileFormat(filename) != FileFormat::FlatbufferFileFormat) {
     auto reader = torch::make_unique<PyTorchStreamReader>(filename);
+    reader->setShouldLoadDebugSymbol(load_debug_files);
     ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
     return deserializer.deserialize(device, extra_files);
   }
@@ -405,70 +413,90 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<at::Device> device) {
+    c10::optional<at::Device> device,
+    bool load_debug_files) {
   ExtraFilesMap extra_files;
-  return import_ir_module(std::move(cu), std::move(rai), device, extra_files);
+  return import_ir_module(
+      std::move(cu), std::move(rai), device, extra_files, load_debug_files);
 }
 
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    bool load_debug_files) {
   std::shared_ptr<ReadAdapterInterface> rai_shared = std::move(rai);
-  return import_ir_module(cu, rai_shared, device, extra_files);
+  return import_ir_module(
+      cu, rai_shared, device, extra_files, load_debug_files);
 }
 
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::shared_ptr<ReadAdapterInterface> rai,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    bool load_debug_files) {
   auto reader = std::make_shared<PyTorchStreamReader>(std::move(rai));
+  reader->setShouldLoadDebugSymbol(load_debug_files);
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
-}
-
-Module load(std::istream& in, c10::optional<at::Device> device) {
-  auto cu = std::make_shared<CompilationUnit>();
-  return import_ir_module(std::move(cu), in, device);
 }
 
 Module load(
     std::istream& in,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
-  return import_ir_module(std::move(cu), in, device, extra_files);
+  return import_ir_module(std::move(cu), in, device, load_debug_files);
 }
 
-Module load(const std::string& filename, c10::optional<at::Device> device) {
+Module load(
+    std::istream& in,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files,
+    bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
-  return import_ir_module(std::move(cu), filename, device);
+  return import_ir_module(
+      std::move(cu), in, device, extra_files, load_debug_files);
 }
 
 Module load(
     const std::string& filename,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
-  return import_ir_module(std::move(cu), filename, device, extra_files);
+  return import_ir_module(std::move(cu), filename, device, load_debug_files);
 }
 
 Module load(
-    std::shared_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device) {
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files,
+    bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
-  ExtraFilesMap extra_files;
-  return import_ir_module(std::move(cu), std::move(rai), device, extra_files);
+  return import_ir_module(
+      std::move(cu), filename, device, extra_files, load_debug_files);
 }
 
 Module load(
     std::shared_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files) {
+    bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
-  return import_ir_module(std::move(cu), std::move(rai), device, extra_files);
+  ExtraFilesMap extra_files;
+  return import_ir_module(
+      std::move(cu), std::move(rai), device, extra_files, load_debug_files);
+}
+
+Module load(
+    std::shared_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device,
+    ExtraFilesMap& extra_files,
+    bool load_debug_files) {
+  auto cu = std::make_shared<CompilationUnit>();
+  return import_ir_module(
+      std::move(cu), std::move(rai), device, extra_files, load_debug_files);
 }
 
 Module _load_jit_module_from_bytes(
