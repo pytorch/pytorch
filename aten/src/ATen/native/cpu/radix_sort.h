@@ -3,9 +3,9 @@
 
 #if !AT_PARALLEL_OPENMP
 
-namespace at { namespace native {
+namespace at::native {
 
-bool inline is_radix_sort_available() { return false; }
+constexpr bool is_radix_sort_available() { return false; }
 
 template <typename K, typename V>
 std::pair<K*, V*> radix_sort_parallel(
@@ -18,14 +18,14 @@ std::pair<K*, V*> radix_sort_parallel(
   TORCH_CHECK(false, "radix_sort_parallel: ATen is not compiled with OpenMP support");
 }
 
-}} // at::native
+} // at::native
 
 #else
 
 #include <omp.h>
 #include <c10/util/llvmMathExtras.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -140,7 +140,7 @@ void radix_sort_kernel(
 
 } // namespace
 
-bool inline is_radix_sort_available() { return true; }
+constexpr bool is_radix_sort_available() { return true; }
 
 template <typename K, typename V>
 std::pair<K*, V*> radix_sort_parallel(
@@ -191,6 +191,6 @@ std::pair<K*, V*> radix_sort_parallel(
                           : std::make_pair(tmp_key_buf, tmp_value_buf));
 }
 
-}} // at::native
+} // at::native
 
 #endif
