@@ -1380,7 +1380,7 @@ Tensor sparse_coo_constructor_backward(
     values_grad.add_(nonzero_values_grad);
     return values_grad._values();
   } else {
-    // add_ CPU modifies values in-place on the CPU, while the CUDA version allocates new values.
+    // add_ modifies values in-place on the CPU, while the CUDA version allocates new values.
 
     const auto nonzero_values_grad = grad.coalesce().mul(at::ones_like(result.coalesce()));
 
