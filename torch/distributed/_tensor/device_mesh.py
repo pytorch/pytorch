@@ -52,16 +52,10 @@ MeshExprT = Union[
 ]
 
 
-def _get_or_create_default_group(device_type, world_size, rank):
+def _get_or_create_default_group(device_type):
     if not is_initialized():
         _backend = "gloo" if device_type == "cpu" else "nccl"
-        hostname = "localhost"
-        port = 25364
-        is_master = rank == 0
-        # TODO: actually mesh size can be smaller than world_size, right???
-        # world_size = math.prod(self.mesh.size())
-        store = TCPStore(hostname, port, world_size, is_master, timedelta(minutes=5))
-        init_process_group(backend=_backend, world_size=world_size, rank=rank, store=store)
+        init_process_group(backend=_backend)
     return _get_default_group()
 
 
@@ -119,8 +113,6 @@ class DeviceMesh(object):
         device_type: str,
         mesh: MeshExprT,
         dim_groups: Optional[List[ProcessGroup]] = None,
-        world_size: Optional[int] = 1,
-        rank: Optional[int] = 0,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
@@ -128,7 +120,7 @@ class DeviceMesh(object):
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
-        default_pg = _get_or_create_default_group(device_type, world_size, rank)
+        default_pg = _get_or_create_default_group(device_type)
         self._backend = default_pg._get_backend_name()
         # TODO: if user want to pass pg_options, offer a way to do it
         # check default pg backend, should support device_type
