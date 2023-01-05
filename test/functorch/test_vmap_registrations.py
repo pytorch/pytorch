@@ -138,7 +138,6 @@ xfail_not_implemented = {
     "aten::greater.Scalar",
     "aten::greater_.Scalar",
     "aten::greater_.Tensor",
-    "aten::greater_equal.Scalar",
     "aten::greater_equal_.Scalar",
     "aten::greater_equal_.Tensor",
     "aten::gru.data",
