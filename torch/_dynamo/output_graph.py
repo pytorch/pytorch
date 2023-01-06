@@ -20,7 +20,6 @@ from typing import (
     Union,
 )
 
-import sympy
 from typing_extensions import Protocol
 
 import torch.nn
@@ -41,7 +40,7 @@ from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, LocalSource, Source
+from .source import ConstantSource, is_constant_source, LocalSource, ShapeEnvSource
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,
@@ -202,6 +201,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             shape_env=ShapeEnv() if config.dynamic_shapes else None,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
+        if config.dynamic_shapes:
+            # Register a SHAPE_ENV guard to make sure we setup shape guards
+            # that show up in ShapeEnv
+            self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
@@ -240,7 +244,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.unspec_variable_map: Dict[
             str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
         ] = {}
-        self.intermediary_symbols: Dict[sympy.Expr, None] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -364,16 +367,20 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
 
     def register_attr_or_module(
-        self, target: Union[torch.nn.Module, torch.Tensor, Any], *names, **options
+        self,
+        target: Union[torch.nn.Module, torch.Tensor, Any],
+        *names,
+        **options,
     ):
         if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
-        source: Source = options.get("source", None)
+        assert "source" in options
+        source = options["source"]
         if isinstance(target, torch.Tensor):
-            if source:
+            if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
@@ -398,7 +405,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             # Attrs that are tenors and symints and such need to be migrated to have their
             # own storage
             # alas, this is like this for now
-            self.intermediary_symbols.update({target.get_pyobj().expr: None})
 
             def wrap_name(module_key):
                 return DynamicShapeVariable.create(

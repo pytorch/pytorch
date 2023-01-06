@@ -22,34 +22,39 @@ def load_state_dict(
     planner: LoadPlanner = None,
 ) -> None:
     """
-    Load a distributed state_dict in SPMD style.
+    Loads a distributed ``state_dict`` in SPMD style.
 
     Each rank will try to read the least amount of data necessary
-    to fullfill the requested `state_dict`.
+    to fullfill the requested `state_dict`. When loading :class:`ShardedTensor`
+    instances, each rank only reads data for their local shards.
 
-    When loading ShardedTensor instances, each rank only
-    reads data for their local shards.
-
+    .. warning::
     All tensors in ``state_dict`` must be allocated on their
-    destination device prior to calling this function.
+    destination device *prior to* calling this function.
 
     All non-tensor data is loaded using `torch.load()` and modified in place
     on state_dict.
 
+    .. warning::
     Users must call `load_state_dict` on the root module to ensure load
     pos-processing and non-tensor data properly propagates.
 
+    .. note:
     This function can be used for local inference and load a checkpoint
     produced by ``save_state_dict`` without having a process group initialized
     by passing ``no_dist=True`` and by using Tensors instead of ShardedTensors.
 
     Args:
         state_dict (Dict[str, Any]) : The state_dict to load. Note that this
-            state dict will updated in places.
+            state dict will updated in place.
         storage_reader (StorageReader): StorageReader used to load data from.
-        process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
-        coordinator_rank (int): Rank to use to coordinate the checkpoint, rank0 is used by default
-        no_dist (bool): Don't attempt to load in SPMD style. Default to False
+        process_group (ProcessGroup):
+            ProcessGroup to be used for cross-rank synchronization.
+        coordinator_rank (int):
+            Rank to use to coordinate the checkpoint.
+            rank0 is used by default.
+        no_dist (bool): If ``True``, distributed checkpoint will not save
+            in SPMD style. (Default: ``False``)
 
     Returns:
         None.
@@ -71,12 +76,13 @@ def load_state_dict(
         >>> # ensure correct behavior.
         >>> my_model.load_state_dict(model_state_dict)
 
-    .. note:: load_state_dict uses collectives to coordinate reads across ranks.
-        For NCCL-based process groups, internal tensor representations of objects
-        must be moved to the GPU device before communication takes place. In this
-        case, the device used is given by ``torch.cuda.current_device()`` and it
-        is the user's responsibility to ensure that this is set so that each rank
-        has an individual GPU, via ``torch.cuda.set_device()``
+    .. note::
+        load_state_dict uses collectives to coordinate reads across ranks.
+        For NCCL-based process groups, internal tensor representations of
+        objects must be moved to the GPU device before communication takes place.
+        In this case, the device used is given by ``torch.cuda.current_device()``
+        and it is the user's responsibility to ensure that this is set so that each
+        rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
