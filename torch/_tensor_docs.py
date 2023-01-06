@@ -5478,7 +5478,7 @@ Example::
     25
 
     >>> dense = torch.zeros(3, 3, 1, 1)
-    >>> dense[0, 0] = dense[1, 2] = dense[2, 1] = 0
+    >>> dense[0, 0] = dense[1, 2] = dense[2, 1] = 1
     >>> dense.to_sparse_csr(dense_dim=2)
     tensor(crow_indices=tensor([0, 1, 2, 3]),
            col_indices=tensor([0, 2, 1]),
@@ -5518,7 +5518,7 @@ Example::
     25
 
     >>> dense = torch.zeros(3, 3, 1, 1)
-    >>> dense[0, 0] = dense[1, 2] = dense[2, 1] = 0
+    >>> dense[0, 0] = dense[1, 2] = dense[2, 1] = 1
     >>> dense.to_sparse_csc(dense_dim=2)
     tensor(ccol_indices=tensor([0, 1, 2, 3]),
            row_indices=tensor([0, 2, 1]),
