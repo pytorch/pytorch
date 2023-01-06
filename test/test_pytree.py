@@ -163,15 +163,15 @@ class TestPytree(TestCase):
         def run_test(pytree):
             def f(x):
                 return x * 3
+
+            # tree_flatten returns a tuple of the flattened list and pytree structure
             sm1 = list(map(f, tree_flatten(pytree)[0]))
             sm2 = tree_flatten(tree_map(f, pytree))[0]
             self.assertEqual(sm1, sm2)
 
             def invf(x):
                 return x // 3
-            sm3 = list(map(f, tree_flatten(pytree)[0]))
-            sm4 = tree_flatten(tree_map(f, pytree))[0]
-            self.assertEqual(sm3, sm4)
+            self.assertEqual(tree_map(invf, tree_map(f, pytree)), pytree)
 
         cases = [
             [()],
@@ -187,18 +187,39 @@ class TestPytree(TestCase):
     def test_treemap_multi_input(self):
         def run_test(pytree, *rest):
             def f(x, y):
-                return [x] + y
+                return x * y
             sm1 = list(map(f, tree_flatten(pytree)[0], rest[0]))
             sm2 = tree_map(f, pytree, *rest)
             self.assertEqual(sm1, sm2)
 
         cases = [
+            [(), {}],
+            [(), []],
+            [(), ([],)],
             [[], [1, 2, 3]],
             [[5, 6], [[7, 9], [1, 2]]],
             [[2, 3, 4], [[2, 3, 4], [2, 0, 7], [8, 4, 1]]],
         ]
         for case in cases:
             run_test(case[0], case[1])
+
+
+    def test_treemap_multi_input_more_cases(self):
+        def run_test(pytree, *rest):
+            def f(x, y, z):
+                return x * y * z
+            sm1 = list(map(f, tree_flatten(pytree)[0], rest[0], rest[1]))
+            sm2 = tree_flatten(tree_map(f, pytree, *rest))[0]
+            self.assertEqual(sm1, sm2)
+
+        cases = [
+            [{'a': 0}, {'a': 5}, (1,)],
+            [[1, 2], [7, 2], {'a': [1, 2], 'b': (4, 5)}],
+            [{'a': 1, 'b': [{'c': 2}]}, [3, 4], {'a': 1, 'b': [{'c': 2}]}],
+        ]
+
+        for case in cases:
+            run_test(case[0], case[1], case[2])
 
 
     def test_tree_only(self):
