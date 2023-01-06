@@ -1425,7 +1425,7 @@ static void addmm_impl_cpu_(
         // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
         // that will call then into ACL GEMM kernel and also additionally have support
         // for running kernel with BF16 instructions
-        if(transpose_a && !transpose_b) {
+        if(transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
             mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
             return;
         }
