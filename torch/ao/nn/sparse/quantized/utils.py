@@ -1,6 +1,10 @@
 import threading
 
-def is_valid_linear_block_sparse_pattern(row_block_size, col_block_size):
+__all__ = [
+    "LinearBlockSparsePattern"
+]
+
+def _is_valid_linear_block_sparse_pattern(row_block_size, col_block_size):
     return (row_block_size == 1 and col_block_size == 4) or \
            (row_block_size == 8 and col_block_size == 1)
 
@@ -18,7 +22,7 @@ class LinearBlockSparsePattern:
     prev_col_block_size = 4
 
     def __init__(self, row_block_size=1, col_block_size=4):
-        assert(is_valid_linear_block_sparse_pattern(row_block_size, col_block_size))
+        assert(_is_valid_linear_block_sparse_pattern(row_block_size, col_block_size))
         LinearBlockSparsePattern.rlock.acquire()
         LinearBlockSparsePattern.prev_row_block_size = LinearBlockSparsePattern.row_block_size
         LinearBlockSparsePattern.prev_col_block_size = LinearBlockSparsePattern.col_block_size

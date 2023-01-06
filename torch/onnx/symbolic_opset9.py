@@ -657,6 +657,18 @@ def neg(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::sqrt")
 @_beartype.beartype
 def sqrt(g: jit_utils.GraphContext, self):
+    if _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    ) in {
+        _type_utils.JitScalarType.UINT8,
+        _type_utils.JitScalarType.INT8,
+        _type_utils.JitScalarType.INT16,
+        _type_utils.JitScalarType.INT,
+        _type_utils.JitScalarType.INT64,
+    }:
+        # torch converts all int inputs to sqrt to float
+        self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+
     return g.op("Sqrt", self)
 
 
@@ -756,7 +768,9 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None:
+        if dim is None or dim == tuple():
+            # Dim can be 0, which will cause (not dim) == True. So we don't want to do
+            # (not dim)
             # all-reduce path
             return symbolic_helper._handle_reduce_dim_none(g, self, onnx_op_name)
         else:
@@ -874,6 +888,12 @@ def _standard_gamma(g: jit_utils.GraphContext, self, generator):
 @_onnx_symbolic("aten::t")
 @_beartype.beartype
 def t(g: jit_utils.GraphContext, self):
+    rank = symbolic_helper._get_tensor_rank(self)
+    if rank is None or rank < 2:
+        # The transpose of a 1d or 0d tensor is itself. ONNX does not define the behavior
+        # clearly and onnxruntime fails on these cases. So we add an Identity node to
+        # mirror the behavior of eager mode.
+        return g.op("Identity", self)
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
@@ -5998,6 +6018,27 @@ def dim(g: jit_utils.GraphContext, self):
     return g.op("Size", shape)
 
 
+@_onnx_symbolic("aten::__contains_")
+@_beartype.beartype
+def __contains_(g: jit_utils.GraphContext, self, element):
+    unpacked_list = symbolic_helper._unpack_list(self)
+    if all(
+        [symbolic_helper._is_constant(x) for x in unpacked_list]
+    ) and symbolic_helper._is_constant(element):
+        return g.op(
+            "Constant",
+            value_t=torch.tensor(
+                symbolic_helper._node_get(element.node(), "value")
+                in (symbolic_helper._node_get(x.node(), "value") for x in unpacked_list)
+            ),
+        )
+
+    raise errors.SymbolicValueError(
+        "Unsupported: ONNX export of __contains__ for non-constant list or element.",
+        self,
+    )
+
+
 @_onnx_symbolic("aten::__getitem_")
 @_beartype.beartype
 def __getitem_(g: jit_utils.GraphContext, self, i):
@@ -6487,8 +6528,9 @@ def prim_data(g: jit_utils.GraphContext, self):
 
 @_onnx_symbolic("prim::layout")
 def prim_layout(g: jit_utils.GraphContext, self):
-    # Unused by ONNX.
-    return None
+    # Always return 'torch.strided'. Other layout types are not supported by JIT 'TensorType'.
+    # Layout class defined in 'c10/core/Layout.h'.
+    return g.op("Constant", value_t=torch.tensor(0))
 
 
 @_onnx_symbolic("prim::ListConstruct")
@@ -6736,6 +6778,12 @@ def prim_constant(g: jit_utils.GraphContext, *inputs, **attrs):
         return g.op(
             "Constant", value_t=torch.tensor(symbolic_helper._node_get(node, "value"))
         )
+    if node.output().type().isSubtypeOf(_C.ListType.ofStrings()):
+        str_constants = [
+            g.op("Constant", value_s=s)
+            for s in symbolic_helper._node_get(node, "value")
+        ]
+        return g.op("prim::ListConstruct", *str_constants)
 
     raise errors.SymbolicValueError(
         f"Unsupported prim::Constant kind: '{node.kindOf('value')}'. "
