@@ -10,8 +10,6 @@ import re
 import types
 from typing import Any, Optional, Union
 
-from functorch.experimental.ops import PyOperator
-
 import torch
 
 from torch import SymInt
