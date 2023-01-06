@@ -134,9 +134,9 @@ PyObject* THPDevice_rc(PyObject* a, PyObject* b, int op) {
     case Py_LE:
     case Py_GT:
     case Py_GE:
-      TORCH_CHECK_TYPE(false, "comparison not implemented");
+      throw torch::TypeError("comparison not implemented");
     default:
-      TORCH_CHECK_TYPE(false, "unexpected comparison op");
+      throw torch::TypeError("unexpected comparison op");
   }
   END_HANDLE_TH_ERRORS
 }
