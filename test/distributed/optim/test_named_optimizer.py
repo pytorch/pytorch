@@ -212,8 +212,7 @@ class NamedOptimizerTest(unittest.TestCase):
         )
 
     def test_load_state_dict(self):
-        """Check that NamedOptimizer exposes the expected state dict
-        interface."""
+        """Check that NamedOptimizer's load_state_dict works as expected."""
         m = TestDummyModel()
         named_optim_1 = _NamedOptimizer(
             m.named_parameters(),
@@ -291,6 +290,7 @@ class NamedOptimizerTest(unittest.TestCase):
             state_dict_after_load["state"]["net4.1.bias"],
             assert_equal=True,
         )
+
 
     def test_load_state_dict_error(self):
         m = TestDummyModel()
