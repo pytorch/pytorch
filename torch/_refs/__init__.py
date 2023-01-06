@@ -2284,7 +2284,7 @@ def var(
     )
     return result
 
-
+@register_decomposition(aten.std)
 @out_wrapper()
 def std(
     a: TensorLikeType,
@@ -2294,6 +2294,7 @@ def std(
     *,
     correction: Optional[int] = None,
 ) -> TensorLikeType:
+    breakpoint()
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
     # reduces over all dimensions if dim=() is passed
@@ -4803,7 +4804,7 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
 
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
-
+@register_decomposition(aten.norm)
 @out_wrapper(exact_dtype=True)
 def norm(
     input: TensorLikeType,
