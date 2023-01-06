@@ -8,7 +8,7 @@ import types
 from typing import Dict, List
 
 import torch
-from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
+from torch import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
