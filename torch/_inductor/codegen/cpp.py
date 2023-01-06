@@ -301,7 +301,10 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def tanh(a):
-        return f"{a}.tanh()"
+        vec_one = f"decltype({a})(1)"
+        vec_two = f"decltype({a})(2)"
+        vec_minus_two = f"decltype({a})(-2)"
+        return f"{vec_two} / ({vec_one} + ({vec_minus_two} * {a}).exp()) - {vec_one}"
 
     @staticmethod
     def reciprocal(a):
