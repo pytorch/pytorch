@@ -185,6 +185,8 @@ void sparse_sampled_addmm_check_inputs(
       result.layout() == kSparseCsr,
       "sampled_addmm: Expected result to have sparse csr layout, but got ",
       result.layout());
+  TORCH_CHECK(result.dense_dim() == 0,
+      "sampled_addmm: Expected non-hybrid result tensor");
 
   TORCH_CHECK(
       mat1.scalar_type() == mat2.scalar_type(),
