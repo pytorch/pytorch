@@ -461,6 +461,7 @@ class Module:
         super().__setattr__('_load_state_dict_pre_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
         super().__setattr__('_modules', OrderedDict())
+        super().__init__()
 
     forward: Callable[..., Any] = _forward_unimplemented
 
