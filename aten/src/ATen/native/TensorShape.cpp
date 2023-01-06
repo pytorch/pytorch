@@ -1217,7 +1217,7 @@ Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t
 // Should just use narrow_copy_out, but this API is used internally at Meta:
 // https://github.com/pytorch/pytorch/pull/87045#issuecomment-1309353561
 Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-  auto output = at::empty_like(self);
+  auto output = at::empty({0}, self.options());
   return narrow_copy_dense_cpu_out(self, dim, start, length, output);
 }
 
