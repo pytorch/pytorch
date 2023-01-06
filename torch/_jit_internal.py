@@ -451,7 +451,7 @@ def createResolutionCallbackForClassMethods(cls):
     # Skip built-ins, as they do not have global scope nor type hints
     # Needed to support `enum.Enum` derived classes in Python-3.11
     # That adds `_new_member_` property which is an alias to `__new__`
-    fns = [fn for fn in fns if  not inspect.isbuiltin(fn)]
+    fns = [fn for fn in fns if not inspect.isbuiltin(fn)]
     captures = {}
 
     for fn in fns:
