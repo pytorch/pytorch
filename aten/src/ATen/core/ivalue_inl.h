@@ -1384,6 +1384,7 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
       TORCH_CHECK(init_func_, "Incompleted Await init_func can't be None");
       value_ = init_func_();
       completed_ = true;
+      args_ = {};
     }
     return value_;
   }
@@ -1414,7 +1415,7 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
     return elType_;
   }
 
-  TypePtr type() {
+  TypePtr type() const {
     return type_;
   }
 
@@ -1422,7 +1423,7 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
     args_ = std::move(args);
   }
 
-  std::vector<IValue> args() {
+  std::vector<IValue>& args() {
     return args_;
   }
 

@@ -83,7 +83,6 @@ struct CodeImpl {
   std::vector<Function*> function_table_;
   std::vector<std::unique_ptr<GraphFunction>> forked_functions_;
   std::vector<std::unique_ptr<GraphFunction>> awaited_functions_;
-  std::unordered_map<Value*, size_t> awaitable_to_function_table_idx_;
   std::vector<TypePtr> type_table_;
   std::vector<std::function<void(std::vector<IValue>&)>>
       profile_function_table_;
@@ -346,8 +345,7 @@ struct CodeImpl {
 
   void emitAwaitableWait(Node* node) {
     emitLoadInputs(node->inputs());
-    const auto fn_idx = awaitable_to_function_table_idx_[node->input()];
-    insertInstruction(AWAITABLE_WAIT, fn_idx);
+    insertInstruction(AWAITABLE_WAIT);
   }
 
   void emitDrop(at::ArrayRef<Value*> to_drop) {
@@ -625,8 +623,6 @@ struct CodeImpl {
         "<awaitable function>", node->g(attr::Subgraph), nullptr));
     awaited_functions_.emplace_back(std::move(await_fn));
     function_table_.emplace_back(awaited_functions_.back().get());
-    //awaitable_to_function_table_idx_.insert(
-    //    {node->output(), function_table_.size() - 1});
     insertInstruction(
         AWAITABLE, function_table_.size() - 1, node->inputs().size());
   }

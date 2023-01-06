@@ -443,29 +443,28 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(AWAITABLE_WAIT): {
             INST_GUARD;
             auto aw = stack.back().toAwait();
-            if (!aw->completed()) {
-              frame.function->function_table_[inst.X]->ensure_defined();
+            aw->wait();
+            //if (!aw->completed()) {
+            //  frame.function->function_table_[inst.X]->ensure_defined();
 
-              auto& gf =
-                  toGraphFunction(*frame.function->function_table_[inst.X]);
+            //  auto& gf =
+            //      toGraphFunction(*frame.function->function_table_[inst.X]);
 
-              for (const auto& arg : aw->args()) {
-                stack.push_back(arg);
-              }
+            //  for (const auto& arg : aw->args()) {
+            //    stack.push_back(arg);
+            //  }
 
-              // works, but not perfect, no frame enter
-              gf.run(stack);
-              // callFunction(f, stack);
+            //  gf.run(stack);
 
-              auto num_outputs = gf.graph()->outputs().size();
-              if (num_outputs == 1) {
-                aw->markCompleted(stack.back());
-              } else {
-                aw->markCompleted(
-                    c10::ivalue::Tuple::create(jit::last(stack, num_outputs)));
-              }
-              drop(stack, num_outputs);
-            }
+            //  auto num_outputs = gf.graph()->outputs().size();
+            //  if (num_outputs == 1) {
+            //    aw->markCompleted(stack.back());
+            //  } else {
+            //    aw->markCompleted(
+            //        c10::ivalue::Tuple::create(jit::last(stack, num_outputs)));
+            //  }
+            //  drop(stack, num_outputs);
+            //}
             stack.pop_back();
             stack.emplace_back(aw->value());
           }
@@ -773,9 +772,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               out_type = TupleType::create(out_types);
             }
             auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
-            // How to avoid capture of interpreter?
-            // Do not do this lambda - frame already destructed, just for experiment
-            std::function<IValue()> init_fn = [args, fn_ptr, taskLauncher=taskLauncher_]
+            auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
+            aw->setArgs(std::move(args));
+            aw->setInitFunc([&args=aw->args(), fn_ptr, taskLauncher=taskLauncher_]
               () -> IValue {
               auto& fn = toGraphFunction(*fn_ptr);
               auto n_out = fn.graph()->outputs().size();
@@ -790,12 +789,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 return s.back();
               } 
               return c10::ivalue::Tuple::create(jit::last(s, n_out));
-            };
-            auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
-            aw->setInitFunc(init_fn);
-            // XXX: Avoid storing arguments this way - Closure must be created
-            // with arguments at .awaitable()
-            aw->setArgs(args);
+            });
             drop(stack, inst.N);
             push(stack, std::move(aw));
           }

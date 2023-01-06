@@ -29,7 +29,7 @@ namespace c10 {
   _(FloatType)              \
   _(ComplexType)            \
   _(FutureType)             \
-  _(AwaitType)             \
+  _(AwaitType)              \
   _(RRefType)               \
   _(IntType)                \
   _(NoneType)               \
