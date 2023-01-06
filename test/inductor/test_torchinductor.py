@@ -1362,6 +1362,7 @@ class CommonTemplate:
             a = torch.unsqueeze(a, 1)
             a = torch.permute(a, [0, 2, 3, -3])
             return (a,)
+
         self.common(fn, (torch.randn(4, 4),))
 
     def test_expand(self):
