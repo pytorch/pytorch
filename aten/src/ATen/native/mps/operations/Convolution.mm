@@ -139,7 +139,7 @@ Tensor _mps_convolution(
                                     + mps::getTensorsStringKey({input_t, weight_t}) + ":"
                                     + to_string(bias_defined) + ":" + bias_shape_key;
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-    MPSShape* inputShape = mps::getMPSShape(input_t, memory_format);
+    MPSShape* inputShape = get_mps_conv_shape(input_t, is_channels_last);
     if(!cachedGraph) {
       native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
 
@@ -167,7 +167,11 @@ Tensor _mps_convolution(
                                                                       descriptor: descriptor_
                                                                             name: nil];
           if (is_channels_last) {
-            outputTensor = mps::convertNHWCtoNCHW(mpsGraph, outputTensor);
+            // NHWC -> NCHW
+            outputTensor = [mpsGraph transposeTensor: [mpsGraph transposeTensor:outputTensor dimension:-1 withDimension:-2 name:nil]
+                                           dimension: -2
+                                       withDimension: -3
+                                                name: nil];
           }
 
           if(bias_defined) {
@@ -290,7 +294,7 @@ Tensor mps_convolution_backward_input(
                                       padding[1], padding[0],
                                       at::MemoryFormat::Contiguous, groups);
 
-          MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, grad_output_t);
+          MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSScalarType(grad_output_t.scalar_type()), gradOutputShape);
           MPSGraphTensor* weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
 
           MPSGraphTensor *gradOutputTensorTranspose = gradOutputTensor;
@@ -317,7 +321,7 @@ Tensor mps_convolution_backward_input(
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output_t);
+    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output_t, gradOutputShape);
     auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_t);
     auto outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, *grad_input);
 
