@@ -3720,7 +3720,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('bitwise_left_shift'),
         xfail('bitwise_right_shift'),
         xfail('float_power'),
-        xfail('ge'),
         xfail('gt'),
         xfail('le'),
         xfail('lt'),
@@ -3731,7 +3730,10 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Greatest relative difference: 2.9177700113052603 at index (0, 3) (up to 0.0001 allowed)
         xfail('narrow_copy', device_type='cpu'),
         # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
-        decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error"))
+        decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        # RuntimeError: Expected all tensors to be on the same device,
+        # but found at least two devices, cuda:0 and cpu!
+        xfail('ge', device_type='cuda'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
