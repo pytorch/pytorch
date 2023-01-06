@@ -2905,6 +2905,12 @@ def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeT
     return x
 
 
+def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+    for dim in reversed(sorted(dimensions)):
+        x = torch.squeeze(x, dim)
+    return x
+
+
 @register_decomposition(aten.native_group_norm.default)
 def native_group_norm(
     input: Tensor,
@@ -2953,8 +2959,8 @@ def native_group_norm(
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
     # remove broadcast dimensions from mean and rstd
-    mean = torch.squeeze(mean, reduction_dims)
-    rstd = torch.squeeze(rstd, reduction_dims)
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
     return (out, mean, rstd)
 
 
@@ -3489,22 +3495,21 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
 
 
 @register_decomposition(aten.squeeze)
-def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
-    if dim is None:
-        dims = tuple(idx for idx, size in enumerate(a.shape) if size == 1)
-        return prims.squeeze(a, dims) if dims else prims.view_of(a)
+def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
+    if dim is not None:
+        dim = utils.canonicalize_dim(a.ndim, dim)
+        # Short-circuits if the tensor has no dimensions
+        if len(a.shape) == 0:
+            assert dim == 0
+            return prims.view_of(a)
 
-    ndim = a.ndim
-    dim = utils.canonicalize_dims(ndim, dim)
-    dims = (dim,) if isinstance(dim, Dim) else dim
-    # Short-circuits if the tensor has no dimensions
-    if ndim == 0:
-        assert len(dims) == 0 or dims == (0,)
-        return prims.view_of(a)
+        # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
+        if a.shape[dim] != 1:
+            return prims.view_of(a)
+        return prims.squeeze(a, (dim,))
 
-    # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
-    dims = tuple(d for d in dims if a.shape[d] == 1)
-    return prims.squeeze(a, dims) if dims else prims.view_of(a)
+    dims = tuple(idx for idx in range(len(a.shape)) if a.shape[idx] == 1)
+    return prims.squeeze(a, dims)
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
