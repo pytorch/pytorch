@@ -2,6 +2,8 @@
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/native/GridSamplerUtils.h>
 
+#include <cmath>
+
 namespace at { namespace native {
 
 using detail::GridSamplerInterpolation;
@@ -52,7 +54,7 @@ scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int size,
 template <typename scalar_t>
 static __forceinline__ __device__
 scalar_t clip_coordinates(scalar_t in, int clip_limit) {
-  return ::min(static_cast<scalar_t>(clip_limit - 1), ::max(in, static_cast<scalar_t>(0)));
+  return std::min(static_cast<scalar_t>(clip_limit - 1), std::max(in, static_cast<scalar_t>(0)));
 }
 
 // clip_coordinates_set_grad works similarly to clip_coordinates except that
@@ -89,10 +91,10 @@ scalar_t reflect_coordinates(scalar_t in, int twice_low, int twice_high) {
   }
   scalar_t min = static_cast<scalar_t>(twice_low) / 2;
   scalar_t span = static_cast<scalar_t>(twice_high - twice_low) / 2;
-  in = ::fabs(in - min);
+  in = std::fabs(in - min);
   // `fmod` returns same sign as `in`, which is positive after the `fabs` above.
-  scalar_t extra = ::fmod(in, span);
-  int flips = static_cast<int>(::floor(in / span));
+  scalar_t extra = std::fmod(in, span);
+  int flips = static_cast<int>(std::floor(in / span));
   if (flips % 2 == 0) {
     return extra + min;
   } else {
@@ -123,8 +125,8 @@ scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, int twice_high
     grad_in_mult_ = 1;
   }
   // `fmod` returns same sign as `in`, which is positive after the `if` above.
-  scalar_t extra = ::fmod(in, span);
-  int flips = static_cast<int>(::floor(in / span));
+  scalar_t extra = std::fmod(in, span);
+  int flips = static_cast<int>(std::floor(in / span));
   if (flips % 2 == 0) {
     *grad_in = static_cast<scalar_t>(grad_in_mult_);
     return extra + min;
