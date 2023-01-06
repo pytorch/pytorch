@@ -208,7 +208,7 @@ subprocess.run(['echo', '@echo', 'off', '>>', os.environ['TMP_DIR_WIN'] +
 env_arr = []
 
 for k, v in os.environ.items():
-    env_arr.append('set ' + k)
+    env_arr.append(f"set {k}={v}")
 
 append_multiple_lines(os.environ['TMP_DIR_WIN'] + '\\ci_scripts\\pytorch_env_restore.bat', env_arr)
 
