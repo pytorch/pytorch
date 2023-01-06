@@ -12,6 +12,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch import _prims_common
 from torch._prims_common import (
+    canonicalize_dims,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -487,16 +488,17 @@ def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
-    offset = len(x.get_size()) == 0
-    dim = _validate_dim(x, dim, offset)
-    new_shape = list(x.get_size())
-    if len(new_shape) > 0:
-        removed = new_shape.pop(dim)
-        if V.graph.sizevars.maybe_guard_equals(removed, 1):
-            return view(x, new_shape)
 
+    dim = canonicalize_dims(len(x.get_size()), dim)
+    dims = set((dim,) if not isinstance(dim, tuple) else dim)
+
+    new_shape = [
+        s
+        for d, s in enumerate(x.get_size())
+        if not (d in dims and V.graph.sizevars.maybe_guard_equals(s, 1))
+    ]
     # squeeze does nothing if the size isn't 1
-    return x
+    return view(x, new_shape) if new_shape != x.get_size() else x
 
 
 @register_lowering([aten.squeeze_])
@@ -1335,27 +1337,6 @@ def arange(
         dtype=dtype,
         inner_fn=lambda index: ops.index_expr(step * index[0] + start, dtype),
         ranges=[sympy.Integer(length)],
-    )
-
-
-@register_lowering([torch.linspace, aten.linspace])
-def linspace(start, end, steps, *, dtype=None, device=None, pin_memory=False):
-    assert not pin_memory
-    dtype = dtype or torch.get_default_dtype()
-
-    step_size = (end - start) / (steps - 1) if steps > 1 else 0.0
-
-    def inner_fn(index):
-        return ops.add(
-            ops.mul(ops.constant(step_size, dtype), ops.index_expr(index[0], dtype)),
-            ops.constant(start, dtype),
-        )
-
-    return Pointwise.create(
-        device=decode_device(device),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=[sympy.Integer(steps)],
     )
 
 
