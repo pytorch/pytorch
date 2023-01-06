@@ -48,7 +48,7 @@ void minimum_kernel_cuda(TensorIteratorBase& iter) {
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cuda", [&]() {
       opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return ::min(a, b);
+        return std::min(a, b);
       });
     });
   } else {
@@ -59,7 +59,7 @@ void minimum_kernel_cuda(TensorIteratorBase& iter) {
         } else if (b != b) {
           return b;
         } else {
-          return ::min(a, b);
+          return std::min(a, b);
         }
       });
     });

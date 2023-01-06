@@ -50,7 +50,7 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
       } if (at::_isnan(upper)) {
         return upper;
       } else {
-        return ::min(::max(v, lower), upper);
+        return std::min(std::max(v, lower), upper);
       }
     });
   });
@@ -67,11 +67,11 @@ void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar li
       if (_isnan(static_cast<opmath_t>(v))) {
         return v;
       } else if (minmax==at::native::detail::ClampLimits::Min){
-        return ::max(static_cast<opmath_t>(v), lim0_val);
+        return std::max(static_cast<opmath_t>(v), lim0_val);
       } else if (minmax==at::native::detail::ClampLimits::Max){
-        return ::min(static_cast<opmath_t>(v), lim0_val);
+        return std::min(static_cast<opmath_t>(v), lim0_val);
       } else {
-        return ::min(::max(static_cast<opmath_t>(v), lim0_val), lim1_val);
+        return std::min(std::max(static_cast<opmath_t>(v), lim0_val), lim1_val);
       }
     });
   });
