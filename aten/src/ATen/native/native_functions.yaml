@@ -4415,6 +4415,7 @@
   dispatch:
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
+    MPS: randperm_out_mps
 
 - func: range.step(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
