@@ -2284,6 +2284,7 @@ def var(
     )
     return result
 
+
 @register_decomposition(aten.std)
 @out_wrapper()
 def std(
@@ -4802,6 +4803,7 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
         return True
 
     return item(all(eq(a, b)))  # type: ignore[return-value]
+
 
 @register_decomposition(aten.norm)
 @out_wrapper(exact_dtype=True)
