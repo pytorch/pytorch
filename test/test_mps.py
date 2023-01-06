@@ -8280,6 +8280,9 @@ class TestConsistency(TestCase):
         'nn.functional.linear': ['f32'],
         'nn.functional.local_response_norm': ['f32'],
         'nn.functional.margin_ranking_loss': ['f32', 'i16', 'i32'],
+        'nn.functional.max_pool1d': ['f32'],
+        'nn.functional.max_pool2d': ['f32'],
+        'max_pool2d_with_indices_backward': ['f32'],
         'nn.functional.mse_loss': ['f16', 'f32'],
         'nn.functional.pad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'nn.functional.padconstant': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8482,6 +8485,8 @@ class TestConsistency(TestCase):
         'nn.functional.leaky_relu': ['f32'],
         'nn.functional.local_response_norm': ['f32'],
         'nn.functional.margin_ranking_loss': ['f32'],
+        'nn.functional.max_pool1d': ['f32'],
+        'nn.functional.max_pool2d': ['f32'],
         'nn.functional.mse_loss': ['f32'],
         'nn.functional.pad': ['f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.pairwise_distance': ['f16', 'f32'],
@@ -8573,8 +8578,6 @@ class TestConsistency(TestCase):
         'index_add': None,
         'linalg.inv': [torch.float32],
         'long': None,
-        'nn.functional.avg_pool1d': [torch.int64],
-        'nn.functional.avg_pool2d': [torch.int64],
         'nn.functional.conv1d': [torch.int64],
         'nn.functional.conv2d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
@@ -8588,6 +8591,12 @@ class TestConsistency(TestCase):
         'sigmoid': [torch.int64],
         'slice_scatter': [torch.uint8],
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8],  # moved from section below
+
+        # failure in average pooling when both ceilMode and includeZeroPadToAverage are True
+        'nn.functional.avg_pool1d': [torch.float32, torch.int64],
+        'nn.functional.avg_pool2d': [torch.float32, torch.int64],
+        'nn.functional.adaptive_avg_pool1d': [torch.float32],
+        'nn.functional.adaptive_avg_pool2d': [torch.float32],
         # count_nonzero returns wrong results for these dtypes
         'nonzero': [torch.uint8, torch.float16],
 
