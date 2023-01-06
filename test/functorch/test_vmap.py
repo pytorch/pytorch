@@ -3352,7 +3352,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             self.assertEqual(vmap_out, loop_out)
 
     def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule,
-                         skip_inplace=(), postprocess_fn=None, noncontiguous=False):
+                         skip_inplace=(), postprocess_fn=None):
         def test():
             # Error inputs check
             if op.error_inputs_func is not None:
@@ -3393,8 +3393,11 @@ class TestVmapOperatorsOpInfo(TestCase):
                     continue
                 kwargs = sample_input.kwargs
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
+
+                # Some ops don't work with non-contiguous inputs.
+                generate_noncontiguous = op.name not in {'nn.functional.group_norm',}
                 for args, in_dims, _ in generate_vmap_inputs(
-                        args, {}, is_batch_norm_and_training=is_batch_norm_and_training):
+                        args, {}, is_batch_norm_and_training=is_batch_norm_and_training, generate_noncontiguous=generate_noncontiguous):
                     for func in aliases:
                         self.vmap_outplace_test(func, args, kwargs, in_dims, check_shape_only, postprocess_fn)
                     if op.name in skip_inplace:
@@ -3552,9 +3555,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
         decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error"))
     }))
-    @parametrize('noncontiguous', (False, True))
-    def test_vmap_exhaustive(self, device, dtype, op, noncontiguous):
-        self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False, noncontiguous=noncontiguous)
+    def test_vmap_exhaustive(self, device, dtype, op):
+        self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False)
 
     @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
@@ -3727,8 +3729,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
         decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error"))
     }))
-    @parametrize('noncontiguous', (False, True))
-    def test_op_has_batch_rule(self, device, dtype, op, noncontiguous):
+    def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
         inplace_failures = (
             'abs',
@@ -3779,7 +3780,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             'xlogy',
         )
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=True,
-                              skip_inplace=inplace_failures, noncontiguous=noncontiguous)
+                              skip_inplace=inplace_failures)
 
     @parametrize('noncontiguous', (False, True))
     def test_linalg_svd(self, device, noncontiguous):

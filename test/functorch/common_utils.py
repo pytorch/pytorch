@@ -153,16 +153,20 @@ def get_bdim_choices_batch_norm(num_tensors, _, running_mean=None, running_var=N
     return tuple(choices[:-1])
 
 
-def add_batch_dim(arg, bdim, batch_size=3):
+def add_batch_dim(arg, bdim, batch_size=3, noncontiguous=False):
     assert bdim == 0 or bdim == -1
     assert isinstance(arg, torch.Tensor)
     if bdim == 0:
-        shape = [1] * len(arg.shape)
-        shape.insert(bdim, batch_size)
-        return (arg.repeat(shape), bdim)
+        if noncontiguous:
+            arg = arg.unsqueeze(0).expand(batch_size, *arg.shape)
+            return (arg, bdim)
+        else:
+            shape = [1] * len(arg.shape)
+            shape.insert(bdim, batch_size)
+            return (arg.repeat(shape), bdim)
     if bdim == -1:
-        arg = arg.unsqueeze(-1).expand(*arg.shape, batch_size).contiguous()
-        return (arg, bdim)
+        arg = arg.unsqueeze(-1).expand(*arg.shape, batch_size)
+        return (arg if noncontiguous else arg.contiguous(), bdim)
 
 
 def construct_in_dims(bdim_choice_for_tensors, is_tensors):
@@ -191,7 +195,7 @@ def is_batch_norm_training(op_name, kwarg_values):
         return is_training[0]
 
 
-def generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training=False, batch_size=2):
+def generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training=False, batch_size=2, generate_noncontiguous=False):
     flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
     is_tensors = [isinstance(a, torch.Tensor) for a in flat_args]
     num_tensors = sum(is_tensors)
@@ -203,20 +207,27 @@ def generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training=Fa
         num_tensors, *arg_values) if is_batch_norm_and_training else get_bdim_choices(num_tensors)
 
     @memoize
-    def get_batched_arg(arg, bdim):
+    def get_batched_arg(arg, bdim, noncontiguous):
         assert isinstance(arg, torch.Tensor)
         assert bdim is not None
-        result, _ = add_batch_dim(arg, bdim, batch_size)
+        result, _ = add_batch_dim(arg, bdim, batch_size, noncontiguous)
         return result
 
     for bdim_choice in bdim_choices:
         flat_in_dims = construct_in_dims(bdim_choice, is_tensors)
 
-        flat_batched_args = tuple(arg if in_dim is None else get_batched_arg(arg, in_dim)
+        flat_batched_args = tuple(arg if in_dim is None else get_batched_arg(arg, in_dim, False)
                                   for arg, in_dim in zip(flat_args, flat_in_dims))
         batched_args = pytree.tree_unflatten(flat_batched_args, arg_spec)
         in_dims = pytree.tree_unflatten(flat_in_dims, arg_spec)
         yield batched_args, in_dims, kwarg_values
+
+        if generate_noncontiguous:
+            flat_batched_args = tuple(arg if in_dim is None else get_batched_arg(arg, in_dim, True)
+                                  for arg, in_dim in zip(flat_args, flat_in_dims))
+            batched_args = pytree.tree_unflatten(flat_batched_args, arg_spec)
+            in_dims = pytree.tree_unflatten(flat_in_dims, arg_spec)
+            yield batched_args, in_dims, kwarg_values
 
 
 def clone_if_tensor(x):
