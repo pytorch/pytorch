@@ -2045,7 +2045,7 @@ def one_layer_rnn(inp, hidden, params, has_biases, nonlinearity, reverse=False):
         cur_hidden = nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + inp)
         step_output.append(cur_hidden)
 
-    out = torch.stack(step_output, 0)
+    out = torch.cat(step_output, 0)
 
     return out, cur_hidden
 
@@ -2092,6 +2092,7 @@ def _rnn_helper(
     return input, final_hiddens
 
 
+@register_decomposition(aten.rnn_tanh.input)
 @aten.rnn_tanh.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.rnn_tanh.input.py_impl(DispatchKey.Autograd)
 def rnn_tanh_input(
@@ -2105,7 +2106,7 @@ def rnn_tanh_input(
     bidirectional,
     batch_first,
 ):
-    hidden = hx.unbind(0)
+    hidden = hx.unsqueeze(1).unbind(0)  # keeps the batch dim as always the first dim
     params = gather_params(params, has_biases, False)
     out, final_hiddens = _rnn_helper(
         input,
@@ -2122,6 +2123,7 @@ def rnn_tanh_input(
     return out, torch.stack(final_hiddens, 0)
 
 
+@register_decomposition(aten.rnn_relu.input)
 @aten.rnn_relu.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.rnn_relu.input.py_impl(DispatchKey.Autograd)
 def rnn_relu_input(
@@ -2135,7 +2137,7 @@ def rnn_relu_input(
     bidirectional,
     batch_first,
 ):
-    hidden = hx.unbind(0)
+    hidden = hx.unsqueeze(1).unbind(0)  # keeps the batch dim as always the first dim
     params = gather_params(params, has_biases, False)
     out, final_hiddens = _rnn_helper(
         input,
