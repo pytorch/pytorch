@@ -26,7 +26,7 @@ pytree = torch.utils._pytree
 T = TypeVar("T")
 TensorWeakRef = Any
 
-aten = torch.ops.aten
+aten = torch._ops.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -1159,5 +1159,5 @@ class FakeCopyMode(TorchFunctionMode):
             memo[id(tensor)] = out
             return out
         else:
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)

@@ -37,9 +37,7 @@ from torch.utils._pytree import tree_flatten, tree_map
 from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = (
-    "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
-)
+troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
@@ -1059,6 +1057,9 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             return nnmodule(*args, **kwargs)
         elif op == "get_attr":
             return output_graph.get_submodule(node.target)
+        elif op == "placeholder":
+            assert "example_value" in node.meta
+            return node.meta["example_value"]
     except Exception as e:
         raise RuntimeError(
             f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
