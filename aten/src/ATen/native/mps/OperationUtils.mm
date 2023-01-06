@@ -63,25 +63,26 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
   }
 }
 
-std::string getMPSTypeString(ScalarType scalar_type) {
+// use short_name to avoid getting extra long cached graph keys with ops such as cat_out(), etc.
+std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
   switch (scalar_type) {
     case ScalarType::Double:
     case ScalarType::Float:
-      return "Float32";
+      return short_name ? "f32" : "Float32";
     case ScalarType::Half:
-      return "Float16";
+      return short_name ? "f16" : "Float16";
     case ScalarType::Int:
-      return "Int32";
+      return short_name ? "i32" : "Int32";
     case ScalarType::Long:
-      return "Int64";
+      return short_name ? "i64" : "Int64";
     case ScalarType::Short:
-      return "Int16";
+      return short_name ? "i16" : "Int16";
     case ScalarType::Char:
-      return "Int8";
+      return short_name ? "i8" : "Int8";
     case ScalarType::Byte:
-      return "UInt8";
+      return short_name ? "u8" : "UInt8";
     case ScalarType::Bool:
-      return "Bool";
+      return short_name ? "b8" : "Bool";
     default:
       return "Undefined";
   }
@@ -149,16 +150,16 @@ std::string getArrayRefString(const IntArrayRef s) {
   return ss.str();
 }
 
-std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value) {
+std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype) {
     std::string str;
     // The key format per tensor would look like ":Float32[1,1,1,10]:"
     for (const Tensor& tensor: tensors) {
       str += ":";
       if (tensor.defined()) {
-        str += getMPSTypeString(tensor.scalar_type()) + "[";
+        str += getMPSTypeString(tensor.scalar_type(), short_dtype) + "[";
         // if tensor is a scalar
         if (tensor.dim() == 0) {
-          str += (use_scalar_value ? std::to_string(tensor.item().to<double>()) : "Scalar");
+          str += "Scalar";
         } else {
           const NSString* ns_shape_key = [[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","];
           str += std::string(ns_shape_key.UTF8String);
