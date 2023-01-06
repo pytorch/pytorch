@@ -157,10 +157,17 @@ if(NOT MSVC)
   target_compile_options(${NVFUSER_CODEGEN} PRIVATE -Wno-unused-variable)
   target_compile_options(${NVFUSER_CODEGEN} PRIVATE -Werror)
 endif()
-target_include_directories(${NVFUSER_CODEGEN}
-                           PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>)
+target_include_directories(${NVFUSER_CODEGEN} PUBLIC
+                          "$<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>"
+                          "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/nvfuser>"
+                          )
 set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 14)
 install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+# installing nvfuser headers
+install(DIRECTORY "${NVFUSER_SRCS_DIR}/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/nvfuser"
+        FILES_MATCHING PATTERN "*.h" )
+
 
 # --- build nvfuser_python library
 
@@ -292,7 +299,7 @@ target_include_directories(${NVFUSER_CODEGEN} PRIVATE "${CMAKE_BINARY_DIR}/inclu
 
 # -- build tests
 
-if(USE_CUDA)
+if(BUILD_TEST)
   set(NVFUSER_TESTS "${PROJECT_NAME}_tests")
   set(JIT_TEST_SRCS)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/python_frontend/test/test_nvfuser_fusion_definition.cpp)
@@ -341,3 +348,6 @@ if(USE_CUDA)
 
   install(TARGETS ${NVFUSER_TESTS} DESTINATION bin)
 endif()
+
+# -- install nvfuser cmake config files
+install(EXPORT NvfuserTargets FILE NvfuserConfig.cmake DESTINATION share/cmake/nvfuser)

@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/executor.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
+#include <arith.h>
+#include <executor.h>
+#include <scheduler/all_schedulers.h>
 #include <memory>
 
 using namespace torch::jit::fuser::cuda;
