@@ -3354,8 +3354,16 @@ class CommonTemplate:
     def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
+                # vec overload
+                # NB: vec doesn't allow specifying both output_size and scales
                 aten.upsample_bilinear2d(a, [45, 45], False, None),
                 aten.upsample_bilinear2d(a, None, True, [2.0, 2.0]),
+                # default overload
+                # NB: default doesn't allow output_size to be None
+                aten.upsample_bilinear2d(a, [74, 76], True, None, None),
+                aten.upsample_bilinear2d(a, [74, 76], False, None, None),
+                aten.upsample_bilinear2d(a, [74, 76], True, 2.0, 2.0),
+                aten.upsample_bilinear2d(a, [74, 76], False, 3.0, 4.0),
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
@@ -3370,6 +3378,36 @@ class CommonTemplate:
                 torch.randn([1, 2, 40, 59]),
             ],
         )
+
+    def test_upsample_bilinear2d_invalid_output_size(self):
+        # vec overload: output_size and scales
+        with self.assertRaisesRegex(
+            RuntimeError, "Must specify exactly one of output_size and scale_factors"
+        ):
+            self.common(
+                lambda a: (aten.upsample_bilinear2d(a, [74, 76], False, [2.0, 2.0]),),
+                (torch.randn([2, 4, 37, 38]),),
+            )
+
+        # default overload: None
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Expected a value of type 'List\[int\]' for argument 'output_size' "
+            r"but instead found type 'NoneType'.",
+        ):
+            self.common(
+                lambda a: (aten.upsample_bilinear2d(a, None, True, 2.0, 2.0),),
+                (torch.randn([2, 4, 37, 38]),),
+            )
+
+        # default overload: output_size must be of length 2
+        with self.assertRaisesRegex(
+            RuntimeError, "It is expected output_size equals to 2, but got size 0"
+        ):
+            self.common(
+                lambda a: (aten.upsample_bilinear2d(a, [], True, 2.0, 2.0),),
+                (torch.randn([2, 4, 37, 38]),),
+            )
 
     def test_reflection_pad2d(self):
         def fn(a):

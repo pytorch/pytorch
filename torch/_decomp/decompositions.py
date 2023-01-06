@@ -2146,22 +2146,29 @@ def upsample_bilinear2d(
     out_w = sym_float(output_size[1])
 
     # Calculate horizontal and vertical scaling factor
-    # TODO: Figure out if scales_h/scales_w matters here
-    if out_h > 1:
-        if align_corners:
-            h_scale_factor = (in_h - 1) / (sym_int(out_h) - 1)
+    def compute_scales_value(
+        scale: Optional[float], input_size: int, output_size: int
+    ) -> float:
+        # FIXME: remove magic > 0 after we ensure no models were serialized with
+        # -1 defaults.
+        if scale is not None and scale > 0:
+            return 1 / scale
         else:
-            h_scale_factor = in_h / out_h
-    else:
-        h_scale_factor = 0.0
+            return input_size / output_size
 
-    if out_w > 1:
+    def area_pixel_compute_scale(
+        input_size: int, output_size: int, align_corners: bool, scale: Optional[float]
+    ) -> float:
         if align_corners:
-            w_scale_factor = (in_w - 1) / (sym_int(out_w) - 1)
+            if output_size > 1:
+                return (input_size - 1) / (output_size - 1)
+            else:
+                return 0
         else:
-            w_scale_factor = in_w / out_w
-    else:
-        w_scale_factor = 0.0
+            return compute_scales_value(scale, input_size, output_size)
+
+    h_scale_factor = area_pixel_compute_scale(in_h, out_h, align_corners, scales_h)
+    w_scale_factor = area_pixel_compute_scale(in_w, out_w, align_corners, scales_w)
 
     i = torch.arange(sym_int(out_h), dtype=input.dtype, device=input.device)
     j = torch.arange(sym_int(out_w), dtype=input.dtype, device=input.device)
