@@ -198,9 +198,10 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     if (loop) { o_tmp = at::empty({total_q, num_heads, head_size}, opts.dtype(at::kFloat)); }
 
     auto softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
-    // auto softmax_lse = torch::full({batch_size, num_heads, max_seqlen_k}, -std::numeric_limits<float>::infinity(), opts.dtype(at::kFloat));
 
-    at::Tensor s;
+    //  It appears that FlashAttention can return attention weights, but we don't use them. Since we are currently
+    //  filtering this out in the dispatch mechanism. Investigate this ouput against the math impl.
+    at::Tensor s = at::empty({0}, opts);
     if (return_softmax) { s = at::empty({ batch_size, num_heads, max_seqlen_q, max_seqlen_k }, opts); }
 
     if( zero_tensors ) {

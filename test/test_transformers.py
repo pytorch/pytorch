@@ -979,13 +979,18 @@ class TestTransformers(NNTestCase):
             key = key.contiguous()
             value = value.contiguous()
 
-        with sdp_kernel(enable_math=False):
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
             actual = torch.nn.functional._scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
-        with sdp_kernel(enable_flash=False):
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
             math_ref = torch.nn.functional._scaled_dot_product_attention(
                 query.contiguous(), key.contiguous(), value.contiguous(),
                 attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+
+        # Since we are setting need weights to false lets check that the returned values are of size 0
+        if type == "dense":
+            assert actual[1].numel() == 0
+            assert math_ref[1].numel() == 0
 
         self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
 
@@ -1012,10 +1017,10 @@ class TestTransformers(NNTestCase):
             key = key.contiguous()
             value = value.contiguous()
 
-        with sdp_kernel(enable_math=False):
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
             actual = torch.nn.functional._scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
-        with sdp_kernel(enable_flash=False):
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
             math_ref = torch.nn.functional._scaled_dot_product_attention(
                 query.contiguous(), key.contiguous(), value.contiguous(),
                 attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)

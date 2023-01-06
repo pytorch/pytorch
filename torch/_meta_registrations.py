@@ -2017,6 +2017,11 @@ def meta__scaled_dot_product_flash(
         dtype=query.dtype,
         device=query.device,
     )
+    softmax = torch.empty(
+        0,
+        dtype=query.dtype,
+        device=query.device,
+    )
     return ouput, logsumexp, softmax
 
 
