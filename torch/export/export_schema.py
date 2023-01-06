@@ -135,11 +135,6 @@ class Argument:
         Device,
     ]
 
-@dataclass
-class KeywordArgument:
-    key: str
-    value: Argument
-
 # !!! How to model optional fields? Is it an operator schema annotation, or an argument type?
 #     Tensor?
 #     Scalar?
@@ -267,7 +262,7 @@ class Node:
                      # !!! Consider using a structured operator name instead of string
 
     args: List[Argument]              # args for this node
-    kwargs: List[KeywordArgument]     # kwargs for this node
+    kwargs: Dict[str, Argument]       # kwargs for this node
                                       # !!! Not all types in Argument are used as kwargs, e.g. TensorArgument should not be used as kwargs
                                       # Do we want to enforce this in the schema? i.e. only allow certain types to be used as kwargs?
 

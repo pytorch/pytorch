@@ -130,12 +130,8 @@ def export_arg(arg: Any) -> ex.Argument:
 def export_node_args(args: List[Any]) -> List[ex.Argument]:
     return [export_arg(arg) for arg in args]
 
-def export_node_kwargs(kwargs: Dict[str, Any]) -> List[ex.KeywordArgument]:
-    return [ex.KeywordArgument(
-                key = key,
-                value = export_arg(arg)
-            ) for key, arg in kwargs.items()]
-
+def export_node_kwargs(kwargs: Dict[str, Any]) -> Dict[str, ex.Argument]:
+    return {key: export_arg(arg) for key, arg in kwargs.items()}
 
 class ExportInterpreter(Interpreter):
     def __init__(self, gm: torch.fx.GraphModule):
@@ -180,7 +176,7 @@ class ExportInterpreter(Interpreter):
             op = "placeholder",
             target = target,  # name of the placeholder
             args = [],
-            kwargs = [],
+            kwargs = {},
             outputs = [
                 ex.TensorArgument(
                     name = target,
@@ -280,7 +276,7 @@ class ExportInterpreter(Interpreter):
                     name = str(arg),
                 ) for arg in node_args
             ],
-            kwargs = [],
+            kwargs = {},
             outputs = [
                 ex.TensorArgument(
                     name = str(arg),

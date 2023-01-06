@@ -6,7 +6,7 @@ export_schema.GraphModule(
                 op='placeholder',
                 target='arg0',
                 args=[],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='arg0')],
                 metadata='Skipped'
             )
@@ -15,7 +15,7 @@ export_schema.GraphModule(
             op='output',
             target='output',
             args=[export_schema.TensorArgument(name='addmm_default')],
-            kwargs=[],
+            kwargs={},
             outputs=[export_schema.TensorArgument(name='addmm_default')],
             metadata='Skipped'
         ),
@@ -75,7 +75,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default')
                 ],
@@ -128,7 +128,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem'),
                     export_schema.TensorArgument(name='getitem_1'),
@@ -146,7 +146,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='relu__default')],
                 metadata='Skipped'
             ),
@@ -161,7 +161,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='detach_default')],
                 metadata='Skipped'
             ),
@@ -197,7 +197,7 @@ export_schema.GraphModule(
                         ])
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_4'),
                     export_schema.TensorArgument(name='getitem_5')
@@ -259,7 +259,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_1')
                 ],
@@ -312,7 +312,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_6'),
                     export_schema.TensorArgument(name='getitem_7'),
@@ -330,7 +330,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_6')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='relu__default_1')],
                 metadata='Skipped'
             ),
@@ -345,7 +345,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_1')
                 ],
@@ -408,7 +408,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_2')
                 ],
@@ -461,7 +461,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_10'),
                     export_schema.TensorArgument(name='getitem_11'),
@@ -483,7 +483,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_4')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='add__tensor')],
                 metadata='Skipped'
             ),
@@ -496,7 +496,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='add__tensor')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='relu__default_2')],
                 metadata='Skipped'
             ),
@@ -511,7 +511,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_2')
                 ],
@@ -574,7 +574,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_3')
                 ],
@@ -627,7 +627,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_14'),
                     export_schema.TensorArgument(name='getitem_15'),
@@ -645,7 +645,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_14')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='relu__default_3')],
                 metadata='Skipped'
             ),
@@ -660,7 +660,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_3')
                 ],
@@ -723,7 +723,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_4')
                 ],
@@ -776,7 +776,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_18'),
                     export_schema.TensorArgument(name='getitem_19'),
@@ -800,7 +800,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='add__tensor_1')],
                 metadata='Skipped'
             ),
@@ -815,7 +815,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='relu__default_4')],
                 metadata='Skipped'
             ),
@@ -830,7 +830,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_4')
                 ],
@@ -893,7 +893,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_5')
                 ],
@@ -946,7 +946,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_22'),
                     export_schema.TensorArgument(name='getitem_23'),
@@ -964,7 +964,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_22')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='relu__default_5')],
                 metadata='Skipped'
             ),
@@ -979,7 +979,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_5')
                 ],
@@ -1042,7 +1042,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_6')
                 ],
@@ -1095,7 +1095,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_26'),
                     export_schema.TensorArgument(name='getitem_27'),
@@ -1161,7 +1161,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_7')
                 ],
@@ -1214,7 +1214,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_30'),
                     export_schema.TensorArgument(name='getitem_31'),
@@ -1236,7 +1236,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_30')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='add__tensor_2')],
                 metadata='Skipped'
             ),
@@ -1251,7 +1251,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='relu__default_6')],
                 metadata='Skipped'
             ),
@@ -1266,7 +1266,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_6')
                 ],
@@ -1329,7 +1329,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_8')
                 ],
@@ -1382,7 +1382,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_34'),
                     export_schema.TensorArgument(name='getitem_35'),
@@ -1400,7 +1400,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_34')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='relu__default_7')],
                 metadata='Skipped'
             ),
@@ -1415,7 +1415,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_7')
                 ],
@@ -1478,7 +1478,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_9')
                 ],
@@ -1531,7 +1531,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_38'),
                     export_schema.TensorArgument(name='getitem_39'),
@@ -1555,7 +1555,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='add__tensor_3')],
                 metadata='Skipped'
             ),
@@ -1570,7 +1570,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='relu__default_8')],
                 metadata='Skipped'
             ),
@@ -1585,7 +1585,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_8')
                 ],
@@ -1648,7 +1648,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_10')
                 ],
@@ -1701,7 +1701,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_42'),
                     export_schema.TensorArgument(name='getitem_43'),
@@ -1719,7 +1719,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_42')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='relu__default_9')],
                 metadata='Skipped'
             ),
@@ -1734,7 +1734,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_9')
                 ],
@@ -1797,7 +1797,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_11')
                 ],
@@ -1850,7 +1850,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_46'),
                     export_schema.TensorArgument(name='getitem_47'),
@@ -1916,7 +1916,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_12')
                 ],
@@ -1969,7 +1969,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_50'),
                     export_schema.TensorArgument(name='getitem_51'),
@@ -1991,7 +1991,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_50')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='add__tensor_4')],
                 metadata='Skipped'
             ),
@@ -2006,7 +2006,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='relu__default_10')
                 ],
@@ -2023,7 +2023,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_10')
                 ],
@@ -2086,7 +2086,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_13')
                 ],
@@ -2139,7 +2139,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_54'),
                     export_schema.TensorArgument(name='getitem_55'),
@@ -2157,7 +2157,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_54')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='relu__default_11')
                 ],
@@ -2174,7 +2174,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_11')
                 ],
@@ -2237,7 +2237,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_14')
                 ],
@@ -2290,7 +2290,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_58'),
                     export_schema.TensorArgument(name='getitem_59'),
@@ -2314,7 +2314,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='add__tensor_5')],
                 metadata='Skipped'
             ),
@@ -2329,7 +2329,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='relu__default_12')
                 ],
@@ -2346,7 +2346,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_12')
                 ],
@@ -2409,7 +2409,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_15')
                 ],
@@ -2462,7 +2462,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_62'),
                     export_schema.TensorArgument(name='getitem_63'),
@@ -2480,7 +2480,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_62')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='relu__default_13')
                 ],
@@ -2497,7 +2497,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_13')
                 ],
@@ -2560,7 +2560,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_16')
                 ],
@@ -2613,7 +2613,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_66'),
                     export_schema.TensorArgument(name='getitem_67'),
@@ -2679,7 +2679,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_17')
                 ],
@@ -2732,7 +2732,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_70'),
                     export_schema.TensorArgument(name='getitem_71'),
@@ -2754,7 +2754,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_70')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='add__tensor_6')],
                 metadata='Skipped'
             ),
@@ -2769,7 +2769,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='relu__default_14')
                 ],
@@ -2786,7 +2786,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_14')
                 ],
@@ -2849,7 +2849,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_18')
                 ],
@@ -2902,7 +2902,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_74'),
                     export_schema.TensorArgument(name='getitem_75'),
@@ -2920,7 +2920,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='getitem_74')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='relu__default_15')
                 ],
@@ -2937,7 +2937,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_15')
                 ],
@@ -3000,7 +3000,7 @@ export_schema.GraphModule(
                         value=1
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='convolution_default_19')
                 ],
@@ -3053,7 +3053,7 @@ export_schema.GraphModule(
                         value=1e-05
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='getitem_78'),
                     export_schema.TensorArgument(name='getitem_79'),
@@ -3077,7 +3077,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='add__tensor_7')],
                 metadata='Skipped'
             ),
@@ -3092,7 +3092,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='relu__default_16')
                 ],
@@ -3109,7 +3109,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[
                     export_schema.TensorArgument(name='detach_default_16')
                 ],
@@ -3137,7 +3137,7 @@ export_schema.GraphModule(
                         value=True
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='mean_dim')],
                 metadata='Skipped'
             ),
@@ -3157,7 +3157,7 @@ export_schema.GraphModule(
                         ])
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='view_default')],
                 metadata='Skipped'
             ),
@@ -3172,7 +3172,7 @@ export_schema.GraphModule(
                         )
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='t_default')],
                 metadata='Skipped'
             ),
@@ -3195,7 +3195,7 @@ export_schema.GraphModule(
                         value=export_schema.TensorArgument(name='t_default')
                     )
                 ],
-                kwargs=[],
+                kwargs={},
                 outputs=[export_schema.TensorArgument(name='addmm_default')],
                 metadata='Skipped'
             )
