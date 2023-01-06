@@ -26,6 +26,8 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
+#include <ATen/ops/sparse_coo_tensor.h>
+
 #include <algorithm>
 #include <ciso646>
 #include <functional>
@@ -1372,44 +1374,62 @@ Tensor sparse_sparse_matmul_backward(
 Tensor sparse_coo_constructor_backward(
     const Tensor& grad,
     const Tensor& result) {
-  if (grad.device().type() == c10::kCPU) {
-    auto values_grad = result.clone();
-    values_grad._values().fill_(1.);
-    const auto nonzero_values_grad = grad.mul(values_grad);
-    values_grad._values().zero_();
-    values_grad.add_(nonzero_values_grad);
-    return values_grad._values();
-  } else {
-    // add_ modifies values in-place on the CPU, while the CUDA version
-    // allocates new values.
+  const auto nonzero_values_grad = grad.mul(at::ones_like(result.coalesce()));
 
-    const auto nonzero_values_grad =
-        grad.coalesce().mul(at::ones_like(result.coalesce()));
-
-    // Short circuit on empty intersection
-    if (nonzero_values_grad._nnz() == 0) {
-      return at::zeros_like(result._values());
-    }
-
-    const auto sparse_dims =
-        at::DimVector(result.sizes().slice(0, result.sparse_dim()));
-    const auto nonzero_grad_indices_hash = at::sparse::flatten_indices(
-        nonzero_values_grad._indices(), sparse_dims);
-    const auto result_indices_hash =
-        at::sparse::flatten_indices(result._indices(), sparse_dims);
-
-    const auto match_table = nonzero_grad_indices_hash.unsqueeze(-1).eq(
-        result_indices_hash.unsqueeze(0));
-    const auto matched_idx = match_table.nonzero().select(1, 1);
-    const auto num_matches = match_table.sum(-1);
-
-    auto values_grad = at::zeros_like(result._values());
-    values_grad.index_add_(
-        0,
-        matched_idx,
-        nonzero_values_grad._values().repeat_interleave(num_matches, 0));
-    return values_grad;
+  // Short circuit on empty intersection
+  if (nonzero_values_grad._nnz() == 0) {
+    return at::zeros_like(result._values());
   }
+
+  const auto sparse_dims =
+      at::DimVector(result.sizes().slice(0, result.sparse_dim()));
+  const auto sparse_dims_numel = [&]() -> int64_t {
+    int64_t numel = 1;
+    for (const auto d : sparse_dims) {
+      numel *= d;
+    }
+    return numel;
+  }();
+
+  const auto result_indices_hash =
+      at::sparse::flatten_indices(result._indices(), sparse_dims);
+  Tensor result_indices_hash_values, result_indices_hash_indices;
+  std::tie(result_indices_hash_values, result_indices_hash_indices) =
+      result_indices_hash.sort();
+  auto result_indices_hash_coo_idx = at::sparse_coo_tensor(
+      result_indices_hash_values.unsqueeze(0),
+      result_indices_hash_indices,
+      {sparse_dims_numel});
+  result_indices_hash_coo_idx._coalesced_(true);
+  auto result_indices_hash_coo_count = at::sparse_coo_tensor(
+      result_indices_hash_values.unsqueeze(0),
+      at::ones({1}, result_indices_hash_indices.options())
+          .expand_as(result_indices_hash_values),
+      {sparse_dims_numel});
+  result_indices_hash_coo_count._coalesced_(true);
+
+  const auto nonzero_grad_indices_hash =
+      at::sparse::flatten_indices(nonzero_values_grad._indices(), sparse_dims);
+  auto nonzero_grad_indices_hash_coo = at::sparse_coo_tensor(
+      nonzero_grad_indices_hash.unsqueeze(0),
+      at::ones({1}, result_indices_hash_indices.options())
+          .expand_as(nonzero_grad_indices_hash),
+      {sparse_dims_numel});
+  nonzero_grad_indices_hash_coo._coalesced_(false);
+
+  const auto matched_idx =
+      nonzero_grad_indices_hash_coo.mul(result_indices_hash_coo_idx)._values();
+  const auto num_matches =
+      nonzero_grad_indices_hash_coo.mul(result_indices_hash_coo_count)
+          .coalesce()
+          ._values();
+
+  auto values_grad = at::zeros_like(result._values());
+  values_grad.index_add_(
+      0,
+      matched_idx,
+      nonzero_values_grad._values().repeat_interleave(num_matches, 0));
+  return values_grad;
 }
 
 Tensor renorm_backward(
