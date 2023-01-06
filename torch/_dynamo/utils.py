@@ -37,9 +37,7 @@ from torch.utils._pytree import tree_flatten, tree_map
 from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = (
-    "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
-)
+troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
@@ -791,7 +789,6 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                breakpoint()
                 log.warning(f"Similarity score={score.cpu().detach().item()}")
             return score >= 0.99
         else:
@@ -819,7 +816,7 @@ def same(
                     # Similary, for 1x1 kenerls, there seems to be high noise with amp.
                     multiplier = 3.0
 
-                passes_test = res_error <= (multiplier * ref_error + 1e-4)
+                passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log.error(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
@@ -1060,6 +1057,9 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             return nnmodule(*args, **kwargs)
         elif op == "get_attr":
             return output_graph.get_submodule(node.target)
+        elif op == "placeholder":
+            assert "example_value" in node.meta
+            return node.meta["example_value"]
     except Exception as e:
         raise RuntimeError(
             f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
