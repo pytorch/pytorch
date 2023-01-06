@@ -12,7 +12,7 @@ NestedTensors are a generalization of torch Tensors which eases working with dat
 
 NestedTensors inherit from c10::TensorImpl whose definition can be found here: [NestedTensorImpl.h](../../NestedTensorImpl.h).
 
-When constructing a NestedTensor in C++ you will likely not be using the NestedTensorImpl constructor directly but using the `wrap_buffer` function defined in [NestedTensorUtils.h](NestedTensorUtils.h). This is a thin wrapper around the NestedTensorImpl constructor that ensures that the input tensor is contiguous. This is because when constructing a NestedTensor from a dense tensor we create a shallow copy of the input's Storage object and the if the input tensor did not satisfy `tensor.numel() == tensor.storage.numel()` this could lead to undefined behavior.
+When constructing a NestedTensor in C++ you will likely not be using the NestedTensorImpl constructor directly but using the `wrap_buffer` function defined in [NestedTensorUtils.h](NestedTensorUtils.h). This is a thin wrapper around the NestedTensorImpl constructor that ensures that the input tensor is contiguous. This is because when constructing a NestedTensor from a dense tensor we create a shallow copy of the input's Storage object and if the input tensor did not satisfy `tensor.numel() == tensor.storage.numel()` this could lead to undefined behavior.
 
 ##  Code Structure
 
@@ -49,11 +49,11 @@ Tensor map_nt(const Tensor& nt, Func f) {
 
 There are also important functions that, under certain conditions of regularity, can be implemented effectively by accessing the underlying buffer and viewing it in a special manner. For a good example of this see the implementation of `linear` in [NestedTensorTransformerFunctions.cpp](NestedTensorTransformerFunctions.cpp).
 
-The second class of functions can't be efficiently implemented by viewing the NestedTensor as a dense tensor. An example of this is `softmax_nested`. The implementation of this function can be found in [NestedTensorMath.cpp](NestedTensorMath.cpp). This can occur when there are strict problem boundaries that occur at the tensor_component level. For example, when computing the softmax of a NestedTensor we need to compute the softmax of each tensor_component individually. This is because the softmax function is not defined on tensors of different shapes. In this case we can't view the NestedTensor as a dense tensor and apply the softmax function to the entire tensor at once. Instead we need to apply the softmax function to each tensor_component individually.
+The second class of functions can't be efficiently implemented by viewing the NestedTensor as a dense tensor. An example of this is `softmax_nested` over ragged dimensions. The implementation of this function can be found in [NestedTensorMath.cpp](NestedTensorMath.cpp). When computing the softmax over a ragged dimension of a NestedTensor the problem boundaries are not trivially separable, i.e. it is not possible to determine which elements belong to what tensor_component when folding the ragged dimension into another. Instead we apply the softmax function to each tensor_component individually.
 
 The problem with this though is that iterating over a potentially large number of tensor_components and launching individual cuda kernels for each one is very inefficient. Ideally we would launch one kernel that operates on all the tensor_components in parallel.
 
-If performance is not your main concern and you would like to enable coverage the function `map_nested_tensor` can be found in [NestedTensorUtils.h](NestedTensorUtils.h). This function iterates over tensor components to applying a function to each tensor_component individually. Be warned though that this is likely very inefficient, especially for cuda implementations of the function.
+If performance is not your main concern and you would like to enable coverage the function `map_nested_tensor` can be found in [NestedTensorUtils.h](NestedTensorUtils.h). This function iterates over tensor components to applying a function to each tensor_component individually. However, this approach may not be efficient for CUDA implementations, as it will launch a new CUDA kernel for every tensor_component. On the other hand, this function can serve as a good baseline for CPU implementations.
 
 ## Triton
 
