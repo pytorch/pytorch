@@ -2248,6 +2248,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_tensor_split(self):
+        def f(x):
+            return torch.split(x, x.shape[0] // 2, dim=0)[0]
+
+        gm, _ = torch._dynamo.export(
+            f,
+            torch.zeros(6, 4),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

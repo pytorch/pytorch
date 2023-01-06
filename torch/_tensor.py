@@ -789,7 +789,7 @@ class Tensor(torch._C._TensorBase):
             except ValueError:
                 pass
 
-        if isinstance(split_size, int):
+        if isinstance(split_size, (int, torch.SymInt)):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
             return torch._VF.split_with_sizes(self, split_size, dim)
