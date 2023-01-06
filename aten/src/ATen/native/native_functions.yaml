@@ -3099,6 +3099,7 @@
 - func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: nan_to_num_out
+    MPS: nan_to_num_out_mps
     SparseCPU, SparseCUDA: nan_to_num_sparse_out
   tags: pointwise
 
@@ -5187,17 +5188,6 @@
   device_check: NoCheck
   device_guard: False
 
-
-- func: squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)
-  variants: function, method
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: squeeze
-    QuantizedCPU, QuantizedCUDA: squeeze_quantized
-    NestedTensorCPU, NestedTensorCUDA: squeeze_dim_nested
-  tags: canonical
-
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
   variants: method
   device_check: NoCheck
@@ -5207,14 +5197,6 @@
     CompositeExplicitAutograd: squeeze_
 
 - func: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
-  variants: method
-  device_check: NoCheck
-  device_guard: False
-  tags: inplace_view
-  dispatch:
-    CompositeExplicitAutograd: squeeze_
-
-- func: squeeze_.dims(Tensor(a!) self, int[] dim) -> Tensor(a!)
   variants: method
   device_check: NoCheck
   device_guard: False
@@ -5819,6 +5801,7 @@
   dispatch:
     CPU: unique_consecutive_cpu
     CUDA: unique_consecutive_cuda
+    MPS: unique_consecutive_mps
   tags: dynamic_output_shape
   autogen: unique_consecutive.out
 
@@ -5827,6 +5810,7 @@
   dispatch:
     CPU: unique_dim_consecutive_cpu
     CUDA: unique_dim_consecutive_cuda
+    MPS: unique_dim_consecutive_mps
   tags: dynamic_output_shape
   autogen: unique_dim_consecutive.out
 
@@ -5839,6 +5823,7 @@
   dispatch:
     CPU: _unique2_cpu
     CUDA: _unique2_cuda
+    MPS: _unique2_mps
   tags: dynamic_output_shape
   autogen: _unique2.out
 
@@ -11681,6 +11666,7 @@
   dispatch:
     CPU: _upsample_nearest_exact1d_out_cpu
     CUDA: _upsample_nearest_exact1d_out_cuda
+    MPS: _upsample_nearest_exact1d_out_mps
 
 - func: upsample_nearest1d(Tensor self, SymInt[1] output_size, float? scales=None) -> Tensor
   python_module: nn
@@ -11696,6 +11682,7 @@
   dispatch:
     CPU: upsample_nearest1d_backward_out_cpu
     CUDA: upsample_nearest1d_backward_out_cuda
+    MPS: upsample_nearest1d_backward_out_mps
 
 - func: _upsample_nearest_exact1d_backward.grad_input(Tensor grad_output, SymInt[1] output_size, SymInt[3] input_size, float? scales=None, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -11703,6 +11690,7 @@
   dispatch:
     CPU: _upsample_nearest_exact1d_backward_out_cpu
     CUDA: _upsample_nearest_exact1d_backward_out_cuda
+    MPS: _upsample_nearest_exact1d_backward_out_mps
 
 - func: upsample_nearest1d_backward(Tensor grad_output, SymInt[1] output_size, SymInt[3] input_size, float? scales=None) -> Tensor
   python_module: nn
@@ -12699,7 +12687,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_cross_out
+    CPU, CUDA, MPS: linalg_cross_out
 
 # linalg.lu_factor
 - func: linalg_lu_factor(Tensor A, *, bool pivot=True) -> (Tensor LU, Tensor pivots)
@@ -13389,12 +13377,6 @@
     CompositeExplicitAutogradNonFunctional: squeeze_copy_dim
   tags: view_copy
 
-- func: squeeze_copy.dims(Tensor self, int[] dim) -> Tensor
-  variants: function
-  dispatch:
-    CompositeExplicitAutogradNonFunctional: squeeze_copy_dims
-  tags: view_copy
-
 - func: t_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
@@ -13605,12 +13587,6 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: squeeze_copy_dim_out
-
-
-- func: squeeze_copy.dims_out(Tensor self, int[] dim, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: squeeze_copy_dims_out
 
 
 - func: t_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
