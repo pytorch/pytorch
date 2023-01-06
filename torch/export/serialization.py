@@ -17,7 +17,7 @@ should_export_node_meta = False
 
 def export_stroage(storage: torch.Storage) -> ex.Storage:
     return ex.Storage(
-        data_location = ex.Storage.DataLocation.Default,
+        data_location = ex.Storage.DataLocation.Internal,
 
         # TODO: There should be a better way to get the data payload
         # convert from list of bytes to byte string
@@ -50,26 +50,23 @@ def export_tensor(t: torch.Tensor) -> ex.Tensor:
         meta = export_tensor_meta(t)
     )
 
-def export_named_tensor(name: str, t: torch.Tensor) -> ex.NamedTensor:
-    return ex.NamedTensor(
-        name=name,
-        tensor=export_tensor(t)
-    )
 
-def export_named_tensors(named_tensors: Dict[str, Tensor]):
-    return [export_named_tensor(name, t) for name, t in named_tensors]
+def export_named_tensors(named_tensors: Dict[str, Tensor]) -> Dict[str, ex.Tensor]:
+    return {name : export_tensor(t) for name, t in named_tensors}
 
 
-def export_node_meta(node_meta: Dict[str, Any]) -> List[ex.StringStringPair]:
+def export_node_meta(node_meta: Dict[str, Any]) -> ex.NodeMetadata:
     if should_export_node_meta:
 
         # FakeTensor under "val" key is skipped
-        return [
-            ex.StringStringPair(
-                key = key,
-                value = str(value)
-            ) for key, value in node_meta.items() if key != "val"
-        ]
+        return ex.NodeMetadata(
+                stack_trace = node_meta.get("stack_trace", None),
+                nn_module_stack = node_meta.get("nn_module_stack", None),
+                extra = {
+                    key : str(value)
+                    for key, value in node_meta.items() if key not in {"val", "stack_trace", "nn_module_stack"}
+                },
+            )
     else:
         return "Skipped"
 
@@ -147,7 +144,7 @@ class ExportInterpreter(Interpreter):
         self.ex_gm = ex_gm = ex.GraphModule()
         ex_gm.name = gm.__class__.__name__
         ex_gm.graph = ex.Graph()
-        ex_gm.metadata = gm.meta
+        ex_gm.metadata = {key : str(value) for key, value in gm.meta.items()}
 
         if should_export_parameters_buffer:
             ex_gm.parameters = export_named_tensors(gm.named_parameters())

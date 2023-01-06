@@ -1,16 +1,7 @@
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import List, Union
+from typing import List, Union, Dict
 
-################################################################################
-# Following section is the defining a few utility data structures
-
-# As many of the serialization library doesn't have the concept of map
-# We use a list of sting-string pair to represent a map<string, string>
-@dataclass
-class StringStringPair:
-    key: str
-    value: str
 
 ################################################################################
 # Following section is the defining the permissible argument types for operators
@@ -199,6 +190,7 @@ class TensorMeta:
 
 @dataclass
 class Buffer:
+    # !!! TODO: need to define endianness for the buffer
     buffer: bytes
 
 
@@ -224,7 +216,7 @@ class ExternalBuffer:
 @dataclass
 class Storage:
     class DataLocation(Enum):
-        Default = auto()
+        Internal = auto()
         External = auto()
 
     data_location: DataLocation
@@ -241,12 +233,6 @@ class Tensor:
     meta: TensorMeta
 
 
-# !!! consider adding an optional named field to Tensor directly to avoid defining a new class
-@dataclass
-class NamedTensor:
-    name: str
-    tensor: Tensor
-
 ################################################################################
 # Following section is the defining the schema of 3 level construct: GraphModule, Graph, Node
 
@@ -261,6 +247,13 @@ class IValue:
                 # The name will be used in the graph and node to refer to the IValue
 
     meta: TensorMeta
+
+
+@dataclass
+class NodeMetadata:
+    stack_trace: str                      # source info of a node
+    nn_module_stack: str                  # stack of nn.Module that the node originates from
+    extra: Dict[str, str]                 # arbitrary string-string pairs for extra metadata
 
 
 # Maps to fx.Node
@@ -281,7 +274,7 @@ class Node:
     outputs: List[TensorArgument]   # A list of Tensor Argument returned by this node
                                     # !!! Notice: this assumes that a node can only return Tensor(s), and not other int/float/bool types...
 
-    metadata: List[StringStringPair]
+    metadata: NodeMetadata              # metadata fields for this node
 
 
 # Maps to fx.Graph
@@ -314,15 +307,15 @@ class GraphModule:
 
     graph: Graph    # Only one Graph per GraphModule
 
-    metadata : List[StringStringPair]   # maps to GraphModule's meta, which is a Dict[str, Any], but we only support string key and string value.
+    metadata : Dict[str, str]   # maps to GraphModule's meta, which is a Dict[str, Any], but we only support string key and string value.
 
     # Need to store stateful information
 
     # The name of the tensor will be used to bind to the IValues of Graph Inputs
     # !!! Consider storing them in the GraphModule, or in the Graph.
     # !!! Do we needs to store parameters and buffers separately? (Sherlock: Ideally no.)
-    parameters: List[NamedTensor]
-    buffers: List[NamedTensor]
+    parameters: Dict[str, Tensor]
+    buffers: Dict[str, Tensor]
 
     # !!! model constants: constant, etc.
 
