@@ -1601,13 +1601,13 @@ class TestMPS(TestCase):
     def test_cpu_to_strided_mps_copy(self):
         # https://github.com/pytorch/pytorch/issues/86975
 
-        a1 = torch.Tensor([[1,2],[3,4], [5,6]]).to(torch.device("mps"))
+        a1 = torch.Tensor([[1, 2], [3, 4], [5, 6]]).to(torch.device("mps"))
         b1 = torch.Tensor([-1, -1])
-        a1[1:,1] = b1
+        a1[1:, 1] = b1
 
-        a2 = torch.Tensor([[1,2],[3,4], [5,6]]).to(torch.device("mps"))
+        a2 = torch.Tensor([[1, 2], [3, 4], [5, 6]]).to(torch.device("mps"))
         b2 = torch.Tensor([-1, -1]).to(torch.device("mps"))
-        a2[1:,1] = b2
+        a2[1:, 1] = b2
 
         self.assertEqual(a1, a2)
 
