@@ -128,13 +128,30 @@ class Importer(ABC):
 
         obj_module_name, obj_location, obj_importer_name = get_obj_info(obj)
         obj2_module_name, obj2_location, obj2_importer_name = get_obj_info(obj2)
-        msg = (
-            f"\n\nThe object provided is from '{obj_module_name}', "
-            f"which is coming from {obj_location}."
-            f"\nHowever, when we import '{obj2_module_name}', it's coming from {obj2_location}."
-            "\nTo fix this, make sure this 'PackageExporter's importer lists "
-            f"{obj_importer_name} before {obj2_importer_name}."
-        )
+        msg = ""
+        if obj_module_name != obj2_module_name:
+            msg += (
+                f"\n\nCan't pickle {obj2}: it's not the same object as {obj_module_name}."
+                f"\nInstead, we are importing {obj2_module_name}. "
+                f"\nUsually these errors occur when trying to package unpicklable objects "
+                f"like decorated functions."
+            )
+        if (obj_location != obj2_location) or (obj_importer_name != obj2_importer_name):
+            msg += (
+                f"\n\nThe object provided is from '{obj_module_name}', "
+                f"which is coming from {obj_location}."
+                f"\nHowever, when we import '{obj2_module_name}', it's coming from {obj2_location}."
+                "\nTo fix this, make sure this 'PackageExporter's importer lists "
+                f"{obj_importer_name} before {obj2_importer_name}."
+            )
+        elif obj_module_name == obj2_module_name:
+            msg += (
+                f"\n\nThe object provided ({obj}) is not the same as the object we import ({obj2}) "
+                f"despite both of them having the name {obj_module_name}', coming from {obj_location}, "
+                f"and using the importer {obj_importer_name}. "
+                "\nPlease report this error to the PyTorch team. "
+            )
+
         raise ObjMismatchError(msg)
 
     def whichmodule(self, obj: Any, name: str) -> str:
