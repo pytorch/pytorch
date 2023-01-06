@@ -14,7 +14,10 @@ from ao.sparsity.test_parametrization import TestFakeSparsity  # noqa: F401
 from ao.sparsity.test_sparsifier import TestBaseSparsifier  # noqa: F401
 from ao.sparsity.test_sparsifier import TestWeightNormSparsifier  # noqa: F401
 from ao.sparsity.test_sparsifier import TestNearlyDiagonalSparsifier  # noqa: F401
+
+# Structured Pruning
 from ao.sparsity.test_structured_sparsifier import TestBaseStructuredSparsifier  # noqa: F401
+from ao.sparsity.test_structured_sparsifier import TestSaliencyPruner # noqa: F401
 
 # Scheduler
 from ao.sparsity.test_scheduler import TestScheduler  # noqa: F401
