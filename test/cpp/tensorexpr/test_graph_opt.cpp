@@ -18,13 +18,12 @@ using namespace torch::jit::tensorexpr;
 
 class GraphOpt : public ::testing::Test {
  public:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  void SetUp() {
+  void SetUp() override {
     old_cat_wo_conditionals_ = getCatWoConditionals();
     getCatWoConditionals() = true;
   }
 
-  void TearDown() {
+  void TearDown() override {
     getCatWoConditionals() = old_cat_wo_conditionals_;
   }
 

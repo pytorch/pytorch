@@ -8,7 +8,14 @@
 
 from typing import Union, Callable, List, Any, Optional, Dict
 from unittest.mock import patch
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64, IS_WINDOWS
+from torch.testing._internal.common_utils import (
+    TestCase,
+    run_tests,
+    IS_ARM64,
+    IS_WINDOWS,
+    compare_equal_outs_and_grads,
+    outs_and_grads
+)
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -236,18 +243,6 @@ class TestPythonKey(AOTTestCase):
         grads2 = [a.grad for a in mod.parameters()]
         self.assertEqual(grads, grads2)
 
-
-def _outs_and_grads(fn, graph_inps, inps):
-    outs = fn(*graph_inps)
-    for out in pytree.tree_flatten(outs)[0]:
-        if isinstance(out, torch.Tensor) and out.requires_grad:
-            out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
-    for inp in pytree.tree_flatten(inps)[0]:
-        inp.grad = None
-    return outs, grads
-
-
 class TestAOTAutograd(AOTTestCase):
     # test_mutation will:
     # - Ensure that inputs are non-leaves, so our graphs can mutate them
@@ -302,8 +297,8 @@ class TestAOTAutograd(AOTTestCase):
         else:
             compiled_f = aot_function(
                 f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop, decompositions=decompositions)
-        ref_out, ref_grad = _outs_and_grads(f, graph_inps, inp)
-        test_out, test_grad = _outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
+        ref_out, ref_grad = outs_and_grads(f, graph_inps, inp)
+        test_out, test_grad = outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
         self.assertEqual(ref_grad, test_grad)
 
         if isinstance(ref_out, torch.Tensor):
@@ -618,8 +613,8 @@ def forward(self, primals_1):
     t_1 = torch.ops.aten.t.default(clone);  clone = None
     select_scatter = torch.ops.aten.select_scatter.default(t_1, mul, 0, 0);  t_1 = mul = None
     t_2 = torch.ops.aten.t.default(select_scatter);  select_scatter = None
-    t_3 = torch.ops.aten.t.default(t_2);  t_2 = None
-    return [t_3, 3, 3, 1, 3, 0]""")
+    t_4 = torch.ops.aten.t.default(t_2);  t_2 = None
+    return [t_4, 3, 3, 1, 3, 0]""")
 
     def test_view_and_inplace_view(self):
         def f(a, b):
@@ -688,11 +683,12 @@ def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    t_1 = torch.ops.aten.t.default(as_strided_5);  as_strided_5 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    as_strided_6 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    t_1 = torch.ops.aten.t.default(as_strided_6);  as_strided_6 = None
     mul_1 = torch.ops.aten.mul.Tensor(t_1, 3);  t_1 = None
-    return [mul, mul_1, 4, 1, 0]""")
+    return [as_strided_3, mul_1, 4, 1, 0]""")
 
     def test_input_mutation_aliases_other_input(self):
         def f(a, b):
@@ -717,10 +713,11 @@ def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2);  as_strided_scatter = None
-    add_1 = torch.ops.aten.add.Tensor(add, as_strided_4);  as_strided_4 = None
-    return [add, add_1]""")
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2);  as_strided_scatter = None
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_5 = None
+    return [as_strided_2, add_1]""")
 
     def test_input_mutation_aliases_other_input2(self):
         def f(a, b):
@@ -741,10 +738,11 @@ def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0);  as_strided_scatter = None
-    add_1 = torch.ops.aten.add.Tensor(add, as_strided_4);  as_strided_4 = None
-    return [add, add_1]""")
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0);  as_strided_scatter = None
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_5 = None
+    return [as_strided_2, add_1]""")
 
     def test_input_mutation_aliases_and_output_alias(self):
         def f(a, b):
@@ -763,9 +761,11 @@ def forward(self, primals_1):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0);  clone = None
+    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    return [add, 4, 1, 0]""")
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    return [as_strided_2, 4, 1, 0]""")
 
     def test_input_aliased_with_mutation_output_alias(self):
         def f(a, b, c):
@@ -788,10 +788,12 @@ def forward(self, primals_1):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0);  clone = None
+    as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    return [mul, add, 4, 1, 0]""")
+    return [as_strided_2, add, 4, 1, 0]""")
 
     def test_input_metadata_mutation_aliases(self):
         def f(a, b):
@@ -834,11 +836,12 @@ def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided, 2);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
-    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    add = torch.ops.aten.add.Tensor(as_strided_2, 1);  as_strided_2 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    add = torch.ops.aten.add.Tensor(as_strided_3, 1);  as_strided_3 = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    return [mul, add, add_1]""")
+    return [as_strided_2, add, add_1]""")
 
     def test_input_mutation_aliases_bases_out_of_order(self):
         # This tests our calling convention: if b and d are aliased, then the outer calling convention
@@ -869,12 +872,13 @@ def forward(self, primals_1, primals_2, primals_3):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    t_1 = torch.ops.aten.t.default(as_strided_4);  as_strided_4 = None
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    t_1 = torch.ops.aten.t.default(as_strided_5);  as_strided_5 = None
     add_2 = torch.ops.aten.add.Tensor(add_1, t_1);  add_1 = t_1 = None
-    return [add, add_2, 4, 1, 0, 4, 1, 0]""")
+    return [as_strided_2, add_2, 4, 1, 0, 4, 1, 0]""")
 
     # Mondo test that tests a combination of:
     # input is mutated, that aliases another input (so we make a synthetic base)
@@ -918,10 +922,11 @@ def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    add = torch.ops.aten.add.Tensor(as_strided_4, mul);  as_strided_4 = None
-    return [mul, add, 2, 2, 1, 2, 0, 2, 2, 2, 1, 0]""")
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    add = torch.ops.aten.add.Tensor(as_strided_5, as_strided_2);  as_strided_5 = None
+    return [as_strided_2, add, 2, 2, 1, 2, 0, 2, 2, 2, 1, 0]""")
 
     def test_no_grad_input_output(self):
         def f(a, b):
@@ -1092,9 +1097,20 @@ def forward(self, primals_1, primals_2):
             """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
+
     @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
     def test_invalid_dupe(self, counter):
+        self._test_invalid_dupe(counter, fake=False)
+
+    # See Note: Dynamo recompilation guarding invalid grad for why this test exists
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_invalid_dupe_fake(self, counter):
+        self._test_invalid_dupe(counter, fake=True)
+
+
+    def _test_invalid_dupe(self, counter, fake):
         class F(torch.nn.Module):
             def forward(self, x, y):
                 x.t_()
@@ -1104,20 +1120,47 @@ def forward(self, primals_1, primals_2):
         x = torch.randn(3, 3, requires_grad=True).clone()
         y = torch.randn(3, 3, requires_grad=True).clone()
 
-        fxy = aot_module_simplified(F(), (x, y), nop)
+        if fake:
+            shape_env = ShapeEnv()
+            fake_mode = FakeTensorMode(shape_env=shape_env)
+
+            fake_x = fake_mode.from_tensor(x)
+            fake_y = fake_mode.from_tensor(y)
+
+        if fake:
+            fxy = aot_module_simplified(F(), (fake_x, fake_y), nop)
+        else:
+            fxy = aot_module_simplified(F(), (x, y), nop)
+
         fxy(x, y)
         fxy(x, x)  # is ok!
 
-        fxx = aot_module_simplified(F(), (x, x), nop)
+        if fake:
+            fxx = aot_module_simplified(F(), (fake_x, fake_x), nop)
+        else:
+            fxx = aot_module_simplified(F(), (x, x), nop)
+
         fxx(x, x)
+        # Note This should not raise! Once we have guards in place here,
+        # we will have this working correctly, as it should recompile.
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxx(x, y),
             """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
+
     @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
     def test_invalid_requires_grad(self, counter):
+        self._test_invalid_requires_grad(counter, fake=False)
+
+    # See Note: Dynamo recompilation guarding invalid grad for why this test exists
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_invalid_requires_grad_fake(self, counter):
+        self._test_invalid_requires_grad(counter, fake=True)
+
+    def _test_invalid_requires_grad(self, counter, fake):
         class F(torch.nn.Module):
             def forward(self, x, y):
                 return (x + y,)
@@ -1126,19 +1169,29 @@ def forward(self, primals_1, primals_2):
         y = torch.randn(3, 3, requires_grad=True)
         z = torch.randn(3, 3, requires_grad=False)
 
-        # Non-mutating please!
-        def compare(m1, m2, inps):
-            r1, g1 = _outs_and_grads(m1, inps, inps)
-            r2, g2 = _outs_and_grads(m2, inps, inps)
-            self.assertEqual(r1, r2)
-            self.assertEqual(g1, g2)
+        if fake:
+            shape_env = ShapeEnv()
+            fake_mode = FakeTensorMode(shape_env=shape_env)
 
-        fxy = aot_module_simplified(F(), (x, y), nop)
-        compare(F(), fxy, (x, y))
-        compare(F(), fxy, (x, z))
+            fake_x = fake_mode.from_tensor(x)
+            fake_y = fake_mode.from_tensor(y)
+            fake_z = fake_mode.from_tensor(z)
 
-        fxz = aot_module_simplified(F(), (x, z), nop)
-        compare(F(), fxz, (x, z))
+        if fake:
+            fxy = aot_module_simplified(F(), (fake_x, fake_y), nop)
+        else:
+            fxy = aot_module_simplified(F(), (x, y), nop)
+
+        compare_equal_outs_and_grads(self, F(), fxy, (x, y))
+        compare_equal_outs_and_grads(self, F(), fxy, (x, z))
+
+        if fake:
+            fxz = aot_module_simplified(F(), (fake_x, fake_z), nop)
+        else:
+            fxz = aot_module_simplified(F(), (x, z), nop)
+
+        compare_equal_outs_and_grads(self, F(), fxz, (x, z))
+
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxz(x, y),
             """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
@@ -1836,85 +1889,28 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = compiled_f(*inputs)
         res[0].sum().backward()
 
-    def _test_aot_module_simplified_fake_tensor_gm_raises(self, debug):
+    def test_aot_module_simplified_fake_tensor_gm_raises(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        real_x = torch.randn(4, requires_grad=True)
+        fake_x = fake_mode.from_tensor(real_x)
+        real_z = torch.randn(4)
+        fake_z = fake_mode.from_tensor(real_z)
+
         class MockModule(torch.nn.Module):
-            def __init__(self, y):
+            def __init__(self):
                 super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.y = y
 
             def forward(self, x):
-                z = self.linear(x)
-                z = z + self.y
-                z = z.relu()
-                return (z, )
-
-
-        real_x = torch.randn(4)
-        real_y = torch.randn(4)
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake_y = fake_mode.from_tensor(real_y)
-
-        tracer = torch.fx.Tracer()
-        tracer.record_stack_traces = True
-
-        # This test uses tracing to lift the fake_y into a constant buffer,
-        # so we have a contrived trace example.
-        # For a traceless example closer to how dynamo would call us, see
-        # test_aot_module_deepcopy_fake_tensor_gm_raises below.
-        graph = tracer.trace(MockModule(fake_y))
-        mod_fake = torch.fx.GraphModule(tracer.root, graph)
-
-        if debug:
-            inner_message = "FAKE TENSOR CREATION TRACEBACK:"
-        else:
-            inner_message = "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
-
-        message = f"""Unexpected fake buffer y {inner_message}"""
+                # Accessing a free variable fake tensor will look like a
+                # constant to make_fx, and result in the tensor being traced
+                # into the graph, which is an error condition.  Make sure we
+                # report adequately in this case.
+                return (x + fake_z, )
 
         with self.assertRaisesRegex(
-            AssertionError, message
+            AssertionError, "Unexpected fake buffer"
         ):
-            aot_module_simplified(mod_fake, (real_x,), nop)
-
-        # Counterfactual to ensure that the raise is only due to real vs fake
-        # Run the same exact thing except with a real buffer.
-        graph = tracer.trace(MockModule(real_y))
-        mod_real = torch.fx.GraphModule(tracer.root, graph)
-        aot_module_simplified(MockModule(real_y), (real_x,), nop)
-
-    @patch("torch._subclasses.fake_tensor.FakeTensorConfig.debug", True)
-    def test_aot_module_simplified_fake_tensor_gm_raises_debug_enabled(self):
-        self._test_aot_module_simplified_fake_tensor_gm_raises(debug=True)
-
-    @patch("torch._subclasses.fake_tensor.FakeTensorConfig.debug", False)
-    def test_aot_module_simplified_fake_tensor_gm_raises_no_debug_enabled(self):
-        self._test_aot_module_simplified_fake_tensor_gm_raises(debug=False)
-
-    def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
-        class MockModule(torch.nn.Module):
-            def __init__(self, y):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.linear.bias = torch.nn.Parameter(torch.ones(4))
-
-            def forward(self, x):
-                z = self.linear(x)
-                z = z.relu()
-                return (z, )
-
-
-        real_x = torch.randn(4)
-        real_y = torch.randn(4)
-
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
-
-        with self.assertRaisesRegex(
-            AssertionError,
-            """Unexpected fake param linear.weight"""
-        ):
-            aot_module_simplified(mod_fake, (real_x,), nop)
+            aot_module_simplified(MockModule(), (fake_x,), nop)
 
 
 # entries in here don't work and need to be fixed.
@@ -1943,6 +1939,12 @@ aot_autograd_failures = {
 
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
+
+    # Worked with real but not with fake
+    xfail('cholesky_inverse'),
+    xfail('segment_reduce', 'lengths'),
+    xfail('nn.functional.embedding_bag'),
+    skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc
     xfail('to_sparse'),
@@ -2045,7 +2047,6 @@ symbolic_aot_autograd_failures = {
     xfail('logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
     xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
     xfail('logdet', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
     xfail('lu_unpack', ''),  # aten.lu_unpack.default - couldn't find symbolic meta function/decomposition
@@ -2055,7 +2056,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('masked_fill', ''),  # could not find kernel
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposi...
-    xfail('masked.logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
@@ -2085,7 +2085,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'bicubic'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'nearest'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.max_pool2d', ''),  # aten.max_pool2d_with_indices_backward.default - couldn't find s...
@@ -2104,11 +2103,9 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.pdist', ''),  # could not find kernel
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('nn.functional.prelu', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
     xfail('nn.functional.unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.upsample_nearest', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('norm', 'nuc'),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
     xfail('normal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2295,9 +2292,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
 
 
 aot_autograd_module_failures = set({
-    torch.nn.RNN,  # See https://github.com/pytorch/pytorch/issues/90500
-    torch.nn.LSTM,  # See https://github.com/pytorch/pytorch/issues/90500
-    torch.nn.GRU,  # See https://github.com/pytorch/pytorch/issues/90500
     torch.nn.GaussianNLLLoss,  # RuntimeError: It appears that you're trying to get value out
                                # of a tracing tensor with aten._local_scalar_dense.default -
                                # erroring out! It's likely that this is caused by data-dependent
@@ -2306,17 +2300,21 @@ aot_autograd_module_failures = set({
                                 # of a tracing tensor with aten._local_scalar_dense.default -
                                 # erroring out! It's likely that this is caused by data-dependent
                                 # control flow or similar.
+    torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input
+                                  # to a causal mask tensor, to see if Boolean is_causal should be set
+                                  # for TrnasformerEncoder layers, MHA and sdp custom kernels
+    torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
+                           # to a causal mask tensor, to see if Boolean is_causal should be set
+                           # for TrnasformerEncoder layers, MHA and sdp custom kernels
+                           # (this bubbles up to Transformer)
 })
 
 symbolic_aot_autograd_module_failures = {
+    torch.nn.GRU,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
+    torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoderLayer,  # RuntimeError: tried to get Double out of SymFloat
     torch.nn.TransformerDecoderLayer,  # RuntimeError: tried to get Double out of SymFloat
-    torch.nn.RNN,  # Exception: Invoking operators with non-Fake Tensor inputs in FakeTensorMode
-                   # is not yet supported. Please convert all Tensors to FakeTensors first.
-    torch.nn.LSTM,  # Exception: Invoking operators with non-Fake Tensor inputs in FakeTensorMode
-                    # is not yet supported. Please convert all Tensors to FakeTensors first.
-    torch.nn.GRU,  # Exception: Invoking operators with non-Fake Tensor inputs in FakeTensorMode
-                   # is not yet supported. Please convert all Tensors to FakeTensors first.
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.CrossEntropyLoss,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
