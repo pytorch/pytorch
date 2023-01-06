@@ -1,13 +1,13 @@
 # Owner(s): ["module: functorch"]
-from functools import wraps
 import typing
 import unittest
 
 from torch.testing._internal.common_utils import (
-    _TestParametrizer,
     TestCase,
     run_tests,
     instantiate_parametrized_tests,
+    parametrize,
+    subtest
 )
 
 from torch._C import (
@@ -327,30 +327,15 @@ xfail_not_implemented = {
 }
 
 
-class dispatch_registrations(_TestParametrizer):
-    def __init__(
-        self,
-        dispatch_key: str,
-        xfails: set,
-        filter_func: typing.Callable = lambda reg: True,
-    ):
-        self.registrations = sorted(get_registrations_for_dispatch_key(dispatch_key))
-        self.xfails = xfails
-        self.filter_func = filter_func
-
-    def _parametrize_test(self, test, generic_cls, device_cls):
-        for registration in self.registrations:
-            if not self.filter_func(registration):
-                continue
-
-            @wraps(test)
-            def test_wrapper(*args, **kwargs):
-                return test(*args, **kwargs)
-
-            if registration in self.xfails:
-                test_wrapper = unittest.expectedFailure(test_wrapper)
-
-            yield (test_wrapper, f"[{registration}]", {"registration": registration})
+def dispatch_registrations(
+        dispatch_key: str, xfails: set, filter_func: typing.Callable = lambda reg: True):
+    registrations = sorted(get_registrations_for_dispatch_key(dispatch_key))
+    subtests = [
+        subtest(reg, name=f"[{reg}]",
+                decorators=([unittest.expectedFailure] if reg in xfails else []))
+        for reg in registrations if filter_func(reg)
+    ]
+    return parametrize("registration", subtests)
 
 
 CompositeImplicitAutogradRegistrations = set(

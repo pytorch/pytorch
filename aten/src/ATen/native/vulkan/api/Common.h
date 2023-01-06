@@ -6,9 +6,6 @@
 #include <utility>
 
 #include <ATen/native/vulkan/api/vk_api.h>
-#include <ATen/native/vulkan/spv.h>
-
-#define VK_KERNEL(name) ::at::native::vulkan::name##_spv
 
 /*
  * Check that the return code of a Vulkan API call is VK_SUCCESS, throwing an
