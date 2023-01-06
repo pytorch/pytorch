@@ -32,7 +32,7 @@ void cos_kernel_cuda(TensorIteratorBase& iter) {
         kComplexHalf, common_dtype, "cos_name", [&]() {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
             using opmath_t = at::opmath_type<scalar_t>;
-            return std::cos(static_cast<opmath_t>(a));
+            return ::cos(static_cast<opmath_t>(a));
           });
         });
 #endif
@@ -44,7 +44,7 @@ void cos_kernel_cuda(TensorIteratorBase& iter) {
         "cos_cuda",
         [&]() {
           gpu_kernel(
-              iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return std::cos(a); });
+              iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return ::cos(a); });
         });
   }
 }

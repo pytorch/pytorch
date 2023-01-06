@@ -32,7 +32,7 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
         kComplexHalf, common_dtype, "sin_name", [&]() {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
             using opmath_t = at::opmath_type<scalar_t>;
-            return std::sin(static_cast<opmath_t>(a));
+            return ::sin(static_cast<opmath_t>(a));
           });
         });
 #endif
@@ -44,7 +44,7 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
         "sin_cuda",
         [&]() {
           gpu_kernel(
-              iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return std::sin(a); });
+              iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return ::sin(a); });
         });
   }
 }
