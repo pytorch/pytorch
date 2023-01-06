@@ -21,7 +21,7 @@ void maximum_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max_elementwise_cuda", [&]() {
       opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
           iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return ::max(a, b);
+        return std::max(a, b);
       });
     });
   } else {
@@ -33,7 +33,7 @@ void maximum_kernel_cuda(TensorIteratorBase& iter) {
         } else if (b != b) {
           return b;
         } else {
-          return ::max(a, b);
+          return std::max(a, b);
         }
       });
     });

@@ -7,6 +7,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
+#include <cmath>
 #include <limits>
 
 namespace at {
@@ -32,7 +33,7 @@ void sinh_kernel_cuda(TensorIteratorBase& iter) {
         kComplexHalf, common_dtype, "sinh_name", [&]() {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
             using opmath_t = at::opmath_type<scalar_t>;
-            return ::sinh(static_cast<opmath_t>(a));
+            return std::sinh(static_cast<opmath_t>(a));
           });
         });
 #endif
@@ -44,7 +45,7 @@ void sinh_kernel_cuda(TensorIteratorBase& iter) {
         "sinh_cuda",
         [&]() {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
-            return ::sinh(a);
+            return std::sinh(a);
           });
         });
   }
