@@ -1461,10 +1461,15 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 
   if (use_mkldnn(_input, dropout_p)) {
     if (!has_projections) {
-      Tensor output, hy, cy;
-      lstm_mkldnn_stub(_input.device().type(), output, hy, cy,_input, hx, _params, has_biases,
-          num_layers, dropout_p, train, bidirectional, batch_first);
-      return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      if (hx[0].unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+        TORCH_WARN_ONCE(
+          "LSTM with symbolic sizes and strides is not supported with oneDNN. Using default implementation.");
+      } else {
+        Tensor output, hy, cy;
+        lstm_mkldnn_stub(_input.device().type(), output, hy, cy,_input, hx, _params, has_biases,
+            num_layers, dropout_p, train, bidirectional, batch_first);
+        return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      }
     } else {
       TORCH_WARN_ONCE(
           "LSTM with projections is not supported with oneDNN. Using default implementation.");

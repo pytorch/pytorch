@@ -472,7 +472,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   mkldnn_workspace.init(
       forward_hint.workspace_desc(), workspace.template data_ptr<uint8_t>());
   ideep::lstm_backward::compute(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, mkldnn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
-  return std::make_tuple(diff_x_, diff_w1_, diff_w2_, diff_b_, diff_b_, diff_hx_, diff_cx_);
+  auto diff_b2_ = at::clone(diff_b_);
+  return std::make_tuple(diff_x_, diff_w1_, diff_w2_, diff_b_, diff_b2_, diff_hx_, diff_cx_);
 }
 
 // MKLDNN RNN integration notes:
