@@ -1,14 +1,14 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/executor.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
+#include <arith.h>
+#include <executor.h>
+#include <fusion.h>
+#include <lower2device.h>
+#include <scheduler/all_schedulers.h>
 
 #include <benchmark/benchmark.h>
 
 #include <cuda_runtime.h>
 
-#include <benchmarks/cpp/nvfuser/utils.h>
+#include <benchmark/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 

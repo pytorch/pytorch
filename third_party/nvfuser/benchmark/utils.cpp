@@ -1,6 +1,6 @@
-#include <benchmarks/cpp/nvfuser/utils.h>
+#include <benchmark/utils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
+#include <scheduler/all_schedulers.h>
 
 #include <sstream>
 
