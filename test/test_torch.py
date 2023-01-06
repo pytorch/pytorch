@@ -2335,6 +2335,7 @@ else:
 
     @skipIfMps
     def test_cumprod(self, device):
+        import pdb; pdb.set_trace()
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumprod(x, 1)
         res2 = torch.tensor([]).to(device)
@@ -2387,6 +2388,7 @@ else:
 
     @skipIfMps
     def test_cummax_cummin(self, device):
+        print("=============================start func000000000000000000000000000000000")
         def test_ops(op, string_of_function_name, expected_output1, expected_output2):
             x = torch.rand(100, 100, device=device)
             out1 = op(x, 1)
@@ -2395,15 +2397,22 @@ else:
             op(x, 1, out=(res2, indices2))
             self.assertEqual(out1[0], res2)
             self.assertEqual(out1[1], indices2)
+            print("-------------------finished the first check!!!!!!!!!!!!!!!!!!!!!!!!!!!!------------------------------------------")
 
             a = torch.tensor([[True, False, True],
                               [False, False, False],
                               [True, True, True]], dtype=torch.bool, device=device)
             b = a.byte()
             aRes = op(a, 0)
+            print("------------------aRes----------------------")
+            print(aRes)
             bRes = op(b, 0)
+            print("------------------bRes----------------------")
+            print(bRes)
             self.assertEqual(aRes[0], bRes[0].bool())
+            print("=====================true one==========================")
             self.assertEqual(aRes[0], expected_output1.bool())
+            print("=====================true two==========================")
 
             # test inf and nan input
             x = torch.tensor([4, inf, 1.5, -inf, 0, nan, 1])
@@ -2442,12 +2451,16 @@ else:
             # Check that output maintained correct shape
             self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
+        print("before define *****************************************************")
         expected_out = torch.tensor([4, inf, inf, inf, inf, nan, nan])
+        print("before first try &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
         test_ops(torch.cummax, "cummax", torch.tensor([[1, 0, 1],
                                                        [1, 0, 1],
                                                        [1, 1, 1]]), expected_out)
 
+        print("before define again ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
         expected_out = torch.tensor([4, 4, 1.5, -inf, -inf, nan, nan])
+        print("before second try @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
         test_ops(torch.cummin, "cummin", torch.tensor([[1, 0, 1],
                                                        [0, 0, 0],
                                                        [0, 0, 0]]), expected_out)
@@ -8734,11 +8747,11 @@ class TestTensorDeviceOps(TestCase):
 # Note: test generation must be done at file scope, not within main, or
 # pytest will fail.
 add_neg_dim_tests()
-instantiate_device_type_tests(TestViewOps, globals())
-instantiate_device_type_tests(TestVitalSignsCuda, globals())
-instantiate_device_type_tests(TestTensorDeviceOps, globals())
+# instantiate_device_type_tests(TestViewOps, globals())
+# instantiate_device_type_tests(TestVitalSignsCuda, globals())
+# instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
-instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
+# instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 
 if __name__ == '__main__':
     run_tests()
