@@ -3,15 +3,16 @@ So you decided to look at the source code.. let's give you a quick overview of t
 
 ## NestedTensor Data Structure
 
-NestedTensors are a generalization of torch Tensors which eases working with data of different shapes and lengths. NestedTensors are mainly used to represent a list of N tensor_components. The N tensor_components are flattened and concatenated into a single tensor. The NestedTensor data structure contains the following information to recover the original tensor_components:
+NestedTensors are a generalization of torch Tensors which eases working with data of different shapes and lengths. They are primarily used to represent a list of N tensors, where each tensor in the list (referred to as a tensor_component) has the same number of dimensions. The tensor_components are flattened and combined into a single NestedTensor, which includes the information required to reconstruct the original tensor_components:
 
-- size_tensor: 2d tensor of n_tensor_components x n_dims
-- stride_tensor: 2d tensor of n_tensor_components x n_dims
-- offsets: 1d tensor of offsets corresponding to the start position of each tensor component
+- nested_size_tensor_: 2d tensor of n_tensor_components x n_dims
+- nested_stride_tensor_: 2d tensor of n_tensor_components x n_dims
+- storage_offsets_: 1d tensor of offsets corresponding to the start position of each tensor component
+- storage_: The storage object that contains the flattened tensor_components (defined on c10::TensorImp)
 
-NestedTensors inherit from c10::TensorImpl and their definition can be found here: [NestedTensorImpl.h](../../NestedTensorImpl.h).
+NestedTensors inherit from c10::TensorImpl whose definition can be found here: [NestedTensorImpl.h](../../NestedTensorImpl.h).
 
-When constructing a NestedTensor in C++ you will likely not be using the NestedTensorImpl constructor directly but use the `wrap_buffer` function defined in [NestedTensorUtils.h](NestedTensorUtils.h). This is a thin wrapper around the NestedTensorImpl constructor that insures that the input tensor is contiguous. This is because when constructing a NestedTensor from a dense tensor we create a shallow copy of the input's Storage object and the if the input tensor did not satisfy tensor.numel() == tensor.storage.numel() this could lead to undefined behavior.
+When constructing a NestedTensor in C++ you will likely not be using the NestedTensorImpl constructor directly but using the `wrap_buffer` function defined in [NestedTensorUtils.h](NestedTensorUtils.h). This is a thin wrapper around the NestedTensorImpl constructor that ensures that the input tensor is contiguous. This is because when constructing a NestedTensor from a dense tensor we create a shallow copy of the input's Storage object and the if the input tensor did not satisfy `tensor.numel() == tensor.storage.numel()` this could lead to undefined behavior.
 
 ##  Code Structure
 
@@ -28,7 +29,7 @@ The NestedTensor code is split into two parts: the C++ code and the Python code.
 - `cuda/`: CUDA implementations of the NestedTensor functions
 
 ##  Implementing new functions
-There are two main classes of functions that can be implemented on NestedTensors: functions that can be efficiently implemented by viewing the NestedTensor as dense tensor where the raggedness has been folded into the dense dimensions and those that can't. Examples of the former are all unary ops (e.g. abs, log, relu) and binary ops (e.g. add, mul, div). If the function acts element wise on one NestedTensor or multiple NestedTensors than an efficient implementation is relative straight forward.
+There are two main classes of functions that can be implemented on NestedTensors: functions that can be efficiently implemented by viewing the NestedTensor as dense tensor where the raggedness has been folded into the dense dimensions and those that can't. Unary operations (e.g. abs, log, relu) and binary operations (e.g. add, mul, div) that act elementwise on one or more NestedTensors are examples of functions that can be efficiently implemented. Efficient implementation of these functions is relatively straightforward.
 
 The definition of map_nt is:
 
@@ -57,3 +58,6 @@ If performance is not your main concern and you would like to enable coverage th
 ## Triton
 
 ##  Best Practices
+
+## Testing
+Unit tests for NestedTensors can be found at [test/test_nestedtensor.py](/test/test_nestedtensor.py). If a new operator is added to NestedTensors it is important to add a unit test for it. The unit tests are run on the CI and if they fail the PR will not be merged.
