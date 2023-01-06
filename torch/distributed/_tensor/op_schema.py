@@ -81,6 +81,19 @@ class OpSchema(object):
             f" kwargs_schema={self.kwargs_schema})"
         )
 
+    def __hash__(self) -> int:
+        # NOTE: we turn kwargs_schema into a frozenset to hash as it would not be nested dict
+        frozen_set_kwargs_schema = frozenset(self.kwargs_schema.items())
+        return hash((self.func_schema, self.args_spec, frozen_set_kwargs_schema))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, OpSchema):
+            return False
+        return (
+            self.func_schema == other.func_schema
+            and self.args_schema == other.args_schema
+            and self.kwargs_schema == other.kwargs_schema
+        )
 
 @dataclass
 class OutputSharding:
