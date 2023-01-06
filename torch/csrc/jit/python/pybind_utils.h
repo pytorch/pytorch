@@ -246,6 +246,7 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
     : aw_(std::move(aw)) {}
   // TODO: leave only ivalue::Await constructor, everything else move to init.cpp
   explicit PythonAwaitWrapper(py::handle input) {
+    // eager mode (no type inference) nowait
     args_ = py::tuple(1u);
     args_[0] = input;
     auto type = PyObjectType::get();
@@ -254,6 +255,7 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
   }
 
   explicit PythonAwaitWrapper(py::function pyf, py::tuple args) {
+    // eager mode (no type inference) awaitable
     pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(
         std::move(pyf));
     args_ = std::move(args);

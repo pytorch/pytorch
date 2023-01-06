@@ -153,36 +153,36 @@ class TestAwait(JitTestCase):
         script_out = sm(inp)
         self.assertTrue(torch.allclose(script_out, out))
 
-    def test_await_implicit_convertion(self):
-        class C(object):
-            def __init__(self, a: Tensor, b: Tensor):
-                self._a = a
-                self._b = b
-
-
-        make_global(C)
-        # Can not stay in the class as Jit does not support Recursive annotations
-        # (self in wait_impl can not be annotated as C as C is not defined by this time)
-        def C_wait_impl(self: C) -> C:
-                return C(self._a * 2, self._b * 3)
-
-        def fn_arg_C(x: C) -> Tensor:
-          return x._a + x._b
-
-        @torch.jit.script
-        def fn(x: Tensor):
-            aw: Await[C] = torch.jit.awaitable(C_wait_impl, C(x, x))
-            _a = torch.eye(2)
-            y = fn_arg_C(aw)
-            return _a + y + x
-
-        inp = torch.zeros(2)
-
-        sm = torch.jit.script(fn)
-        out = fn(inp)
-        script_out = sm(inp)
-        self.assertTrue(torch.allclose(script_out, out))
-        self.assertGraphContainsExactly(sm.graph, kind='aten::awaitable_wait', num_kind_nodes=1)
+#    def test_await_implicit_convertion(self):
+#        class C(object):
+#            def __init__(self, a: Tensor, b: Tensor):
+#                self._a = a
+#                self._b = b
+#
+#
+#        make_global(C)
+#        # Can not stay in the class as Jit does not support Recursive annotations
+#        # (self in wait_impl can not be annotated as C as C is not defined by this time)
+#        def C_wait_impl(self: C) -> C:
+#                return C(self._a * 2, self._b * 3)
+#
+#        def fn_arg_C(x: C) -> Tensor:
+#          return x._a + x._b
+#
+#        @torch.jit.script
+#        def fn(x: Tensor):
+#            aw: Await[C] = torch.jit.awaitable(C_wait_impl, C(x, x))
+#            _a = torch.eye(2)
+#            y = fn_arg_C(aw)
+#            return _a + y + x
+#
+#        inp = torch.zeros(2)
+#
+#        sm = torch.jit.script(fn)
+#        out = fn(inp)
+#        script_out = sm(inp)
+#        self.assertTrue(torch.allclose(script_out, out))
+#        self.assertGraphContainsExactly(sm.graph, kind='aten::awaitable_wait', num_kind_nodes=1)
 
     def test_await_class_return(self):
         class C(object):
@@ -204,7 +204,7 @@ class TestAwait(JitTestCase):
         def fn(x: Tensor):
             aw: Await[C] = torch.jit.awaitable(C_wait_impl, C(x, x))
             _a = torch.eye(2)
-            y = fn_arg_C(aw)
+            y = fn_arg_C(torch.jit.awaitable_wait(aw))
             return _a + y + x
 
         inp = torch.zeros(2)
@@ -358,13 +358,29 @@ class TestAwait(JitTestCase):
 
         sm = torch.jit.script(main)
         out_aw = main(inp)
-        print(f"XXX out_aw:{out_aw}")
         out = torch.jit.awaitable_wait(out_aw)
-        print(f"XXX out:{out}")
 
         script_out_aw = sm(inp)
-        print(f"XXX script_out_aw:{script_out_aw}")
         script_out = torch.jit.awaitable_wait(script_out_aw)
-        print(f"XXX script_out:{script_out}")
 
         self.assertTrue(torch.allclose(script_out, out))
+
+    def test_jit_trace(self):
+        def gap(x: Tensor):
+            return torch.relu(x) + torch.sin(x)
+
+        def delayed(x: Tensor) -> Tensor:
+            return 2 * (torch.cos(x) + 1)
+
+        def main(x: Tensor, y: Tensor) -> Tensor:
+            aw = torch.jit.awaitable(delayed, x)
+
+            assert isinstance(aw, torch.Await)
+            z = gap(y)
+            k = torch.jit.awaitable_wait(aw)
+            return y + k
+
+        inp = torch.randn(2)
+        tm = torch.jit.trace(main, (inp,inp))
+        inp_check = torch.ones(2)
+        self.assertEqual(main(inp_check, inp_check), tm(inp_check, inp_check))

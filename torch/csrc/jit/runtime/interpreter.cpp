@@ -448,7 +448,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
               auto& gf =
                   toGraphFunction(*frame.function->function_table_[inst.X]);
-              auto num_outputs = gf.graph()->outputs().size();
 
               for (const auto& arg : aw->args()) {
                 stack.push_back(arg);
@@ -458,6 +457,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               gf.run(stack);
               // callFunction(f, stack);
 
+              auto num_outputs = gf.graph()->outputs().size();
               if (num_outputs == 1) {
                 aw->markCompleted(stack.back());
               } else {
@@ -777,7 +777,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // Do not do this lambda - frame already destructed, just for experiment
             std::function<IValue()> init_fn = [args, fn_ptr, taskLauncher=taskLauncher_]
               () -> IValue {
-                std::cout << "XXX " << __FILE__ << ":" << __LINE__ <<":" <<__FUNCTION__ << std::endl;
               auto& fn = toGraphFunction(*fn_ptr);
               auto n_out = fn.graph()->outputs().size();
               torch::jit::Stack s;

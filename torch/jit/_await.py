@@ -15,5 +15,6 @@ def awaitable_wait(aw):
 def awaitable_nowait(o):
     return torch._C.awaitable_nowait(o)
 
+
 _register_builtin(awaitable_wait, "aten::awaitable_wait")
 _register_builtin(awaitable_nowait, "aten::awaitable_nowait")
