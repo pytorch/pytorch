@@ -54,7 +54,7 @@ scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int size,
 template <typename scalar_t>
 static __forceinline__ __device__
 scalar_t clip_coordinates(scalar_t in, int clip_limit) {
-  return std::min(static_cast<scalar_t>(clip_limit - 1), std::max(in, static_cast<scalar_t>(0)));
+  return ::min(static_cast<scalar_t>(clip_limit - 1), ::max(in, static_cast<scalar_t>(0)));
 }
 
 // clip_coordinates_set_grad works similarly to clip_coordinates except that
