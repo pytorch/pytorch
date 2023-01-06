@@ -2161,7 +2161,7 @@ def upsample_bilinear2d(
     ) -> float:
         if align_corners:
             if output_size > 1:
-                return (input_size - 1) / (output_size - 1)
+                return (input_size - 1) / (sym_int(output_size) - 1)
             else:
                 return 0
         else:
