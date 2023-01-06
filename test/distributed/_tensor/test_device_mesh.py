@@ -25,13 +25,7 @@ from torch.testing._internal.common_distributed import TEST_SKIPS
 class DeviceMeshTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
-
-    @with_comms
-    def test_mesh_size_requirement(self):
-        mesh_tensor = torch.arange(4).reshape(2, 2)
-        with self.assertRaisesRegex(RuntimeError, "DeviceMesh must include every process in WORLD"):
-            mesh = DeviceMesh(self.device_type, mesh_tensor)
+        return 4
 
     def test_init_process_group(self):
         self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
@@ -145,6 +139,18 @@ class DeviceMeshTest(DTensorTestBase):
                 [[0, 1], [2, 3]],
                 dim_groups=[dim_groups[0]],
             )
+
+
+class DeviceMeshTestNDim(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    def test_mesh_size_requirement(self):
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        with self.assertRaisesRegex(RuntimeError, "DeviceMesh must include every process in WORLD"):
+            mesh = DeviceMesh(self.device_type, mesh_tensor)
 
     @with_comms
     def test_device_mesh_nd(self):
