@@ -156,7 +156,6 @@ def fill_tensor(self, value: Tensor):
 
 
 @register_decomposition(aten.hardsigmoid)
-@pw_cast_for_opmath
 def hardsigmoid(self: Tensor) -> Tensor:
     return torch.clamp(torch.clamp(self + 3, min=0), max=6) / 6
 
@@ -172,7 +171,6 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
 
 
 @register_decomposition(aten.hardtanh_backward)
-@pw_cast_for_opmath
 def hardtanh_backward(
     grad_output: Tensor, self: Tensor, min_val: float, max_val: float
 ):
@@ -180,7 +178,6 @@ def hardtanh_backward(
 
 
 @register_decomposition(aten.hardshrink_backward)
-@pw_cast_for_opmath
 def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
     return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_out)
 
@@ -202,7 +199,6 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 
 
 @register_decomposition(aten.threshold_backward)
-@pw_cast_for_opmath
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, 0.0, grad_output)
 
