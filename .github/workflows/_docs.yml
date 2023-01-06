@@ -95,6 +95,8 @@ jobs:
         env:
           GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
+          # sometimes .netrc exists as a directory even though this is the temp folder
+          rm -rf "${RUNNER_TEMP}/.netrc"
           # set credentials for https pushing
           echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
           echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"
