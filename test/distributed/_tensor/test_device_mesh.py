@@ -33,6 +33,24 @@ class DeviceMeshTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "DeviceMesh must include every process in WORLD"):
             mesh = DeviceMesh(self.device_type, mesh_tensor)
 
+    @with_comms
+    def test_contiguous_mesh(self):
+        mesh_tensor = torch.arange(self.world_size).reshape(2, -1)
+        mesh = DeviceMesh(self.device_type, mesh_tensor)
+
+    @with_comms
+    def test_incontiguous_mesh(self):
+        # mesh ranks are not unique
+        mesh_tensor = torch.arange(self.world_size).reshape(2, -1)
+        mesh_tensor[0][2] = 1
+        with self.assertRaisesRegex(RuntimeError, "DeviceMesh cannot have duplicate values"):
+            mesh = DeviceMesh(self.device_type, mesh_tensor)
+        # mesh ranks don't start from 0
+        mesh_tensor = torch.arange(start=1, end=self.world_size+1).reshape(2, -1)
+        with self.assertRaisesRegex(RuntimeError, "DeviceMesh ranks must start from 0"):
+            mesh = DeviceMesh(self.device_type, mesh_tensor)
+        
+
     def test_init_process_group(self):
         self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
         backend = "nccl" if self.device_type == "cuda" else "gloo"

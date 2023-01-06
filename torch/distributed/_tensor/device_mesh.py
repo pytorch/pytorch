@@ -156,6 +156,19 @@ class DeviceMesh(object):
                 f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
             )
 
+        # ranks in mesh must start from 0
+        if unique_mesh_values[0] != 0:
+            raise RuntimeError(
+                "DeviceMesh ranks must start from 0, "
+                f"but found min rank = {unique_mesh_values[0]}"
+            )
+
+        # mesh must be contiguous (i.e. from 0 to N-1)
+        if 2 * unique_mesh_values.sum().item() != world_size * (world_size - 1):
+            raise RuntimeError(
+                f"DeviceMesh is expected to be contiguous, but found {self.mesh.tolist()}"
+            )
+
         # coordinates of this rank on the mesh
         rank_coords = (self.mesh == get_rank()).nonzero()
         assert rank_coords.size(0) in (0, 1)
