@@ -228,6 +228,8 @@ if 'REBUILD' not in os.environ and 'BUILD_ENVIRONMENT' in os.environ:
     subprocess.run(['aws', 's3', 'cp', '\"s3://ossci-windows/Restore PyTorch Environment.lnk\"',
         '\"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"'])
 
+subprocess.run(['echo', str(os.environ)])
+subprocess.run(['env'])
 
 subprocess.call('conda run -n test_env' + " python setup.py bdist_wheel", shell=True)
 subprocess.call("sccache --show-stats", shell=True)
