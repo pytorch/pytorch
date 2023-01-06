@@ -11,6 +11,7 @@
 #include <ir_all_nodes.h>
 #include <ir_iostream.h>
 #include <ir_utils.h>
+#include <kernel_db/kernel_db.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
 
@@ -1019,6 +1020,7 @@ c10::optional<int> getMaxRegCount(
 } // namespace
 
 std::pair<NvrtcFunction, std::string> nvrtcCompile(
+    c10::optional<std::reference_wrapper<const std::string>> kernel_code,
     const std::string& code,
     const std::string& func_name,
     int id,
@@ -1039,23 +1041,6 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   int major = 0, minor = 0;
   bool compile_to_sass = false;
   codegenOutputQuery(prop, major, minor, compile_to_sass);
-
-  nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
-
-  {
-    std::stringstream ss;
-    ss << "__tmp_kernel" << id << ".cu";
-    std::string name = ss.str();
-    FUSER_PERF_SCOPE("executor_utils::NvrtcCreateProgram");
-    AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
-        &program, code.c_str(), name.c_str(), 0, nullptr, nullptr));
-  }
-
-  ResourceGuard holdProgram([&] {
-    FUSER_PERF_SCOPE("executor_utils::NvrtcDestroyProgram");
-    AT_CUDA_NVRTC_CHECK(
-        at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
-  });
 
 #ifdef USE_ROCM
   std::vector<const char*> args = {"--std=c++17"};
@@ -1199,81 +1184,124 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   }
 #endif
 
-  at::globalContext().getNVRTC().nvrtcAddNameExpression(
-      program, func_name.c_str());
-
-  {
-    FUSER_PERF_SCOPE("executor_utils::Nvrtc::CompileProgram");
-
-    const auto result = at::globalContext().getNVRTC().nvrtcCompileProgram(
-        program, args.size(), args.data());
-
-    size_t logsize = 0;
-    at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
-
-    std::vector<char> log(logsize);
-    at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
-
-    if (result != NVRTC_SUCCESS) {
-      TORCH_INTERNAL_ASSERT(
-          false, code.c_str(), "\nCUDA NVRTC compile error: ", log.data());
-    }
-
-    ptxas_log << log.data() << std::endl;
-    if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
-      if (max_register.has_value()) {
-        std::cout << "Max register count: " << *max_register << std::endl;
-      }
-      std::cout << log.data() << std::endl;
-    }
-    AT_CUDA_NVRTC_CHECK(result);
-  }
-
-  const char* lowered_kernel_name = nullptr;
-  at::globalContext().getNVRTC().nvrtcGetLoweredName(
-      program, func_name.c_str(), &lowered_kernel_name);
-
-  size_t ptx_size = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<char> ptx;
+  std::string lowered_kernel_name_str;
+  std::string compile_args;
+  bool first_arg = true;
+  for (auto arg : args) {
+    if (first_arg) {
+      compile_args += arg;
+      first_arg = false;
+    } else {
+      compile_args += " ";
+      compile_args += arg;
+    }
+  }
 
-  {
-    FUSER_PERF_SCOPE("executor_utils::Nvrtc::GetPTX");
+  auto& kernel_db = KernelDb::get();
+  // If the Kernel Query failes, the Kernel is recompiled
+  if (!(kernel_db.enabled() && kernel_code.has_value() &&
+        kernel_db.query(
+            kernel_code.value(), compile_args, lowered_kernel_name_str, ptx))) {
+    nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
+    ResourceGuard holdProgram([&] {
+      FUSER_PERF_SCOPE("executor_utils::NvrtcDestroyProgram");
+      AT_CUDA_NVRTC_CHECK(
+          at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
+    });
+
+    {
+      FUSER_PERF_SCOPE("executor_utils::Nvrtc::CompileProgram");
+      {
+        std::stringstream ss;
+        ss << "__tmp_kernel" << id << ".cu";
+        std::string name = ss.str();
+        FUSER_PERF_SCOPE("executor_utils::NvrtcCreateProgram");
+        AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
+            &program, code.c_str(), name.c_str(), 0, nullptr, nullptr));
+      }
+
+      at::globalContext().getNVRTC().nvrtcAddNameExpression(
+          program, func_name.c_str());
+
+      const auto result = at::globalContext().getNVRTC().nvrtcCompileProgram(
+          program, args.size(), args.data());
+
+      size_t logsize = 0;
+      at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
+
+      std::vector<char> log(logsize);
+      at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+
+      if (result != NVRTC_SUCCESS) {
+        TORCH_INTERNAL_ASSERT(
+            false, code.c_str(), "\nCUDA NVRTC compile error: ", log.data());
+      }
+
+      ptxas_log << log.data() << std::endl;
+      if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
+        if (max_register.has_value()) {
+          std::cout << "Max register count: " << *max_register << std::endl;
+        }
+        std::cout << log.data() << std::endl;
+      }
+      AT_CUDA_NVRTC_CHECK(result);
+    }
+
+    const char* lowered_kernel_name = nullptr;
+    at::globalContext().getNVRTC().nvrtcGetLoweredName(
+        program, func_name.c_str(), &lowered_kernel_name);
+    lowered_kernel_name_str.assign(lowered_kernel_name);
+
+    size_t ptx_size = 0;
+
+    {
+      FUSER_PERF_SCOPE("executor_utils::Nvrtc::GetPTX");
 #if CUDA_VERSION >= 11010
-    // compile_to_sass determines whether we are generating SASS or PTX, hence
-    // the different API.
-    const auto getSize = compile_to_sass
-        ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
-        : at::globalContext().getNVRTC().nvrtcGetPTXSize;
-    const auto getFunc = compile_to_sass
-        ? at::globalContext().getNVRTC().nvrtcGetCUBIN
-        : at::globalContext().getNVRTC().nvrtcGetPTX;
+      // compile_to_sass determines whether we are generating SASS or PTX, hence
+      // the different API.
+      const auto getSize = compile_to_sass
+          ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+          : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+      const auto getFunc = compile_to_sass
+          ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+          : at::globalContext().getNVRTC().nvrtcGetPTX;
 #else
-    const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
-    const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
+      const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
+      const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
 #endif
-    AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
-    ptx.resize(ptx_size);
-    AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
+      AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
+      ptx.resize(ptx_size);
+      AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
+    }
+
+    if (kernel_db.enabled() && kernel_code.has_value()) {
+      auto result = kernel_db.write(
+          kernel_code.value(), compile_args, lowered_kernel_name_str, ptx);
+      if (!result) {
+        TORCH_WARN(
+            "kernel_db was unable to write kernel: ", lowered_kernel_name_str);
+      }
+    }
+
+#if !defined(USE_ROCM) && CUDA_VERSION >= 11010
+    if (isDebugDumpEnabled(DebugDumpOption::Ptx)) {
+      dumpCompiledCodeToFile(program, id, false);
+    }
+
+    if (isDebugDumpEnabled(DebugDumpOption::Cubin)) {
+      TORCH_INTERNAL_ASSERT(
+          compile_to_sass,
+          "CUBIN not available as the kernel was compiled only to PTX");
+      dumpCompiledCodeToFile(program, id, true);
+    }
+#endif
   }
 
   NvrtcFunction compiled_kernel_;
 
 #ifndef USE_ROCM
-
-#if CUDA_VERSION >= 11010
-  if (isDebugDumpEnabled(DebugDumpOption::Ptx)) {
-    dumpCompiledCodeToFile(program, id, false);
-  }
-
-  if (isDebugDumpEnabled(DebugDumpOption::Cubin)) {
-    TORCH_INTERNAL_ASSERT(
-        compile_to_sass,
-        "CUBIN not available as the kernel was compiled only to PTX");
-    dumpCompiledCodeToFile(program, id, true);
-  }
-#endif
-
   {
     FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadPTX");
 
@@ -1299,7 +1327,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleGetFunction(
       &(compiled_kernel_.function),
       compiled_kernel_.module,
-      lowered_kernel_name));
+      lowered_kernel_name_str.c_str()));
 
   TORCH_CHECK(
       !isOptionDisabled(DisableOption::ArchCheck),

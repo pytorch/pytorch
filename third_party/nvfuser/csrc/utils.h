@@ -109,6 +109,7 @@ enum class EnableOption {
   LinearDecomposition, //! Enable linear-bias decomposition
   ConvDecomposition, //! Enable conv-bias decomposition
   GraphOp, //! Enable graphOps(index_select/gather/scatter)
+  KernelDb, //! Enable Kernel Database
   EndOfOption //! Placeholder for counting the number of elements
 };
 

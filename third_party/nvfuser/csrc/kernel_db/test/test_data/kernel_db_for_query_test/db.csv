@@ -1,0 +1,2 @@
+kernel_signature,compile_args,kernel_code_file,cubin_file
+_ZN11CudaCodeGen7kernel1ENS_6TensorIfLi3EEES1_S1_,--std=c++14 --gpu-architecture=sm_80 -default-device --fmad=true -DNDEBUG --ptxas-options --maxrregcount=255,kernel_0.cu,kernel_0.cubin

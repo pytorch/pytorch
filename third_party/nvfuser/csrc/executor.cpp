@@ -186,7 +186,7 @@ void FusionExecutor::debugCompileFusionFromStr(
   }
 
   std::tie(compiled_kernel_, last_compiler_log_) =
-      executor_utils::nvrtcCompile(code, name, fusion_id_);
+      executor_utils::nvrtcCompile(c10::nullopt, code, name, fusion_id_);
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "assign a fusion_id_ <= 0 is not accepted.");
 }
@@ -344,6 +344,7 @@ void FusionExecutor::compileFusion(
       block_size_high_water_mark);
   maxrregcount_high_water_mark = maxrregcount;
   std::tie(compiled_kernel_, last_compiler_log_) = executor_utils::nvrtcCompile(
+      kernel_code_,
       structured_code,
       (kernelNamespace() + "::" + kernelName()).c_str(),
       fusion_id_,
@@ -1110,6 +1111,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
       std::tie(compiled_kernel_, last_compiler_log_) =
           executor_utils::nvrtcCompile(
+              kernel_code_,
               structured_code,
               (kernelNamespace() + "::" + kernelName()).c_str(),
               fusion_id_,
@@ -1394,7 +1396,7 @@ void FusionExecutor::compileRtc(
   options_ = options;
 
   std::tie(compiled_kernel_, last_compiler_log_) =
-      executor_utils::nvrtcCompile(scode, name, fusion_id_);
+      executor_utils::nvrtcCompile(c10::nullopt, scode, name, fusion_id_);
 }
 
 float FusionExecutor::runRtc(

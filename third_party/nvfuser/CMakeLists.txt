@@ -56,6 +56,8 @@ list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/iter_visitor.cpp
     ${NVFUSER_SRCS_DIR}/kernel.cpp
     ${NVFUSER_SRCS_DIR}/kernel_cache.cpp
+    ${NVFUSER_SRCS_DIR}/kernel_db/kernel_db.cpp
+    ${NVFUSER_SRCS_DIR}/kernel_db/utils.cpp
     ${NVFUSER_SRCS_DIR}/kernel_ir.cpp
     ${NVFUSER_SRCS_DIR}/kernel_ir_dispatch.cpp
     ${NVFUSER_SRCS_DIR}/lower_alias_memory.cpp
@@ -146,6 +148,8 @@ else()
 endif()
 
 target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch ${TORCHLIB_FLAVOR})
+# For kernel_db, linking STL Filesystem Library for backward compatability with C++14
+target_link_libraries(${NVFUSER_CODEGEN} PRIVATE stdc++fs)
 if(NOT USE_ROCM)
   target_link_libraries(${NVFUSER_CODEGEN} PRIVATE ${CUDA_NVRTC_LIB} torch::nvtoolsext)
   target_include_directories(${NVFUSER_CODEGEN} PRIVATE ${CUDA_INCLUDE_DIRS})
@@ -302,6 +306,9 @@ target_include_directories(${NVFUSER_CODEGEN} PRIVATE "${CMAKE_BINARY_DIR}/inclu
 if(BUILD_TEST)
   set(NVFUSER_TESTS "${PROJECT_NAME}_tests")
   set(JIT_TEST_SRCS)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/kernel_db/test/test_nvfuser_kernel_db_open.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/kernel_db/test/test_nvfuser_kernel_db_query.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/kernel_db/test/test_nvfuser_kernel_db_write.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/python_frontend/test/test_nvfuser_fusion_definition.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/python_frontend/test/test_nvfuser_fusion_cache.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/python_frontend/test/test_nvfuser_fusion_record.cpp)

@@ -51,6 +51,7 @@ struct NvrtcFunction {
 
 // Returns executable function and the ptxas log from compilation
 std::pair<NvrtcFunction, std::string> nvrtcCompile(
+    c10::optional<std::reference_wrapper<const std::string>> kernel_code,
     const std::string& code,
     const std::string& func_name,
     int id,
