@@ -651,7 +651,9 @@ class CppKernel(Kernel):
         if need_accmulate:
             max_threads = parallel_num_threads()
             tmpvar_to_accumulate = f"{tmpvar}_acc[{max_threads}]"
-            tmpvar_to_accumulate_with_idx = tmpvar_to_accumulate.replace(f"[{max_threads}]", f"[i]")
+            tmpvar_to_accumulate_with_idx = tmpvar_to_accumulate.replace(
+                f"[{max_threads}]", f"[i]"
+            )
         index = self.rename_indexing(index)
         self.reduction_vars[tmpvar] = reduction_type
         if argmax_or_argmin:
@@ -687,11 +689,14 @@ class CppKernel(Kernel):
                         "}",
                     ]
                 )
-                if not hasattr(self.parallel_accumulation_stores, 'has_tid' ):
-                    self.parallel_accumulation_stores.writeline(None, f"int tid = omp_get_thread_num();")
-                    setattr(self.parallel_accumulation_stores, 'has_tid', True)
+                if not hasattr(self.parallel_accumulation_stores, "has_tid"):
+                    self.parallel_accumulation_stores.writeline(
+                        None, f"int tid = omp_get_thread_num();"
+                    )
+                    setattr(self.parallel_accumulation_stores, "has_tid", True)
                 self.parallel_accumulation_stores.writeline(
-                    None, f"{reduction_combine(reduction_type, tmpvar_to_accumulate, value, max_threads)};"
+                    None,
+                    f"{reduction_combine(reduction_type, tmpvar_to_accumulate, value, max_threads)};",
                 )
                 self.accumulation_stores.writeline(
                     None, f"{reduction_combine(reduction_type, tmpvar, value)};"
@@ -709,8 +714,8 @@ class CppKernel(Kernel):
                     None,
                     [
                         f"for (int i = 0; i < {max_threads}; i++)",
-                        f"    {tmpvar} += {tmpvar_to_accumulate_with_idx};"
-                    ]
+                        f"    {tmpvar} += {tmpvar_to_accumulate_with_idx};",
+                    ],
                 )
             self.reduction_suffix.writeline(
                 name, f"{var}[{cexpr(index)}] = {tmpvar}{member_name};"
@@ -953,8 +958,12 @@ class CppVecKernel(CppKernel):
             self.parallel_accumulation_prefix.writeline(
                 f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}> {tmpvar_vec_to_accumulate};"
             )
-            tmpvar_to_accumulate_with_idx = tmpvar_to_accumulate.replace(f"[{max_threads}]", f"[i]")
-            tmpvar_vec_to_accumulate_with_idx = tmpvar_vec_to_accumulate.replace(f"[{max_threads}]", f"[i]")
+            tmpvar_to_accumulate_with_idx = tmpvar_to_accumulate.replace(
+                f"[{max_threads}]", f"[i]"
+            )
+            tmpvar_vec_to_accumulate_with_idx = tmpvar_vec_to_accumulate.replace(
+                f"[{max_threads}]", f"[i]"
+            )
             self.parallel_accumulation_prefix.writelines(
                 [
                     f"for (int i = 0; i < {max_threads}; i++) ",
@@ -964,18 +973,21 @@ class CppVecKernel(CppKernel):
                     "}",
                 ]
             )
-            if not hasattr(self.parallel_accumulation_stores, 'has_tid' ):
-                self.parallel_accumulation_stores.writeline(None, f"int tid = omp_get_thread_num();")
-                setattr(self.parallel_accumulation_stores, 'has_tid', True)
+            if not hasattr(self.parallel_accumulation_stores, "has_tid"):
+                self.parallel_accumulation_stores.writeline(
+                    None, f"int tid = omp_get_thread_num();"
+                )
+                setattr(self.parallel_accumulation_stores, "has_tid", True)
             self.parallel_accumulation_stores.writeline(
-                None, f"{reduction_combine_vec(reduction_type, tmpvar_vec_to_accumulate, value, max_threads)};"
+                None,
+                f"{reduction_combine_vec(reduction_type, tmpvar_vec_to_accumulate, value, max_threads)};",
             )
             self.parallel_accumulation_suffix.writelines(
                 None,
                 [
                     f"for (int i = 0; i < {max_threads}; i++)",
-                    f"    {tmpvar_vec} += {tmpvar_vec_to_accumulate_with_idx};"
-                ]
+                    f"    {tmpvar_vec} += {tmpvar_vec_to_accumulate_with_idx};",
+                ],
             )
             self.accumulation_stores.writeline(
                 None, f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
@@ -1368,8 +1380,12 @@ class CppKernelProxy(CppKernel):
 
                 if reduction_par_depth:
                     worksharing.close()
-                    code.splice(loop_with_tail.main_loop_body.parallel_accumulation_suffix)
-                    code.splice(loop_with_tail.tail_loop_body.parallel_accumulation_suffix)
+                    code.splice(
+                        loop_with_tail.main_loop_body.parallel_accumulation_suffix
+                    )
+                    code.splice(
+                        loop_with_tail.tail_loop_body.parallel_accumulation_suffix
+                    )
 
                 code.splice(loop_with_tail.tail_loop_body.reduction_suffix)
 
@@ -1648,7 +1664,9 @@ class LoopLevel:
         if self.reduction_vars:
             suffix = "_vec" if self.simd_vec else ""
             reduction = " " + " ".join(
-                f"reduction({RTYPE_TO_CPP[rtype]}:{var}{suffix})" if rtype != "sum" else ""
+                f"reduction({RTYPE_TO_CPP[rtype]}:{var}{suffix})"
+                if rtype != "sum"
+                else ""
                 for var, rtype in self.reduction_vars.items()
             )
         else:
