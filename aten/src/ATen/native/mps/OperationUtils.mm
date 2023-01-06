@@ -151,7 +151,7 @@ std::string getArrayRefString(const IntArrayRef s) {
 
 std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value) {
     std::string str;
-    // The key format per tensor would look like ":MPSDataTypeFloat32[1,1,1,10]:"
+    // The key format per tensor would look like ":Float32[1,1,1,10]:"
     for (const Tensor& tensor: tensors) {
       str += ":";
       if (tensor.defined()) {
@@ -171,16 +171,19 @@ std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value
     return str;
 }
 
-MPSShape* getMPSShape(const Tensor& t) {
-  return getMPSShape(t.sizes());
+MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format) {
+  return getMPSShape(t.sizes(), memory_format);
 }
 
-MPSShape* getMPSShape(c10::MaybeOwned<Tensor> t) {
-  const Tensor& t_ = *t;
-  return getMPSShape(t_);
-}
-
-MPSShape* getMPSShape(IntArrayRef sizes) {
+MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format) {
+  if (memory_format == MemoryFormat::ChannelsLast) {
+    TORCH_INTERNAL_ASSERT(sizes.size() == 4, "ChannelsLast memory format must have 4 dimensions!");
+    const NSUInteger N = sizes[0];
+    const NSUInteger C = sizes[1];
+    const NSUInteger H = sizes[2];
+    const NSUInteger W = sizes[3];
+    return @[@(N), @(H), @(W), @(C)];
+  }
   const int sz = sizes.size();
   const int sz_ = (sz > 0) ? sz : 1;
 
@@ -350,6 +353,12 @@ MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, const Scalar& scal
 // we pass ScalarType instead of MPSDataType to handle MPSDataTypeBoolean's availability too
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType) {
   return [mpsGraph castTensor:tensor toType:getMPSScalarType(toType) name:@"castTensor"];
+}
+
+MPSGraphTensor* convertNHWCtoNCHW(MPSGraph *mpsGraph, MPSGraphTensor* tensor) {
+  TORCH_INTERNAL_ASSERT(tensor.shape.count == 4, "Tensor must have 4 dimensions!");
+  return [mpsGraph transposeTensor:[mpsGraph transposeTensor:tensor dimension:3 withDimension:2 name:nil]
+                         dimension:2 withDimension:1 name: nil];
 }
 
 string get_mem_format_string(c10::MemoryFormat memory_format) {
