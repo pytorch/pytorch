@@ -179,9 +179,6 @@ class TensorMeta:
     storage_offset: int
     layout: Layout
 
-    # !!! memory_format is not tensor property, but it can only used as operator argument
-    # memory_format: MemoryFormat
-
 
 @dataclass
 class Buffer:
