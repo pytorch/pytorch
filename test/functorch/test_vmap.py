@@ -3532,8 +3532,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('_native_batch_norm_legit'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
-        # The error inputs are vectors, that pass when batched as they are treated as a matrix
-        xfail('trace'),
         xfail('as_strided', 'partial_views'),
 
         # RuntimeError: output with shape [4, 4] doesn't match the broadcast shape [1, 4, 4]
@@ -3613,7 +3611,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
-        xfail('trace'),  # Does not support batched tensors
         xfail('bucketize'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
