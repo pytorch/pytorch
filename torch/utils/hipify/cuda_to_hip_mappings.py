@@ -2828,7 +2828,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuDevicePrimaryCtxSetFlags",
             ("hipDevicePrimaryCtxSetFlags", CONV_CONTEXT, API_DRIVER),
         ),
-        ("cuDeviceGet", ("hipGetDevice", CONV_DEVICE, API_DRIVER)),
+        ("cuDeviceGet", ("hipDeviceGet", CONV_DEVICE, API_DRIVER)),
         ("cuDeviceGetName", ("hipDeviceGetName", CONV_DEVICE, API_DRIVER)),
         ("cuDeviceGetCount", ("hipGetDeviceCount", CONV_DEVICE, API_DRIVER)),
         ("cuDeviceGetAttribute", ("hipDeviceGetAttribute", CONV_DEVICE, API_DRIVER)),
