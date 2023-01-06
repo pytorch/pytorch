@@ -618,8 +618,7 @@ Tensor sparse_compressed_to_dense(
     if (!block_sparse) {
       nrows = self.size(batch_ndim);
       ncols = self.size(batch_ndim + 1);
-      dense_reshaped_sizes.erase(dense_reshaped_sizes.begin());
-      dense_reshaped_sizes.erase(dense_reshaped_sizes.begin());
+      dense_reshaped_sizes.erase(dense_reshaped_sizes.begin(), dense_reshaped_sizes.begin() + 2);
     } else {
       std::array<int64_t, 2> blocksize = {values.size(2), values.size(3)};
       nrows = self.size(batch_ndim) / blocksize[0];
@@ -881,7 +880,7 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksi
   constexpr auto compressed_rows_layout = target_layout == Layout::SparseCsr || target_layout == Layout::SparseBsr;
   constexpr auto blocked_layout = target_layout == Layout::SparseBsr || target_layout == Layout::SparseBsc;
 
-  int64_t dense_dim = dense_dim_opt.has_value() ? *dense_dim_opt : 0;
+  int64_t dense_dim = dense_dim_opt.value_or(0);
   TORCH_CHECK(
       dense_dim >= 0 && dense_dim <= self.dim() - 2,
       "number of dense dimensions must be in [0,", self.dim() - 2,
@@ -1715,7 +1714,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim)
   // TODO: implement coo.to_sparse(sparse_dim) and then use
   // return self.to_sparse().to_sparse(sparse_dim);
   TORCH_CHECK(
-      sparse_dim == 2, "sparse dim 1 is not supported by sparse_compressed_to_dense");
+      sparse_dim == 2, "sparse dim 1 is not supported by sparse_compressed_to_sparse");
   Layout layout = self.layout();
   Tensor compressed_indices, plain_indices;
   std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);

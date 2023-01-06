@@ -5397,7 +5397,9 @@ Example::
 
 Returns a sparse tensor with the specified layout and blocksize.  If
 the :attr:`self` is strided, the number of dense dimensions could be
-specified, and a hybrid sparse tensor will be created.
+specified, and a hybrid sparse tensor will be created, with
+`dense_dim` dense dimensions and `self.dim() - 2 - dense_dim` batch
+dimension.
 
 .. note:: If the :attr:`self` layout and blocksize parameters match
           with the specified layout and blocksize, return
