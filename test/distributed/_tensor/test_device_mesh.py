@@ -186,7 +186,10 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     def test_scatter_uneven(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         my_rank = device_mesh.get_rank()
-        tensor_to_split = torch.randn(device_mesh.size() + 3, device_mesh.size() + 1)
+        tensor_to_split = torch.randn(
+            device_mesh.size() + 3, device_mesh.size() + 1,
+            device=self.device_type
+        )
 
         for shard_dim in range(tensor_to_split.ndim):
             shard_placement = Shard(shard_dim)
