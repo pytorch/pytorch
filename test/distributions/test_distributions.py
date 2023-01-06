@@ -2411,6 +2411,18 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(Exponential(rate), ref_log_prob)
         self._check_forward_ad(lambda x: x.exponential_())
 
+        def mean_var(lambd, sample):
+            sample.exponential_(lambd)
+            mean = sample.float().mean()
+            var = sample.float().var()
+            self.assertEqual((1. / lambd), mean, atol=2e-2, rtol=2e-2)
+            self.assertEqual((1. / lambd) ** 2, var, atol=2e-2, rtol=2e-2)
+
+        for dtype in [torch.float, torch.double, torch.bfloat16, torch.float16]:
+            for lambd in [0.2, 0.5, 1., 1.5, 2., 5.]:
+                sample_len = 50000
+                mean_var(lambd, torch.rand(sample_len, dtype=dtype))
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
@@ -3188,8 +3200,6 @@ class TestDistributions(DistributionsTestCase):
             self.assertTrue((-1e-12 < delta[mask].detach()).all())  # Allow up to 1e-12 rounding error.
 
     def _test_continuous_distribution_mode(self, dist, sanitized_mode, batch_isfinite):
-        if isinstance(dist, Wishart):
-            return
         # We perturb the mode in the unconstrained space and expect the log probability to decrease.
         num_points = 10
         transform = transform_to(dist.support)

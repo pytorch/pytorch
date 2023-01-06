@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 
-__all__ = ['FakeStructuredSparsity', 'BiasHook']
 
 
 # Structured Pruning Parameterizations

@@ -178,7 +178,7 @@ void IRVerifier::visit(ForPtr v) {
 }
 
 void IRVerifier::visit(BlockPtr v) {
-  for (StmtPtr s : v->stmts()) {
+  for (const StmtPtr& s : v->stmts()) {
     if (s->get_parent() != v) {
       throw malformed_ir("Broken child-parent link inside a Block");
     }

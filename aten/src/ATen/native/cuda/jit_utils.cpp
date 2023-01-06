@@ -1532,7 +1532,7 @@ NvrtcFunction jit_pwise_function(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
 #ifdef USE_ROCM
-  std::vector<const char*> args = {"--std=c++14"};
+  std::vector<const char*> args = {"--std=c++17"};
 #else
   // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
@@ -1547,7 +1547,7 @@ NvrtcFunction jit_pwise_function(
       std::to_string(cuda_minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
+      "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
   #ifndef NDEBUG

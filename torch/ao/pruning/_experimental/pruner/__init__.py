@@ -3,9 +3,3 @@ from .parametrization import (
     FakeStructuredSparsity,
     BiasHook,
 )
-
-__all__ = [
-    "FakeStructuredSparsity",
-    "BaseStructuredSparsifier",
-    "BiasHook",
-]

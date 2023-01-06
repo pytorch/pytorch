@@ -1,6 +1,13 @@
 # ---[ Test binaries.
 
 set(C10_CUDA_ALL_TEST_FILES
+    impl/CUDAAssertionsTest_1_var_test.cu
+    impl/CUDAAssertionsTest_catches_stream.cu
+    impl/CUDAAssertionsTest_catches_thread_and_block_and_device.cu
+    impl/CUDAAssertionsTest_from_2_processes.cu
+    impl/CUDAAssertionsTest_multiple_writes_from_blocks_and_threads.cu
+    impl/CUDAAssertionsTest_multiple_writes_from_multiple_blocks.cu
+    impl/CUDAAssertionsTest_multiple_writes_from_same_block.cu
     impl/CUDATest.cpp
 )
 if(BUILD_TEST)

@@ -23,14 +23,16 @@ class LKJCholesky(Distribution):
     to make the probability of the correlation matrix :math:`M` generated from
     a Cholesky factor proportional to :math:`\det(M)^{\eta - 1}`. Because of that,
     when ``concentration == 1``, we have a uniform distribution over Cholesky
-    factors of correlation matrices. Note that this distribution samples the
+    factors of correlation matrices::
+
+        L ~ LKJCholesky(dim, concentration)
+        X = L @ L' ~ LKJCorr(dim, concentration)
+
+    Note that this distribution samples the
     Cholesky factor of correlation matrices and not the correlation matrices
     themselves and thereby differs slightly from the derivations in [1] for
     the `LKJCorr` distribution. For sampling, this uses the Onion method from
     [1] Section 3.
-
-        L ~ LKJCholesky(dim, concentration)
-        X = L @ L' ~ LKJCorr(dim, concentration)
 
     Example::
 
@@ -48,8 +50,9 @@ class LKJCholesky(Distribution):
 
     **References**
 
-    [1] `Generating random correlation matrices based on vines and extended onion method`,
+    [1] `Generating random correlation matrices based on vines and extended onion method` (2009),
     Daniel Lewandowski, Dorota Kurowicka, Harry Joe.
+    Journal of Multivariate Analysis. 100. 10.1016/j.jmva.2009.04.008
     """
     arg_constraints = {'concentration': constraints.positive}
     support = constraints.corr_cholesky

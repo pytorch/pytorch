@@ -1522,6 +1522,20 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         for tensor in tensors:
             self.assertEqual(tensor, torch.ones(10, 10) * self.world_size)
 
+    def _test_all_to_all_single(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda" if backend == "nccl" else "cpu"
+        # test alltoall_base
+        input_tensor = torch.ones(2, 2, device=torch.device(device))
+        output_tensor = torch.zeros(2, 2, device=torch.device(device))
+        dist.all_to_all_single(output_tensor, input_tensor)
+
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):
         super(CompilerTest, self).setUp()
@@ -1550,7 +1564,12 @@ class CompilerTest(MultiProcessTestCase):
             # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
             # and torch.nn.Parameter objects
             work.wait()
-            return z * 2
+            if isinstance(z, list):
+                return [zz * 2 for zz in z]
+            elif isinstance(z, torch.Tensor):
+                return z * 2
+            else:
+                raise RuntimeError("Unexpected return type")
 
         xx = x.clone()
 
@@ -1595,7 +1614,7 @@ class CompilerTest(MultiProcessTestCase):
 
         xx += 1
         yy = traced_fn(xx)
-        self.assertFalse(y.allclose(yy))
+        self.assertNotEqual(y, yy)
 
     def _test_allreduce_work_wait(self, tensor):
         def comm_fn(tensor, group=None):
@@ -1614,11 +1633,30 @@ class CompilerTest(MultiProcessTestCase):
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
+    def _test_allgather_into_tensor_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            output_tensor = torch.cat(out_tensors, dim=0)
+            work = dist.all_gather_into_tensor(output_tensor, tensor, group=group, async_op=True)
+            work.wait()
+
+            return work, output_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
     def _test_reduce_scatter_work_wait(self, tensor):
         def comm_fn(tensor, group=None):
             in_tensors = [tensor.clone() + i for i in range(group.size())]
             out_tensor = torch.zeros_like(tensor)
             work = dist.reduce_scatter(out_tensor, in_tensors, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_reduce_scatter_tensor_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensor = torch.zeros_like(tensor).chunk(group.size(), dim=0)[self.rank]
+            work = dist.reduce_scatter_tensor(out_tensor, tensor, group=group, async_op=True)
             return work, out_tensor
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
@@ -1636,6 +1674,15 @@ class CompilerTest(MultiProcessTestCase):
             out_tensor = torch.zeros_like(tensor)
             work = dist.scatter(out_tensor, in_tensors, src=0, group=group, async_op=True)
             return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_alltoall_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            in_tensors = [tensor for i in range(group.size())]
+            work = dist.all_to_all(out_tensors, in_tensors, group=group, async_op=True)
+            return work, out_tensors
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 

@@ -1,18 +1,18 @@
 #pragma once
 
-#include <cstdlib>
-#include <cstdint>
-#include <cmath>
-#include <cfloat>
-#include <limits>
-#include <type_traits>
+#include <ATen/AccumulateType.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/jiterator_macros.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
 #include <c10/util/math_compat.h>
-#include <ATen/AccumulateType.h>
-#include <ATen/jiterator_macros.h>
+#include <cfloat>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <limits>
+#include <type_traits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
@@ -100,7 +100,7 @@ jiterator_also_stringify_as(jiterator_code(
 
   template <typename T>
   JITERATOR_HOST_DEVICE T calc_i0e(T _x) {
-    T x = fabs(_x);
+    T x = std::fabs(_x);
 
     if (x <= T{8.0}) {
       static const T coefficients[] = {
@@ -140,7 +140,7 @@ jiterator_also_stringify_as(jiterator_code(
         6.88975834691682398426E-5,   3.36911647825569408990E-3,
         8.04490411014108831608E-1};
 
-    return chbevl(T{32.0} / x - T{2.0}, coefficients, int{25}) / sqrt(x);
+    return chbevl(T{32.0} / x - T{2.0}, coefficients, int{25}) / std::sqrt(x);
   }),
   i0e_string); // i0e_string
 }
@@ -265,15 +265,15 @@ C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_igno
   }
 
   if (q <= zero) {
-    if (q == ::floor(q)) {
+    if (q == std::floor(q)) {
       return std::numeric_limits<scalar_t>::infinity();
     }
-    if (x != ::floor(x)) {
+    if (x != std::floor(x)) {
       return std::numeric_limits<scalar_t>::quiet_NaN();
     }
   }
 
-  s = ::pow(q, -x);
+  s = std::pow(q, -x);
   a = q;
   i = 0;
   b = zero;
@@ -491,7 +491,7 @@ static inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
   // already blocked if n <= 1
   const auto one = scalar_t{1};
   return ((n % 2) ? one : -one) *
-      ::exp(::lgamma(static_cast<scalar_t>(n) + one)) *
+      std::exp(std::lgamma(static_cast<scalar_t>(n) + one)) *
       zeta<scalar_t, is_cuda>(static_cast<scalar_t>(n + 1), x);
 }
 

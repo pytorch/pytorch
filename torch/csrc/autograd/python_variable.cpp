@@ -38,6 +38,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/utils/tensor_numpy.h>
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
@@ -680,7 +681,7 @@ PyObject* THPVariable_pynew(
 
 static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   const auto& var = THPVariable_Unpack(self);
-  THPVariable_Wrap(var);
+  Py_DECREF(THPVariable_Wrap(var));
   Py_RETURN_NONE;
 }
 
@@ -727,10 +728,11 @@ static PyObject* THPVariable_as_subclass(
   ParsedArgs<1> parsed_args{};
   auto r = parser.parse(_self, args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    throw torch::TypeError(
-        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       self.alias(),
@@ -749,10 +751,11 @@ static PyObject* THPVariable_make_subclass(
   ParsedArgs<7> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    throw torch::TypeError(
-        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
   // guard completely turns off torch dispatch modes, doesn't just pop off the
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
@@ -1057,11 +1060,10 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   }
   THPUtils_assertRet(
       -1, data, "Deleting tensor data is not allowed. Delete tensor instead!");
-  if (!THPVariable_Check(data)) {
-    throw torch::TypeError(
-        "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
-  }
-
+  TORCH_CHECK_TYPE(
+      THPVariable_Check(data),
+      "Variable data has to be a tensor, but got ",
+      Py_TYPE(data)->tp_name);
   THPVariable_Unpack(self).set_data(THPVariable_Unpack(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -2205,6 +2207,7 @@ bool THPVariable_initModule(PyObject* module) {
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);
+  torch::utils::validate_numpy_for_dlpack_deleter_bug();
   return true;
 }
 
