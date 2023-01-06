@@ -1360,7 +1360,7 @@ class CommonTemplate:
         def fn(a):
             a = a.unfold(0, 2, 1),
             a = torch.unsqueeze(a, 1),
-            a = torch.permute(a, [0, 2, 3, -3])
+            a = torch.permute(a, [0, 2, 3, -3]),
             return (a,)
 
         self.common(fn, (torch.randn(4, 4),))
