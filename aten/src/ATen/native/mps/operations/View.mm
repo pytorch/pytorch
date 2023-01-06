@@ -527,7 +527,7 @@ std::vector<int64_t> getViewShape(const Tensor& src, MPSShape *mpsShape) {
 }
 
 bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
-  if (!src.is_view()) {
+  if (!src.is_contiguous()) {
     return false;
   }
 
