@@ -358,13 +358,20 @@ class TestSortAndSelect(TestCase):
             test(shape)
 
     @dtypes(torch.float)
-    def test_sort_expanded_scalar(self, device, dtype):
+    def test_sort_expanded_tensor(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/91420
-        s0 = torch.scalar_tensor(True, device=device, dtype=dtype)
-        s3 = s0.expand([1, 1, 1])
-        out = torch.sort(s3, stable=True, dim=1, descending=True)
-        t3 = torch.Tensor([[[True]]])
-        expected = torch.sort(t3, stable=True, dim=1, descending=True)
+        data = torch.scalar_tensor(True, device=device, dtype=dtype)
+        data = data.expand([1, 1, 1])
+        ref = torch.Tensor([[[True]]])
+        out = torch.sort(data, stable=True, dim=1, descending=True)
+        expected = torch.sort(ref, stable=True, dim=1, descending=True)
+        self.assertEqual(out, expected)
+
+        data = torch.randn(4, 1, 10, device=device, dtype=dtype)
+        data = data.expand([4, 8, 10])
+        ref = data.contiguous()
+        out = torch.sort(data, stable=True, dim=1, descending=True)
+        expected = torch.sort(ref, stable=True, dim=1, descending=True)
         self.assertEqual(out, expected)
 
     def test_topk(self, device):
