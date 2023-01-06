@@ -155,10 +155,9 @@ def _preload_cuda_deps():
         cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
         if not os.path.exists(cublas_path) or not os.path.exists(cudnn_path):
             continue
+        ctypes.CDLL(cublas_path)
+        ctypes.CDLL(cudnn_path)
         break
-
-    ctypes.CDLL(cublas_path)
-    ctypes.CDLL(cudnn_path)
 
 
 # See Note [Global dependencies]
