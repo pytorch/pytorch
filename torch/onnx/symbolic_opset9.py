@@ -3689,13 +3689,6 @@ def new_zeros(
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
-@_onnx_symbolic("aten::zero")
-@_beartype.beartype
-def zero(g: jit_utils.GraphContext, self):
-    self_dtype = symbolic_helper._try_get_scalar_type(self)
-    return zeros_like(g, self, self_dtype)
-
-
 @_onnx_symbolic("aten::ones")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
 @_beartype.beartype
