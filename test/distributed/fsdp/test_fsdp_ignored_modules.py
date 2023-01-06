@@ -104,11 +104,11 @@ class TestFSDPIgnoredModules(FSDPTest):
         """Tests that ignored modules' parameters are not flattened for a
         transformer model with shared parameters."""
         self.run_subtests(
-            {"use_orig_params": [False, True]},
+            {"use_orig_params": [False, True], "ignore_modules": [True, False]},
             self._test_ignored_modules_transformer,
         )
 
-    def _test_ignored_modules_transformer(self, use_orig_params: bool):
+    def _test_ignored_modules_transformer(self, use_orig_params: bool, ignore_modules: bool):
         # Initialize an FSDP-wrapped transformer model that has FSDP ignore
         # the `nn.Transformer` module's parameters
         model: nn.Module = TransformerWithSharedParams.init(
@@ -117,12 +117,20 @@ class TestFSDPIgnoredModules(FSDPTest):
             CUDAInitMode.CUDA_BEFORE,
             deterministic=True,
         )
-        wrapped_model = FSDP(
-            model,
-            self.process_group,
-            ignored_modules=[model.transformer],
-            use_orig_params=use_orig_params,
-        )
+        if ignore_modules:
+            wrapped_model = FSDP(
+                model,
+                self.process_group,
+                ignored_modules=[model.transformer],
+                use_orig_params=use_orig_params,
+            )
+        else:
+            wrapped_model = FSDP(
+                model,
+                self.process_group,
+                ignored_parameters=list(model.transformer.parameters()),
+                use_orig_params=use_orig_params,
+            )
         # Check that the wrapped model's flattened parameter does not include
         # the ignored transformer module's parameters
         nonwrapped_model: nn.Module = TransformerWithSharedParams.init(
@@ -149,19 +157,24 @@ class TestFSDPIgnoredModules(FSDPTest):
         """Tests that passing a module with nested FSDP modules does not
         error and still ignores non-FSDP modules' parameters."""
         self.run_subtests(
-            {"use_orig_params": [False, True]},
+            {"use_orig_params": [False, True], "ignore_modules": [True, False]},
             self._test_ignored_modules_nested,
         )
 
-    def _test_ignored_modules_nested(self, use_orig_params: bool):
+    def _test_ignored_modules_nested(self, use_orig_params: bool, ignore_modules: bool):
         # Initialize an FSDP-wrapped nested model that first wraps the nested
         # sequential's second linear layer (`layer1[1]`) and then wraps the
         # overall model while ignoring the nested sequential (`layer1`)
         model = Model().cuda()
         model.layer1[1] = FSDP(model.layer1[1], use_orig_params=use_orig_params)
-        wrapped_model = FSDP(
-            model, ignored_modules=[model.layer1], use_orig_params=use_orig_params
-        )
+        if ignore_modules:
+            wrapped_model = FSDP(
+                model, ignored_modules=[model.layer1], use_orig_params=use_orig_params
+            )
+        else:
+            wrapped_model = FSDP(
+                model, ignored_parameters=list(model.layer1.parameters()), use_orig_params=use_orig_params
+            )
         # Check that the wrapped model's flattened parameter does not include
         # the ignored nested sequential's parameters
         nonwrapped_model = Model()
@@ -197,10 +210,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             FSDP(model, ignored_modules=[model])
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("pass_ignored_modules_to_root", [False, True])
-    def test_diff_ignored_modules_across_ranks(
-        self, pass_ignored_modules_to_root: bool
-    ):
+    def test_diff_ignored_modules_across_ranks(self):
         """
         Tests ignoring different modules across ranks.
 
@@ -211,6 +221,12 @@ class TestFSDPIgnoredModules(FSDPTest):
                 all ignored modules (representing a superset of the children's
                 ignored modules) to the root FSDP instance.
         """
+        self.run_subtests(
+            {"pass_ignored_modules_to_root": [False, True], "ignore_modules": [True, False]},
+            self._test_diff_ignored_modules_across_ranks,
+        )
+
+    def _test_diff_ignored_modules_across_ranks(self, pass_ignored_modules_to_root: bool, ignore_modules: bool):
         # To exercise different `FlatParameter` enumerations across ranks,
         # we wrap `layer3` with FSDP, where `layer3` is registered as a module
         # after `layer1`, which has the variable number of ignored modules
@@ -218,33 +234,57 @@ class TestFSDPIgnoredModules(FSDPTest):
         layer1_ignored_modules = [
             m for m in model.layer1.modules() if isinstance(m, IgnoredModule)
         ]
-        model.layer1 = FSDP(model.layer1, ignored_modules=layer1_ignored_modules)
+        if ignore_modules:
+            model.layer1 = FSDP(model.layer1, ignored_modules=layer1_ignored_modules)
+        else:
+            model.layer1 = FSDP(model.layer1, ignored_parameters=set(
+                p for m in layer1_ignored_modules for p in m.parameters()))
         model.layer3 = FSDP(model.layer3)
         model_ignored_modules = (
             [m for m in model.modules() if isinstance(m, IgnoredModule)]
             if pass_ignored_modules_to_root
             else []
         )
-        wrapped_model = FSDP(model, ignored_modules=model_ignored_modules)
+        if ignore_modules:
+            wrapped_model = FSDP(model, ignored_modules=model_ignored_modules)
+        else:
+            wrapped_model = FSDP(model, ignored_parameters=set(
+                p for m in model_ignored_modules for p in m.parameters()))
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
         self._train_model(wrapped_model, optim, 3)
 
     @skip_if_lt_x_gpu(2)
-    def test_ignored_modules_not_under_wrapped_root(self):
+    @parametrize("ignore_modules", [True, False])
+    def test_ignored_modules_not_under_wrapped_root(self, ignore_modules: bool):
         model = Model().cuda()
         ignored_modules = list(model.layer1.children())[1:]
-        model.layer1 = FSDP(
-            model.layer1,
-            # sharding_strategy shouldn't matter here.
-            sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
-            ignored_modules=ignored_modules,
-        )
-        model.layer3 = FSDP(
-            model.layer3,
-            # the ignored_modules contains submodule under model.layer1, which
-            # is out of the the local root model.layer3.
-            ignored_modules=ignored_modules,
-        )
+        if ignore_modules:
+            model.layer1 = FSDP(
+                model.layer1,
+                # sharding_strategy shouldn't matter here.
+                sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+                ignored_modules=ignored_modules,
+            )
+            model.layer3 = FSDP(
+                model.layer3,
+                # the ignored_modules contains submodule under model.layer1, which
+                # is out of the the local root model.layer3.
+                ignored_modules=ignored_modules,
+            )
+        else:
+            ignored_parameters = set(p for m in ignored_modules for p in m.parameters())
+            model.layer1 = FSDP(
+                model.layer1,
+                # sharding_strategy shouldn't matter here.
+                sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+                ignored_parameters=ignored_parameters,
+            )
+            model.layer3 = FSDP(
+                model.layer3,
+                # the ignored_parameters contains submodule under model.layer1, which
+                # is out of the the local root model.layer3.
+                ignored_parameters=ignored_parameters,
+            )
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
         self._train_model(model, optim, 3)
 
