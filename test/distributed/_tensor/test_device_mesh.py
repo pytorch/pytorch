@@ -27,6 +27,12 @@ class DeviceMeshTest(DTensorTestBase):
     def world_size(self):
         return 8
 
+    @with_comms
+    def test_mesh_size_requirement(self):
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        with self.assertRaisesRegex(RuntimeError, "DeviceMesh must include every process in WORLD"):
+            mesh = DeviceMesh(self.device_type, mesh_tensor)
+
     def test_init_process_group(self):
         self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
         backend = "nccl" if self.device_type == "cuda" else "gloo"

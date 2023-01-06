@@ -143,6 +143,13 @@ class DeviceMesh(object):
                 f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
             )
 
+        # TODO: we will support mesh on a subset of WORLD in future
+        if self.mesh.numel() < world_size:
+            raise RuntimeError(
+                "DeviceMesh must include every process in WORLD, "
+                f"but WORLD_SIZE({world_size}) != mesh size({self.mesh.numel()})"
+            )
+
         unique_mesh_values = self.mesh.unique(sorted=True)
         if unique_mesh_values.numel() != self.mesh.numel():
             raise RuntimeError(
