@@ -24,7 +24,7 @@ void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase&
           auto max = at::_isnan(y) ? y : std::max<opmath_t>(x, y); //std::max returns first arg if one of the args is nan
           if (min != max || ::isfinite(min)) {
           // nan will be propagated here
-              return ::log1p(std::exp(min - max)) + max;
+              return std::log1p(std::exp(min - max)) + max;
           } else {
           // special case to correctly handle infinite inputs
              return x;
