@@ -1175,7 +1175,8 @@ class PermuteView(BaseView):
 
     @classmethod
     def create(cls, x, dims):
-        assert set(cls._map_neg_dims(dims)) == set(range(len(dims)))
+        dims = cls._map_neg_dims(dims)
+        assert set(dims) == set(range(len(dims)))
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
