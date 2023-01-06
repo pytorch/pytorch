@@ -1358,11 +1358,10 @@ class CommonTemplate:
 
     def test_permute2(self):
         def fn(a):
-            return (
-                a.unfold(0, 2, 1),
-                torch.unsqueeze(a, 1),
-                torch.permute(a, [0, 2, 3, -3])
-            )
+            a = a.unfold(0, 2, 1)
+            a = torch.unsqueeze(a, 1)
+            a = torch.permute(a, [0, 2, 3, -3])
+            return (a,)
         self.common(fn, (torch.randn(4, 4),))
 
     def test_expand(self):
