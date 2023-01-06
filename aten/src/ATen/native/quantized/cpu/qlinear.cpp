@@ -801,6 +801,8 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
     op_attr = ideep::attr_t::fuse_relu();
   } else if (post_op == LeakyRelu) {
     op_attr = ideep::attr_t::fuse_relu(/*scale=*/1.0f, /*alpha=*/post_op_args.get(0).to<double>());
+  } else if (post_op == Tanh) {
+    op_attr = ideep::attr_t::fuse_tanh();
   }
   ideep::tensor x(input_desc, input_contig->data_ptr<c10::quint8>());
   auto dst_dims = {M, N};
@@ -842,19 +844,19 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   c10::call_once(*cache_initialized_flag, [&](){
       LinearParams params;
       ideep::matmul_forward::prepare</*is_dynamic=*/false>(
-          params, x, w, b, y,
+          params, x, w, b, y, 1.0f, 1.0f,
           src_scales, weights_scales, dst_scales,
-          src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr);
+          src_zero_point, dst_zero_point, op_attr);
       get_cache() = LinearPrimitiveCache(cache_key, params);
-      w = w.reorder_if_differ_in(params.pd.weights_desc());
+      onednn_utils::try_reorder(
+          w, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
   });
   if (get_cache().hit(cache_key)) {
     LinearParams& params = get_cache().get_param();
     ideep::matmul_forward::compute(params, x, w, b, y);
   } else {
-    ideep::matmul_forward::compute(x, w, b, y, src_scales, weights_scales,
-                                   dst_scales, src_zero_point, dst_zero_point,
-                                   1.0f, 1.0f, op_attr);
+    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales,
+                                      dst_scales, src_zero_point, dst_zero_point, op_attr);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = N;
@@ -888,6 +890,14 @@ at::Tensor PackedLinearWeightsOnednn:: apply_leaky_relu(
       {at::Scalar(negative_slope)};
   return apply_impl<LeakyRelu>(
       std::move(input), output_scale, output_zero_point, post_op_args);
+}
+
+at::Tensor PackedLinearWeightsOnednn:: apply_tanh(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<Tanh>(
+      std::move(input), output_scale, output_zero_point);
 }
 
 #endif // #if AT_MKLDNN_ENABLED()
@@ -936,6 +946,28 @@ class QLinearLeakyReluInt8 final {
   }
 };
 
+
+class QLinearTanhInt8 final {
+ public:
+  static at::Tensor run(
+      at::Tensor input,
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
+      double output_scale,
+      int64_t output_zero_point) {
+    auto& ctx = at::globalContext();
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+      return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_tanh(
+          std::move(input), output_scale, output_zero_point);
+    }
+#endif
+    TORCH_CHECK(
+        false,
+        "Didn't find engine for operation quantized::linear_tanh ",
+        toString(ctx.qEngine()));
+  }
+};
+
 template <bool ReluFused>
 class QLinearInt8FusedQDQ final {
  public:
@@ -959,6 +991,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), TORCH_FN(QLinearInt8<true>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_leaky_relu"), TORCH_FN(QLinearLeakyReluInt8::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_tanh"), TORCH_FN(QLinearTanhInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
