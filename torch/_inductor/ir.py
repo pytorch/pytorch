@@ -3939,9 +3939,9 @@ class InterpreterShim(torch.fx.Interpreter):
         self.current_node = n
         return super().run_node(n)
 
-    def run(self, *args):
+    def run(self, *args, **kwargs):
         with V.set_interpreter_handler(self):
-            return super().run(*args)
+            return super().run(*args, **kwargs)
 
 
 class LoopBody:
