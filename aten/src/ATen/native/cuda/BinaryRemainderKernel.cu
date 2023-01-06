@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/TypeSafeSignMath.h>
 
+#include <cmath>
 #include <type_traits>
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -28,7 +29,7 @@ void remainder_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "remainder_cuda", [&]() {
       gpu_kernel_with_scalars(iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          auto mod = ::fmod(a, b);
+          auto mod = std::fmod(a, b);
           if (mod != 0 && c10::signs_differ(b, mod)) {
             mod += b;
           }
@@ -49,7 +50,7 @@ void fmod_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "fmod_cuda", [&]() {
       gpu_kernel_with_scalars(iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return ::fmod(a, b);
+          return std::fmod(a, b);
         });
     });
   }
