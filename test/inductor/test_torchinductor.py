@@ -4992,6 +4992,17 @@ class CommonTemplate:
             assert callable(func), "not a callable"
             func()
 
+    def test_pixel_shuffle_channels_last(self):
+        def fn(x):
+            x = torch.nn.functional.pixel_shuffle(x, 2)
+            x = torch.nn.functional.relu(x)
+            return x
+
+        self.common(
+            fn,
+            (torch.randn(1, 16, 64, 72).to(memory_format=torch.channels_last),),
+        )
+
 
 if HAS_CPU:
 
