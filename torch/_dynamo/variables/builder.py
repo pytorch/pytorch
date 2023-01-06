@@ -11,12 +11,12 @@ import types
 from typing import Any, Optional, Union
 
 import numpy as np
-from functorch.experimental.ops import PyOperator
 
 import torch
 
 from torch import SymInt
 from torch._guards import GuardSource
+from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
@@ -782,7 +782,7 @@ def wrap_fx_proxy_cls(
                 # The legacy behavior for real value cache with subclasses was
                 # to perform a clone WITHOUT preserving the subclass.  It's
                 # not entirely clear this is what you actually want though.
-                with torch._C.DisableTorchFunction():
+                with torch._C.DisableTorchFunctionSubclass():
                     proxy.tracer.real_value_cache[proxy.node] = _clone_input(
                         example_value
                     )
@@ -945,6 +945,7 @@ def wrap_to_fake_tensor_and_record(
             source is None
             or type(e) is torch.nn.Parameter
             or config.dynamic_shapes is False
+            or not is_tensor
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(

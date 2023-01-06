@@ -743,6 +743,27 @@ PyObject* THPModule_allowFP16ReductionCuBLAS(
   Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setAllowBF16ReductionCuBLAS(
+    PyObject* _unused,
+    PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_allow_bf16_reduction_cublas expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowBF16ReductionCuBLAS(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_allowBF16ReductionCuBLAS(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().allowBF16ReductionCuBLAS()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -1061,6 +1082,14 @@ static PyMethodDef TorchMethods[] = {
      nullptr},
     {"_set_cublas_allow_fp16_reduced_precision_reduction",
      THPModule_setAllowFP16ReductionCuBLAS,
+     METH_O,
+     nullptr},
+    {"_get_cublas_allow_bf16_reduced_precision_reduction",
+     THPModule_allowBF16ReductionCuBLAS,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cublas_allow_bf16_reduced_precision_reduction",
+     THPModule_setAllowBF16ReductionCuBLAS,
      METH_O,
      nullptr},
     {"_vmapmode_increment_nesting",
@@ -1613,8 +1642,8 @@ Call this whenever a new thread is created in order to propagate values from
       (PyObject*)THPDefaultCPUGenerator,
       /* incref= */ false));
   ASSERT_TRUE(set_module_attr(
-      "DisableTorchFunction",
-      (PyObject*)THPModule_DisableTorchFunctionType(),
+      "DisableTorchFunctionSubclass",
+      (PyObject*)THPModule_DisableTorchFunctionSubclassType(),
       /* incref= */ false));
   torch::set_disabled_torch_function_impl(
       PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
