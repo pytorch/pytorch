@@ -1,11 +1,11 @@
-import torch
-import torch.nn as nn
-from torch.utils.checkpoint import detach_variable
-
 from contextlib import contextmanager
 from functools import partial
 from typing import Any, List, Optional, Tuple
-from weakref import ReferenceType, WeakKeyDictionary, ref
+from weakref import ref, ReferenceType, WeakKeyDictionary
+
+import torch
+import torch.nn as nn
+from torch.utils.checkpoint import detach_variable, get_device_states, set_device_states
 
 from .contract import contract
 
@@ -66,9 +66,22 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
         for i, idx in enumerate(tensor_indices):
             inputs[idx] = tensors[i]
 
-        detached_inputs = detach_variable(tuple(inputs))
-        with torch.enable_grad(), _no_hook(ctx.module):
-            outputs = ctx.module(*detached_inputs)
+        # Stash the surrounding rng state, and mimic the state that was
+        # present at this time during forward.  Restore the surrounding state
+        # when we're done.
+        rng_devices = []
+        if checkpoint.state(ctx.module).had_cuda_in_fwd:
+            rng_devices = checkpoint.state(ctx.module).fwd_gpu_devices
+        with torch.random.fork_rng(devices=rng_devices, enabled=True):
+            torch.set_rng_state(checkpoint.state(ctx.module).fwd_cpu_state)
+            if checkpoint.state(ctx.module).had_cuda_in_fwd:
+                set_device_states(
+                    checkpoint.state(ctx.module).fwd_gpu_devices,
+                    checkpoint.state(ctx.module).fwd_gpu_states,
+                )
+            detached_inputs = detach_variable(tuple(inputs))
+            with torch.enable_grad(), _no_hook(ctx.module):
+                outputs = ctx.module(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
             outputs = (outputs,)
@@ -97,7 +110,6 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
             inp.grad if isinstance(inp, torch.Tensor) else None
             for inp in detached_inputs
         )
-
         # The two None is for forward argument module and output respectively.
         return (None, None) + grads
 
@@ -183,6 +195,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
             autograd.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> import torch.nn as nn
         >>>
         >>> class MyModel(nn.Module):
@@ -205,6 +218,19 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
             checkpoint.state(module).orig_grad_enabled = torch.is_grad_enabled()
             if checkpoint.state(module).use_reentrant:
                 torch.set_grad_enabled(False)
+                checkpoint.state(module).fwd_cpu_state = torch.get_rng_state()
+                # Don't eagerly initialize the cuda context by accident.
+                # (If the user intends that the context is initialized later, within their
+                # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
+                # we have no way to anticipate this will happen before we run the function.)
+                checkpoint.state(module).had_cuda_in_fwd = False
+                if torch.cuda._initialized:
+                    checkpoint.state(module).had_cuda_in_fwd = True
+                    (
+                        checkpoint.state(module).fwd_gpu_devices,
+                        checkpoint.state(module).fwd_gpu_states,
+                    ) = get_device_states(*inputs)
+
             else:
                 # The Holder object for each of the saved object is saved
                 # directly on the SavedVariable and is cleared when reset_data()
@@ -231,9 +257,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
         if checkpoint.state(module).enable_hook:
             torch.set_grad_enabled(checkpoint.state(module).orig_grad_enabled)
             if checkpoint.state(module).use_reentrant:
-                return _ModuleHookCheckpointFunction.apply(
-                    module, output, *inputs
-                )
+                return _ModuleHookCheckpointFunction.apply(module, output, *inputs)
             else:
                 checkpoint.state(module).saved_tensor_hooks.__exit__()
                 checkpoint.state(module).saved_tensor_hooks = None

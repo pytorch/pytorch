@@ -131,7 +131,7 @@ def _matches_machine_hostname(host: str) -> bool:
         host_addr_list = socket.getaddrinfo(
             host, None, proto=socket.IPPROTO_TCP, flags=socket.AI_CANONNAME
         )
-    except ValueError:
+    except (ValueError, socket.gaierror) as _:
         host_addr_list = []
 
     host_ip_list = [

@@ -888,9 +888,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(input1), correct1))
         self.assertTrue(same(opt_fn(input2), correct2))
 
-        # Dyn recompiles are due to changes in hidden_state (Should we be guarding on this?)
-        self.assertEqual(cnt.frame_count, ifdyn(4, 2))
-        self.assertEqual(cnt.op_count, ifdyn(76, 4))
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, ifdyn(38, 4))
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -2225,6 +2224,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_tensor_item(self):
+        def f(x, y):
+            val = y.item()
+            return x.sum() + val
+
+        gm, _ = torch._dynamo.export(
+            f,
+            torch.zeros(6, 4),
+            torch.tensor(1),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+        self.assertEqual(
+            f(torch.zeros(6, 4), torch.tensor(1)),
+            gm(torch.zeros(6, 4), torch.tensor(1)),
+        )
+        self.assertEqual(
+            f(torch.zeros(6, 4), torch.tensor(2)),
+            gm(torch.zeros(6, 4), torch.tensor(2)),
+        )
 
 
 if __name__ == "__main__":
