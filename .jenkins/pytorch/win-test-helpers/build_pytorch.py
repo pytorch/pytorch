@@ -71,6 +71,25 @@ subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', sh
 subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
 subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
 
+# test vars
+os.environ['CMAKE_INCLUDE_PATH'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\include'
+
+if 'LIB' in os.environ:
+    os.environ['LIB'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\lib;' + os.environ['LIB']
+else:
+    os.environ['LIB'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\lib'
+
+if 'BUILD_ENVIRONMENT' not in os.environ:
+    os.environ['CONDA_PARENT_DIR'] = str(os.getcwd())
+else:
+    os.environ['CONDA_PARENT_DIR'] = 'C:\\Jenkins'
+
+os.environ['INSTALL_FRESH_CONDA'] = '1'
+
+os.environ['PATH'] = os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Library\\bin;' + os.environ['CONDA_PARENT_DIR'] +\
+    '\\Miniconda3;' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts;' + os.environ['PATH']
+
+
 '''
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
@@ -156,8 +175,6 @@ os.environ['CC'] = 'sccache-cl'
 os.environ['CXX'] = 'sccache-cl'
 
 os.environ['CMAKE_GENERATOR'] = 'Ninja'
-os.environ['CMAKE_INCLUDE_PATH'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\include'
-os.environ['CMAKE_TRY_COMPILE_TARGET_TYPE'] = "STATIC_LIBRARY"
 
 
 if os.environ['USE_CUDA'] == '1':
