@@ -32,7 +32,7 @@ Tensor upsample_nearest2d(
           output_sizes[Layout::Parameter::height],
           output_sizes[Layout::Parameter::width],
       },
-      input_arg.options(),
+      input_arg.scalar_type(),
   };
 
   const struct Block final {
@@ -110,9 +110,9 @@ Tensor quantized_upsample_nearest2d(
           output_sizes[Layout::Parameter::height],
           output_sizes[Layout::Parameter::width],
       },
-      input_arg.options(),
       v_input.get_scale(),
       v_input.get_zero_point(),
+      input_arg.scalar_type(),
   };
 
   const struct Block final {
