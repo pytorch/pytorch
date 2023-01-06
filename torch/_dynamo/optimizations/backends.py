@@ -8,8 +8,6 @@ import tempfile
 
 from typing import Dict
 
-import numpy as np
-
 import torch
 from ..output_graph import CompilerFn
 
@@ -18,17 +16,6 @@ from .subgraph import SubGraph
 
 log = logging.getLogger(__name__)
 BACKENDS: Dict[str, CompilerFn] = dict()
-_NP_DTYPE = {
-    torch.float16: np.float16,
-    torch.float32: np.float32,
-    torch.float64: np.float64,
-    torch.uint8: np.uint8,
-    torch.int8: np.int8,
-    torch.int16: np.int16,
-    torch.int32: np.int32,
-    torch.int64: np.longlong,
-    torch.bool: np.bool_,
-}
 
 
 def register_backend(fn):
@@ -133,7 +120,20 @@ def static_runtime(subgraph):
 
 
 def onnxrt_common(subgraph, provider, onnx_filename=None):
+    import numpy as np  # type: ignore[import]
     import onnxruntime  # type: ignore[import]
+
+    _np_dtype = {
+        torch.float16: np.float16,
+        torch.float32: np.float32,
+        torch.float64: np.float64,
+        torch.uint8: np.uint8,
+        torch.int8: np.int8,
+        torch.int16: np.int16,
+        torch.int32: np.int32,
+        torch.int64: np.longlong,
+        torch.bool: np.bool_,
+    }
 
     assert provider in onnxruntime.get_available_providers()
     session = onnxruntime.InferenceSession(
@@ -153,7 +153,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
                 name,
                 dev.type,
                 dev.index or 0,
-                _NP_DTYPE[value.dtype],
+                _np_dtype[value.dtype],
                 value.size(),
                 value.data_ptr(),
             )
@@ -164,7 +164,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
                 name,
                 dev.type,
                 dev.index or 0,
-                _NP_DTYPE[value.dtype],
+                _np_dtype[value.dtype],
                 value.size(),
                 value.data_ptr(),
             )

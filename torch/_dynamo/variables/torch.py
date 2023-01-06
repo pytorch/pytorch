@@ -6,8 +6,6 @@ import types
 from collections import OrderedDict
 from typing import Dict, List
 
-import numpy
-
 import torch._C
 import torch.fx
 import torch.nn
@@ -21,7 +19,9 @@ from ..source import GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    HAS_NUMPY,
     istype,
+    np,
     product,
     proxy_args_kwargs,
     specialize_args_kwargs,
@@ -447,13 +447,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
             if (
-                self.value in tensortype_to_dtype
+                HAS_NUMPY
+                and self.value in tensortype_to_dtype
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
                 and args[0].is_python_constant()
             ):
                 for x in args[0].items:
-                    if isinstance(x.value, numpy.generic):
+                    if isinstance(x.value, np.generic):
                         x.value = x.value.item()
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
