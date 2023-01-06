@@ -1358,8 +1358,8 @@ class CommonTemplate:
 
     def test_permute2(self):
         def fn(a):
-            a = a.unfold(0, 2, 1)
-            a = torch.unsqueeze(a, 1)
+            a = a.unfold(0, 2, 1),
+            a = torch.unsqueeze(a, 1),
             a = torch.permute(a, [0, 2, 3, -3])
             return (a,)
 
