@@ -96,23 +96,23 @@ FusionDefinition* FusionDefinition::enter() {
   TORCH_CHECK(max_length_ > 0, "Can't make a FusionDefinition with 0 records!");
   TORCH_CHECK(
       !fusionInterfacePtr()->defined(), "Fusion Interface is already defined!");
-  fusionCachePtr()->resetFusionCachePtr();
+  fusionCachePtr()->resetTriePtr();
   return this;
 }
 
 void FusionDefinition::exit() {
   FUSER_PERF_SCOPE("FusionDefinition::exit");
   auto cache_entry =
-      fusionCachePtr()->lookupFusionCacheEntry(end_record_.get());
+      fusionCachePtr()->queryChildren(end_record_.get());
   if (!cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
     auto fusion_id =
-        fusionCachePtr()->createFusionCacheEntry(end_record_.get());
+        fusionCachePtr()->createChild(end_record_.get());
     TORCH_CHECK(fusion_id.has_value(), "Invalid fusion id!");
     fusionInterfacePtr()->define(fusion_id.value());
-    fusionCachePtr()->traverseFusionCache(end_record_.get());
+    fusionCachePtr()->traverseTrie(end_record_.get());
 
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonDefinition)) {
       print(std::cout);
@@ -128,7 +128,7 @@ void FusionDefinition::exit() {
       std::cout << "\nFusionDefinition: Terminal Node found!\n";
     }
     fusionInterfacePtr()->define(cache_entry.value()->fusion_id);
-    fusionCachePtr()->traverseFusionCache(end_record_.get());
+    fusionCachePtr()->traverseTrie(end_record_.get());
   }
 }
 
@@ -168,7 +168,7 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       "increased if the definition is created as expected.");
   recording_.emplace_back(record);
   auto cache_entry =
-      fusionCachePtr()->lookupFusionCacheEntry(recording_.back().get());
+      fusionCachePtr()->queryChildren(recording_.back().get());
   // If the Record is found in the cache, the FusionDefinition and the Cache
   // will not share Record given the Record had to be created in order to
   // match it but it also already existed in the cache.
@@ -183,9 +183,9 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
                 << record->hash() << ") missed in Fusion Cache.\n";
     }
-    fusionCachePtr()->createFusionCacheEntry(recording_.back().get());
+    fusionCachePtr()->createChild(recording_.back().get());
   }
-  fusionCachePtr()->traverseFusionCache(recording_.back().get());
+  fusionCachePtr()->traverseTrie(recording_.back().get());
 }
 
 void FusionDefinition::addInput(Nvf::Val* input) {

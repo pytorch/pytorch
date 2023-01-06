@@ -36,28 +36,28 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
     std::unique_ptr<RecordFunctor> null_record(nullptr);
 
     try {
-      auto bad_cache_entry_ptr = fc->lookupFusionCacheEntry(null_record.get());
+      auto bad_cache_entry_ptr = fc->queryChildren(null_record.get());
       FAIL() << "Should trigger an assert when the record is looked up!";
     } catch (...) {
       SUCCEED();
     }
 
     try {
-      fc->traverseFusionCache(null_record.get());
+      fc->traverseTrie(null_record.get());
       FAIL() << "Should trigger an assert when the record is looked up!";
     } catch (...) {
       SUCCEED();
     }
 
     try {
-      fc->createFusionCacheEntry(null_record.get());
+      fc->createChild(null_record.get());
       FAIL() << "Should trigger an assert when the record is looked up!";
     } catch (...) {
       SUCCEED();
     }
 
     try {
-      auto id = fc->createFusionCacheEntry(null_record.get());
+      auto id = fc->createChild(null_record.get());
       FAIL() << "Should trigger an assert when the record is looked up!";
     } catch (...) {
       SUCCEED();
@@ -75,7 +75,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
     // Cache Lookup should not succeed becase no records are in the cache
     try {
       auto empty_cache_entry_ptr =
-          fc->lookupFusionCacheEntry(test_record.get());
+          fc->queryChildren(test_record.get());
       ASSERT_TRUE(empty_cache_entry_ptr == c10::nullopt);
       SUCCEED();
     } catch (const std::exception& e) {
@@ -84,7 +84,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
 
     // Traversal of the cache should fail because there is nothing to traverse
     try {
-      fc->traverseFusionCache(test_record.get());
+      fc->traverseTrie(test_record.get());
       FAIL() << "Expected the cache traversal to fail!";
     } catch (...) {
       SUCCEED();
@@ -93,14 +93,14 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
     // Add a cache entry and check methods
 
     try {
-      fc->createFusionCacheEntry(test_record.get());
+      fc->createChild(test_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "An unexpected assert on Cache Entry creation!" << e.what();
     }
 
     try {
-      auto cache_entry_ptr = fc->lookupFusionCacheEntry(test_record.get());
+      auto cache_entry_ptr = fc->queryChildren(test_record.get());
       ASSERT_FALSE(cache_entry_ptr == c10::nullopt);
       SUCCEED();
     } catch (const std::exception& e) {
@@ -108,7 +108,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
     }
 
     try {
-      fc->traverseFusionCache(test_record.get());
+      fc->traverseTrie(test_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "An unexpected assert during Cache Traverse!" << e.what();
@@ -118,7 +118,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
 
     std::unique_ptr<RecordFunctor> end_record(new EndRecord());
     try {
-      auto id = fc->createFusionCacheEntry(end_record.get());
+      auto id = fc->createChild(end_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "An unexpected assert on Terminal Cache Entry creation!"
@@ -126,7 +126,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
     }
 
     try {
-      fc->traverseFusionCache(end_record.get());
+      fc->traverseTrie(end_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "An unexpected assert while traversing to a Terminal Entry!"
@@ -134,14 +134,14 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
     }
 
     try {
-      auto no_cache_entry_ptr = fc->lookupFusionCacheEntry(test_record.get());
+      auto no_cache_entry_ptr = fc->queryChildren(test_record.get());
       FAIL() << "Expected an assert from a terminal entry!";
     } catch (...) {
       SUCCEED();
     }
 
     try {
-      fc->traverseFusionCache(test_record.get());
+      fc->traverseTrie(test_record.get());
       FAIL() << "Expected an assert from a terminal entry!";
     } catch (...) {
       SUCCEED();
@@ -150,7 +150,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
 
   // Setup cache for a new cache lookup
   try {
-    fc->resetFusionCachePtr();
+    fc->resetTriePtr();
     SUCCEED();
   } catch (const std::exception& e) {
     FAIL() << "Did not properly set cache to pointer to top of tree!"
@@ -166,7 +166,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
         new ScalarRecord({State(1, StateType::Scalar)}, Nvf::DataType::Float));
 
     try {
-      auto hit_cache_entry = fc->lookupFusionCacheEntry(cached_record.get());
+      auto hit_cache_entry = fc->queryChildren(cached_record.get());
       ASSERT_FALSE(hit_cache_entry == c10::nullopt);
       SUCCEED();
     } catch (const std::exception& e) {
@@ -174,14 +174,14 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
     }
 
     try {
-      fc->traverseFusionCache(cached_record.get());
+      fc->traverseTrie(cached_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Fusion cache traverse unexpectedly asserted!" << e.what();
     }
 
     try {
-      auto miss_cache_entry = fc->lookupFusionCacheEntry(new_record.get());
+      auto miss_cache_entry = fc->queryChildren(new_record.get());
       ASSERT_TRUE(miss_cache_entry == c10::nullopt);
       SUCCEED();
     } catch (const std::exception& e) {
@@ -189,14 +189,14 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
     }
 
     try {
-      fc->createFusionCacheEntry(new_record.get());
+      fc->createChild(new_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "An unexpected assert on Cache Entry creation!" << e.what();
     }
 
     try {
-      fc->traverseFusionCache(new_record.get());
+      fc->traverseTrie(new_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "Fusion cache traverse unexpectedly asserted!" << e.what();
@@ -204,7 +204,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
 
     std::unique_ptr<RecordFunctor> end_record(new EndRecord());
     try {
-      auto id = fc->createFusionCacheEntry(end_record.get());
+      auto id = fc->createChild(end_record.get());
       FAIL() << "Expected the cache to assert because it is full!";
     } catch (...) {
       SUCCEED();
@@ -213,7 +213,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
 
   // Setup cache for a new cache lookup
   try {
-    fc->resetFusionCachePtr();
+    fc->resetTriePtr();
     SUCCEED();
   } catch (const std::exception& e) {
     FAIL() << "Did not properly set cache to pointer to top of tree!"
@@ -229,7 +229,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
         {State(0, StateType::Tensor)}, {3}, {true}, Nvf::DataType::Float));
 
     try {
-      auto cache_entry_ptr = fc->lookupFusionCacheEntry(test_record.get());
+      auto cache_entry_ptr = fc->queryChildren(test_record.get());
       ASSERT_FALSE(cache_entry_ptr == c10::nullopt);
       SUCCEED();
     } catch (const std::exception& e) {
@@ -237,7 +237,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
     }
 
     try {
-      fc->traverseFusionCache(test_record.get());
+      fc->traverseTrie(test_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "An unexpected assert during Cache Traverse!" << e.what();
@@ -245,14 +245,14 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
 
     std::unique_ptr<RecordFunctor> end_record(new EndRecord());
     try {
-      auto no_cache_entry_ptr = fc->lookupFusionCacheEntry(end_record.get());
+      auto no_cache_entry_ptr = fc->queryChildren(end_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "An unexpected assert on cache lookup!" << e.what();
     }
 
     try {
-      fc->traverseFusionCache(end_record.get());
+      fc->traverseTrie(end_record.get());
       SUCCEED();
     } catch (const std::exception& e) {
       FAIL() << "An unexpected assert while traversing to a Terminal Entry!"
