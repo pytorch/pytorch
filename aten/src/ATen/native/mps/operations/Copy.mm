@@ -207,14 +207,14 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
 
     void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size_to_copy, &alignedLength);
     sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
-    sourceOffset += src_.storage_offset() * src_.itemsize();
+    sourceOffset += src.storage_offset() * src.itemsize();
 
     id<MTLBuffer> sourceBuffer = nil;
     // If the destination is a strided MPS tensor, we cannot perform a blit directly to copy the
     // memory from the CPU tensor into the MPS tensor. We need to scatter the data into the right indices
-    bool doScatter = (!dst_.is_contiguous() && src.is_contiguous());
+    bool doScatter = (!dst.is_contiguous() && src.is_contiguous());
     if (doScatter) {
-      sourceBuffer = [device newBufferWithBytes:(void*)((uint8_t*)host_src + (src_.storage_offset() * src_.itemsize()))
+      sourceBuffer = [device newBufferWithBytes:(void*)((uint8_t*)host_src + (src.storage_offset() * src.itemsize()))
                                          length:size_to_copy
                                         options:options];
     }
@@ -226,7 +226,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
     }
 
     if (doScatter) {
-      scatterViewTensor(src, dst_, sourceBuffer);
+      scatterViewTensor(src, dst, sourceBuffer);
     } else {
       stream->copy_and_sync(sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking);
     }
