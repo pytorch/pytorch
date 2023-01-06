@@ -4,6 +4,7 @@ import os
 import tempfile
 from enum import Enum
 from functools import partial
+import logging
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from warnings import warn
 
@@ -31,6 +32,11 @@ __all__ = [
     "ExecutionGraphObserver",
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
+_dynolog_handle = None
+
+logging.basicConfig(format="%(asctime)s:%(name)s:%(filename)s:%(lineno)s-%(levelname)s:%(message)s")
+logger = logging.getLogger(__name__)
+logger.setLevel(level=logging.INFO)
 
 def supported_activities():
     """
@@ -55,9 +61,11 @@ def _profile_using_dynolog(override: bool = False):
     To enable tracing via dynolog we register a global optimizer step post
     hook. Requires the 'KINETO_USE_DAEMON' environment variable to be set.
     """
-    if os.environ.get("KINETO_USE_DAEMON", None) is not None or override is True:
-        handle = register_optimizer_step_post_hook(_optimizer_post_hook)
-        print("Registered optimizer step post hook")
+    global _dynolog_handle
+    if _dynolog_handle is not None and os.environ.get("KINETO_USE_DAEMON", None) is not None or override is True:
+        _dynolog_handle = True
+        _ = register_optimizer_step_post_hook(_optimizer_post_hook)
+        logger.info("Registered optimizer step post hook")
 
 
 class _KinetoProfile(object):
