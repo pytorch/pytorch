@@ -66,8 +66,8 @@ namespace {
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
-        index_t ix_nw = static_cast<index_t>(std::floor(ix));
-        index_t iy_nw = static_cast<index_t>(std::floor(iy));
+        index_t ix_nw = static_cast<index_t>(::floor(ix));
+        index_t iy_nw = static_cast<index_t>(::floor(iy));
         index_t ix_ne = ix_nw + 1;
         index_t iy_ne = iy_nw;
         index_t ix_sw = ix_nw;
@@ -206,9 +206,9 @@ namespace {
         // get corner pixel values from (x, y, z)
         // for 4d, we used north-east-south-west
         // for 5d, we add top-bottom
-        index_t ix_tnw = static_cast<index_t>(std::floor(ix));
-        index_t iy_tnw = static_cast<index_t>(std::floor(iy));
-        index_t iz_tnw = static_cast<index_t>(std::floor(iz));
+        index_t ix_tnw = static_cast<index_t>(::floor(ix));
+        index_t iy_tnw = static_cast<index_t>(::floor(iy));
+        index_t iz_tnw = static_cast<index_t>(::floor(iz));
 
         index_t ix_tne = ix_tnw + 1;
         index_t iy_tne = iy_tnw;
