@@ -2294,7 +2294,6 @@ def std(
     *,
     correction: Optional[int] = None,
 ) -> TensorLikeType:
-    breakpoint()
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
     # reduces over all dimensions if dim=() is passed
