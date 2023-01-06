@@ -53,9 +53,9 @@ std::string getArrayRefString(const IntArrayRef s);
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst);
 Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output);
 
-MPSShape* getMPSShape(const Tensor& t);
-MPSShape* getMPSShape(IntArrayRef sizes);
-MPSShape* getMPSShape(c10::MaybeOwned<Tensor> t);
+// The MPSShape could vary based on memory format
+MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
+MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const at::Tensor& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
@@ -85,6 +85,7 @@ class Placeholder {
 
 void resize_tensor(Tensor* output);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
+MPSGraphTensor* convertNHWCtoNCHW(MPSGraph *mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor);
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar);
