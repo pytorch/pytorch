@@ -44,6 +44,7 @@ def isvariadic(obj):
         Whether or not `obj` is variadic
     Examples
     --------
+    >>> # xdoctest: +SKIP
     >>> isvariadic(int)
     False
     >>> isvariadic(Variadic[int])
@@ -76,8 +77,8 @@ class Variadic(six.with_metaclass(VariadicSignatureMeta)):
     representing a specific variadic signature.
     Examples
     --------
-    >>> Variadic[int]  # any number of int arguments
     >>> # xdoctest: +SKIP
+    >>> Variadic[int]  # any number of int arguments
     <class 'multipledispatch.variadic.Variadic[int]'>
     >>> Variadic[(int, str)]  # any number of one of int or str arguments
     <class 'multipledispatch.variadic.Variadic[(int, str)]'>

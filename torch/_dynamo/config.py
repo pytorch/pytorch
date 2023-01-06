@@ -71,9 +71,6 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 
-# Run the FX graph as it is created to get better type information
-dynamic_propagation = True
-
 # run FX normalization passes in optimizer
 normalize_ir = False
 
