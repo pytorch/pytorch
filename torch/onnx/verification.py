@@ -1200,6 +1200,8 @@ class OnnxTestCaseRepro:
 
 @dataclasses.dataclass
 class GraphInfo:
+    """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph."""
+
     graph: torch.Graph
     input_args: Tuple[Any, ...]
     params_dict: Dict[str, Any]
@@ -1348,7 +1350,7 @@ class GraphInfo:
     ) -> str:
         """Export the subgraph to ONNX along with the input/output data for repro.
 
-        The repro directory will contain the following files:
+        The repro directory will contain the following files::
 
             dir
             ├── test_<name>

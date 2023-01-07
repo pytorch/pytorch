@@ -107,7 +107,7 @@ namespace native {
 
 
 Tensor mkldnn_view_symint(const Tensor& self, c10::SymIntArrayRef size) {
-  return mkldnn_view(self, c10::asIntArrayRefSlow(size));
+  return mkldnn_view(self, C10_AS_INTARRAYREF_SLOW(size));
 }
 
 } // namespace native
