@@ -25,14 +25,20 @@ bool use_mkldnn_bf16_matmul(
   return false;
 }
 
-bool mkldnn_bf16_gemm(
-    TransposeType transa, TransposeType transb,
-    int64_t m, int64_t n, int64_t k,
+bool mkldnn_gemm(
+    TransposeType transa,
+    TransposeType transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
     float alpha,
-    const c10::BFloat16 *a, int64_t lda,
-    const c10::BFloat16 *b, int64_t ldb,
+    const c10::BFloat16* a,
+    int64_t lda,
+    const c10::BFloat16* b,
+    int64_t ldb,
     float beta,
-    c10::BFloat16 *c, int64_t ldc) {
+    c10::BFloat16* c,
+    int64_t ldc) {
   return false;
 }
 
@@ -43,6 +49,8 @@ bool mkldnn_bf16_gemm(
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <dnnl.hpp>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -53,14 +61,21 @@ static bool use_mkldnn_bf16_matmul() {
       mkldnn_bf16_device_check());
 }
 
-bool mkldnn_bf16_gemm(
-    TransposeType transa, TransposeType transb,
-    int64_t m, int64_t n, int64_t k,
+template <typename scalar_t>
+bool mkldnn_gemm(
+    TransposeType transa,
+    TransposeType transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
     float alpha,
-    const c10::BFloat16 *a_data, int64_t lda,
-    const c10::BFloat16 *b_data, int64_t ldb,
+    const scalar_t* a_data,
+    int64_t lda,
+    const scalar_t* b_data,
+    int64_t ldb,
     float beta,
-    c10::BFloat16 *c_data, int64_t ldc) {
+    scalar_t* c_data,
+    int64_t ldc) {
   if (!use_mkldnn_bf16_matmul() ||
       (m * n * k <= 16 * 16 * 16) ||
       (alpha == 0.0f)) {
@@ -83,22 +98,25 @@ bool mkldnn_bf16_gemm(
     std::swap(b_strides[0], b_strides[1]);
   }
 
-  ideep::tensor a({
-      /*sizes=*/{k, m},
-      ideep::tensor::data_type::bf16,
-      /*strides=*/a_strides},
-    const_cast<c10::BFloat16*>(a_data));
-  ideep::tensor b({
-      /*sizes=*/{n, k},
-      ideep::tensor::data_type::bf16,
-      /*strides=*/b_strides},
-    const_cast<c10::BFloat16*>(b_data));
+  ideep::tensor a(
+      {/*sizes=*/{k, m},
+       ideep::tensor::data_type::bf16,
+       /*strides=*/a_strides},
+      const_cast<scalar_t*>(a_data));
+  ideep::tensor b(
+      {/*sizes=*/{n, k},
+       ideep::tensor::data_type::bf16,
+       /*strides=*/b_strides},
+      const_cast<scalar_t*>(b_data));
   ideep::tensor c({
       /*sizes=*/{n, m},
       ideep::tensor::data_type::bf16,
       /*strides=*/c_strides},
     c_data);
-
+  if (at::globalContext().float32MatmulPrecision() ==
+      at::Float32MatmulPrecision::MEDIUM) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
   ideep::matmul_forward::compute(
       b, a, c, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
@@ -117,6 +135,36 @@ bool mkldnn_bf16_gemm(
 
   return true;
 }
+
+template bool mkldnn_gemm(
+    TransposeType transa,
+    TransposeType transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    float alpha,
+    const float* a,
+    int64_t lda,
+    const float* b,
+    int64_t ldb,
+    float beta,
+    float* c,
+    int64_t ldc);
+
+template bool mkldnn_gemm(
+    TransposeType transa,
+    TransposeType transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    float alpha,
+    const c10::BFloat16* a,
+    int64_t lda,
+    const c10::BFloat16* b,
+    int64_t ldb,
+    float beta,
+    c10::BFloat16* c,
+    int64_t ldc);
 
 void mkldnn_matmul(
     const Tensor &mat1,
@@ -182,6 +230,10 @@ void mkldnn_matmul(
   const ideep::tensor x = itensor_view_from_dense(mat1_);
   const ideep::tensor w = itensor_view_from_dense(mat2_);
   ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
+  if (at::globalContext().float32MatmulPrecision() ==
+      at::Float32MatmulPrecision::MEDIUM) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
   ideep::matmul_forward::compute(x, w, y, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
   if (y.get_data_handle() != result.data_ptr()){
@@ -204,19 +256,20 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // else called from aten::mv, mat1.size = (m * n), mat2.size = (n)
   // only m * n * b * k(if exist) are large enough we can get benefit from mkldnn optimized gemm kernel
-  static const int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
+  static const int64_t _min_size = 16 * 16 * 16;
   if (mat1.dim() == 1 && mat2.dim() == 1) {
     // aten::dot
-    return mat1.size(0) > mkldnn_gemm_min_size;
+    return mat1.size(0) > _min_size;
   } else if (mat1.dim() == 2 && mat2.dim() == 1) {
     // aten::mv
-    return mat1.size(0) * mat1.size(1) > mkldnn_gemm_min_size;
+    return mat1.size(0) * mat1.size(1) > _min_size;
   } else if (mat2.dim() == 2 && mat2.dim() == 2) {
     // aten::addmm
-    return mat1.size(0) * mat1.size(1) * mat2.size(1) > mkldnn_gemm_min_size;
+    return mat1.size(0) * mat1.size(1) * mat2.size(1) > _min_size;
   } else {
     // aten::bmm, aten::baddbmm
-    return mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) > mkldnn_gemm_min_size;
+    return mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) >
+        _min_size;
   }
 }
 
@@ -238,14 +291,18 @@ bool use_mkldnn_bf16_matmul(
   } else
 #endif
   {
-     return (
+    bool all_args_are_bf16 = mat1.scalar_type() == kFloat &&
+        mat2.scalar_type() == kFloat &&
+        (!result.defined() || result.scalar_type() == kFloat);
+    bool all_args_are_fp32 = mat1.scalar_type() == kFloat &&
+        mat2.scalar_type() == kFloat &&
+        (!result.defined() || result.scalar_type() == kFloat);
+    bool allow_low_precision = at::globalContext().float32MatmulPrecision() ==
+        at::Float32MatmulPrecision::MEDIUM;
+    return (
         use_mkldnn_bf16_matmul() &&
-        mat1.scalar_type() == kBFloat16 &&
-        mat2.scalar_type() == kBFloat16 &&
-        (!result.defined() || result.scalar_type() == kBFloat16) &&
-        mat1.numel() != 0 &&
-        mat2.numel() != 0 &&
-        checksize(mat1, mat2));
+        (all_args_are_bf16 || (all_args_are_fp32 && allow_low_precision)) &&
+        mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2));
   }
 }
 

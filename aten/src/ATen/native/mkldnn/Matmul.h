@@ -20,15 +20,21 @@ bool use_mkldnn_bf16_matmul(
     const Tensor& result_opt);
 
 // Try running mkldnn optimized gemm, or returns false if naive gemm would be faster
-bool mkldnn_bf16_gemm(
-    TransposeType transa, TransposeType transb,
-    int64_t m, int64_t n, int64_t k,
+template <typename scalar_t>
+bool mkldnn_gemm(
+    TransposeType transa,
+    TransposeType transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
     float alpha,
-    const c10::BFloat16 *a, int64_t lda,
-    const c10::BFloat16 *b, int64_t ldb,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
     float beta,
-    c10::BFloat16 *c, int64_t ldc);
-
+    scalar_t* c,
+    int64_t ldc);
 }
 
 }
