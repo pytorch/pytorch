@@ -10,12 +10,14 @@ import types
 import warnings
 from typing import Dict, Optional, Set
 
+import numpy
+
 import torch
 from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
 from .external_utils import is_compiling
-from .utils import HAS_NUMPY, is_safe_constant, np
+from .utils import is_safe_constant
 
 """
 A note on allowed functions:
@@ -218,16 +220,15 @@ def _builtin_function_ids():
 @make_function_id_set
 def _numpy_function_ids():
     rv = dict()
-    if HAS_NUMPY:
-        for mod in (np, np.random):
-            rv.update(
-                {
-                    id(v): f"{mod.__name__}.{k}"
-                    for k, v in mod.__dict__.items()
-                    if callable(v)
-                    and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
-                }
-            )
+    for mod in (numpy, numpy.random):
+        rv.update(
+            {
+                id(v): f"{mod.__name__}.{k}"
+                for k, v in mod.__dict__.items()
+                if callable(v)
+                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
+            }
+        )
     return rv
 
 
@@ -269,7 +270,4 @@ def is_builtin_constant(obj):
 
 
 def is_numpy(obj):
-    if HAS_NUMPY:
-        return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
-    else:
-        return False
+    return isinstance(obj, numpy.ndarray) or id(obj) in _numpy_function_ids

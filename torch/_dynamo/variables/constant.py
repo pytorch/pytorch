@@ -5,7 +5,7 @@ import torch
 
 from .. import variables
 from ..exc import unimplemented
-from ..utils import HAS_NUMPY, istype, np
+from ..utils import istype
 from .base import typestr, VariableTracker
 
 
@@ -15,11 +15,7 @@ class ConstantVariable(VariableTracker):
         assert not isinstance(value, torch.Tensor)
         assert not isinstance(value, torch.SymInt)
         assert not isinstance(value, torch.SymFloat)
-
-        if HAS_NUMPY and isinstance(value, np.number):
-            self.value = value.item()
-        else:
-            self.value = value
+        self.value = value
 
     def as_proxy(self):
         return self.value
