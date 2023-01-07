@@ -873,7 +873,7 @@ class GitHubPR:
         land_check_commit: Optional[str] = None
     ) -> List["GitHubPR"]:
         assert self.is_ghstack_pr()
-        additional_prs = []
+        additional_prs: List["GitHubPR"] = []
         # For ghstack, cherry-pick commits based from origin
         orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', self.head_ref())}"
         rev_list = repo.revlist(f"{self.default_branch()}..{orig_ref}")
