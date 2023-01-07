@@ -374,7 +374,7 @@ for name in dir(_C):
         if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
             if (obj.__module__ != 'torch'):
                 # TODO: fix their module from C++ side
-                if name not in ['DisableTorchFunction', 'Generator']:
+                if name not in ['DisableTorchFunctionSubclass', 'Generator']:
                     obj.__module__ = 'torch'
 
 if not TYPE_CHECKING:
@@ -427,7 +427,7 @@ def is_tensor(obj):
         obj (Object): Object to test
     Example::
 
-        >>> x=torch.tensor([1,2,3])
+        >>> x = torch.tensor([1, 2, 3])
         >>> torch.is_tensor(x)
         True
 
@@ -627,10 +627,10 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
-        >>> # xdoctest: +SKIP
         >>> torch.randn(10, device='cuda').kthvalue(0)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...
