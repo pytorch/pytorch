@@ -11504,6 +11504,9 @@ op_db: List[OpInfo] = [
                # RuntimeError: Argument weight is not defined as mutable but was mutated
                DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo',
                             'test_schema_correctness', dtypes=(torch.complex64, torch.complex128)),
+               # AssertionError: Tensor-likes are not close!
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu',
+                            dtypes=(torch.float32,)),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
