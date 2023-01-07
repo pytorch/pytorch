@@ -2354,14 +2354,13 @@ class Module:
                         p.grad.detach_()
                     else:
                         p.grad.requires_grad_(False)
-                    if p.grad.device.type == 'cuda':
+                    if p.grad.is_cuda():
                         per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p)
                     else:
                         p.grad.zero_()
         if per_device_and_dtype_grads:
-            for _, per_dtype_grads in per_device_and_dtype_grads.items():
-                for grads in per_dtype_grads.values():
-                    torch._foreach_zero_(grads)
+            for per_dtype_grads in per_device_and_dtype_grads.values():
+                torch._foreach_zero_(per_dtype_grads)
 
     def share_memory(self: T) -> T:
         r"""See :meth:`torch.Tensor.share_memory_`"""
