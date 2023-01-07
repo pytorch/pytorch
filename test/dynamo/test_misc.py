@@ -3277,7 +3277,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )
         from torch import package
 
-        path = "MyPickledModule.pt"
+        path = "/tmp/MyPickledModule.pt"
         package_name = "MyPickledModule"
         resource_name = "MyPickledModule.pkl"
 
