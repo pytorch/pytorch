@@ -785,7 +785,12 @@ class TritonKernel(Kernel):
 
         for tree in self.range_trees:
             # Masks are superfluous if we only have one element
-            if tree.numel == 1:
+            # or if numel is a multiple of BLOCK
+            # (We use the fact that BLOCK is required by triton to be a power of 2)
+            if tree.prefix.upper() not in config.triton.max_block:
+                continue
+            max_block = config.triton.max_block[tree.prefix.upper()]
+            if tree.numel == 1 or tree.numel % max_block == 0:
                 mask_vars.discard(f"{tree.prefix}mask")
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
@@ -1041,6 +1046,7 @@ class TritonKernel(Kernel):
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
+        mutated_args = sorted(mutated_args)
 
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),

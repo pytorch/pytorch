@@ -675,21 +675,39 @@ def mm_autotune(get_io_bound_configs=False):
 def grid(xnumel, ynumel=None, znumel=None):
     """Helper function to compute triton grids"""
 
+    def get_grid_dim(numel, block_name, meta):
+        if numel is None:
+            return None
+        block = meta[block_name]
+        label = block_name[0]
+        if numel == 1:
+            assert block == 1, (
+                f"TritonKernel.indexing assumes {label.lower()}numel == 1 => {block_name} == 1"
+                f"({label.lower()}numel=={numel}, {block_name}={block})."
+            )
+        max_block = config.triton.max_block[label]
+        max_block_str = f'config.triton.max_block["{label}"]'
+        assert max_block % block == 0, (
+            f"TritonKernel.indexing assumes {block_name} divides {max_block_str}."
+            f"({block_name}={block}, {max_block_str}={max_block})."
+        )
+        return cdiv(numel, block)
+
     if ynumel and znumel:
 
         def grid_fn(meta):
             return (
-                cdiv(xnumel, meta["XBLOCK"]),
-                cdiv(ynumel, meta["YBLOCK"]),
-                cdiv(znumel, meta["ZBLOCK"]),
+                get_grid_dim(xnumel, "XBLOCK", meta),
+                get_grid_dim(ynumel, "YBLOCK", meta),
+                get_grid_dim(znumel, "ZBLOCK", meta),
             )
 
     elif ynumel:
 
         def grid_fn(meta):
             return (
-                cdiv(xnumel, meta["XBLOCK"]),
-                cdiv(ynumel, meta["YBLOCK"]),
+                get_grid_dim(xnumel, "XBLOCK", meta),
+                get_grid_dim(ynumel, "YBLOCK", meta),
                 1,
             )
 
@@ -697,7 +715,7 @@ def grid(xnumel, ynumel=None, znumel=None):
 
         def grid_fn(meta):
             return (
-                cdiv(xnumel, meta["XBLOCK"]),
+                get_grid_dim(xnumel, "XBLOCK", meta),
                 1,
                 1,
             )
