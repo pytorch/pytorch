@@ -7,11 +7,13 @@
 #include <ATen/core/ivalue_to.h>
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/type_factory.h>
+#include <c10/core/SymFloat.h>
+#include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/macros/Export.h>
 #include <typeindex>
+#include <utility>
 
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
@@ -27,6 +29,8 @@ template <class Key, class Value>
 class Dict;
 template <class T>
 class List;
+template <class T>
+class IListRef;
 struct IValue;
 struct ClassType;
 struct Type;
@@ -65,7 +69,7 @@ struct ComplexHolder : c10::intrusive_ptr_target {
     ComplexHolder(c10::complex<T> c) {
       val = convert<decltype(val), c10::complex<T>>(c);
     }
-    ComplexHolder() {}
+    ComplexHolder() = default;
     c10::complex<double> val;
 };
 } // namespace ivalue
@@ -79,7 +83,7 @@ template <typename T>
 struct OptionalArray {
   c10::optional<std::vector<T>> list;
 
-  OptionalArray(){}
+  OptionalArray()= default;
   OptionalArray(std::vector<T> val) : list(std::move(val)) {}
 
   // Used when saving an argument for the backwards pass.
@@ -144,7 +148,8 @@ struct Capsule {
   _(Double)                  \
   _(ComplexDouble)           \
   _(Int)                     \
-  _(SymInt)   \
+  _(SymInt)                  \
+  _(SymFloat)                \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -201,13 +206,13 @@ struct Capsule {
 /// \endrst
 struct TORCH_API IValue final {
   IValue(const IValue& rhs)
-      : IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr) {
-    if (is_intrusive_ptr && payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
+      : IValue(rhs.payload, rhs.tag) {
+    if (isIntrusivePtr() && payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
       c10::raw::intrusive_ptr::incref(payload.u.as_intrusive_ptr);
     }
   }
 
-  IValue(IValue&& rhs) noexcept : tag(rhs.tag), is_intrusive_ptr(rhs.is_intrusive_ptr) {
+  IValue(IValue&& rhs) noexcept : tag(rhs.tag) {
     moveFrom(std::move(rhs));
   }
 
@@ -348,12 +353,12 @@ public:
       return isAliasOf(this->toTensor(), rhs.toTensor());
     }
 
-    if (!this->is_intrusive_ptr) {
+    if (!isIntrusivePtr()) {
       // Primitive types don't alias anything
       return false;
     }
 
-    AT_ASSERT(rhs.is_intrusive_ptr);
+    AT_ASSERT(rhs.isIntrusivePtr());
 
     // Other types can be compared by their ptr value
     return this->payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
@@ -365,7 +370,7 @@ public:
       return payload.as_tensor.use_count();
     }
 
-    if (!is_intrusive_ptr) {
+    if (!isIntrusivePtrLegacyBehavior()) {
       return 1;
     }
 
@@ -398,7 +403,6 @@ public:
     } else {
       std::swap(payload.u, rhs.payload.u);
     }
-    std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
   }
 
@@ -406,7 +410,7 @@ public:
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
-  IValue(at::TensorBase t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
+  IValue(at::TensorBase t) : tag(Tag::Tensor) {
     new (&payload.as_tensor) at::Tensor(std::move(t));
   }
   bool isTensor() const {
@@ -422,15 +426,11 @@ public:
   at::Tensor& toTensor() &;
   const at::Tensor& toTensor() const&;
   at::TensorImpl* unsafeToTensorImpl() const {
+    TORCH_INTERNAL_ASSERT(isTensor());
     return payload.as_tensor.unsafeGetTensorImpl();
   }
 
-  IValue(at::Storage s) : tag(Tag::Storage), is_intrusive_ptr(static_cast<bool>(s)) {
-    // Note: the undefined tensor is not refcounted, so while it
-    // is tagged as a tensor, is_intrusive_ptr is set to false.
-    // This is not an optional optimization: our incref call
-    // *will not* do the right thing when called on an
-    // undefined tensor.
+  IValue(at::Storage s) : tag(Tag::Storage) {
     payload.u.as_intrusive_ptr = null_to_undefined_tensor(s.unsafeReleaseStorageImpl());
   }
   bool isStorage() const {
@@ -448,7 +448,7 @@ public:
 
   /// @private [doxygen private]
   IValue(intrusive_ptr<caffe2::Blob> blob)
-      : tag(Tag::Blob), is_intrusive_ptr(true) {
+      : tag(Tag::Blob) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
     // and store it as a Tensor instead.
     payload.u.as_intrusive_ptr = null_to_undefined_tensor(blob.release());
@@ -515,7 +515,7 @@ public:
   C10_NODISCARD ivalue::Tuple& toTupleRef() const;
 
   // Double
-  IValue(double d) : tag(Tag::Double), is_intrusive_ptr(false) {
+  IValue(double d) : tag(Tag::Double) {
     payload.u.as_double = d;
   }
   bool isDouble() const {
@@ -557,21 +557,43 @@ public:
   c10::intrusive_ptr<at::Quantizer> toQuantizer() const&;
 
   // Int
-  IValue(int64_t i) : tag(Tag::Int), is_intrusive_ptr(false) {
+  IValue(int64_t i) : tag(Tag::Int) {
     payload.u.as_int = i;
   }
 
-  IValue(c10::SymInt i) : tag(Tag::SymInt), is_intrusive_ptr(false) {
-    payload.u.as_int = i.data();
+  IValue(c10::SymInt i) {
+    if (i.is_symbolic()) {
+      tag = Tag::SymInt;
+      payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
+    } else {
+      tag = Tag::Int;
+      payload.u.as_int = i.as_int_unchecked();
+    }
   }
 
   bool isSymInt() const {
     return Tag::SymInt == tag;
   }
 
-  c10::SymInt toSymInt() const {
-    return c10::SymInt(payload.u.as_int);
+  c10::SymInt toSymInt() &&;
+  c10::SymInt toSymInt() const&;
+
+  IValue(c10::SymFloat i) {
+    if (i.is_symbolic()) {
+      tag = Tag::SymFloat;
+      payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
+    } else {
+      tag = Tag::Double;
+      payload.u.as_double = i.as_float_unchecked();
+    }
   }
+
+  bool isSymFloat() const {
+    return Tag::SymFloat == tag;
+  }
+
+  c10::SymFloat toSymFloat() &&;
+  c10::SymFloat toSymFloat() const&;
 
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
@@ -586,7 +608,7 @@ public:
   }
 
   // Bool
-  IValue(bool b) : tag(Tag::Bool), is_intrusive_ptr(false) {
+  IValue(bool b) : tag(Tag::Bool) {
 #if defined(__clang__) && defined(__x86_64__)
     // Initializing entire payload stops valgrind's from reporting
     // "jump or move depends on uninitialised value" in IValue copy constructor
@@ -649,6 +671,12 @@ public:
   c10::List<at::Tensor> toTensorList() const&;
   std::vector<at::Tensor> toTensorVector() const;
 
+  // OptionalTensorList
+  bool isOptionalTensorList() const;
+  c10::List<c10::optional<at::Tensor>> toOptionalTensorList() &&;
+  c10::List<c10::optional<at::Tensor>> toOptionalTensorList() const&;
+  std::vector<c10::optional<at::Tensor>> toOptionalTensorVector() const;
+
   // GenericList
   IValue(c10::List<IValue> v);
   bool isList() const {
@@ -659,21 +687,58 @@ public:
   c10::ArrayRef<IValue> toListRef() const;
 
   // Some template constructors of IValue calls another constructor recursively.
-  // This SNIFAEs the called constructor exists.
+  // This SFINAEs the called constructor exists.
   template <class T>
   using enable_if_ivalue_constructible =
       std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
 
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  // The rule for lists is more complicated; the generic constructor is only
+  // acceptable if your element isn't SymInt.  If you do have a SymInt element,
+  // then you must also, at construction time, check if you can decay the list
+  // into an int list (this is MANDATORY, as at a use site we may expect
+  // toIntList to work even if at the call site you had a SymIntArrayRef
+  // argument).  In practice, only SymIntArrayRef is used this way, so we
+  // didn't bother making it work for the other constructors, we just make sure
+  // they're not selectable.
+  template <class T>
+  using enable_if_list_is_ivalue_constructible =
+      std::enable_if_t<std::is_constructible<IValue, T>::value &&
+        !std::is_same<T, c10::SymInt>::value, std::nullptr_t>;
+
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::List<T>&& v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(const c10::List<T>& v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
   template <class T, size_t N>
   IValue(std::array<T, N> v);
+
+  // Manual constructors for lists of symints, which decay to int list if
+  // possible.  To avoid ambiguous overload situations, we template them
+  // to prevent implicit conversions
+  template <class T>
+  using enable_if_symint =
+      std::enable_if_t<std::is_same<T, c10::SymInt>::value, std::nullptr_t>;
+
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(at::ArrayRef<T> v);
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(at::OptionalArrayRef<T> v);
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(const std::vector<T>& v);
+
+  template <class T>
+  using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
+      std::is_constructible<IValue, T>::value &&
+          std::is_constructible<IValue, typename IListRef<T>::boxed_type>::value &&
+          !std::is_same<T, c10::SymInt>::value,
+      std::nullptr_t>;
+
+  template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
+  IValue(c10::IListRef<T> v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
@@ -696,7 +761,7 @@ public:
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::OptionalArrayRef<T> v);
   IValue(c10::nullopt_t);
 
@@ -730,7 +795,7 @@ public:
   c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() const&;
 
   // None
-  IValue() : tag(Tag::None), is_intrusive_ptr(false) {}
+  IValue() : tag(Tag::None) {}
   bool isNone() const {
     return Tag::None == tag;
   }
@@ -747,21 +812,31 @@ public:
 
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
   IValue(const at::Scalar& s) : IValue() {
-    if (s.isFloatingPoint()) {
-      *this = s.toDouble();
+    // NB: do the symbolic versions first, as isFloatingPoint is true
+    // for both SymFloat and double
+    if (s.isSymInt()) {
+      tag = Tag::SymInt;
+      payload.u.as_intrusive_ptr = s.toSymInt().toSymNodeImpl().release();
+    } else if (s.isSymFloat()) {
+      tag = Tag::SymFloat;
+      payload.u.as_intrusive_ptr = s.toSymFloat().toSymNodeImpl().release();
+    } else if (s.isFloatingPoint()) {
+      tag = Tag::Double;
+      payload.u.as_double = s.toDouble();
     } else if (s.isComplex()) {
       *this = s.toComplexDouble();
     } else if (s.isBoolean()) {
-      *this = s.toBool();
-    } else if (s.isIntegral(false)) {
-      *this = s.toLong();
+      tag = Tag::Bool;
+      payload.u.as_bool = s.toBool();
     } else {
-      TORCH_CHECK(false, "Unknown type in Scalar");
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(s.isIntegral(false), "Unknown type in Scalar");
+      tag  = Tag::Int;
+      payload.u.as_int = s.toLong();
     }
   }
 
   bool isScalar() const {
-    return isDouble() || isInt() || isComplexDouble() || isBool();
+    return isDouble() || isInt() || isComplexDouble() || isBool() || isSymInt() || isSymFloat();
   }
 
   at::Scalar toScalar() const {
@@ -773,11 +848,15 @@ public:
       return toComplexDouble();
     else if (isBool())
       return toBool();
+    else if (isSymInt())
+      return toSymInt();
+    else if (isSymFloat())
+      return toSymFloat();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
   // Device
-  IValue(c10::Device d) : tag(Tag::Device), is_intrusive_ptr(false) {
+  IValue(c10::Device d) : tag(Tag::Device) {
     payload.u.as_device.type = d.type();
     payload.u.as_device.index = d.index();
   }
@@ -791,7 +870,7 @@ public:
 
   //Stream
   IValue(c10::Stream stream)
-    : tag(Tag::Stream), is_intrusive_ptr(false) {
+    : tag(Tag::Stream) {
     payload.u.as_int = stream.pack();
   }
   c10::Stream toStream() &&;
@@ -820,7 +899,7 @@ public:
   }
 
   // QScheme
-  IValue(at::QScheme qscheme) : tag(Tag::Int), is_intrusive_ptr(false) {
+  IValue(at::QScheme qscheme) : tag(Tag::Int) {
     payload.u.as_int = static_cast<int64_t>(qscheme);
   }
 
@@ -836,12 +915,7 @@ public:
   }
 
   // Generator
-  IValue(at::Generator g) : tag(Tag::Generator), is_intrusive_ptr(g.defined()) {
-    // Note: the undefined generator is not refcounted, so while it
-    // is tagged as a generator, is_intrusive_ptr is set to false.
-    // This is not an optional optimization: our incref call
-    // *will not* do the right thing when called on an
-    // undefined generator.
+  IValue(at::Generator g) : tag(Tag::Generator) {
     payload.u.as_intrusive_ptr = null_to_undefined_tensor(g.unsafeReleaseGeneratorImpl());
   }
   bool isGenerator() const {
@@ -913,7 +987,10 @@ public:
       const IValue& v);
 
   bool isPtrType() const {
-    return (isTensor() && payload.as_tensor.defined()) || is_intrusive_ptr;
+    if (isTensor()) {
+      return payload.as_tensor.defined();
+    }
+    return isIntrusivePtrLegacyBehavior();
   }
 
   /// @private [doxygen private]
@@ -1021,7 +1098,7 @@ public:
     // the "wrong" one of as_tensor and as_intrusive_ptr and 2) enable
     // the compiler to generate the same code for each case. It is
     // surprisingly difficult to get this right.
-    if (isTensor() || is_intrusive_ptr) {
+    if (isTensor() || isIntrusivePtr()) {
       c10::intrusive_ptr_target* p = isTensor() ? payload.as_tensor.unsafeGetTensorImpl() : payload.u.as_intrusive_ptr;
       c10::intrusive_ptr<intrusive_ptr_target, c10::UndefinedTensorImpl>::reclaim(p);
       // No need to make this destructor call!
@@ -1045,17 +1122,84 @@ public:
       payload.u = rhs.payload.u;
     }
     tag = rhs.tag;
-    is_intrusive_ptr = rhs.is_intrusive_ptr;
     rhs.clearToNone();
   }
 
   void clearToNone() noexcept {
     payload.u.as_int = 0;
     tag = Tag::None;
-    is_intrusive_ptr = false;
+  }
+
+  bool isIntrusivePtr() const {
+    switch (tag) {
+      case Tag::None:
+        return false;
+      case Tag::Tensor:
+        return false;
+      case Tag::Storage:
+        return true;
+      case Tag::Generator:
+        return true;
+      case Tag::Double:
+        return false;
+      case Tag::ComplexDouble:
+        return true;
+      case Tag::Int:
+        return false;
+      case Tag::SymInt:
+        return true;
+      case Tag::SymFloat:
+        return true;
+      case Tag::Bool:
+        return false;
+      case Tag::Tuple:
+        return true;
+      case Tag::String:
+        return true;
+      case Tag::Blob:
+        return true;
+      case Tag::GenericList:
+        return true;
+      case Tag::GenericDict:
+        return true;
+      case Tag::Future:
+        return true;
+      case Tag::Device:
+        return false;
+      case Tag::Stream:
+        return false;
+      case Tag::Object:
+        return true;
+      case Tag::PyObject:
+        return true;
+      case Tag::Uninitialized:
+        return false;
+      case Tag::Capsule:
+        return true;
+      case Tag::RRef:
+        return true;
+      case Tag::Quantizer:
+        return true;
+      case Tag::Enum:
+        return true;
+    }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false, "unexpected tag ", static_cast<int>(tag));
+    return false;
+  }
+
+  // Storage and Generator were treated specially when
+  // is_intrusive_ptr was stored as explicit state. This getter
+  // preserves the old behavior for use with WeakIValue for now.
+  bool isIntrusivePtrLegacyBehavior() const {
+    if (tag == Tag::Storage || tag == Tag::Generator) {
+      return payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton();
+    } else {
+      return isIntrusivePtr();
+    }
   }
 
   union Payload {
+    // [TriviallyCopyablePayload]
     // We use a nested union here so that we can make the copy easy
     // and efficient in the non-tensor (i.e., trivially copyable)
     // case. Specifically, we do not have to do a switch-on-tag to
@@ -1080,7 +1224,7 @@ public:
     ~Payload() {}
   };
 
-  IValue(const Payload& p, Tag t, bool i) : tag(t), is_intrusive_ptr(i) {
+  IValue(const Payload& p, Tag t) : tag(t) {
     if (isTensor()) {
       new (&payload.as_tensor) at::Tensor(p.as_tensor);
     } else {
@@ -1095,7 +1239,6 @@ public:
 
   Payload payload;
   Tag tag;
-  bool is_intrusive_ptr;
   friend struct WeakIValue;
 };
 
@@ -1112,7 +1255,7 @@ struct TORCH_API WeakIValue final {
   }
   WeakIValue(const IValue& rhs)
       : tag(rhs.tag),
-        is_intrusive_ptr(rhs.is_intrusive_ptr) {
+    is_intrusive_ptr(rhs.isIntrusivePtrLegacyBehavior()) {
     if (rhs.isTensor()) {
       payload.as_intrusive_ptr = rhs.unsafeToTensorImpl();
       is_intrusive_ptr = true;
@@ -1156,7 +1299,7 @@ struct TORCH_API WeakIValue final {
     if (!is_intrusive_ptr) {
       IValue::Payload newPayload;
       newPayload.u = payload;
-      return IValue(newPayload, tag, false);
+      return IValue(newPayload, tag);
     }
     if (IValue::Tag::Tensor == tag) {
       auto temp = c10::weak_intrusive_ptr<at::TensorImpl, c10::UndefinedTensorImpl>::reclaim(
@@ -1179,7 +1322,7 @@ struct TORCH_API WeakIValue final {
       if (!pl.u.as_intrusive_ptr) {
         return IValue();
       } else {
-        return IValue(pl, tag, true);
+        return IValue(pl, tag);
       }
     }
   }
@@ -1245,16 +1388,10 @@ struct TORCH_API WeakTypePtr {
 // internal build errors with std::variant :/
 struct WeakOrStrongCompilationUnit {
   explicit WeakOrStrongCompilationUnit(
-      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) {
-    strong_ptr_ = shared_cu;
-    weak_ptr_ = c10::nullopt;
-  }
+      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) : strong_ptr_(std::move(shared_cu)), weak_ptr_(c10::nullopt) {}
 
   explicit WeakOrStrongCompilationUnit(
-      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) {
-    strong_ptr_ = c10::nullopt;
-    weak_ptr_ = weak_cu;
-  }
+      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) : strong_ptr_(c10::nullopt), weak_ptr_(std::move(weak_cu)) {}
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
     TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
@@ -1270,6 +1407,10 @@ struct WeakOrStrongCompilationUnit {
     return strong_ptr_ != c10::nullopt;
   }
 
+  bool holdingEmptyStrongRef() const {
+    return holdingStrongRef() && *strong_ptr_ == nullptr;
+  }
+
   c10::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;
   c10::optional<std::weak_ptr<torch::jit::CompilationUnit>> weak_ptr_;
 };
@@ -1278,23 +1419,22 @@ struct WeakOrStrongCompilationUnit {
 // Constant in the graph and a Owning reference otherwise
 struct TORCH_API WeakOrStrongTypePtr {
   explicit WeakOrStrongTypePtr(WeakTypePtr weak)
-      : cu_(WeakOrStrongCompilationUnit(weak.cu_)) {
-    type_ = weak.type_;
-  }
+      : cu_(WeakOrStrongCompilationUnit(std::move(weak.cu_))), type_(std::move(weak.type_)) {}
   explicit WeakOrStrongTypePtr(StrongTypePtr strong)
-      : cu_(WeakOrStrongCompilationUnit(strong.cu_)) {
-    type_ = strong.type_;
-  }
+      : cu_(WeakOrStrongCompilationUnit(std::move(strong.cu_))), type_(std::move(strong.type_)) {}
   explicit WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type)
-      : cu_(cu) {
-    type_ = type;
-  }
+      : cu_(std::move(cu)), type_(std::move(type)) {}
   WeakTypePtr asWeakTypePtr() const;
 
   WeakOrStrongCompilationUnit cu_;
   TypePtr type_;
+
   bool holds_strong_ref() const {
     return cu_.holdingStrongRef();
+  }
+
+  bool holds_empty_strong_ref() const {
+    return cu_.holdingEmptyStrongRef();
   }
 };
 

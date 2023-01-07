@@ -1,5 +1,6 @@
 // The clang-tidy job seems to complain that it can't find cudnn.h without this.
-// This file should only be compiled if this condition holds, so it should be safe.
+// This file should only be compiled if this condition holds, so it should be
+// safe.
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 #include <torch/csrc/utils/pybind.h>
 
@@ -39,7 +40,7 @@ size_t getVersionInt() {
 #endif
 }
 
-}
+} // namespace
 #elif defined(USE_ROCM)
 #include <miopen/miopen.h>
 #include <miopen/version.h>
@@ -53,7 +54,8 @@ version_tuple getCompileVersion() {
 
 version_tuple getRuntimeVersion() {
   // MIOpen doesn't include runtime version info before 2.3.0
-#if (MIOPEN_VERSION_MAJOR > 2) || (MIOPEN_VERSION_MAJOR == 2 && MIOPEN_VERSION_MINOR > 2)
+#if (MIOPEN_VERSION_MAJOR > 2) || \
+    (MIOPEN_VERSION_MAJOR == 2 && MIOPEN_VERSION_MINOR > 2)
   size_t major, minor, patch;
   miopenGetVersion(&major, &minor, &patch);
   return version_tuple(major, minor, patch);
@@ -69,10 +71,12 @@ size_t getVersionInt() {
   return major * 1000000 + minor * 1000 + patch;
 }
 
-}
+} // namespace
 #endif
 
-namespace torch { namespace cuda { namespace shared {
+namespace torch {
+namespace cuda {
+namespace shared {
 
 void initCudnnBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -80,10 +84,10 @@ void initCudnnBindings(PyObject* module) {
   auto cudnn = m.def_submodule("_cudnn", "libcudnn.so bindings");
 
   py::enum_<cudnnRNNMode_t>(cudnn, "RNNMode")
-    .value("rnn_relu", CUDNN_RNN_RELU)
-    .value("rnn_tanh", CUDNN_RNN_TANH)
-    .value("lstm", CUDNN_LSTM)
-    .value("gru", CUDNN_GRU);
+      .value("rnn_relu", CUDNN_RNN_RELU)
+      .value("rnn_tanh", CUDNN_RNN_TANH)
+      .value("lstm", CUDNN_LSTM)
+      .value("gru", CUDNN_GRU);
 
   // The runtime version check in python needs to distinguish cudnn from miopen
 #ifdef USE_CUDNN

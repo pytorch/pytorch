@@ -9,39 +9,39 @@
 
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 
+if [ -z "$PYTHON" ]; then
+  PYTHON=python
+  PYTHON_VERSION_MAJOR=$($PYTHON -c 'import sys; print(sys.version_info[0])')
+  if [ "${PYTHON_VERSION_MAJOR}" -le 2 ]; then
+    echo "Default python executable is Python-2, trying to use python3 alias"
+    PYTHON=python3
+  fi
+fi
+
+echo "Bash: $(/bin/bash --version | head -1)"
+echo "Python: $($PYTHON -c 'import sys; print(sys.version)')"
+echo "Caffe2 path: $CAFFE2_ROOT"
+
 CMAKE_ARGS=()
 
-if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
-  # Build PyTorch mobile
-  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
-  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
-  CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
-  # custom build with selected ops
-  if [ -n "${SELECTED_OP_LIST}" ]; then
-    SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
-    echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
-    if [ ! -r ${SELECTED_OP_LIST} ]; then
-      echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
-      exit 1
-    fi
-    CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
+# Build PyTorch mobile
+CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$($PYTHON -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
+CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$($PYTHON -c 'import sys; print(sys.executable)')")
+CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
+
+# custom build with selected ops
+if [ -n "${SELECTED_OP_LIST}" ]; then
+  SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
+  echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
+  if [ ! -r ${SELECTED_OP_LIST} ]; then
+    echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
+    exit 1
   fi
-  # bitcode
-  if [ "${ENABLE_BITCODE:-}" == '1' ]; then
-    CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
-    CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
-  fi
-else
-  # Build Caffe2 mobile
-  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=ON")
-  # Build protobuf from third_party so we have a host protoc binary.
-  echo "Building protoc"
-  BITCODE_FLAGS="-DCMAKE_C_FLAGS=-fembed-bitcode -DCMAKE_CXX_FLAGS=-fembed-bitcode "
-  $CAFFE2_ROOT/scripts/build_host_protoc.sh --other-flags $BITCODE_FLAGS
-  # Use locally built protoc because we'll build libprotobuf for the
-  # target architecture and need an exact version match.
-  CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
-  # Bitcode is enabled by default for caffe2
+  CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
+fi
+
+# bitcode
+if [ "${ENABLE_BITCODE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
   CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
 fi
@@ -104,6 +104,7 @@ CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
 
 # Disable unused dependencies
 CMAKE_ARGS+=("-DUSE_CUDA=OFF")
+CMAKE_ARGS+=("-DUSE_ITT=OFF")
 CMAKE_ARGS+=("-DUSE_GFLAGS=OFF")
 CMAKE_ARGS+=("-DUSE_OPENCV=OFF")
 CMAKE_ARGS+=("-DUSE_LMDB=OFF")

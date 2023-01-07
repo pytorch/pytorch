@@ -6,7 +6,7 @@ torch.optim
 How to use an optimizer
 -----------------------
 
-To use :mod:`torch.optim` you have to construct an optimizer object, that will hold
+To use :mod:`torch.optim` you have to construct an optimizer object that will hold
 the current state and will update the parameters based on the computed gradients.
 
 Constructing it
@@ -15,15 +15,6 @@ Constructing it
 To construct an :class:`Optimizer` you have to give it an iterable containing the
 parameters (all should be :class:`~torch.autograd.Variable` s) to optimize. Then,
 you can specify optimizer-specific options such as the learning rate, weight decay, etc.
-
-.. note::
-
-    If you need to move a model to GPU via ``.cuda()``, please do so before
-    constructing optimizers for it. Parameters of a model after ``.cuda()`` will
-    be different objects with those before the call.
-
-    In general, you should make sure that optimized parameters live in
-    consistent locations when optimizers are constructed and used.
 
 Example::
 
@@ -150,8 +141,7 @@ should write your code this way:
 
 Example::
 
-    model = [Parameter(torch.randn(2, 2, requires_grad=True))]
-    optimizer = SGD(model, 0.1)
+    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     scheduler = ExponentialLR(optimizer, gamma=0.9)
 
     for epoch in range(20):
@@ -169,8 +159,7 @@ other on the learning rate obtained by the one preceding it.
 
 Example::
 
-    model = [Parameter(torch.randn(2, 2, requires_grad=True))]
-    optimizer = SGD(model, 0.1)
+    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     scheduler1 = ExponentialLR(optimizer, gamma=0.9)
     scheduler2 = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
 
@@ -213,6 +202,7 @@ algorithms.
     lr_scheduler.ConstantLR
     lr_scheduler.LinearLR
     lr_scheduler.ExponentialLR
+    lr_scheduler.PolynomialLR
     lr_scheduler.CosineAnnealingLR
     lr_scheduler.ChainedScheduler
     lr_scheduler.SequentialLR

@@ -64,10 +64,10 @@ class Registry {
       const RegistryPriority priority = REGISTRY_DEFAULT) {
     std::lock_guard<std::mutex> lock(register_mutex_);
     // The if statement below is essentially the same as the following line:
-    // CHECK_EQ(registry_.count(key), 0) << "Key " << key
+    // TORCH_CHECK_EQ(registry_.count(key), 0) << "Key " << key
     //                                   << " registered twice.";
-    // However, CHECK_EQ depends on google logging, and since registration is
-    // carried out at static initialization time, we do not want to have an
+    // However, TORCH_CHECK_EQ depends on google logging, and since registration
+    // is carried out at static initialization time, we do not want to have an
     // explicit dependency on glog's initialization function.
     if (registry_.count(key) != 0) {
       auto cur_priority = priority_[key];
@@ -114,11 +114,12 @@ class Registry {
   }
 
   ObjectPtrType Create(const SrcType& key, Args... args) {
-    if (registry_.count(key) == 0) {
+    auto it = registry_.find(key);
+    if (it == registry_.end()) {
       // Returns nullptr if the key is not registered.
       return nullptr;
     }
-    return registry_[key](args...);
+    return it->second(args...);
   }
 
   /**
@@ -126,6 +127,7 @@ class Registry {
    */
   std::vector<SrcType> Keys() const {
     std::vector<SrcType> keys;
+    keys.reserve(registry_.size());
     for (const auto& it : registry_) {
       keys.push_back(it.first);
     }

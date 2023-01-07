@@ -65,6 +65,7 @@
 
 // Just for inferFunctionSchemaFromFunctor
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/core/enum_tag.h>
 
 namespace torch {
 
@@ -84,6 +85,12 @@ namespace torch {
  */
 struct NoInferSchemaTag {};
 #endif
+
+// For multipy/torchdeploy use case
+enum class _RegisterOrVerify {
+  REGISTER,
+  VERIFY
+};
 
 template <class CurClass>
 class class_;
@@ -201,16 +208,21 @@ class TORCH_API CppFunction final {
 
   CppFunction& operator=(CppFunction&&) = default;
 
+  /// \private
+  /// Creates a function from a type-erased boxed kernel.
+  static CppFunction makeFromBoxedKernel(c10::BoxedKernel kernel) {
+    return CppFunction(
+        c10::KernelFunction::makeFromBoxedKernel(std::move(kernel)),
+        /* cpp_signature */ c10::nullopt, // not known for boxed functions
+        /* schema */ nullptr);
+  }
+
   /// This creates a fallthrough function.  Fallthrough functions
   /// immediately redispatch to the next available dispatch key,
   /// but are implemented more efficiently than a hand written
   /// function done in the same way.
   static CppFunction makeFallthrough() {
-    // TODO: more user friendly API
-    return CppFunction(
-        c10::KernelFunction::makeFallthrough(),
-        /* cpp_signature */ c10::nullopt, // not known for fallthroughs
-        /* schema */ nullptr);
+    return makeFromBoxedKernel(c10::BoxedKernel::makeFallthrough());
   }
 
   /// \private
@@ -218,10 +230,7 @@ class TORCH_API CppFunction final {
   /// Creates a function that raises an error saying that named tensors
   /// are not supported when called.
   static CppFunction makeNamedNotSupported() {
-    return CppFunction(
-        c10::KernelFunction::makeNamedNotSupported(),
-        /* cpp_signature */ c10::nullopt, // not known for fallthroughs
-        /* schema */ nullptr);
+    return makeFromBoxedKernel(c10::BoxedKernel::makeNamedNotSupported());
   }
 
   /// Create a function from a boxed kernel function with signature
@@ -230,25 +239,19 @@ class TORCH_API CppFunction final {
   /// in the native C++ calling convention.  Boxed functions are
   /// typically only used to register backend fallbacks via
   /// torch::Library::fallback().
-  template <c10::KernelFunction::BoxedKernelFunction* func>
+  template <c10::BoxedKernel::BoxedKernelFunction* func>
   static CppFunction makeFromBoxedFunction() {
-    // TODO: more user friendly API
-    return CppFunction(
-        c10::KernelFunction::makeFromBoxedFunction<func>(),
-        /* cpp_signature */ c10::nullopt, // not known for boxed functions
-        /* schema */ nullptr);
+    return makeFromBoxedKernel(
+        c10::BoxedKernel::makeFromFunction<func>());
   }
 
   // Variant that takes in a boxed kernel function with a plumbed
   // DispatchKeySet. See Note [Plumbing Keys Through The Dispatcher] for
   // details.
-  template <c10::KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
+  template <c10::BoxedKernel::BoxedKernelFunction_withDispatchKeys* func>
   static CppFunction makeFromBoxedFunction() {
-    // TODO: more user friendly API
-    return CppFunction(
-        c10::KernelFunction::makeFromBoxedFunction<func>(),
-        /* cpp_signature */ c10::nullopt, // not known for boxed functions
-        /* schema */ nullptr);
+    return makeFromBoxedKernel(
+        c10::BoxedKernel::makeFromFunction<func>());
   }
 
   /// Create a function from a boxed kernel functor which defines
@@ -262,10 +265,8 @@ class TORCH_API CppFunction final {
   template <class KernelFunctor>
   static CppFunction makeFromBoxedFunctor(
       std::unique_ptr<KernelFunctor> kernelFunctor) {
-    return CppFunction(
-        c10::KernelFunction::makeFromBoxedFunctor(std::move(kernelFunctor)),
-        /* cpp_signature */ c10::nullopt, // not known for boxed functions
-        /* schema */ nullptr);
+    return makeFromBoxedKernel(
+        c10::BoxedKernel::makeFromFunctor(std::move(kernelFunctor)));
   }
 
   /// Create a function from an unboxed kernel function.
@@ -361,8 +362,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::XLA;
       case c10::DeviceType::Lazy:
         return c10::DispatchKey::Lazy;
-      case c10::DeviceType::MLC:
-        return c10::DispatchKey::MLC;
+      case c10::DeviceType::MPS:
+        return c10::DispatchKey::MPS;
       case c10::DeviceType::Meta:
         return c10::DispatchKey::Meta;
       case c10::DeviceType::HIP:
@@ -371,6 +372,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::ORT;
       case c10::DeviceType::HPU:
         return c10::DispatchKey::HPU;
+      case c10::DeviceType::PrivateUse1:
+        return c10::DispatchKey::PrivateUse1;
       default:
         TORCH_CHECK(
             false,
@@ -592,12 +595,12 @@ class TORCH_API Library final {
   ///   m.def("add(Tensor self, Tensor other) -> Tensor");
   /// }
   /// ```
-  template <typename Schema>
-  Library& def(Schema&& raw_schema) & {
-    c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
-    return _def(std::move(s));
-  }
 
+  template <typename Schema>
+  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags = {}, _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
+    c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
+    return _def(std::move(s), nullptr, tags, rv);
+  }
   /// Define an operator for a schema and then register an implementation for
   /// it.  This is typically what you would use if you aren't planning
   /// on making use of the dispatcher to structure your operator
@@ -647,7 +650,7 @@ class TORCH_API Library final {
   /// }
   /// ```
   template <typename Name, typename Func>
-  Library& impl(Name name, Func&& raw_f) & {
+  Library& impl(Name name, Func&& raw_f, _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
     // TODO: need to raise an error when you impl a function that has a
     // catch all def
 #if defined C10_MOBILE
@@ -655,7 +658,7 @@ class TORCH_API Library final {
 #else
     CppFunction f(std::forward<Func>(raw_f));
 #endif
-    return _impl(name, std::move(f));
+    return _impl(name, std::move(f), rv);
   }
 
 #if defined C10_MOBILE
@@ -675,6 +678,10 @@ class TORCH_API Library final {
     return _impl(name, std::move(f));
   }
 #endif
+
+  // Helper for getting an OperatorName for a const char*.  You probably
+  // don't need this.
+  c10::OperatorName _resolve(const char* name) const;
 
   /// \private
   ///
@@ -811,12 +818,18 @@ class TORCH_API Library final {
   // public because we only implement & qualifier and not && qualifier
   Library& _def(
       c10::FunctionSchema&& schema,
-      c10::OperatorName* out_name = nullptr) &;
+      c10::OperatorName* out_name = nullptr,
+      const std::vector<at::Tag>& tags = {},
+      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER
+      ) &;
   Library& _def(
       c10::either<c10::OperatorName, c10::FunctionSchema>&&,
       CppFunction&& f) &;
-  Library& _impl(const char* name, CppFunction&& f) &;
+  Library& _impl(const char* name, CppFunction&& f,
+    _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) &;
   Library& _fallback(CppFunction&& f) &;
+
+  at::OperatorName _parseNameForLib(const char* name_str) const;
 };
 
 namespace detail {

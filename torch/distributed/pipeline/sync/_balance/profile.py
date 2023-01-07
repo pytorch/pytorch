@@ -99,13 +99,15 @@ def profile_sizes(
         detach(batch)
 
         # Detect memory usage at forward.
+        torch._C._cuda_clearCublasWorkspaces()
         memory_before = torch.cuda.memory_allocated(device)
         batch = batch.call(layer)
+        torch._C._cuda_clearCublasWorkspaces()
         memory_after = torch.cuda.memory_allocated(device)
         latent_size = memory_after - memory_before
 
         # Analyze size of parameters.
-        param_size = sum(p.storage().nbytes() for p in layer.parameters())
+        param_size = sum(p._typed_storage()._nbytes() for p in layer.parameters())
 
         # Combine size of parameters and activations with normalize scales.
         size = latent_size * latent_scale + param_size * param_scale

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, cast
+from typing import List
 
 import torch
 from torch.distributed._shard.metadata import ShardMetadata
@@ -29,12 +29,12 @@ class Shard(object):
                 f"Found shard tensor size: {list(self.tensor.size())}, "
                 f"metadata.shard_lengths: {self.metadata.shard_sizes}, "
             )
-        placement_device = cast(_remote_device, self.metadata.placement).device()
-        if placement_device != self.tensor.device:
+        placement_device = self.metadata.placement
+        if placement_device is not None and placement_device.device() != self.tensor.device:
             raise ValueError(
                 f"Local shard tensor device does not match with local Shard's placement! "
                 f"Found local shard tensor device: {self.tensor.device}, "
-                f"local shard metadata placement device: {placement_device}"
+                f"local shard metadata placement device: {placement_device.device()}"
             )
 
     @classmethod

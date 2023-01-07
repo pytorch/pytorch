@@ -12,8 +12,13 @@ namespace util {
 
 // TODO Make it work for more compilers
 
+// Intel compiler works
+#if defined(__INTEL_COMPILER)
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
+#define C10_TYPENAME_CONSTEXPR
+
 // Clang works
-#if defined(__clang__)
+#elif defined(__clang__)
 
 // except for NVCC
 #if defined(__CUDACC__)

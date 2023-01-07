@@ -5,6 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Exponential']
 
 class Exponential(ExponentialFamily):
     r"""
@@ -12,6 +13,7 @@ class Exponential(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Exponential(torch.tensor([1.0]))
         >>> m.sample()  # Exponential distributed with rate=1
         tensor([ 0.1046])
@@ -27,6 +29,10 @@ class Exponential(ExponentialFamily):
     @property
     def mean(self):
         return self.rate.reciprocal()
+
+    @property
+    def mode(self):
+        return torch.zeros_like(self.rate)
 
     @property
     def stddev(self):
@@ -51,10 +57,6 @@ class Exponential(ExponentialFamily):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        if torch._C._get_tracing_state():
-            # [JIT WORKAROUND] lack of support for ._exponential()
-            u = torch.rand(shape, dtype=self.rate.dtype, device=self.rate.device)
-            return -(-u).log1p() / self.rate
         return self.rate.new(shape).exponential_() / self.rate
 
     def log_prob(self, value):

@@ -1,7 +1,20 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 
+#include <c10/util/CallOnce.h>
+
 #include <thread>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_nnpack_available_native.h>
+#include <ATen/ops/_nnpack_spatial_convolution_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #if !AT_NNPACK_ENABLED()
 
@@ -37,10 +50,10 @@ namespace at {
 namespace native {
 
 static bool init_nnpack() {
-  static std::once_flag once_;
+  static c10::once_flag once_;
   static bool nnpack_successfully_initialized_ = false;
 
-  std::call_once(once_, []() {
+  c10::call_once(once_, []() {
     const nnp_status nnpack_status = nnp_initialize();
     nnpack_successfully_initialized_ = (nnp_status_success == nnpack_status);
 
@@ -196,8 +209,8 @@ Tensor _nnpack_spatial_convolution(
       .height = (size_t)output.size(2),
   };
   const nnp_size output_subsample = {
-      .width = stride[1],
-      .height = stride[0],
+      .width = static_cast<std::size_t>(stride[1]),
+      .height = static_cast<std::size_t>(stride[0]),
   };
 
   const auto input_ = input.contiguous();

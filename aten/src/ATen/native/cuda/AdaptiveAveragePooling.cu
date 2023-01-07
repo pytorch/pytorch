@@ -19,12 +19,14 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#include <ATen/native/AdaptivePooling.h>
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 
-#define START_IND(a,b,c) (int)std::floor((float)(a * c) / b)
-#define END_IND(a,b,c) (int)std::ceil((float)((a + 1) * c) / b)
+#define START_IND(a,b,c) ((int64_t)((a / b) * c + ((a % b) * c) / b))
+#define END_IND(a,b,c) (1 + ((int64_t)(a + 1) * c - 1) / b)
 
 #define START_IND_INT(a,b,c) ((a * c) / b)
 #define END_IND_INT(a,b,c) (((a + 1) * c + b - 1) / b)
@@ -442,10 +444,14 @@ namespace {
               output_arg{ output, "output", 2 };
     checkAllSameGPU(__func__, {input_arg, output_arg});
 
-    for (int64_t i = 1; i < input.ndimension(); i++) {
+    TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
+    int64_t ndim = input.dim();
+    TORCH_CHECK((ndim == 3 || ndim == 4),
+      "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
+    for (const auto i : {-2, -1}) {
       TORCH_CHECK(input.size(i) > 0,
         "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
-        "but input has sizes ", input.sizes(), " with dimension ", i, " being "
+        "but input has sizes ", input.sizes(), " with dimension ", i + ndim, " being "
         "empty");
     }
 
@@ -538,9 +544,6 @@ namespace {
         break;
       }
       case at::MemoryFormat::Contiguous: {
-        TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
-                    "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ",
-                    input.sizes());
         int64_t grid_x = input.size(-3);
         if (input.ndimension() == 4) {
            input_ = input.contiguous();
@@ -600,6 +603,9 @@ namespace {
     TensorArg grad_input_arg{ gradInput, "gradInput", 1 },
               grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
+
+    adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool2d_backward");
+
     checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
     switch (input.suggest_memory_format()) {

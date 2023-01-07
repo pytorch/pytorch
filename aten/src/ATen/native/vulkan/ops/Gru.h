@@ -3,7 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/vulkan/ops/Mm.h>
+#include <ATen/native/vulkan/ops/VulkanPackedContext.h>
 #include <torch/library.h>
 
 namespace at {
@@ -11,9 +11,10 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-class GruOpContext final : public torch::jit::CustomClassHolder {
+class GruPackedContext final : virtual public VulkanPackedContext,
+                               public torch::jit::CustomClassHolder {
  public:
-  static GruOpContext create(
+  GruPackedContext(
       const std::vector<Tensor>& params_cpu, // weights/biases (cpu)
       bool has_biases,
       int64_t num_layers,
@@ -22,49 +23,43 @@ class GruOpContext final : public torch::jit::CustomClassHolder {
       bool bidirectional,
       bool batch_first);
 
-  using State = std::tuple<std::vector<Tensor>, bool, int64_t, double, bool, bool, bool>;
+  /*
+   * Assigns a name to each index in the unpacked list.
+   */
+  struct Unpacked final {
+    static constexpr uint32_t Params = 0u;
+    static constexpr uint32_t hasBiases = 1u;
+    static constexpr uint32_t NumLayers = 2u;
+    static constexpr uint32_t Dropout = 3u;
+    static constexpr uint32_t Train = 4u;
+    static constexpr uint32_t Bidirectional = 5u;
+    static constexpr uint32_t BatchFirst = 6u;
 
-  std::tuple<Tensor, Tensor> run(
-      const Tensor& input_vk,
-      const Tensor & hx_vk) const;
-  State unpack() const;
+    static constexpr uint32_t NumArgs = 7u;
+  };
 
- private:
-  GruOpContext(
-      const std::vector<Tensor>& params_cpu, // weights/biases (cpu)
-      bool has_biases,
-      int64_t num_layers,
-      double dropout,
-      bool train,
-      bool bidirectional,
-      bool batch_first);
+  /*
+   * Assigns a name to each index in the packed list.
+   */
+  struct Packed final {
+    static constexpr uint32_t LinearContexts = 0u;
+    static constexpr uint32_t hasBiases = 1u;
+    static constexpr uint32_t NumLayers = 2u;
+    static constexpr uint32_t Dropout = 3u;
+    static constexpr uint32_t Train = 4u;
+    static constexpr uint32_t Bidirectional = 5u;
+    static constexpr uint32_t BatchFirst = 6u;
 
- private:
-  struct {
-    std::vector<LinearOpContext> linear_op_contexts;  // {{ op context for b_ir, w_ir, op context for b_hr, w_hr,
-                                                      //    op context for b_iz, w_iz, op context for b_hz, w_hz,
-                                                      //    op context for b_in, w_in, op context for b_hn, w_hn,}, ...}
-    bool has_biases{};
-    int64_t num_layers{};
-    double dropout{};
-    bool train{};
-    bool bidirectional{};
-    bool batch_first{};
-  } packed_;
+    static constexpr uint32_t NumArgs = 7u;
+  };
 
-  struct {
-    std::vector<Tensor> params_cpu;      // weights/biases (cpu)
-    bool has_biases{};
-    int64_t num_layers{};
-    double dropout{};
-    bool train{};
-    bool bidirectional{};
-    bool batch_first{};
-  } unpacked_;
+  static GruPackedContext pack(c10::impl::GenericList);
+
+  const c10::impl::GenericList unpack() const override;
 };
 
-c10::intrusive_ptr<GruOpContext> gru_prepack(
-    std::vector<Tensor>&& params_cpu,   // weights/biases (cpu)
+c10::intrusive_ptr<GruPackedContext> create_gru_context(
+    std::vector<Tensor>&& params_cpu, // weights/biases (cpu)
     bool has_biases,
     int64_t num_layers,
     double dropout,
@@ -72,10 +67,10 @@ c10::intrusive_ptr<GruOpContext> gru_prepack(
     bool bidirectional,
     bool batch_first);
 
-std::tuple<Tensor, Tensor> gru_run(
+std::tuple<Tensor, Tensor> run_gru_context(
     const Tensor& input_vk,
-    const Tensor & hx_vk,
-    const c10::intrusive_ptr<GruOpContext>& context);
+    const Tensor& hx_vk,
+    const c10::intrusive_ptr<GruPackedContext>& vulkan_context);
 
 } // namespace ops
 } // namespace vulkan

@@ -17,9 +17,23 @@ graph {
     }
   }
   node {
+    output: "onnx::ConstantOfShape_6"
+    name: "Constant_1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\004\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
     input: "onnx::ConstantOfShape_6"
     output: "onnx::Expand_3"
-    name: "ConstantOfShape_1"
+    name: "ConstantOfShape_2"
     op_type: "ConstantOfShape"
     attribute {
       name: "value"
@@ -35,23 +49,17 @@ graph {
     input: "onnx::Expand_0"
     input: "onnx::Expand_3"
     output: "onnx::Tile_4"
-    name: "Expand_2"
+    name: "Expand_3"
     op_type: "Expand"
   }
   node {
     input: "onnx::Tile_4"
     input: "onnx::Tile_1"
     output: "5"
-    name: "Tile_3"
+    name: "Tile_4"
     op_type: "Tile"
   }
   name: "torch_jit"
-  initializer {
-    dims: 1
-    data_type: 7
-    name: "onnx::ConstantOfShape_6"
-    raw_data: "\004\000\000\000\000\000\000\000"
-  }
   input {
     name: "onnx::Expand_0"
     type {
@@ -98,5 +106,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

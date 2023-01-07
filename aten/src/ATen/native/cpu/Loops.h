@@ -28,17 +28,13 @@
 
 #include <stdint.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Load.h>
 #include <c10/util/irange.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
-
-#ifndef _MSC_VER
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-parameter"
-#endif
 
 namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
@@ -49,8 +45,8 @@ typename traits::ArgsTuple
 dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
                  std::index_sequence<INDEX...>) {
   return std::make_tuple(
-      *(typename traits::template arg<INDEX>::type*)
-        (data[INDEX] + i * strides[INDEX])...);
+      c10::load<typename traits::template arg<INDEX>::type>(
+          data[INDEX] + i * strides[INDEX])...);
 }
 
 template <typename traits>
@@ -273,8 +269,7 @@ struct VectorizedLoop2d {
     const int64_t *outer_strides = &strides[ntensors];
 
     if (is_contiguous<traits>(strides)) {
-      for (const auto i : c10::irange(size1)) {
-        (void)i;
+      for (const auto i C10_UNUSED : c10::irange(size1)) {
         vectorized_loop(data.data(), size0, 0, op, vop);
         advance(data, outer_strides);
       }
@@ -282,14 +277,12 @@ struct VectorizedLoop2d {
       using Indices = std::make_index_sequence<traits::arity>;
       unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
         if (idx) {
-          for (const auto i : c10::irange(size1)) {
-            (void)i;
+          for (const auto i C10_UNUSED : c10::irange(size1)) {
             vectorized_loop(data.data(), size0, idx, op, vop);
             advance(data, outer_strides);
           }
         } else {
-          for (const auto i : c10::irange(size1)) {
-            (void)i;
+          for (const auto i C10_UNUSED : c10::irange(size1)) {
             basic_loop(data.data(), strides, 0, size0, op);
             advance(data, outer_strides);
           }
@@ -397,7 +390,3 @@ void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& v
 }
 
 }}}  // namespace at::native::<anonymous>
-
-#ifndef _MSC_VER
-#pragma GCC diagnostic pop
-#endif

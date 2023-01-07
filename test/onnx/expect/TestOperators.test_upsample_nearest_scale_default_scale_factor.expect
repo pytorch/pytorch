@@ -3,11 +3,25 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
+    output: "onnx::Resize_6"
+    name: "Constant_0"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 4
+        data_type: 1
+        raw_data: "\000\000\200?\000\000\200?\000\000\000@\000\000\000@"
+      }
+      type: TENSOR
+    }
+  }
+  node {
     input: "x"
     input: ""
     input: "onnx::Resize_6"
     output: "5"
-    name: "Resize_0"
+    name: "Resize_1"
     op_type: "Resize"
     attribute {
       name: "coordinate_transformation_mode"
@@ -31,12 +45,6 @@ graph {
     }
   }
   name: "torch_jit"
-  initializer {
-    dims: 4
-    data_type: 1
-    name: "onnx::Resize_6"
-    raw_data: "\000\000\200?\000\000\200?\000\000\000@\000\000\000@"
-  }
   input {
     name: "x"
     type {
@@ -66,16 +74,16 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_param: "Resize5_dim_0"
+            dim_value: 1
           }
           dim {
-            dim_param: "Resize5_dim_1"
+            dim_value: 2
           }
           dim {
-            dim_param: "Resize5_dim_2"
+            dim_value: 6
           }
           dim {
-            dim_param: "Resize5_dim_3"
+            dim_value: 8
           }
         }
       }
@@ -83,5 +91,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

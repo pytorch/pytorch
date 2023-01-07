@@ -11,22 +11,9 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
-
-// Make a tensor that is known to be non-contiguous of dimensionality=ndims,
-// but unknown sizes
-TensorView* makeSymbolicTensor(size_t ndims, DataType dtype = DataType::Float) {
-  return TensorViewBuilder().ndims(ndims).dtype(dtype).build();
-}
-
-// Make a non-contiguous tensor of compile-time known sizes
-TensorView* makeConcreteTensor(
-    std::vector<int64_t> shape,
-    DataType dtype = DataType::Float) {
-  return TensorViewBuilder().shape(shape).dtype(dtype).build();
-}
 
 static auto getLayerBackwardNormRuntime(
     std::unique_ptr<Fusion> fusion_ptr,
@@ -112,12 +99,15 @@ static void LayerNormBackward_HeuristicLookup(
 
   auto runtime = getLayerBackwardNormRuntime(
       std::move(fusion_ptr), fec, aten_inputs, shape, norm_shape);
+
+  KernelArgumentHolder args = KernelArgumentHolder::createKernelArgumentHolder(aten_inputs);
+
   TORCH_INTERNAL_ASSERT(
-      runtime->getMaybeHeuristicsFor(aten_inputs).has_value());
+      runtime->getMaybeHeuristicsFor(args).has_value());
 
   for (auto _ : benchmark_state) {
     // Setup (not included in the measurement)
-    runtime->getMaybeHeuristicsFor(aten_inputs);
+    runtime->getMaybeHeuristicsFor(args);
   }
 }
 
@@ -165,12 +155,15 @@ static void LayerNormForward_HeuristicLookup(
 
   auto runtime = getLayerForwardNormRuntime(
       std::move(fusion_ptr), fec, aten_inputs, shape, norm_shape);
+
+  KernelArgumentHolder args = KernelArgumentHolder::createKernelArgumentHolder(aten_inputs);
+
   TORCH_INTERNAL_ASSERT(
-      runtime->getMaybeHeuristicsFor(aten_inputs).has_value());
+      runtime->getMaybeHeuristicsFor(args).has_value());
 
   for (auto _ : benchmark_state) {
     // Setup (not included in the measurement)
-    runtime->getMaybeHeuristicsFor(aten_inputs);
+    runtime->getMaybeHeuristicsFor(args);
   }
 }
 

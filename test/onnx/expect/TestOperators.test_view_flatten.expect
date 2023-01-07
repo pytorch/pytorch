@@ -3,19 +3,32 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
+    output: "onnx::Reshape_11"
+    name: "Constant_0"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 2
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000\030\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
     input: "onnx::Reshape_0"
     input: "onnx::Reshape_11"
     output: "8"
-    name: "Reshape_0"
+    name: "Reshape_1"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   name: "torch_jit"
-  initializer {
-    dims: 2
-    data_type: 7
-    name: "onnx::Reshape_11"
-    raw_data: "\001\000\000\000\000\000\000\000\030\000\000\000\000\000\000\000"
-  }
   input {
     name: "onnx::Reshape_0"
     type {
@@ -56,5 +69,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

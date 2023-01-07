@@ -65,7 +65,7 @@ Tensor hardswish(const Tensor& input) {
     padded_input.sizes(),
     padded_input.options().dtype(),
     input.suggest_memory_format(),
-    padded_input.names());
+    padded_input.opt_names());
 
   hardswish_impl(padded_input, output);
   return output.contiguous(input.suggest_memory_format());
@@ -84,7 +84,7 @@ Tensor& hardswish_(Tensor& input) {
       padded_input.sizes(),
       padded_input.options().dtype(),
       input.suggest_memory_format(),
-      padded_input.names());
+      padded_input.opt_names());
     hardswish_impl(padded_input, output);
     return input.copy_(output);
   }

@@ -1,7 +1,11 @@
 #pragma once
+#include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/compile_time_info.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/heuristic.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise_heuristic.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/reduction_heuristic.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -23,26 +27,28 @@ class ExpressionEvaluator;
 //!    segmenter and schedulers.
 //!  It is important that input id encoding should be up to date with any change
 //!   of this class to avoid launching compiled kernels with illegal inputs.
-class TORCH_CUDA_CU_API SchedulerRuntimeInfo {
+
+class TORCH_CUDA_CU_API SchedulerRuntimeInfo : public NonCopyable {
  public:
   // Max vector size we will consider, in bytes,
   //  currently set to 16B = 128b
-  const size_t max_alignment_size_in_byte = 16;
+  static constexpr size_t max_alignment_size_in_byte = 16;
 
   //! Create runtime info for given fusion and input. Creating and binding
-  //! evaluator is optional. The evaluator is used to manage intermediate
+  //!  evaluator is optional. The evaluator is used to manage intermediate
   //!  integers in the fusion. We need them for segmenter and schedulers,
   //!  but we don't need them when we are just using this class to provide
   //!  additional encoding for kernel cache lookup.
   SchedulerRuntimeInfo(
       Fusion* complete_fusion,
-      const at::ArrayRef<at::IValue>& inputs,
+      const KernelArgumentHolder& inputs,
       bool create_expr_evaluator = false);
 
-  //! Create runtime info by copying all the global
-  //! input meta data (i.e. alignment), but not the
-  //! expression evaluator.
-  SchedulerRuntimeInfo(const SchedulerRuntimeInfo& global_runtime_info);
+  // TODO: Remove this guy below. Everything needs to go into the other ctor
+  SchedulerRuntimeInfo(
+      Fusion* complete_fusion,
+      const at::ArrayRef<at::IValue>& aten_inputs,
+      bool create_expr_evaluator = false);
 
   //! Lookup for the alignment sizes of the given tv. Currently only returns
   //!  actual alignment info for input tensors to the complete fusion,
@@ -50,19 +56,20 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo {
   //!  return max_alignment_size_in_byte.
   size_t getAlignmentSize(TensorView* tv);
 
-  //! Take the minimum of input tv alignment sizes. This is both information for
-  //! vectorization and
-  //!  a signature for kernel cache id lookup. May need to be updated with
-  //!  vectorization logic.
-  size_t getCommonAlignmentSize() const {
-    return common_alignment_size_;
-  }
+  // Gets maximum vectorizable width of tv, assumes we can merge across all
+  // iteration domains if contiguous. Cannot permute the dimensions to fix
+  // contiguity. Ignores dimensions that are broadcast or reduction.
+  size_t getMaxVectorizableWidth(TensorView* tv);
 
-  //! Returns the max width the given tensor view can be vectorized,
-  //!  for input tensors will use the pre-computed value based on
-  //!  the given tensor alignment and strides. For intermediate tensors
-  //!  will assume it is contiguous and aligned to 128bit/16Byte
-  size_t getVectorizableWidth(TensorView* tv);
+  // Gets the vectorizable width of the inner most dimension of tv if it's
+  // contiguous. Ignores inner most dimensions that are broadcast or reduction.
+  size_t getInnerDimVectorizableWidth(TensorView* tv);
+
+  // Computes alignment size in bytes for provided ptr address
+  static size_t computeAlignmentSize(size_t ptr_address);
+
+  // Return the runtime pointer value for provided tensor view
+  size_t ptrOf(TensorView* tv);
 
   KernelIndexMode getIndexMode() {
     return index_mode_;
@@ -79,29 +86,48 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo {
 
  private:
   // Bind full fusion inputs to the internal expression evaluator
-  void initializeExpressionEvaluator(const at::ArrayRef<at::IValue>& inputs);
+  void initializeExpressionEvaluator(const KernelArgumentHolder& inputs);
 
-  // Compute alignment data for all input tensors of full fusion
-  void collectVectorizationInfo(const at::ArrayRef<at::IValue>& inputs);
+  // Initialize SchedulerRuntimeInfo
+  void initialize(const KernelArgumentHolder& args, bool create_expr_evaluator);
 
-  // Compute alignment data for given tensor
-  size_t collectAlignmentSize(const at::Tensor& tensor) const;
-
-  // Compute max vectorization word size for each an input tensor
-  size_t collectMaxVectorizeSize(
-      const at::Tensor& tensor,
-      size_t max_word_size_in_byte);
-
-  // check if input is compatible with 32b index mode
-  void collectIndexModeInfo(const at::ArrayRef<at::IValue>& inputs);
+  bool isInputTv(TensorView* tv) {
+    return std::find(
+               complete_fusion_->inputs().begin(),
+               complete_fusion_->inputs().end(),
+               tv) != complete_fusion_->inputs().end();
+  }
 
  private:
+  // Returns the offset of tv in the inputs ignoring non tensor views. Used to
+  // access input_sizes, input_strides, input_ptr
+  int offsetTensorPos(TensorView* tv);
+
+  // Expression evaluator used to probe sizes in the fusion IR
   std::unique_ptr<ExpressionEvaluator> expression_evaluator_ = nullptr;
+
+  // Fusion reference that this runtime info is associated with
   Fusion* complete_fusion_ = nullptr;
+
+  // Copy of aten input pointer addresses
+  // TODO: Support output tensor pointers
+  std::unordered_map<Val*, size_t> input_ptrs_;
+
+  // Copy of aten input tensor strides (in bytes)
+  std::unordered_map<Val*, std::vector<size_t>> input_discontig_strides_;
+
+  // Cache for getAlignmentSize
   std::unordered_map<TensorView*, size_t> alignment_map_;
-  std::unordered_map<TensorView*, size_t> vectorword_map_;
-  size_t common_alignment_size_ = 0;
+  // Cache for getMaxVectorizableWidth
+  std::unordered_map<TensorView*, size_t> max_vectorword_map_;
+  // Cache for getInnerDimVectorizableWidth
+  std::unordered_map<TensorView*, size_t> inner_vectorword_map_;
+
+  // Found index mode kernel needs to be run in
   KernelIndexMode index_mode_ = KernelIndexMode::INT64;
+
+  // TODO: Remove
+  std::unordered_map<TensorView*, size_t> vectorword_map_;
 };
 
 class HeuristicSummary;
@@ -146,11 +172,7 @@ class TORCH_CUDA_CU_API SchedulerEntry {
   //! Heuristic comparison
   bool sameAs(const SchedulerEntry* other);
 
-  bool hasReductionParam() const {
-    return has_reduction_param_;
-  }
-
-  ScheduleHeuristic heuristc() const {
+  ScheduleHeuristic heuristic() const {
     return heuristc_;
   }
 
@@ -158,50 +180,44 @@ class TORCH_CUDA_CU_API SchedulerEntry {
     return index_mode_;
   }
 
+  const std::shared_ptr<HeuristicParams>& params() const {
+    return params_;
+  }
+
   const ReductionParams& reductionParams() const {
+    auto rparams = std::dynamic_pointer_cast<ReductionParams>(params_);
     TORCH_INTERNAL_ASSERT(
-        has_reduction_param_, "This schedule heuristic is not reduction.");
-    return rparams_;
+        rparams != nullptr, "Heuristic parameter is not a reduction parameter");
+    return *rparams;
   }
 
   const PointwiseParams& pointwiseParams() const {
+    auto pparams = std::dynamic_pointer_cast<PointwiseParams>(params_);
     TORCH_INTERNAL_ASSERT(
-        !has_reduction_param_, "This schedule heuristic is not pointwise.");
-    return pparams_;
+        pparams != nullptr, "Heuristic parameter is not a pointwise parameter");
+    return *pparams;
+  }
+
+  const TransposeParams& transposeParams() const {
+    auto tparams = std::dynamic_pointer_cast<TransposeParams>(params_);
+    TORCH_INTERNAL_ASSERT(
+        tparams != nullptr, "Heuristic parameter is not a transpose parameter");
+    return *tparams;
   }
 
   void updateLaunchConstraint(const LaunchParams& launch_params) {
-    if (hasReductionParam()) {
-      rparams_.lparams = launch_params;
-    } else {
-      pparams_.lparams = launch_params;
-    }
+    params_->lparams = launch_params;
   }
 
  protected:
-  explicit SchedulerEntry(ScheduleHeuristic heuristic, bool has_reduction_param)
-      : heuristc_(heuristic), has_reduction_param_(has_reduction_param) {}
+  explicit SchedulerEntry(ScheduleHeuristic heuristic) : heuristc_(heuristic) {}
 
-  ReductionParams& rparams() {
-    return rparams_;
-  };
-
-  PointwiseParams& pparams() {
-    return pparams_;
-  }
+  //! Heuristic parameters if applicable
+  std::shared_ptr<HeuristicParams> params_ = nullptr;
 
  private:
   //! What kind of heuristics does this entry have?
   const ScheduleHeuristic heuristc_;
-
-  //! Has reduction params if true, else has pointwise params
-  const bool has_reduction_param_;
-
-  //! Reduction parameters if applicable
-  ReductionParams rparams_;
-
-  //! Pointwise parameters if applicable
-  PointwiseParams pparams_;
 
   //! Kernel Index Mode
   KernelIndexMode index_mode_ = KernelIndexMode::INT64;
@@ -214,7 +230,12 @@ class TORCH_CUDA_CU_API SchedulerEntryHash {
 };
 
 //! Debug print function for heuristics
-std::string toString(ScheduleHeuristic sh);
+TORCH_CUDA_CU_API std::string toString(ScheduleHeuristic sh);
+
+//! Debug print function for heuristics
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    ScheduleHeuristic sh);
 
 } // namespace cuda
 } // namespace fuser

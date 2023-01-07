@@ -3,27 +3,32 @@
 import collections
 import doctest
 import functools
+import importlib
+import inspect
 import itertools
 import math
 import os
 import re
+import subprocess
+import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple
+from typing import Any, Callable, Iterator, List, Tuple, Generator
 
 import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
-     parametrize, subtest, instantiate_parametrized_tests, dtype_name)
+    (IS_FBCODE, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
+     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
-     deviceCountAtLeast, ops, expectedFailureMeta)
+     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
-import torch.testing._internal.opinfo_helper as opinfo_helper
-from torch.testing._internal.common_dtype import all_types_and_complex_and
-from torch.testing._internal.common_modules import modules, module_db
+from torch.testing._internal import opinfo
+from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
+from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
+from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -45,6 +50,28 @@ class TestTesting(TestCase):
             self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
             self.assertEqual(a, a_n, rtol=0, atol=0, msg=msg)
             self.assertEqual(a_n, a_n, rtol=0, atol=0, msg=msg)
+
+    def test_assertEqual_longMessage(self):
+        actual = "actual"
+        expected = "expected"
+
+        long_message = self.longMessage
+        try:
+            # Capture the default error message by forcing TestCase.longMessage = False
+            self.longMessage = False
+            try:
+                self.assertEqual(actual, expected)
+            except AssertionError as error:
+                default_msg = str(error)
+            else:
+                raise AssertionError("AssertionError not raised")
+
+            self.longMessage = True
+            extra_msg = "sentinel"
+            with self.assertRaisesRegex(AssertionError, re.escape(f"{default_msg}\n{extra_msg}")):
+                self.assertEqual(actual, expected, msg=extra_msg)
+        finally:
+            self.longMessage = long_message
 
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
@@ -287,6 +314,7 @@ class TestTesting(TestCase):
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
@@ -320,6 +348,7 @@ if __name__ == '__main__':
         self.assertIn('errors=1', stderr)
 
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
@@ -360,6 +389,7 @@ if __name__ == '__main__':
         self.assertIn('errors=1', stderr)
 
 
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
@@ -407,10 +437,10 @@ if __name__ == '__main__':
         ops_to_test = list(filter(lambda op: op.name in ['atan2', 'topk', 'xlogy'], op_db))
 
         for op in ops_to_test:
-            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
-            dynamic_dispatch = opinfo_helper.dtypes_dispatch_hint(dynamic_dtypes)
+            dynamic_dtypes = opinfo.utils.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
+            dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
-                dtypes = op.dtypesIfCPU
+                dtypes = op.dtypes
             else:  # device_type ='cuda'
                 dtypes = op.dtypesIfCUDA
 
@@ -452,7 +482,7 @@ if __name__ == '__main__':
         test_bases_count = len(get_device_type_test_bases())
         # Test without setting env var should run everything.
         env = dict(os.environ)
-        for k in ['IN_CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
+        for k in ['CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
             if k in env.keys():
                 del env[k]
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
@@ -942,7 +972,7 @@ class TestAssertCloseErrorMessage(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape(f"(up to {atol} allowed)")):
                 fn(rtol=0.0, atol=atol)
 
-    def test_msg(self):
+    def test_msg_str(self):
         msg = "Custom error message!"
 
         actual = torch.tensor(1)
@@ -951,6 +981,16 @@ class TestAssertCloseErrorMessage(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=msg)
+
+    def test_msg_callable(self):
+        msg = "Custom error message"
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=lambda _: msg)
 
 
 class TestAssertCloseContainer(TestCase):
@@ -1088,17 +1128,14 @@ class TestAssertCloseSparseCSR(TestCase):
         col_indices = (1, 0)
         values = (1, 2)
         actual = torch.sparse_csr_tensor(crow_indices, col_indices, values, size=(2, 2))
-        # TODO: replace this by actual.clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
-        expected = torch.sparse_csr_tensor(
-            actual.crow_indices(), actual.col_indices(), actual.values(), size=actual.size(), device=actual.device
-        )
+        expected = actual.clone()
 
         for fn in assert_close_with_inputs(actual, expected):
             fn()
 
     def test_mismatching_crow_indices_msg(self):
         actual_crow_indices = (0, 1, 2)
-        actual_col_indices = (1, 0)
+        actual_col_indices = (0, 1)
         actual_values = (1, 2)
         actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
 
@@ -1139,6 +1176,191 @@ class TestAssertCloseSparseCSR(TestCase):
 
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR values")):
+                fn()
+
+    @unittest.expectedFailure
+    def test_hybrid_support(self):
+        # If you read this after the test unexpectedly succeeded, this is a good thing. It means that you added support
+        # for `.to_dense()` for hybrid sparse CSR tensors and in turn enabled support for them in
+        # `torch.testing.assert_close` if comparing to strided tensors. You can safely remove this test as well as the
+        # patch on `TensorOrArrayPair` in `torch.testing._internal.common_utils`.
+        actual = torch.sparse_csr_tensor([0, 2, 4], [0, 1, 0, 1], [[1, 11], [2, 12], [3, 13], [4, 14]])
+        expected = torch.stack([actual[0].to_dense(), actual[1].to_dense()])
+
+        torch.testing.assert_close(actual, expected, check_layout=False)
+
+
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSC testing")
+class TestAssertCloseSparseCSC(TestCase):
+    def test_matching(self):
+        ccol_indices = (0, 1, 2)
+        row_indices = (1, 0)
+        values = (1, 2)
+        actual = torch.sparse_csc_tensor(ccol_indices, row_indices, values, size=(2, 2))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_ccol_indices_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (0, 1)
+        actual_values = (1, 2)
+        actual = torch.sparse_csc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = (0, 2, 2)
+        expected_row_indices = actual_row_indices
+        expected_values = actual_values
+        expected = torch.sparse_csc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSC ccol_indices")):
+                fn()
+
+    def test_mismatching_row_indices_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = actual_ccol_indices
+        expected_row_indices = (1, 1)
+        expected_values = actual_values
+        expected = torch.sparse_csc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSC row_indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = actual_ccol_indices
+        expected_row_indices = actual_row_indices
+        expected_values = (1, 3)
+        expected = torch.sparse_csc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSC values")):
+                fn()
+
+
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support BSR testing")
+class TestAssertCloseSparseBSR(TestCase):
+    def test_matching(self):
+        crow_indices = (0, 1, 2)
+        col_indices = (1, 0)
+        values = ([[1]], [[2]])
+        actual = torch.sparse_bsr_tensor(crow_indices, col_indices, values, size=(2, 2))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_crow_indices_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (0, 1)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = (0, 2, 2)
+        expected_col_indices = actual_col_indices
+        expected_values = actual_values
+        expected = torch.sparse_bsr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSR crow_indices")):
+                fn()
+
+    def test_mismatching_col_indices_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = actual_crow_indices
+        expected_col_indices = (1, 1)
+        expected_values = actual_values
+        expected = torch.sparse_bsr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSR col_indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = actual_crow_indices
+        expected_col_indices = actual_col_indices
+        expected_values = ([[1]], [[3]])
+        expected = torch.sparse_bsr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSR values")):
+                fn()
+
+
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support BSC testing")
+class TestAssertCloseSparseBSC(TestCase):
+    def test_matching(self):
+        ccol_indices = (0, 1, 2)
+        row_indices = (1, 0)
+        values = ([[1]], [[2]])
+        actual = torch.sparse_bsc_tensor(ccol_indices, row_indices, values, size=(2, 2))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_ccol_indices_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (0, 1)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = (0, 2, 2)
+        expected_row_indices = actual_row_indices
+        expected_values = actual_values
+        expected = torch.sparse_bsc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSC ccol_indices")):
+                fn()
+
+    def test_mismatching_row_indices_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (1, 0)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = actual_ccol_indices
+        expected_row_indices = (1, 1)
+        expected_values = actual_values
+        expected = torch.sparse_bsc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSC row_indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_ccol_indices = (0, 1, 2)
+        actual_row_indices = (1, 0)
+        actual_values = ([[1]], [[2]])
+        actual = torch.sparse_bsc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
+
+        expected_ccol_indices = actual_ccol_indices
+        expected_row_indices = actual_row_indices
+        expected_values = ([[1]], [[3]])
+        expected = torch.sparse_bsc_tensor(expected_ccol_indices, expected_row_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse BSC values")):
                 fn()
 
 
@@ -1192,6 +1414,12 @@ def _get_test_names_for_test_class(test_cls):
     test_names = ['{}.{}'.format(test_cls.__name__, key) for key in test_cls.__dict__
                   if key.startswith('test_')]
     return sorted(test_names)
+
+
+def _get_test_funcs_for_test_class(test_cls):
+    """ Convenience function to get all (test function, parametrized_name) pairs for a given test class. """
+    test_funcs = [(getattr(test_cls, key), key) for key in test_cls.__dict__ if key.startswith('test_')]
+    return test_funcs
 
 
 class TestTestParametrization(TestCase):
@@ -1284,6 +1512,48 @@ class TestTestParametrization(TestCase):
         test_names = _get_test_names_for_test_class(TestParametrized)
         self.assertEqual(expected_test_names, test_names)
 
+    def test_apply_param_specific_decorators(self):
+        # Test that decorators can be applied on a per-param basis.
+
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        class TestParametrized(TestCase):
+            @parametrize("x", [subtest(1, name='one'),
+                               subtest(2, name='two', decorators=[test_dec]),
+                               subtest(3, name='three')])
+            def test_param(self, x):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
+        for test_func, name in _get_test_funcs_for_test_class(TestParametrized):
+            self.assertEqual(hasattr(test_func, '_decorator_applied'), name == 'test_param_two')
+
+    def test_compose_param_specific_decorators(self):
+        # Test that multiple per-param decorators compose correctly.
+
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        class TestParametrized(TestCase):
+            @parametrize("x", [subtest(1),
+                               subtest(2, decorators=[test_dec]),
+                               subtest(3)])
+            @parametrize("y", [subtest(False, decorators=[test_dec]),
+                               subtest(True)])
+            def test_param(self, x, y):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
+        for test_func, name in _get_test_funcs_for_test_class(TestParametrized):
+            # Decorator should be applied whenever either x == 2 or y == False.
+            should_apply = ('x_2' in name) or ('y_False' in name)
+            self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
+
     def test_modules_decorator_misuse_error(self):
         # Test that @modules errors out when used with instantiate_parametrized_tests().
 
@@ -1296,7 +1566,7 @@ class TestTestParametrization(TestCase):
             instantiate_parametrized_tests(TestParametrized)
 
     def test_ops_decorator_misuse_error(self):
-        # Test that @modules errors out when used with instantiate_parametrized_tests().
+        # Test that @ops errors out when used with instantiate_parametrized_tests().
 
         class TestParametrized(TestCase):
             @ops(op_db)
@@ -1355,6 +1625,49 @@ class TestTestParametrizationDeviceType(TestCase):
         ]
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
+
+    def test_empty_param_names(self, device):
+        # If no param names are passed, ensure things still work without parametrization.
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("", [])
+            def test_foo(self, device):
+                pass
+
+            @parametrize("", range(5))
+            def test_bar(self, device):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_bar_{}',
+            '{}.test_foo_{}')
+        ]
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
+
+    def test_empty_param_list(self, device):
+        # If no param values are passed, ensure a helpful error message is thrown.
+        # In the wild, this could indicate reuse of an exhausted generator.
+        device = self.device_type
+
+        generator = (a for a in range(5))
+
+        class TestParametrized(TestCase):
+            @parametrize("x", generator)
+            def test_foo(self, device, x):
+                pass
+
+            # Reuse generator from first test function.
+            @parametrize("y", generator)
+            def test_bar(self, device, y):
+                pass
+
+        with self.assertRaisesRegex(ValueError, 'An empty arg_values was passed'):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
     def test_default_names(self, device):
         device = self.device_type
@@ -1466,7 +1779,7 @@ class TestTestParametrizationDeviceType(TestCase):
         device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = []
         for op in op_db:
-            for dtype in op.default_test_dtypes(device):
+            for dtype in op.supported_dtypes(torch.device(device).type):
                 for flag_part in ('flag_disabled', 'flag_enabled'):
                     expected_name = '{}.test_op_parametrized_{}_{}_{}_{}'.format(
                         device_cls.__name__, op.formatted_name, flag_part, device, dtype_name(dtype))
@@ -1474,6 +1787,125 @@ class TestTestParametrizationDeviceType(TestCase):
 
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(sorted(expected_test_names), sorted(test_names))
+
+    def test_modules_composition_names(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @modules(module_db)
+            @parametrize("flag", [False, True], lambda f: 'flag_enabled' if f else 'flag_disabled')
+            def test_module_parametrized(self, device, dtype, module_info, training, flag):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = []
+        for module_info in module_db:
+            for dtype in module_info.dtypes:
+                for flag_part in ('flag_disabled', 'flag_enabled'):
+                    expected_train_modes = (
+                        ['train_mode', 'eval_mode'] if module_info.train_and_eval_differ else [''])
+                    for training_part in expected_train_modes:
+                        expected_name = '{}.test_module_parametrized_{}{}_{}_{}_{}'.format(
+                            device_cls.__name__, module_info.formatted_name,
+                            '_' + training_part if len(training_part) > 0 else '',
+                            flag_part, device, dtype_name(dtype))
+                        expected_test_names.append(expected_name)
+
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(sorted(expected_test_names), sorted(test_names))
+
+    def test_ops_decorator_applies_op_and_param_specific_decorators(self, device):
+        # Test that decorators can be applied on a per-op / per-param basis.
+
+        # Create a test op, OpInfo entry, and decorator to apply.
+        def test_op(x):
+            return -x
+
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        test_op_info = OpInfo(
+            'test_op',
+            op=test_op,
+            dtypes=floating_types(),
+            sample_inputs_func=lambda _: [],
+            decorators=[
+                DecorateInfo(test_dec, 'TestParametrized', 'test_op_param',
+                             device_type='cpu', dtypes=[torch.float64],
+                             active_if=lambda p: p['x'] == 2)
+            ])
+
+        class TestParametrized(TestCase):
+            @ops(op_db + [test_op_info])
+            @parametrize("x", [2, 3])
+            def test_op_param(self, device, dtype, op, x):
+                pass
+
+            @ops(op_db + [test_op_info])
+            @parametrize("y", [
+                subtest(4),
+                subtest(5, decorators=[test_dec])])
+            def test_other(self, device, dtype, op, y):
+                pass
+
+        device = self.device_type
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+
+        for test_func, name in _get_test_funcs_for_test_class(device_cls):
+            should_apply = (name == 'test_op_param_test_op_x_2_cpu_float64' or
+                            ('test_other' in name and 'y_5' in name))
+            self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
+
+    def test_modules_decorator_applies_module_and_param_specific_decorators(self, device):
+        # Test that decorators can be applied on a per-module / per-param basis.
+
+        # Create a test module, ModuleInfo entry, and decorator to apply.
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, y):
+                return self.x + y
+
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        test_module_info = ModuleInfo(
+            TestModule,
+            module_inputs_func=lambda _: [],
+            decorators=[
+                DecorateInfo(test_dec, 'TestParametrized', 'test_module_param',
+                             device_type='cpu', dtypes=[torch.float64],
+                             active_if=lambda p: p['x'] == 2)
+            ])
+
+        class TestParametrized(TestCase):
+            @modules(module_db + [test_module_info])
+            @parametrize("x", [2, 3])
+            def test_module_param(self, device, dtype, module_info, training, x):
+                pass
+
+            @modules(module_db + [test_module_info])
+            @parametrize("y", [
+                subtest(4),
+                subtest(5, decorators=[test_dec])])
+            def test_other(self, device, dtype, module_info, training, y):
+                pass
+
+        device = self.device_type
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+
+        for test_func, name in _get_test_funcs_for_test_class(device_cls):
+            should_apply = (name == 'test_module_param_TestModule_x_2_cpu_float64' or
+                            ('test_other' in name and 'y_5' in name))
+            self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
 
     def test_dtypes_composition_valid(self, device):
         # Test checks that @parametrize and @dtypes compose as expected when @parametrize
@@ -1534,7 +1966,7 @@ class TestTestParametrizationDeviceType(TestCase):
         class TestParametrized(TestCase):
             @ops(op_db)
             @modules(module_db)
-            def test_param(self, device, dtype, op, module_info):
+            def test_param(self, device, dtype, op, module_info, training):
                 pass
 
         with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
@@ -1554,6 +1986,173 @@ class TestTestParametrizationDeviceType(TestCase):
 
 instantiate_parametrized_tests(TestTestParametrization)
 instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
+
+
+class TestImports(TestCase):
+    def test_circular_dependencies(self) -> None:
+        """ Checks that all modules inside torch can be imported
+        Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
+        ignored_modules = ["torch.utils.tensorboard",  # deps on tensorboard
+                           "torch.distributed.elastic.rendezvous",  # depps on etcd
+                           "torch.backends._coreml",  # depends on pycoreml
+                           "torch.contrib.",  # something weird
+                           "torch.testing._internal.distributed.",  # just fails
+                           "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
+                           ]
+        # See https://github.com/pytorch/pytorch/issues/77801
+        if not sys.version_info >= (3, 9):
+            ignored_modules.append("torch.utils.benchmark")
+        if IS_WINDOWS or IS_MACOS:
+            # Distributed should be importable on Windows(except nn.api.), but not on Mac
+            if IS_MACOS:
+                ignored_modules.append("torch.distributed.")
+            else:
+                ignored_modules.append("torch.distributed.nn.api.")
+                ignored_modules.append("torch.distributed.optim.")
+                ignored_modules.append("torch.distributed.pipeline.")
+                ignored_modules.append("torch.distributed.rpc.")
+            ignored_modules.append("torch.testing._internal.dist_utils")
+            # And these both end up with transitive dependencies on distributed
+            ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
+            ignored_modules.append("torch.testing._internal.common_fsdp")
+            ignored_modules.append("torch.testing._internal.common_distributed")
+
+        torch_dir = os.path.dirname(torch.__file__)
+        for base, folders, files in os.walk(torch_dir):
+            prefix = os.path.relpath(base, os.path.dirname(torch_dir)).replace(os.path.sep, ".")
+            for f in files:
+                if not f.endswith(".py"):
+                    continue
+                mod_name = f"{prefix}.{f[:-3]}" if f != "__init__.py" else prefix
+                # Do not attempt to import executable modules
+                if f == "__main__.py":
+                    continue
+                if any(mod_name.startswith(x) for x in ignored_modules):
+                    continue
+                try:
+                    mod = importlib.import_module(mod_name)
+                except Exception as e:
+                    raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
+                self.assertTrue(inspect.ismodule(mod))
+
+    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
+    def test_no_warning_on_import(self) -> None:
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "import torch"],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        self.assertEquals(out, "")
+
+    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
+    @parametrize('path', ['torch', 'functorch'])
+    def test_no_mutate_global_logging_on_import(self, path) -> None:
+        # Calling logging.basicConfig, among other things, modifies the global
+        # logging state. It is not OK to modify the global logging state on
+        # `import torch` (or other submodules we own) because users do not expect it.
+        expected = 'abcdefghijklmnopqrstuvwxyz'
+        commands = [
+            'import logging',
+            f'import {path}',
+            '_logger = logging.getLogger("torch_test_testing")',
+            'logging.root.addHandler(logging.StreamHandler())',
+            'logging.root.setLevel(logging.INFO)',
+            f'_logger.info("{expected}")'
+        ]
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "; ".join(commands)],
+            stderr=subprocess.STDOUT,
+        ).decode("utf-8")
+        self.assertEqual(out.strip(), expected)
+
+class TestOpInfos(TestCase):
+    def test_sample_input(self) -> None:
+        a, b, c, d, e = [object() for _ in range(5)]
+
+        # Construction with natural syntax
+        s = SampleInput(a, b, c, d=d, e=e)
+        assert s.input is a
+        assert s.args == (b, c)
+        assert s.kwargs == dict(d=d, e=e)
+
+        # Construction with explicit args and kwargs
+        s = SampleInput(a, args=(b,), kwargs=dict(c=c, d=d, e=e))
+        assert s.input is a
+        assert s.args == (b,)
+        assert s.kwargs == dict(c=c, d=d, e=e)
+
+        # Construction with a mixed form will error
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, c, args=(d, e))
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, c, kwargs=dict(d=d, e=e))
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, args=(b, c), d=d, e=e)
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, c=c, kwargs=dict(d=d, e=e))
+
+        # Mixing metadata into "natural" construction will error
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, name="foo")
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, output_process_fn_grad=lambda x: x)
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, broadcasts_input=True)
+
+        # But when only input is given, metadata is allowed for backward
+        # compatibility
+        s = SampleInput(a, broadcasts_input=True)
+        assert s.input is a
+        assert s.broadcasts_input
+
+    def test_sample_input_metadata(self) -> None:
+        a, b = [object() for _ in range(2)]
+        s1 = SampleInput(a, b=b)
+        self.assertIs(s1.output_process_fn_grad(None), None)
+        self.assertFalse(s1.broadcasts_input)
+        self.assertEqual(s1.name, "")
+
+        s2 = s1.with_metadata(
+            output_process_fn_grad=lambda x: a,
+            broadcasts_input=True,
+            name="foo",
+        )
+        self.assertIs(s1, s2)
+        self.assertIs(s2.output_process_fn_grad(None), a)
+        self.assertTrue(s2.broadcasts_input)
+        self.assertEqual(s2.name, "foo")
+
+
+# Tests that validate the various sample generating functions on each OpInfo.
+class TestOpInfoSampleFunctions(TestCase):
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_opinfo_sample_generators(self, device, dtype, op):
+        # Test op.sample_inputs doesn't generate multiple samples when called
+        samples = op.sample_inputs(device, dtype)
+        self.assertIsInstance(samples, Generator)
+
+    @ops([op for op in op_db if op.reference_inputs_func is not None], dtypes=OpDTypes.any_one)
+    def test_opinfo_reference_generators(self, device, dtype, op):
+        # Test op.reference_inputs doesn't generate multiple samples when called
+        samples = op.reference_inputs(device, dtype)
+        self.assertIsInstance(samples, Generator)
+
+    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    def test_opinfo_error_generators(self, device, op):
+        # Test op.error_inputs doesn't generate multiple inputs when called
+        samples = op.error_inputs(device)
+        self.assertIsInstance(samples, Generator)
+
+
+instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
+instantiate_parametrized_tests(TestImports)
 
 
 if __name__ == '__main__':

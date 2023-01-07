@@ -8,11 +8,13 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_alias_memory.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
+#include <torch/csrc/jit/codegen/cuda/lower_divisible_split.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
 #include <torch/csrc/jit/codegen/cuda/lower_expr_sort.h>
 #include <torch/csrc/jit/codegen/cuda/lower_fusion_simplifier.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
 #include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
+#include <torch/csrc/jit/codegen/cuda/lower_instrument.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 #include <torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.h>
@@ -143,8 +145,11 @@ void GpuLower::collectPaddedParallelDims() {
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
     for (auto id : tv->domain()->domain()) {
       if (tv->definition()) {
+        // TODO: Support GroupedReductionOp
         if (auto reduction = dynamic_cast<ReductionOp*>(tv->definition())) {
-          if (ir_utils::getMaybeWarpReductionDim(reduction).has_value()) {
+          if (ir_utils::getMaybeWarpReductionDim(
+                  reduction->out(), reduction->in())
+                  .has_value()) {
             warp_pad_info_.has_warp_reduction = true;
           }
         }
@@ -184,6 +189,16 @@ void GpuLower::collectPaddedParallelDims() {
   }
 }
 
+void assignRNGOffset(Fusion* fusion) {
+  int counter = 0;
+  for (auto expr : fusion->exprs()) {
+    if (expr->isA<RNGOp>()) {
+      auto rop = expr->as<RNGOp>();
+      rop->setRNGOffset(counter++);
+    }
+  }
+}
+
 void GpuLower::lower(Fusion* fusion, DataType index_type) {
   FUSER_PERF_SCOPE("GpuLower::lower");
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
@@ -209,6 +224,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
       tv->resolveIndexDtype();
     }
   }
+  assignRNGOffset(fusion_);
 
   FusionGuard fg(fusion_);
   // prepare for lowering
@@ -229,25 +245,24 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // with set unary op
   trivialReductionReplacement(fusion_, trivial_reduction_info_);
 
-  // In the future we may directly use this map, but for now it will propagate
-  // and validate (to some extent) the parallelization strategy. Map only axes
-  // to the left of compute at position, forward broadcast in replay.
-  ca_parallel_map_ = ComputeAtMap(ComputeAtMap::MappingMode::PARALLEL);
-  ca_parallel_map_.build(fusion_, current());
+  // Build what's refered to as the compute at map. This map contains the
+  // mappings of all iteration domains across the fusion. There are three types
+  // of mappings Permissive, Exact, and Loop, see compute_at_map.h/cpp for more
+  // information.
+  compute_at_map_ = std::make_shared<ComputeAtMap>(fusion_);
 
-  // Generate mappings to generate indices. Maps all iteration domains but
-  // doesn't map any broadcast iteration domains, nor forward them in replay.
-  ca_index_map_ = ComputeAtMap(ComputeAtMap::MappingMode::INDEX);
-  ca_index_map_.build(fusion_, current());
+  if (isDebugDumpEnabled(DebugDumpOption::ComputeAtMap)) {
+    std::cout << compute_at_map_->toString() << std::endl;
+  }
 
-  // Generate mappings to generate and map to loop nests. Maps all iteration
-  // domains, forwards broadcasts, ensures root domain mappings exist (aren't
-  // replaced in forwarding).
-  ca_loop_map_ = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
-  ca_loop_map_.build(fusion_, current());
+  compute_at_map_->validateAndPropagatePType();
+
+  // Uses compute_at_map, find all splits that are enforced to be divisible
+  divisible_splits_ = getAllDivisibleSplits(fusion_, compute_at_map_.get());
 
   // Used in parallel dimension map
-  concretized_broadcast_domains_.build(fusion_);
+  concretized_broadcast_domains_ =
+      std::make_shared<const ConcretizedBroadcastDomains>(fusion_);
 
   parallelDimensionMap().build(fusion_);
   if (isDebugDumpEnabled(DebugDumpOption::ParallelDimensions)) {
@@ -258,37 +273,53 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Validate mma data format and compatibility if any on the fusion.
   validateMma(fusion_);
 
+  // Validate swizzle usage on the fusion schedule.
+  validateSwizzle(fusion_);
+
   // Compute thread predicates. Depends on parallel_dimension_map_
   thread_pred_map_.build(fusion_);
 
   // Fuse cetain patterns of reductions, such as a grid reduction
   // followed by a grid broadcast. Only depends on parallelization and
   // thread predicate map.
-  fuseReductions(fusion_);
+  fuseReductionsAndBroadcasts(fusion_);
 
   // Scan the whole fusion and build mappings about halo extensions of
   // all IterDomains
-  haloInfo().build(fusion_);
+  halo_info_ = std::make_shared<HaloInfo>(fusion_, compute_at_map_);
 
   // Want to run this after parallel map and halo info map are
   // created. vectorized_accesses_ and vectorized_set_info_ are filled.
   validateAndCollectVectorizeInfo(fusion_);
 
+  // Depends on ComputeAtMap and HaloInfo.
+  validateAndConvertIterDomainGrouping(fusion_);
+
+  // Assumes all grouped reductions are convered to
+  // GroupedReductionOp, which is done by
+  // validateAndConvertIterDomainGrouping
+  validateGroupedReductions(fusion_);
+
   // Depends on thread_pred_map_, validates parallelization collects which
   // tensor views need WAR or RAW syncs
   sync_map_.build(fusion_);
+  if (isDebugDumpEnabled(DebugDumpOption::SyncMap)) {
+    std::cout << sync_map_.toString() << std::endl;
+  }
 
   partialSplitMap().build(fusion_);
 
   validatePartialSplit(fusion_);
 
-  // Detects all exprssions that don't need predicates
-  predicateElimination().build(fusion_);
-
   nonDivisibleSplitInfo().build(fusion_);
+
+  // Detects all exprssions that don't need predicates. Depends on
+  // nonDivisibleSplitInfo.
+  predicateElimination().build(fusion_);
 
   doubleBufferInfo().build(fusion_);
 
+  compute_at_map_->allocateIndexVariables();
   // Run our passes keeping the lowered expressions and forwarding
   // them
 
@@ -350,10 +381,12 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   const auto exprs_cleaned_up_loops =
       KIRCleaner::cleanUp(exprs_register_adjusted);
 
+  const auto exprs_instrumented = instrumentKernel(exprs_cleaned_up_loops);
+
   // We now have the lowered expressions, finalize the kernel IR. This function
   // will also copy over some relevant information for code generation from
   // GpuLower.
-  kernel_->finalize(exprs_cleaned_up_loops);
+  kernel_->finalize(exprs_instrumented);
 }
 
 kir::Kernel* GpuLower::kernel() const {
@@ -365,6 +398,14 @@ GpuLower* GpuLower::current() {
   TORCH_INTERNAL_ASSERT(
       active_gpu_lower != nullptr, "No active GpuLower available");
   return active_gpu_lower;
+}
+
+bool GpuLower::hasCurrent() {
+  return active_gpu_lower != nullptr;
+}
+
+void GpuLower::propagateExprInfo(const Expr* old_expr, const Expr* new_expr) {
+  pred_elimination_.propagateRemovalInfo(old_expr, new_expr);
 }
 
 } // namespace cuda

@@ -4,8 +4,13 @@ from torch.nn.parameter import Parameter
 from torch import Tensor
 
 import collections
+import copyreg
+from copy import deepcopy
 from contextlib import contextmanager
 from typing import Union, Optional, Dict, Tuple, Sequence
+
+__all__ = ['cached', 'ParametrizationList', 'register_parametrization', 'is_parametrized', 'remove_parametrizations',
+           'type_before_parametrizations', 'transfer_parametrizations_and_params']
 
 _cache_enabled = 0
 _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
@@ -68,7 +73,7 @@ class ParametrizationList(ModuleList):
     It is the type of ``module.parametrizations[tensor_name]`` when ``module[tensor_name]``
     has been parametrized with :func:`register_parametrization`.
 
-    If the first registered parmetrization has a ``right_inverse`` that returns one tensor or
+    If the first registered parametrization has a ``right_inverse`` that returns one tensor or
     does not have a ``right_inverse`` (in which case we assume that ``right_inverse`` is the identity),
     it will hold the tensor under the name ``original``.
     If it has a ``right_inverse`` that returns more than one tensor, these will be registered as
@@ -115,7 +120,7 @@ class ParametrizationList(ModuleList):
         #    assert X.dtype == Z.dtype and X.shape == Z.shape
         #    # If it has one input, this allows to be able to use set_ to be able to
         #    # move data to/from the original tensor without changing its id (which is what the
-        #    # optimiser uses to track parameters)
+        #    # optimizer uses to track parameters)
         #    if isinstance(Y, Tensor)
         #      assert X.dtype == Y.dtype
         # Below we use original = X, new = Y
@@ -237,7 +242,7 @@ class ParametrizationList(ModuleList):
                 if len(value) != self.ntensors:
                     raise ValueError(
                         "'right_inverse' must return a sequence of tensors of length "
-                        f"{self.ntensors}. Got a sequence of lenght {len(value)}."
+                        f"{self.ntensors}. Got a sequence of length {len(value)}."
                     )
                 for i, tensor in enumerate(value):
                     original_i = getattr(self, f"original{i}")
@@ -254,6 +259,8 @@ class ParametrizationList(ModuleList):
                     original_i.set_(tensor)
 
     def forward(self) -> Tensor:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         # Unpack the originals for the first parametrization
         if self.is_tensor:
             x = self[0](self.original)
@@ -280,6 +287,21 @@ def _inject_new_class(module: Module) -> None:
     """
     cls = module.__class__
 
+    def default_deepcopy(self, memo):
+        # Just emulate a standard deepcopy procedure when __deepcopy__ doesn't exist in the current class.
+        obj = memo.get(id(self), None)
+        if obj is not None:
+            return obj
+        replica = self.__new__(self.__class__)
+        memo[id(self)] = replica
+        replica.__dict__ = deepcopy(self.__dict__, memo)
+        # Also save all slots if they exist.
+        slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+        for slot in slots_to_save:
+            if hasattr(self, slot):
+                setattr(replica, slot, deepcopy(getattr(self, slot), memo))
+        return replica
+
     def getstate(self):
         raise RuntimeError(
             "Serialization of parametrized modules is only "
@@ -288,12 +310,16 @@ def _inject_new_class(module: Module) -> None:
             "#saving-loading-a-general-checkpoint-for-inference-and-or-resuming-training"
         )
 
+    dct = {"__getstate__": getstate}
+    # We don't allow serialization of parametrized modules but should still allow deepcopying.
+    # Default 'deepcopy' function invokes __deepcopy__ method instead of __getstate__ when it exists.
+    if not hasattr(cls, "__deepcopy__"):
+        dct["__deepcopy__"] = default_deepcopy  # type: ignore[assignment]
+
     param_cls = type(
         f"Parametrized{cls.__name__}",
         (cls,),
-        {
-            "__getstate__": getstate,
-        },
+        dct,
     )
 
     module.__class__ = param_cls
@@ -325,6 +351,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
         return tensor
 
     def get_parametrized(self) -> Tensor:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         parametrization = self.parametrizations[tensor_name]
         if _cache_enabled:
             if torch.jit.is_scripting():
@@ -341,6 +369,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
             return parametrization()
 
     def set_original(self, value: Tensor) -> None:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         self.parametrizations[tensor_name].right_inverse(value)
 
     setattr(module.__class__, tensor_name, property(get_parametrized, set_original))
@@ -430,6 +460,7 @@ def register_parametrization(
         ValueError: if the module does not have a parameter or a buffer named :attr:`tensor_name`
 
     Examples:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> import torch
         >>> import torch.nn as nn
         >>> import torch.nn.utils.parametrize as P
@@ -560,7 +591,7 @@ def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
 
     Args:
         module (nn.Module): module to query
-        name (str, optional): attribute in the module to query
+        tensor_name (str, optional): attribute in the module to query
             Default: ``None``
     """
     parametrizations = getattr(module, "parametrizations", None)
@@ -614,7 +645,19 @@ def remove_parametrizations(
             # We do this so that the parameter does not to change the id()
             # This way the user does not need to update the optimizer
             with torch.no_grad():
-                original.set_(t)
+                if type(original) is torch.Tensor:
+                    original.set_(t)
+                else:
+                    try:
+                        original.set_(t)
+                    except RuntimeError as e:
+                        # TODO: Fix this for tensor subclasses that are parameters:
+                        # RuntimeError: set_storage is not allowed on a Tensor created from .data or .detach().
+                        raise RuntimeError("Calling remove_parametrizations() with leave_parametrized=True "
+                                           "for a parameter that is an instance of a tensor subclass requires "
+                                           "set_() to be implemented correctly for the tensor subclass. Either "
+                                           "set leave_parametrized=False or provide a working implementation for "
+                                           "set_() in the tensor subclass.") from e
     else:
         if leave_parametrized:
             # We cannot use no_grad because we need to know whether one or more

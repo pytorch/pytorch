@@ -9,6 +9,7 @@
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/NamedTensorUtils.h>
 
 #include <ATen/native/Copy.h>
@@ -132,12 +133,15 @@ SparseTensor new_sparse(
     c10::optional<bool> pin_memory) {
   AT_ASSERT(layout.has_value() && *layout == kSparse);
   DispatchKey dispatch_key;
-  if (device_or_default(device).is_cuda()) {
-    dispatch_key = DispatchKey::SparseCUDA;
-  } else if (device_or_default(device).is_xpu()) {
-    dispatch_key = DispatchKey::SparseXPU;
-  } else {
-    dispatch_key = DispatchKey::SparseCPU;
+  switch (device_or_default(device).type()) {
+#define DO_CASE(device, _) \
+    case DeviceType::device: \
+      dispatch_key = DispatchKey::Sparse##device; \
+      break;
+    C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
+    default:
+      TORCH_CHECK(false, "device type not supported for sparse ", device_or_default(device))
   }
   return detail::make_tensor<SparseTensorImpl>(
       DispatchKeySet(dispatch_key),
@@ -159,10 +163,10 @@ SparseTensor new_with_dims_sparse(
   return self;
 }
 
-SparseTensor new_with_dims_and_tensor_sparse(
+SparseTensor new_with_dims_and_tensor_sparse_symint(
     int64_t sparse_dim,
     int64_t dense_dim,
-    ArrayRef<int64_t> size,
+    c10::SymIntArrayRef size,
     const Tensor& indices,
     const Tensor& values,
     c10::optional<ScalarType> dtype,
@@ -345,7 +349,7 @@ void _validate_sparse_coo_tensor_args(
     Tensor max_indices =
         std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
     Tensor cpu_min_indices, cpu_max_indices;
-    if (indices.is_cuda()) {
+    if (!indices.is_cpu()) {
       cpu_min_indices = min_indices.to(at::DeviceType::CPU);
       cpu_max_indices = max_indices.to(at::DeviceType::CPU);
     } else {
@@ -404,13 +408,34 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       options.pinned_memory_opt());
 }
 
+Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, at::IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+    return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
+
+  Tensor values = expand_values_if_needed(values_);
+
+  auto sparse_dim = indices.size(0);
+  auto dense_dim = values.dim() - 1;
+
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      sparse_dim,
+      dense_dim,
+      size,
+      indices,
+      values,
+      values.options().layout(kSparse));
+}
+
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
 // in that we don't check whether any indices are out of boundaries of `size`, thus avoiding a
 // copy from CUDA to CPU. However, this function should ONLY be used where we know that the indices
 // are guaranteed to be within bounds or if the caller is going to call
 // _validate_sparse_coo_tensor_args before using the tensor.
 // NB: Got rid of the size == NULL case
-Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, IntArrayRef size,
+Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& values_, c10::SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -419,10 +444,12 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, I
 
   Tensor values = expand_values_if_needed(values_);
 
-  int64_t sparse_dim = indices.size(0);
-  int64_t dense_dim = values.dim() - 1;
+  // This guard is intentional: we don't support dynamic shapes along the
+  // indices dimension because that implies variable dimensionality
+  auto sparse_dim = indices.sym_size(0).guard_int(__FILE__, __LINE__);
+  auto dense_dim = values.dim() - 1;
 
-  return at::_sparse_coo_tensor_with_dims_and_tensors(
+  return at::_sparse_coo_tensor_with_dims_and_tensors_symint(
       sparse_dim,
       dense_dim,
       size,
@@ -491,7 +518,40 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
   return self;
 }
 
-SparseTensor dense_to_sparse(const Tensor& self) {
+SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize) {
+  if (layout.has_value()) {
+    if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not use specified blocksize");
+    }
+    if (self.layout() == *layout) {
+      return self;
+    }
+    switch (*layout) {
+    case kStrided:
+      return self;
+    case kSparse:
+      return dense_to_sparse(self, self.dim());
+    case kSparseCsr:
+      return self.to_sparse_csr();
+    case kSparseCsc:
+      return self.to_sparse_csc();
+    case kSparseBsr:
+      if (blocksize.has_value()) {
+        return self.to_sparse_bsr(*blocksize);
+      }
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
+      break;
+    case kSparseBsc:
+      if (blocksize.has_value()) {
+        return self.to_sparse_bsc(*blocksize);
+      }
+      break;
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
+    default:
+      break;
+    }
+    AT_ERROR("to_sparse not implemented for ", self.layout(), " to ", *layout, " conversion");
+  }
   return dense_to_sparse(self, self.dim());
 }
 
@@ -510,7 +570,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
   Tensor nz = self.nonzero().transpose(0, 1);
   if (nz.size(1) == 0) {
-    return new_with_dims_sparse(
+    auto sparse = new_with_dims_sparse(
         sparse_dim,
         dims - sparse_dim,
         sizes,
@@ -518,6 +578,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
         sparse_options.layout_opt(),
         sparse_options.device_opt(),
         sparse_options.pinned_memory_opt());
+    return sparse._coalesced_(true);
   }
   Tensor indices;
   if (sparse_dim == dims) {
@@ -542,29 +603,6 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
   Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
   return sparse._coalesced_(true);
-}
-
-SparseTensor sparse_csr_to_sparse(const Tensor& self, int64_t sparse_dim) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-  TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
-  TORCH_CHECK(sparse_dim <= 2,
-              "sparse_dim must be less than or equal to 2");
-  if (sparse_dim == 2) {
-    auto sizes = self.sizes();
-    Tensor crow_indices = self.crow_indices();
-    Tensor col_indices = self.col_indices();
-    Tensor values = self.values();
-    Tensor indices = at::_convert_indices_from_csr_to_coo(crow_indices, col_indices, false, false);
-    return at::native::_sparse_coo_tensor_unsafe(indices, values, sizes)._coalesced_(true);
-  } else {
-    TORCH_CHECK(false, "sparse dim 1 is not supported by sparse_csr_to_dense");
-    // TODO: implement coo.to_sparse(sparse_dim) and then use
-    // return self.to_sparse().to_sparse(sparse_dim);
-  }
-}
-
-SparseTensor sparse_csr_to_sparse(const Tensor& self) {
-  return sparse_csr_to_sparse(self, 2);
 }
 
 // NB: Dropped the resizeNd variants
@@ -655,8 +693,9 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
 
   int64_t i = -1;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, values.scalar_type(),
-                                         "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      at::ScalarType::ComplexHalf, at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool,
+      values.scalar_type(), "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
@@ -669,7 +708,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
             0) { // if values is an empty tensor, there are no elements to copy
           at::native::cpublas::axpy<scalar_t>(
               blockSize,
-              1,
+              static_cast<scalar_t>(1),
               values_ptr + pos * blockSize,
               1,
               newValues_ptr + i * blockSize,
@@ -785,7 +824,7 @@ SparseTensor& sparse_mask_out_cpu(
     // TODO: Re-audit this; it used to be an indexSelect directly into r_values
     at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(r_values.scalar_type(), "sparse_mask", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r_values.scalar_type(), "sparse_mask", [&] {
       sparse_mask_out_cpu_kernel<scalar_t>(
           r_values, t, r_nnz, sparse_dim, mask_indices);
     });

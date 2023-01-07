@@ -1,13 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <cmath>
 #include <tuple>
 #include <vector>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_fake_quantize_per_tensor_affine_cachemask_tensor_qparams.h>
+#include <ATen/ops/_fused_moving_avg_obs_fq_helper.h>
+#include <ATen/ops/_fused_moving_avg_obs_fq_helper_native.h>
+#include <ATen/ops/aminmax.h>
+#include <ATen/ops/fake_quantize_per_channel_affine_cachemask.h>
+#include <ATen/ops/fused_moving_avg_obs_fake_quant_native.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/ones_like.h>
+#endif
+
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
 #endif
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 
 namespace {
 void calculate_moving_average(
@@ -143,6 +158,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     const int64_t ch_axis,
     bool per_row_fake_quant,
     bool symmetric_quant) {
+  TORCH_CHECK(ch_axis < self.dim(), "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()");
   // Calculate min/max
   auto observe = observer_on.item().toInt();
   // Calculate the size of the dimension we need to quantize over,
@@ -220,7 +236,7 @@ at::Tensor fused_moving_avg_obs_fake_quant(
     const int64_t ch_axis,
     bool per_row_fake_quant,
     bool symmetric_quant) {
-  if (self.numel() == 0) {
+  if (self.sym_numel() == 0) {
     return self.clone();
   }
   const auto res = at::_fused_moving_avg_obs_fq_helper(

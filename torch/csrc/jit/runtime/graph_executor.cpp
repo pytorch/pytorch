@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
-#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -134,7 +133,7 @@ struct CaptureList {
       auto tensors = val.toTensorList();
       sizes_.push_back(tensors.size());
 
-      for (const at::Tensor tensor : tensors) {
+      for (const auto& tensor : tensors) {
         captureTensor(tensor, is_output);
       }
     } else {
@@ -223,7 +222,7 @@ struct UnpackInstructions {
           stack.emplace_back(lst);
         } break;
         case PUSH_NONE: {
-          stack.emplace_back(IValue());
+          stack.emplace_back();
         }
       }
     }
@@ -327,7 +326,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
       input_tensor_lists_.insert({index_, value.toTensorList().size()});
-      for (const at::Tensor tensor : value.toTensorList()) {
+      for (const at::Tensor& tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
         index_++;
       }
@@ -358,7 +357,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     if (v.isTensorList()) {
       auto tensors = v.toTensorList();
       input_instructions_.pushTensorList(tensors.size());
-      for (const at::Tensor tensor : tensors) {
+      for (const at::Tensor& tensor : tensors) {
         addInputVariable(tensor);
       }
     } else if (v.isTensor()) {
@@ -376,7 +375,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
  private:
   void produceOutput(size_t i, at::Tensor output, variable_list& outputs) {
-    if (should_compute_output(i)) {
+    if (task_should_compute_output(i)) {
       const auto& edge = next_edge(i);
       if (output.defined()) {
         outputs.emplace_back(std::move(output));
@@ -923,13 +922,12 @@ void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
   GRAPH_DEBUG(
-      "Before customPrePassses (beginning of runNondiffOptimization)\n",
-      *graph);
+      "Before customPrePasses (beginning of runNondiffOptimization)\n", *graph);
   // Run custom passes that different backends can register.
   for (const auto& passPair : getCustomPrePasses()) {
     passPair.first(graph);
   }
-  GRAPH_DEBUG("After customPrePassses\n", *graph);
+  GRAPH_DEBUG("After customPrePasses\n", *graph);
 
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
@@ -961,7 +959,7 @@ void runNondiffOptimization(
     passPair.first(graph);
   }
   GRAPH_DEBUG(
-      "After customPostPassses (end of runNondiffOptimization)\n", *graph);
+      "After customPostPasses (end of runNondiffOptimization)\n", *graph);
 }
 
 void runOptimization(
@@ -1015,10 +1013,7 @@ void runOptimization(
 
   EliminateCommonSubexpression(graph);
   GRAPH_DEBUG(
-      "After EliminateCommonSubexpression, before HoistCommonExpression\n",
-      *graph);
-  HoistCommonExpression(graph);
-  GRAPH_DEBUG("After HoistCommonExpression, before CheckInplace\n", *graph);
+      "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
   CheckInplace(graph);
   GRAPH_DEBUG("After CheckInplace (end of runOptimization)\n", *graph);
 }

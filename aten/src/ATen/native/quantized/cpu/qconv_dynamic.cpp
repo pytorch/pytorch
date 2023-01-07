@@ -1,18 +1,24 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <algorithm>
-#include <cmath>
-#include <vector>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/Parallel.h>
 #include <ATen/SmallVector.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/onednn_utils.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <c10/util/irange.h>
-#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/dequantize.h>                           // for dequantize
+#include <ATen/ops/quantize_per_tensor.h>
+#endif
 
 #ifdef USE_FBGEMM
 
@@ -71,7 +77,11 @@ template at::Tensor PackedConvWeight<3>::apply_dynamic(
 template <int kSpatialDim>
 at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
-    bool /*reduce_range*/) {
+    bool reduce_range) {
+  if (reduce_range) {
+    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
+  }
+
   // On empty input, no output data will be generated,
   // so use arbitrary qparams.
   float x_min = 0;

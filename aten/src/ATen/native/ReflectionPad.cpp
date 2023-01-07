@@ -1,8 +1,25 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/reflection_pad1d_backward_native.h>
+#include <ATen/ops/reflection_pad1d_native.h>
+#include <ATen/ops/reflection_pad2d_backward_native.h>
+#include <ATen/ops/reflection_pad2d_native.h>
+#include <ATen/ops/reflection_pad3d_backward_native.h>
+#include <ATen/ops/reflection_pad3d_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at {
 
@@ -55,9 +72,9 @@ TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
       output_w);
 
   if (input.ndimension() == 2) {
-    set_output({nplane, output_w}, input.options());
+    set_output_raw_strided(0, {nplane, output_w}, {}, input.options());
   } else {
-    set_output({nbatch, nplane, output_w}, input.options());
+    set_output_raw_strided(0, {nbatch, nplane, output_w}, {}, input.options());
   }
 }
 
@@ -96,7 +113,7 @@ TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
   TORCH_CHECK(output_w == grad_output.size(dim_w), "grad_output width unexpected."
     " Expected: ", output_w, ", Got: ", grad_output.size(dim_w));
 
-  set_output(input.sizes(), input.options());
+  set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 
 TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
@@ -161,9 +178,9 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
       " Calculated output D: ", output_d, " H: ", output_h, " W: ", output_w);
 
   if (batch_mode) {
-    set_output({input.size(0), nplane, output_d, output_h, output_w}, input.options());
+    set_output_raw_strided(0, {input.size(0), nplane, output_d, output_h, output_w}, {}, input.options());
   } else {
-    set_output({nplane, output_d, output_h, output_w}, input.options());
+    set_output_raw_strided(0, {nplane, output_d, output_h, output_w}, {}, input.options());
   }
 }
 
@@ -208,7 +225,7 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
   TORCH_CHECK(output_d == grad_output.size(dim_d), "grad_output depth unexpected."
     " Expected: ", output_h, ", Got: ", grad_output.size(dim_d));
 
-  set_output(input.sizes(), input.options());
+  set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 } // namespace meta
 
@@ -965,8 +982,8 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
   auto input = input_.contiguous();
 
   if (batch_mode) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-        kHalf, input.scalar_type(), "replication_pad3d_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, input.scalar_type(), "reflection_pad3d_cpu", [&] {
           auto input_data = input.data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           auto nbatch = input.size(0);
@@ -986,8 +1003,8 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
               pad_front);
         });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-        kHalf, input.scalar_type(), "replication_pad3d_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, input.scalar_type(), "reflection_pad3d_cpu", [&] {
           auto input_data = input.data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           reflection_pad3d_out_frame(
@@ -1043,8 +1060,8 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
   grad_input.zero_();
 
   if (batch_mode) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-        kHalf, input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, input.scalar_type(), "reflection_pad3d_backward_cpu", [&] {
           reflection_pad3d_backward_out_loop<scalar_t>(
               grad_input.data_ptr<scalar_t>(),
               grad_output_.data_ptr<scalar_t>(),
@@ -1061,8 +1078,8 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
               pad_front);
         });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
-        kHalf, input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, input.scalar_type(), "reflection_pad3d_backward_cpu", [&] {
           reflection_pad3d_backward_out_frame<scalar_t>(
               grad_input.data_ptr<scalar_t>(),
               grad_output_.data_ptr<scalar_t>(),

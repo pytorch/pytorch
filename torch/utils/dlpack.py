@@ -42,9 +42,10 @@ Args:
 The DLPack capsule shares the tensor's memory.
 """)
 
+
 # TODO: add a typing.Protocol to be able to tell Mypy that only objects with
 # __dlpack__ and __dlpack_device__ methods are accepted.
-def from_dlpack(ext_tensor: Any) -> torch.Tensor:
+def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
     """from_dlpack(ext_tensor) -> Tensor
 
     Converts a tensor from an external library into a ``torch.Tensor``.
@@ -82,7 +83,7 @@ def from_dlpack(ext_tensor: Any) -> torch.Tensor:
         # The old-style DLPack usage, with an intermediate capsule object
         >>> capsule = torch.utils.dlpack.to_dlpack(t)
         >>> capsule
-        <capsule object "dltensor" at 0x7f6017d14300>
+        <capsule object "dltensor" at ...>
         >>> t3 = torch.from_dlpack(capsule)
         >>> t3
         tensor([-1, -1,  2,  3])

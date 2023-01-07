@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <c10/core/Storage.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 
 #include <torch/csrc/lazy/core/tensor.h>
@@ -17,11 +17,15 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   explicit LTCTensorImpl(const LazyTensor& tensor);
   explicit LTCTensorImpl(LazyTensor&& tensor);
 
-  LazyTensorPtr tensor() { return tensor_; }
+  LazyTensorPtr tensor() {
+    return tensor_;
+  }
 
   void set_tensor(const LazyTensorPtr& lazy_tensor);
 
-  void force_refresh_sizes() { generation_ = 0; }
+  void force_refresh_sizes() {
+    generation_ = 0;
+  }
 
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
@@ -33,27 +37,26 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
 
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override;
 
-  int64_t size(int64_t d) const override;
+  at::IntArrayRef sizes_custom() const override;
+  at::IntArrayRef strides_custom() const override;
+  int64_t numel_custom() const override;
+  int64_t storage_offset_custom() const override;
+  int64_t dim_custom() const override;
+  bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
+  bool is_strides_like_custom(at::MemoryFormat memory_format) const override;
+  bool is_non_overlapping_and_dense_custom() const override;
 
-  int64_t stride(int64_t d) const override;
-
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  at::IntArrayRef sizes() const override;
-  at::IntArrayRef strides() const override;
-  int64_t dim() const override;
-  int64_t numel() const override;
-
-  bool is_contiguous(at::MemoryFormat memory_format) const override;
-  const at::Storage& storage() const override;
-  bool has_storage() const override { return false; }
-#endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymIntArrayRef sym_strides_custom() const override;
+  c10::SymInt sym_numel_custom() const override;
 
  private:
   void setup_size_properties();
 
   LazyTensorPtr tensor_;
-  size_t generation_ {0};
+  mutable c10::optional<std::vector<c10::SymInt>> sym_sizes_;
+  size_t generation_{0};
 };
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

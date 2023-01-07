@@ -426,7 +426,7 @@ class LocalRRefTest:
 
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
-        # Create a local RRef<MyScripClass> remotely in Python.
+        # Create a local RRef<MyScriptClass> remotely in Python.
         rref = rpc.rpc_sync(
             dst_worker_name, owner_create_rref_my_script_class, args=(self.rank,)
         )
@@ -440,7 +440,7 @@ class LocalRRefTest:
             ret = fut.wait()
             return ret
 
-        # Use RRef<MyScripClass> in local Python RPC and remote Script run.
+        # Use RRef<MyScriptClass> in local Python RPC and remote Script run.
         ret = use_rref_on_owner(rref)
         self.assertEqual(ret, self.rank)
 
@@ -473,7 +473,7 @@ class LocalRRefTest:
             ret = fut.wait()
             return ret
 
-        # Use RRef<MyScripClass> in local Python RPC and remote Script run.
+        # Use RRef<MyScriptClass> in local Python RPC and remote Script run.
         ret = use_rref_on_owner(rref)
         self.assertEqual(ret, torch.ones(self.rank))
 

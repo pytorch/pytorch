@@ -29,7 +29,8 @@ enum class MemoryFormat : int8_t {
   Contiguous,
   Preserve,
   ChannelsLast,
-  ChannelsLast3d
+  ChannelsLast3d,
+  NumOptions
 };
 
 // If you are seeing this, it means that this call site was not checked if
@@ -54,14 +55,15 @@ inline std::ostream& operator<<(
     case MemoryFormat::ChannelsLast3d:
       return stream << "ChannelsLast3d";
     default:
-      TORCH_CHECK(false, "Unknown memory format");
+      TORCH_CHECK(false, "Unknown memory format ", memory_format);
   }
 }
 
 // Note: Hardcoded the channel last stride indices here to get better
 // performance
-inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
-  std::vector<int64_t> strides(sizes.size());
+template <typename T>
+inline std::vector<T> get_channels_last_strides_2d(ArrayRef<T> sizes) {
+  std::vector<T> strides(sizes.size());
   switch (sizes.size()) {
     case 4:
       strides[1] = 1;
@@ -80,8 +82,13 @@ inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
   }
 }
 
-inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
-  std::vector<int64_t> strides(sizes.size());
+inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
+  return get_channels_last_strides_2d<int64_t>(sizes);
+}
+
+template <typename T>
+std::vector<T> get_channels_last_strides_3d(ArrayRef<T> sizes) {
+  std::vector<T> strides(sizes.size());
   switch (sizes.size()) {
     case 5:
       strides[1] = 1;
@@ -102,6 +109,10 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
   }
 }
 
+inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
+  return get_channels_last_strides_3d<int64_t>(sizes);
+}
+
 // NOTE:
 // Below are Helper functions for is_channels_last_strides_xd.
 // 1. Please do not combine these helper functions, each helper function handles
@@ -113,10 +124,11 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
 // input
 // 3. All helper functions have similar comments, only 1st helper function is
 // commented here.
+template <typename T>
 inline bool is_channels_last_strides_2d_s4(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
-  int64_t min = 0;
+    const ArrayRef<T> sizes,
+    const ArrayRef<T> strides) {
+  T min = 0;
   // special case for trivial C dimension. default to NCHW
   if (strides[1] == 0) {
     return false;
@@ -154,10 +166,11 @@ inline bool is_channels_last_strides_2d_s4(
   return true;
 }
 
+template <typename T>
 inline bool is_channels_last_strides_3d_s5(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
-  int64_t min = 0;
+    const ArrayRef<T> sizes,
+    const ArrayRef<T> strides) {
+  T min = 0;
   if (strides[1] == 0) {
     return false;
   }
@@ -229,9 +242,10 @@ inline bool is_channels_last_strides_3d_s5(
 // implementation. Please check the helper functions
 // (is_channels_last_strides_*d_s*) for more details.
 
+template <typename T>
 inline bool is_channels_last_strides_2d(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
+    const ArrayRef<T> sizes,
+    const ArrayRef<T> strides) {
   switch (sizes.size()) {
     case 4:
       return is_channels_last_strides_2d_s4(sizes, strides);
@@ -243,9 +257,10 @@ inline bool is_channels_last_strides_2d(
   }
 }
 
+template <typename T>
 inline bool is_channels_last_strides_3d(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
+    const ArrayRef<T> sizes,
+    const ArrayRef<T> strides) {
   switch (sizes.size()) {
     case 5:
       return is_channels_last_strides_3d_s5(sizes, strides);
@@ -255,6 +270,18 @@ inline bool is_channels_last_strides_3d(
     default:
       return false;
   }
+}
+
+inline bool is_channels_last_strides_2d(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
+  return is_channels_last_strides_2d<int64_t>(sizes, strides);
+}
+
+inline bool is_channels_last_strides_3d(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
+  return is_channels_last_strides_3d<int64_t>(sizes, strides);
 }
 
 } // namespace c10

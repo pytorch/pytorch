@@ -29,7 +29,8 @@ struct AvgPoolOptions {
   /// when True, will include the zero-padding in the averaging calculation
   TORCH_ARG(bool, count_include_pad) = true;
 
-  /// if specified, it will be used as divisor, otherwise size of the pooling region will be used.
+  /// if specified, it will be used as divisor, otherwise size of the pooling
+  /// region will be used.
 
   TORCH_ARG(c10::optional<int64_t>, divisor_override) = c10::nullopt;
 };
@@ -149,7 +150,8 @@ using MaxPool2dOptions = MaxPoolOptions<2>;
 using MaxPool3dOptions = MaxPoolOptions<3>;
 
 namespace functional {
-/// Options for `torch::nn::functional::max_pool1d` and `torch::nn::functional::max_pool1d_with_indices`.
+/// Options for `torch::nn::functional::max_pool1d` and
+/// `torch::nn::functional::max_pool1d_with_indices`.
 ///
 /// Example:
 /// ```
@@ -160,7 +162,8 @@ using MaxPool1dFuncOptions = MaxPool1dOptions;
 } // namespace functional
 
 namespace functional {
-/// Options for `torch::nn::functional::max_pool2d` and `torch::nn::functional::max_pool2d_with_indices`.
+/// Options for `torch::nn::functional::max_pool2d` and
+/// `torch::nn::functional::max_pool2d_with_indices`.
 ///
 /// Example:
 /// ```
@@ -171,7 +174,8 @@ using MaxPool2dFuncOptions = MaxPool2dOptions;
 } // namespace functional
 
 namespace functional {
-/// Options for `torch::nn::functional::max_pool3d` and `torch::nn::functional::max_pool3d_with_indices`.
+/// Options for `torch::nn::functional::max_pool3d` and
+/// `torch::nn::functional::max_pool3d_with_indices`.
 ///
 /// Example:
 /// ```
@@ -207,7 +211,8 @@ using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<ExpandingArray<1>>;
 /// ```
 /// AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
 /// ```
-using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<ExpandingArrayWithOptionalElem<2>>;
+using AdaptiveMaxPool2dOptions =
+    AdaptiveMaxPoolOptions<ExpandingArrayWithOptionalElem<2>>;
 
 /// `AdaptiveMaxPoolOptions` specialized for the `AdaptiveMaxPool3d` module.
 ///
@@ -215,10 +220,12 @@ using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<ExpandingArrayWithOption
 /// ```
 /// AdaptiveMaxPool3d model(AdaptiveMaxPool3dOptions(3));
 /// ```
-using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<ExpandingArrayWithOptionalElem<3>>;
+using AdaptiveMaxPool3dOptions =
+    AdaptiveMaxPoolOptions<ExpandingArrayWithOptionalElem<3>>;
 
 namespace functional {
-/// Options for `torch::nn::functional::adaptive_max_pool1d` and `torch::nn::functional::adaptive_max_pool1d_with_indices`
+/// Options for `torch::nn::functional::adaptive_max_pool1d` and
+/// `torch::nn::functional::adaptive_max_pool1d_with_indices`
 ///
 /// Example:
 /// ```
@@ -229,7 +236,8 @@ using AdaptiveMaxPool1dFuncOptions = AdaptiveMaxPool1dOptions;
 } // namespace functional
 
 namespace functional {
-/// Options for `torch::nn::functional::adaptive_max_pool2d` and `torch::nn::functional::adaptive_max_pool2d_with_indices`
+/// Options for `torch::nn::functional::adaptive_max_pool2d` and
+/// `torch::nn::functional::adaptive_max_pool2d_with_indices`
 ///
 /// Example:
 /// ```
@@ -240,7 +248,8 @@ using AdaptiveMaxPool2dFuncOptions = AdaptiveMaxPool2dOptions;
 } // namespace functional
 
 namespace functional {
-/// Options for `torch::nn::functional::adaptive_max_pool3d` and `torch::nn::functional::adaptive_max_pool3d_with_indices`
+/// Options for `torch::nn::functional::adaptive_max_pool3d` and
+/// `torch::nn::functional::adaptive_max_pool3d_with_indices`
 ///
 /// Example:
 /// ```
@@ -276,7 +285,8 @@ using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<ExpandingArray<1>>;
 /// ```
 /// AdaptiveAvgPool2d model(AdaptiveAvgPool2dOptions({3, 2}));
 /// ```
-using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<ExpandingArrayWithOptionalElem<2>>;
+using AdaptiveAvgPool2dOptions =
+    AdaptiveAvgPoolOptions<ExpandingArrayWithOptionalElem<2>>;
 
 /// `AdaptiveAvgPoolOptions` specialized for the `AdaptiveAvgPool3d` module.
 ///
@@ -284,13 +294,14 @@ using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<ExpandingArrayWithOption
 /// ```
 /// AdaptiveAvgPool3d model(AdaptiveAvgPool3dOptions(3));
 /// ```
-using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<ExpandingArrayWithOptionalElem<3>>;
+using AdaptiveAvgPool3dOptions =
+    AdaptiveAvgPoolOptions<ExpandingArrayWithOptionalElem<3>>;
 
 namespace functional {
 /// Options for `torch::nn::functional::adaptive_avg_pool1d`.
 ///
-/// See the documentation for `torch::nn::AdaptiveAvgPool1dOptions` class to learn what
-/// arguments are supported.
+/// See the documentation for `torch::nn::AdaptiveAvgPool1dOptions` class to
+/// learn what arguments are supported.
 ///
 /// Example:
 /// ```
@@ -303,8 +314,8 @@ using AdaptiveAvgPool1dFuncOptions = AdaptiveAvgPool1dOptions;
 namespace functional {
 /// Options for `torch::nn::functional::adaptive_avg_pool2d`.
 ///
-/// See the documentation for `torch::nn::AdaptiveAvgPool2dOptions` class to learn what
-/// arguments are supported.
+/// See the documentation for `torch::nn::AdaptiveAvgPool2dOptions` class to
+/// learn what arguments are supported.
 ///
 /// Example:
 /// ```
@@ -317,8 +328,8 @@ using AdaptiveAvgPool2dFuncOptions = AdaptiveAvgPool2dOptions;
 namespace functional {
 /// Options for `torch::nn::functional::adaptive_avg_pool3d`.
 ///
-/// See the documentation for `torch::nn::AdaptiveAvgPool3dOptions` class to learn what
-/// arguments are supported.
+/// See the documentation for `torch::nn::AdaptiveAvgPool3dOptions` class to
+/// learn what arguments are supported.
 ///
 /// Example:
 /// ```
@@ -393,25 +404,30 @@ struct MaxUnpoolFuncOptions {
   TORCH_ARG(c10::optional<std::vector<int64_t>>, output_size) = c10::nullopt;
 };
 
-/// `MaxUnpoolFuncOptions` specialized for `torch::nn::functional::max_unpool1d`.
+/// `MaxUnpoolFuncOptions` specialized for
+/// `torch::nn::functional::max_unpool1d`.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::max_unpool1d(x, indices, F::MaxUnpool1dFuncOptions(3).stride(2).padding(1));
+/// F::max_unpool1d(x, indices,
+/// F::MaxUnpool1dFuncOptions(3).stride(2).padding(1));
 /// ```
 using MaxUnpool1dFuncOptions = MaxUnpoolFuncOptions<1>;
 
-/// `MaxUnpoolFuncOptions` specialized for `torch::nn::functional::max_unpool2d`.
+/// `MaxUnpoolFuncOptions` specialized for
+/// `torch::nn::functional::max_unpool2d`.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::max_unpool2d(x, indices, F::MaxUnpool2dFuncOptions(3).stride(2).padding(1));
+/// F::max_unpool2d(x, indices,
+/// F::MaxUnpool2dFuncOptions(3).stride(2).padding(1));
 /// ```
 using MaxUnpool2dFuncOptions = MaxUnpoolFuncOptions<2>;
 
-/// `MaxUnpoolFuncOptions` specialized for `torch::nn::functional::max_unpool3d`.
+/// `MaxUnpoolFuncOptions` specialized for
+/// `torch::nn::functional::max_unpool3d`.
 ///
 /// Example:
 /// ```
@@ -436,9 +452,9 @@ struct FractionalMaxPoolOptions {
   /// the target output size of the image
   TORCH_ARG(c10::optional<ExpandingArray<D>>, output_size) = c10::nullopt;
 
-  /// If one wants to have an output size as a ratio of the input size, this option can be given.
-  /// This has to be a number or tuple in the range (0, 1)
-  using ExpandingArrayDouble=torch::ExpandingArray<D,double>;
+  /// If one wants to have an output size as a ratio of the input size, this
+  /// option can be given. This has to be a number or tuple in the range (0, 1)
+  using ExpandingArrayDouble = torch::ExpandingArray<D, double>;
   TORCH_ARG(c10::optional<ExpandingArrayDouble>, output_ratio) = c10::nullopt;
 
   TORCH_ARG(torch::Tensor, _random_samples) = Tensor();
@@ -461,23 +477,27 @@ using FractionalMaxPool2dOptions = FractionalMaxPoolOptions<2>;
 using FractionalMaxPool3dOptions = FractionalMaxPoolOptions<3>;
 
 namespace functional {
-/// Options for `torch::nn::functional::fractional_max_pool2d` and `torch::nn::functional::fractional_max_pool2d_with_indices`
+/// Options for `torch::nn::functional::fractional_max_pool2d` and
+/// `torch::nn::functional::fractional_max_pool2d_with_indices`
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::fractional_max_pool2d(x, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
+/// F::fractional_max_pool2d(x,
+/// F::FractionalMaxPool2dFuncOptions(3).output_size(2));
 /// ```
 using FractionalMaxPool2dFuncOptions = FractionalMaxPool2dOptions;
 } // namespace functional
 
 namespace functional {
-/// Options for `torch::nn::functional::fractional_max_pool3d` and `torch::nn::functional::fractional_max_pool3d_with_indices`
+/// Options for `torch::nn::functional::fractional_max_pool3d` and
+/// `torch::nn::functional::fractional_max_pool3d_with_indices`
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::fractional_max_pool3d(x, F::FractionalMaxPool3dFuncOptions(3).output_size(2));
+/// F::fractional_max_pool3d(x,
+/// F::FractionalMaxPool3dFuncOptions(3).output_size(2));
 /// ```
 using FractionalMaxPool3dFuncOptions = FractionalMaxPool3dOptions;
 } // namespace functional
@@ -488,7 +508,9 @@ using FractionalMaxPool3dFuncOptions = FractionalMaxPool3dOptions;
 template <size_t D>
 struct LPPoolOptions {
   LPPoolOptions(double norm_type, ExpandingArray<D> kernel_size)
-      : norm_type_(norm_type), kernel_size_(kernel_size), stride_(kernel_size) {}
+      : norm_type_(norm_type),
+        kernel_size_(kernel_size),
+        stride_(kernel_size) {}
 
   TORCH_ARG(double, norm_type);
 
@@ -514,7 +536,8 @@ using LPPool1dOptions = LPPoolOptions<1>;
 ///
 /// Example:
 /// ```
-/// LPPool2d model(LPPool2dOptions(1, std::vector<int64_t>({3, 4})).stride({5, 6}).ceil_mode(true));
+/// LPPool2d model(LPPool2dOptions(1, std::vector<int64_t>({3, 4})).stride({5,
+/// 6}).ceil_mode(true));
 /// ```
 using LPPool2dOptions = LPPoolOptions<2>;
 

@@ -17,7 +17,6 @@ Arch = Literal["windows", "linux", "macos"]
 GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 LABEL_CIFLOW_TRUNK = "ciflow/trunk"
-LABEL_CIFLOW_ALL = "ciflow/all"
 LABEL_CIFLOW_BINARIES = "ciflow/binaries"
 LABEL_CIFLOW_PERIODIC = "ciflow/periodic"
 LABEL_CIFLOW_BINARIES_LIBTORCH = "ciflow/binaries_libtorch"
@@ -34,7 +33,6 @@ class CIFlowConfig:
 
     def __post_init__(self) -> None:
         if not self.isolated_workflow:
-            self.labels.add(LABEL_CIFLOW_ALL)
             if LABEL_CIFLOW_PERIODIC not in self.labels:
                 self.labels.add(LABEL_CIFLOW_TRUNK)
 
@@ -136,7 +134,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
-            arches=["10.2"],
+            arches=["11.6"],
             python_versions=["3.7"]),
         branches="master",
     ),
@@ -156,7 +154,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+            OperatingSystem.LINUX, generate_binary_build_matrix.PRE_CXX11_ABI,
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
@@ -209,15 +207,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     ),
 ]
 WINDOWS_BINARY_SMOKE_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.WINDOWS,
-            arches=["11.3"],
-            python_versions=["3.7"]),
-        branches="master",
-    ),
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="libtorch",
@@ -288,7 +277,7 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.MACOS_ARM64,
         package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.MACOS),
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.MACOS_ARM64),
         cross_compile_arm64=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},

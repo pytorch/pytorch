@@ -4,13 +4,17 @@ import json
 import os
 import sys
 from functools import reduce
-from typing import Set, List, Any
+from typing import Any, List, Set
 
 import yaml
-from tools.codegen.selective_build.selector import combine_selective_builders, SelectiveBuilder
 from tools.lite_interpreter.gen_selected_mobile_ops_header import (
     write_selected_mobile_ops,
 )
+from torchgen.selective_build.selector import (
+    combine_selective_builders,
+    SelectiveBuilder,
+)
+
 
 def extract_all_operators(selective_builder: SelectiveBuilder) -> Set[str]:
     ops = []
@@ -123,9 +127,9 @@ def main(argv: List[Any]) -> None:
         default=False,
         required=False,
     )
-    options = parser.parse_args()
+    options = parser.parse_args(argv)
 
-    if (os.path.isfile(options.model_file_list_path)):
+    if os.path.isfile(options.model_file_list_path):
         print("Processing model file: ", options.model_file_list_path)
         model_dicts = []
         model_dict = yaml.safe_load(open(options.model_file_list_path))
@@ -180,5 +184,6 @@ def main(argv: List[Any]) -> None:
         selective_builder,
     )
 
+
 if __name__ == "__main__":
-    main(sys.argv)
+    main(sys.argv[1:])

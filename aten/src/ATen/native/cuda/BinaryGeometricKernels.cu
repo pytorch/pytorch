@@ -26,7 +26,8 @@ void hypot_kernel_cuda(TensorIteratorBase& iter) {
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.common_dtype(), "hypot_cuda",
       [&]() {
-        gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+            iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
           return ::hypot(a, b);
         });
       });

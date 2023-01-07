@@ -75,7 +75,8 @@ def run_command(
         logging.debug("took %dms", (end_time - start_time) * 1000)
 
 
-# Severity is either "error" or "note": https://git.io/JiLOP
+# Severity is either "error" or "note":
+# https://github.com/python/mypy/blob/8b47a032e1317fb8e3f9a818005a6b63e9bf0311/mypy/errors.py#L46-L47
 severities = {
     "error": LintSeverity.ERROR,
     "note": LintSeverity.ADVICE,
@@ -85,12 +86,12 @@ severities = {
 def check_files(
     filenames: List[str],
     config: str,
-    binary: str,
     retries: int,
+    code: str,
 ) -> List[LintMessage]:
     try:
         proc = run_command(
-            [binary, f"--config={config}"] + filenames,
+            [sys.executable, "-mmypy", f"--config={config}"] + filenames,
             extra_env={},
             retries=retries,
         )
@@ -100,7 +101,7 @@ def check_files(
                 path=None,
                 line=None,
                 char=None,
-                code="MYPY",
+                code=code,
                 severity=LintSeverity.ERROR,
                 name="command-failed",
                 original=None,
@@ -118,7 +119,7 @@ def check_files(
             char=int(match["column"])
             if match["column"] is not None and not match["column"].startswith("-")
             else None,
-            code="MYPY",
+            code=code,
             severity=severities.get(match["severity"], LintSeverity.ERROR),
             original=None,
             replacement=None,
@@ -133,11 +134,6 @@ def main() -> None:
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
-        "--binary",
-        required=True,
-        help="mypy binary path",
-    )
-    parser.add_argument(
         "--retries",
         default=3,
         type=int,
@@ -147,6 +143,11 @@ def main() -> None:
         "--config",
         required=True,
         help="path to an mypy .ini config file",
+    )
+    parser.add_argument(
+        "--code",
+        default="MYPY",
+        help="the code this lint should report as",
     )
     parser.add_argument(
         "--verbose",
@@ -187,7 +188,7 @@ def main() -> None:
         else:
             filenames[filename] = True
 
-    lint_messages = check_files(list(filenames), args.config, args.binary, args.retries)
+    lint_messages = check_files(list(filenames), args.config, args.retries, args.code)
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 

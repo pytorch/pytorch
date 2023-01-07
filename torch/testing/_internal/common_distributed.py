@@ -2,6 +2,7 @@ import faulthandler
 import logging
 import multiprocessing
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -13,25 +14,26 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
-from functools import partial, reduce
-from functools import wraps
+from functools import partial, reduce, wraps
 from io import StringIO
-from typing import NamedTuple, Optional, Union
+from typing import Dict, NamedTuple, Optional, Union
 
 import torch
 import torch.cuda.nccl
 import torch.distributed as c10d
+import torch.nn as nn
 from torch.testing._internal.common_utils import (
-    TestCase,
-    TEST_WITH_ROCM,
-    TEST_WITH_TSAN,
     FILE_SCHEMA,
     find_free_port,
-    retry_on_connect_failures,
     IS_SANDCASTLE,
-    sandcastle_skip_if,
+    retry_on_connect_failures,
     sandcastle_skip,
+    sandcastle_skip_if,
+    TEST_WITH_ROCM,
+    TEST_WITH_TSAN,
+    TestCase,
 )
+from torch.testing._internal.distributed.multi_threaded_pg import run_with_threaded_pg
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ TEST_SKIPS = {
         72, "Skipped because distributed backend is not available."
     ),
     "small_worldsize": TestSkip(73, "Skipped due to small world size."),
+    "odd_worldsize": TestSkip(87, "Skipped due to odd world size."),
     "no_cuda": TestSkip(74, "CUDA is not available."),
     "multi-gpu-1": TestSkip(75, "Need at least 1 CUDA device"),
     "multi-gpu-2": TestSkip(77, "Need at least 2 CUDA devices"),
@@ -62,29 +65,32 @@ TEST_SKIPS = {
     "generic": TestSkip(
         86, "Test skipped at subprocess level, look at subprocess log for skip reason"
     ),
+    "importerror": TestSkip(88, "Test skipped due to missing import"),
 }
+
 
 @dataclass
 class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
-    skip_collective["allgather_coalesced"] = {"nccl", "mpi"}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc"}
     skip_collective["reduce"] = set()
-    skip_collective["sendrecv anysource"] = {"nccl"}
-    skip_collective["cpu barrier"] = {"nccl"}
+    skip_collective["sendrecv anysource"] = {"nccl", "ucc"}
+    skip_collective["cpu barrier"] = {"nccl", "ucc"}
 
     # Sets showing that something is implemented
     backend_feature = {}
-    backend_feature["gpu"] = {"nccl", "gloo"}
-    backend_feature["cuda"] = {"nccl", "gloo"}
-    backend_feature["ddp"] = {"nccl", "gloo"}
-    backend_feature["subgroup"] = {"nccl", "gloo"}
+    backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
+    backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
+    backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
     backend_feature["plugin"] = set()
 
 
 def skip_if_no_gpu(func):
     """Skips if the world size exceeds the number of GPUs, ensuring that if the
     test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not torch.cuda.is_available():
@@ -109,6 +115,17 @@ def skip_if_small_worldsize(func):
     return wrapper
 
 
+def skip_if_odd_worldsize(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) % 2 == 1:
+            sys.exit(TEST_SKIPS["odd_worldsize"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
 def require_n_gpus_for_nccl_backend(n, backend):
     def decorator(func):
         @wraps(func)
@@ -117,6 +134,25 @@ def require_n_gpus_for_nccl_backend(n, backend):
                 sys.exit(TEST_SKIPS[f"multi-gpu-{n}"].exit_code)
             else:
                 return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def import_transformers_or_skip():
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                from transformers import (  # noqa: Unused
+                    AutoModelForMaskedLM,
+                    BertConfig,
+                )
+
+                return func(*args, **kwargs)
+            except ImportError:
+                sys.exit(TEST_SKIPS["importerror"].exit_code)
 
         return wrapper
 
@@ -161,10 +197,13 @@ def verify_ddp_error_logged(model_DDP, err_substr):
     logging_err = ddp_logging_data["error"]
     # Remove C++ stacktrace if needed.
     actual = (
-        err_substr if err_substr.find("\nException raised from ") == -1
+        err_substr
+        if err_substr.find("\nException raised from ") == -1
         else err_substr.split("\nException raised from ")[0]
     )
-    assert actual in logging_err, f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+    assert (
+        actual in logging_err
+    ), f"Did not find expected {actual} in ddp logging data error: {logging_err}"
 
 
 def with_nccl_blocking_wait(func):
@@ -266,6 +305,11 @@ def requires_nccl():
         "c10d was not compiled with the NCCL backend",
     )
 
+def requires_ucc():
+    return sandcastle_skip_if(
+        not c10d.is_ucc_available(),
+        "c10d was not compiled with the UCC backend",
+    )
 
 def requires_mpi():
     return sandcastle_skip_if(
@@ -289,8 +333,8 @@ def skip_if_rocm(func):
 
 def skip_if_win32():
     return sandcastle_skip_if(
-        sys.platform == 'win32',
-        "This unit test case is not supportted on Windows platform",
+        sys.platform == "win32",
+        "This unit test case is not supported on Windows platform",
     )
 
 
@@ -322,8 +366,13 @@ if TEST_WITH_TSAN:
     # TSAN runs much slower.
     TIMEOUT_DEFAULT = 500
 else:
-    TIMEOUT_DEFAULT = 100
+    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+
+
+# https://github.com/pytorch/pytorch/issues/75665
+if TEST_WITH_ROCM:
+    TIMEOUT_OVERRIDE["test_join_kwargs"] = 200
 
 
 def create_device(interface=None):
@@ -416,9 +465,7 @@ def init_multigpu_helper(world_size: int, backend: str):
     if world_size > nGPUs:
         nGPUs_per_process = nGPUs // world_size
     rank_to_GPU = {
-        i: list(
-            visible_devices[i * nGPUs_per_process : (i + 1) * nGPUs_per_process]
-        )
+        i: list(visible_devices[i * nGPUs_per_process : (i + 1) * nGPUs_per_process])
         for i in range(world_size)
     }
     return rank_to_GPU
@@ -449,6 +496,9 @@ def cleanup_temp_dir() -> None:
         tmp_dir.cleanup()
 
 
+# Most tests operate with this worldsize
+DEFAULT_WORLD_SIZE = 4
+
 # [How does MultiProcessTestCase work?]
 # Each MultiProcessTestCase instance uses 1 + `world_size()` processes, by
 # default `world_size()` returns 4. Let's take `test_rpc_spawn.py` as an
@@ -475,7 +525,7 @@ class MultiProcessTestCase(TestCase):
 
     @property
     def world_size(self) -> int:
-        return 4
+        return DEFAULT_WORLD_SIZE
 
     def join_or_run(self, fn):
         @wraps(fn)
@@ -573,6 +623,13 @@ class MultiProcessTestCase(TestCase):
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+        # Enable DDP + ReplicatedTensor
+        from torch.nn.parallel._replicated_tensor_ddp_utils import (
+            _set_ddp_with_replicated_tensor,
+        )
+
+        _set_ddp_with_replicated_tensor(True)
+
         self = cls(test_name)
 
         self.rank = rank
@@ -778,9 +835,222 @@ class MultiProcessTestCase(TestCase):
         self.assertEqual(
             first_process.exitcode,
             0,
-            msg="Expected zero exit code but got {} for pid: {}".format(first_process.exitcode, first_process.pid)
+            msg="Expected zero exit code but got {} for pid: {}".format(
+                first_process.exitcode, first_process.pid
+            ),
         )
 
     @property
     def is_master(self) -> bool:
         return self.rank == 0
+
+
+# Cannot use functools.cache as it requires python 3.9
+EFA_PROBE_RESULT = None
+
+
+def has_efa() -> bool:
+    """
+    If shell command `fi_info -p efa -t FI_EP_RDM` returns exit code 0 then we assume that the machine has
+    Libfabric EFA interfaces and EFA software components installed,
+    see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html.
+    """
+    global EFA_PROBE_RESULT
+    if EFA_PROBE_RESULT is not None:
+        return EFA_PROBE_RESULT
+
+    try:
+        EFA_PROBE_RESULT = (
+            subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"]).returncode == 0
+        )
+    except FileNotFoundError:
+        EFA_PROBE_RESULT = False
+    return EFA_PROBE_RESULT
+
+
+def tp_transports():
+    """
+    If the machine has Libfabric EFA interfaces and EFA software components installed it may cause
+    'RuntimeError: In operator() at tensorpipe/common/ibv.h:172 "": Operation not supported' if tensorpipe
+    uses InfiniBand transport, so we exclude it from tensorpipe transports,
+    see https://github.com/pytorch/pytorch/issues/73885 and https://github.com/pytorch/pytorch/issues/65022
+    """
+    return ["shm", "uv"] if has_efa() else None
+
+
+def spawn_threads_and_init_comms(
+    func=None, timeout=TIMEOUT_DEFAULT, world_size=DEFAULT_WORLD_SIZE
+):
+    """
+    Wrapper to use with a test method
+    """
+    if func is None:
+        return partial(
+            spawn_threads_and_init_comms, timeout=timeout, world_size=world_size
+        )
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        # TODO: get test name from kwargs
+        MultiThreadedTestCase._run_test_with_mt_pg(
+            "runTest", timeout, world_size, lambda: func(self, *args, **kwargs)
+        )
+
+    return wrapper
+
+
+class MultiThreadedTestCase(TestCase):
+    """
+    Simple test runner that executes all tests with the in-proc process group.
+
+    A single instance of the TestCase object for all threads.
+
+    Difference from regular test runner:
+    Cannot use setUp / tearDown (must use perThreadSetup / perThreadShutdown)
+        Not sure what these two would be good for though.
+    No global state possible
+        How bad of a limitation is this?
+    """
+
+    def __init__(self, method_name: str = "runTest") -> None:
+        super().__init__(method_name)
+        self._test_method = getattr(self, method_name, None)
+        setattr(self, method_name, self.threaded_run_test)
+        if TestCase.setUp != type(self).setUp:
+            raise RuntimeError(
+                f"Test class {type(self)} overrides disabled method setUp. Use perThreadSetUp instead"
+            )
+        if TestCase.tearDown != type(self).tearDown:
+            raise RuntimeError(
+                f"Test class {type(self)} overrides disabled method tearDown. Use perThreadTearDown instead"
+            )
+
+    def threaded_run_test(self):
+        self.perThreadSetUp()
+        try:
+            MultiThreadedTestCase._run_test_with_mt_pg(
+                name=self._current_test_name,
+                timeout=TIMEOUT_DEFAULT,
+                world_size=self.world_size,
+                callback=self._test_method,
+            )
+        finally:
+            self.perThreadTearDown()
+
+    def perThreadSetUp(self):
+        super().setUp()  # TestCase.setUp() calls torch.manual_seed()
+
+    def perThreadTearDown(self):
+        pass
+
+    @classmethod
+    def _run_test_with_mt_pg(cls, name, timeout, world_size, callback):
+        # Show full C++ stacktraces when a Python error originating from C++ is raised.
+        os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
+        failed_ranks = run_with_threaded_pg(world_size, timeout, callback)
+
+        # Print based on exceptions raised from threads
+        #   SkipTest: print info for each thread
+        #   TimeoutError: raise RuntimeError for any timed out thread
+        #   Normal Exception: print error for each thread that raises exception
+        #   and raise a RuntimeError
+        error_msg = ""
+        skip_code = -1
+        for rank, exc_info in failed_ranks:
+            exc = exc_info[1]
+            if isinstance(exc, unittest.SkipTest):
+                logger.info(
+                    f"Thread {rank} skipping test {name} for following reason: {str(exc)}"
+                )
+                if skip_code < 0:
+                    skip_code = TEST_SKIPS["generic"].exit_code
+            elif isinstance(exc, TimeoutError):
+                msg = "Thread {} terminated or timed out after {} seconds\n".format(
+                    rank, timeout
+                )
+                logger.error(msg)
+                raise RuntimeError(msg)
+            elif isinstance(exc, Exception):
+                msg = "".join(traceback.format_exception(*exc_info))
+                logger.error(
+                    f"Caught exception: \n{msg} exiting thread {rank}"
+                )
+                error_msg += (
+                    "Thread {} exited with exception:\n{}\n".format(rank, msg)
+                )
+            elif isinstance(exc, SystemExit):
+                if type(exc.code) == int and skip_code < 0:
+                    skip_code = exc.code
+
+        # check exceptions
+        if len(error_msg) > 0:
+            raise RuntimeError(error_msg)
+        # check skip
+        if skip_code > 0:
+            for skip in TEST_SKIPS.values():
+                if skip_code == skip.exit_code:
+                    if IS_SANDCASTLE:
+                        # "pass" the test with an appropriate message.
+                        logger.info(
+                            f"Skipping {name} on sandcastle for the following reason: {skip.message}"
+                        )
+                        return
+                    else:
+                        raise unittest.SkipTest(skip.message)
+
+    @property
+    def world_size(self) -> int:
+        raise RuntimeError("world size not implemented")
+
+    @property
+    def rank(self) -> int:
+        return c10d.get_rank()
+
+    @property
+    def _current_test_name(self) -> str:
+        # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
+        return self.id().split(".")[-1]
+
+    def assertEqualOnRank(self, x, y, rank=0):
+        """
+        The reason why we have this util function instead of
+        self.assertEqual is all threads are sharing one CPU RNG
+        so the assertion result is only reliable on rank 0
+        """
+        if self.rank == rank:
+            self.assertEqual(x, y)
+
+    def assertNotEqualOnRank(self, x, y, rank):
+        if self.rank == rank:
+            self.assertNotEqual(x, y)
+
+class SaveForwardInputsModule(nn.Module):
+    def __init__(
+        self,
+        forward_inputs: Dict[nn.Module, torch.Tensor],
+        cast_forward_inputs: bool,
+    ) -> None:
+        super().__init__()
+        self.l = nn.Linear(100, 100)
+        self.forward_inputs = forward_inputs
+        self.cast_forward_inputs = cast_forward_inputs
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.forward_inputs[self] = x
+        return self.l(x.to(self.l.weight.dtype) if self.cast_forward_inputs else x)
+
+
+class SaveForwardInputsModel(nn.Module):
+    def __init__(
+        self,
+        forward_inputs: Dict[nn.Module, torch.Tensor],
+        cast_forward_inputs: bool,
+    ) -> None:
+        super().__init__()
+        self.c1 = SaveForwardInputsModule(forward_inputs, cast_forward_inputs)
+        self.c2 = SaveForwardInputsModule(forward_inputs, cast_forward_inputs)
+        self.forward_inputs = forward_inputs
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.forward_inputs[self] = x
+        return self.c2(self.c1(x))

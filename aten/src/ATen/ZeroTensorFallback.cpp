@@ -99,6 +99,7 @@ namespace at {
     // do not use the fallback.
     // m.impl("mul.Tensor", torch::CppFunction::makeFallthrough());
     // m.impl("add.Tensor", torch::CppFunction::makeFallthrough());
+    // m.impl("linalg_cross", torch::CppFunction::makeFallthrough());
 
     TORCH_VIEW_FNS(m)
     TENSOR_UTILITIES_AND_CONSTRUCTORS(m)

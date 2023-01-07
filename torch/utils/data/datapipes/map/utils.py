@@ -2,6 +2,8 @@ import copy
 import warnings
 from torch.utils.data.datapipes.datapipe import MapDataPipe
 
+__all__ = ["SequenceWrapperMapDataPipe", ]
+
 
 class SequenceWrapperMapDataPipe(MapDataPipe):
     r"""
@@ -18,6 +20,7 @@ class SequenceWrapperMapDataPipe(MapDataPipe):
       across iterations.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper
         >>> dp = SequenceWrapper(range(10))
         >>> list(dp)

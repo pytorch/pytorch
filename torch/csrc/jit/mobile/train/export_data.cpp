@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/mobile/import_export_common.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
@@ -10,11 +11,6 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-
-#if defined(ENABLE_FLATBUFFER)
-#include <flatbuffers/flatbuffers.h>
-#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
-#endif // defined(ENABLE_FLATBUFFER)
 
 #include <string>
 #include <vector>
@@ -119,36 +115,27 @@ mobile::Module tensor_dict_to_mobile(
 
 } // namespace mobile
 
+void (*_save_mobile_module_to)(
+    const mobile::Module& module,
+    const std::function<size_t(const void*, size_t)>& writer_func) = nullptr;
+
 void _save_parameters(
     const std::map<std::string, at::Tensor>& map,
     std::ostream& out,
     bool use_flatbuffer) {
   auto dict = mobile::tensor_map_to_dict(map);
 
-  if (use_flatbuffer) {
-#if defined(ENABLE_FLATBUFFER)
-    // For Flatbuffer, we serialize an entire, mostly-empty module containing
-    // the dict as an attribute.
-    flatbuffers::DetachedBuffer bytes = torch::jit::save_mobile_module_to_bytes(
-        mobile::tensor_dict_to_mobile(dict));
+  auto write_func = [&out](const void* buf, size_t nbytes) -> size_t {
     out.write(
-        reinterpret_cast<char*>(bytes.data()),
-        static_cast<std::streamsize>(bytes.size()));
-#else // !defined(ENABLE_FLATBUFFER)
-    TORCH_CHECK(
-        false,
-        "Trying to export as flatbuffer file but "
-        "the build hasn't enabled flatbuffer");
-#endif // !defined(ENABLE_FLATBUFFER)
+        static_cast<const char*>(buf), static_cast<std::streamsize>(nbytes));
+    return !out ? 0 : nbytes;
+  };
+
+  if (use_flatbuffer) {
+    save_mobile_module_to_func(mobile::tensor_dict_to_mobile(dict), write_func);
   } else {
     // For Pickle, we only serialize the dict itself.
-    mobile::IValuePickler pickler(
-        [&](const void* buf, size_t nbytes) -> size_t {
-          out.write(
-              static_cast<const char*>(buf),
-              static_cast<std::streamsize>(nbytes));
-          return !out ? 0 : nbytes;
-        });
+    mobile::IValuePickler pickler(write_func);
     pickler.serialize(dict);
   }
 }
@@ -159,23 +146,8 @@ void _save_parameters(
     bool use_flatbuffer) {
   auto dict = mobile::tensor_map_to_dict(map);
 
-  if (use_flatbuffer) {
-#if defined(ENABLE_FLATBUFFER)
-    // For Flatbuffer, we serialize an entire, mostly-empty module containing
-    // the dict as an attribute.
-    torch::jit::save_mobile_module(
-        mobile::tensor_dict_to_mobile(dict), filename);
-#else // !defined(ENABLE_FLATBUFFER)
-    TORCH_CHECK(
-        false,
-        "Trying to export as flatbuffer file but "
-        "the build hasn't enabled flatbuffer");
-#endif // !defined(ENABLE_FLATBUFFER)
-  } else {
-    // For Pickle, we only serialize the dict itself.
-    mobile::IValuePickler pickler(filename);
-    pickler.serialize(dict);
-  }
+  std::ofstream ifile(filename);
+  _save_parameters(map, ifile, use_flatbuffer);
 }
 
 } // namespace jit

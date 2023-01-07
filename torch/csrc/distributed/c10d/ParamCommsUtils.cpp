@@ -1,6 +1,9 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
 
-#include <c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 
 namespace torch {
 
@@ -13,8 +16,8 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     int outSize,
     at::ScalarType dType,
     std::vector<int64_t> inSplitSizes,
-    std::vector<int64_t> outSplitSizes) :
-      rank_(rank),
+    std::vector<int64_t> outSplitSizes)
+    : rank_(rank),
       columnName_(colName),
       inMessageSize_(inSize),
       outMessageSize_(outSize),

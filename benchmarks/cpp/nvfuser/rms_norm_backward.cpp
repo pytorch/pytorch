@@ -11,7 +11,7 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -23,9 +23,6 @@ static void setupRMSNorm_BWD(Fusion* fusion, DataType dtype) {
   TORCH_INTERNAL_ASSERT(
       dtype == DataType::Float || dtype == DataType::Half ||
       dtype == DataType::BFloat16);
-
-  const int kReductionAxis = 2;
-  Double* eps_ptr = IrBuilder::create<Double>(1e-6);
 
   // setup fusion
   auto grad_out = makeContigTensor(3, dtype);
@@ -140,26 +137,27 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_BWD_fp16)
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_RMSNorm_BWD_bf16,
-    setupRMSNorm_BWD,
-    NvFuserScheduler_RMSNorm_BWD,
-    DataType::BFloat16);
+// TODO: Automatically disable/enable if bf16 is supported
+// NVFUSER_BENCHMARK_DEFINE(
+//     NvFuserScheduler_RMSNorm_BWD_bf16,
+//     setupRMSNorm_BWD,
+//     NvFuserScheduler_RMSNorm_BWD,
+//     DataType::BFloat16);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_BWD_bf16)
-    ->RangeMultiplier(2)
-    ->Ranges({{16, 64}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
+// NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_BWD_bf16)
+//     ->RangeMultiplier(2)
+//     ->Ranges({{16, 64}})
+//     ->Unit(benchmark::kMicrosecond)
+//     ->UseManualTime();
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_BWD_bf16)
-    ->RangeMultiplier(2)
-    ->Ranges({{28, 56}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
+// NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_BWD_bf16)
+//     ->RangeMultiplier(2)
+//     ->Ranges({{28, 56}})
+//     ->Unit(benchmark::kMicrosecond)
+//     ->UseManualTime();
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_BWD_bf16)
-    ->RangeMultiplier(2)
-    ->Ranges({{24, 48}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
+// NVFUSER_BENCHMARK_RUN(NvFuserScheduler_RMSNorm_BWD_bf16)
+//     ->RangeMultiplier(2)
+//     ->Ranges({{24, 48}})
+//     ->Unit(benchmark::kMicrosecond)
+//     ->UseManualTime();

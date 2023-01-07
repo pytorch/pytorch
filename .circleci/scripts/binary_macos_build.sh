@@ -4,7 +4,7 @@ set -eux -o pipefail
 source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
-if [[ -z "${IS_GHA:-}" ]]; then
+if [[ -z "${GITHUB_ACTIONS:-}" ]]; then
   export PATH="${workdir:-${HOME}}/miniconda/bin:${PATH}"
 fi
 

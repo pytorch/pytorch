@@ -14,127 +14,149 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct Command final {
-  class Pool;
+class CommandBuffer final {
+ public:
+  explicit CommandBuffer(
+      const VkCommandBuffer,
+      const VkCommandBufferUsageFlags =
+          VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-  //
-  // Buffer
-  //
+  CommandBuffer(const CommandBuffer&) = delete;
+  CommandBuffer& operator=(const CommandBuffer&) = delete;
 
-  class Buffer final {
-   public:
-    explicit Buffer(VkCommandBuffer command_buffer = VK_NULL_HANDLE);
-    Buffer(const Buffer&) = delete;
-    Buffer& operator=(const Buffer&) = delete;
-    Buffer(Buffer&&);
-    Buffer& operator=(Buffer&&);
-    ~Buffer() = default;
+  CommandBuffer(CommandBuffer&&) noexcept;
+  CommandBuffer& operator=(CommandBuffer&&) noexcept;
 
-    operator bool() const;
-    VkCommandBuffer handle() const;
+  ~CommandBuffer() = default;
 
-    void begin();
-    void end();
-
-    void barrier(const Pipeline::Barrier& barrier);
-    void bind(const Pipeline::Object& pipeline);
-    void bind(const Descriptor::Set& set);
-    void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
-    void dispatch(const Shader::WorkGroup& global_work_group);
-
-   private:
-    friend class Pool;
-
-    void barrier();
-    void invalidate();
-
-   private:
-    VkCommandBuffer command_buffer_;
-
-    struct Bound final {
-      Pipeline::Object pipeline;
-      VkDescriptorSet descriptor_set;
-
-      void reset();
-    } bound_;
-
-    struct Barrier final {
-      struct Stage final {
-        VkPipelineStageFlags src;
-        VkPipelineStageFlags dst;
-
-        operator bool() const;
-      } stage;
-
-      c10::SmallVector<Resource::Buffer::Barrier, 4u> buffers;
-      c10::SmallVector<Resource::Image::Barrier, 4u> images;
-
-      void reset();
-    } barriers_;
+  // The lifecycle of a command buffer is as follows:
+  enum State {
+    INVALID, // Used to indicate the command buffer is moved from
+    NEW, // Set during constructor
+    RECORDING, // Set during call to begin(), dispatch(), and
+               // copy_*_to_*()
+    PIPELINE_BOUND, // Set during call to  bind_pipeline()
+    DESCRIPTORS_BOUND, // Set during call to bind_descriptors()
+    BARRIERS_INSERTED, // Set during call to insert_barrier()
+    READY, //  Set during call to end()
+    SUBMITTED, // Set during call to get_submit_handle()
   };
 
-  //
-  // Pool
-  //
+  struct Bound {
+    VkPipeline pipeline;
+    VkPipelineLayout pipeline_layout;
+    utils::uvec3 local_workgroup_size;
+    VkDescriptorSet descriptors;
 
-  class Pool final {
-   public:
-    explicit Pool(const GPU& gpu);
-    Pool(const Pool&) = delete;
-    Pool& operator=(const Pool&) = delete;
-    Pool(Pool&&);
-    Pool& operator=(Pool&&);
-    ~Pool();
+    explicit Bound()
+        : pipeline{VK_NULL_HANDLE},
+          pipeline_layout{VK_NULL_HANDLE},
+          local_workgroup_size{0u, 0u, 0u},
+          descriptors{VK_NULL_HANDLE} {}
 
-    Buffer allocate();
-    Buffer& stream();
-    void purge();
+    inline void reset() {
+      pipeline = VK_NULL_HANDLE;
+      pipeline_layout = VK_NULL_HANDLE;
+      local_workgroup_size = {0u, 0u, 0u};
+      descriptors = VK_NULL_HANDLE;
+    }
+  };
 
-    void submit(
-        VkQueue queue,
-        c10::ArrayRef<const Buffer> buffers,
-        Resource::Fence fence = {});
+ private:
+  VkCommandBuffer handle_;
+  VkCommandBufferUsageFlags flags_;
+  State state_;
+  Bound bound_;
 
-   private:
-    void invalidate();
+ public:
+  void begin();
+  void end();
 
-   private:
-    struct Configuration final {
-      static constexpr uint32_t kQuantum = 4u;
-      static constexpr uint32_t kReserve = 16u;
-      static constexpr uint32_t kSubmit = 16u;
-    };
+  void bind_pipeline(
+      const VkPipeline,
+      const VkPipelineLayout,
+      const utils::uvec3);
+  void bind_descriptors(const VkDescriptorSet);
 
-    VkDevice device_;
-    Handle<VkCommandPool, VK_DELETER(CommandPool)> command_pool_;
+  void insert_barrier(const PipelineBarrier& pipeline_barrier);
+  void dispatch(const utils::uvec3&);
 
-    struct {
-      std::vector<VkCommandBuffer> pool;
-      size_t in_use;
-    } buffer_;
+  void copy_buffer_to_buffer(
+      const api::VulkanBuffer&,
+      const api::VulkanBuffer&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
 
-    struct {
-      Buffer buffer;
-      uint32_t counter;
-    } stream_;
-  } pool /* [thread_count] */;
+  void copy_texture_to_texture(
+      const api::VulkanImage&,
+      const api::VulkanImage&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
 
-  explicit Command(const GPU& gpu)
-    : pool(gpu) {
+  void copy_texture_to_buffer(
+      const api::VulkanImage&,
+      const api::VulkanBuffer&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
+
+  void copy_buffer_to_texture(
+      const api::VulkanBuffer&,
+      const api::VulkanImage&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
+
+  void write_timestamp(const VkQueryPool, const uint32_t) const;
+  void reset_querypool(const VkQueryPool, const uint32_t, const uint32_t) const;
+
+  VkCommandBuffer get_submit_handle();
+
+  inline operator bool() const {
+    return VK_NULL_HANDLE != handle_;
   }
 };
 
-//
-// Impl
-//
+struct CommandPoolConfig final {
+  uint32_t cmdPoolInitialSize;
+  uint32_t cmdPoolBatchSize;
+};
 
-inline Command::Buffer::operator bool() const {
-  return VK_NULL_HANDLE != command_buffer_;
-}
+class CommandPool final {
+ public:
+  explicit CommandPool(
+      const VkDevice,
+      const uint32_t,
+      const CommandPoolConfig&);
 
-inline VkCommandBuffer Command::Buffer::handle() const {
-  return command_buffer_;
-}
+  CommandPool(const CommandPool&) = delete;
+  CommandPool& operator=(const CommandPool&) = delete;
+
+  CommandPool(CommandPool&&) = delete;
+  CommandPool& operator=(CommandPool&&) = delete;
+
+  ~CommandPool();
+
+ private:
+  VkDevice device_;
+  uint32_t queue_family_idx_;
+  VkCommandPool pool_;
+  CommandPoolConfig config_;
+  // New Buffers
+  std::mutex mutex_;
+  std::vector<VkCommandBuffer> buffers_;
+  size_t in_use_;
+
+ public:
+  CommandBuffer get_new_cmd();
+
+  void flush();
+
+ private:
+  void allocate_new_batch(const uint32_t);
+};
 
 } // namespace api
 } // namespace vulkan

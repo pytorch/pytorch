@@ -4,6 +4,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property
 
+__all__ = ['Categorical']
 
 class Categorical(Distribution):
     r"""
@@ -34,6 +35,7 @@ class Categorical(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Categorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
         tensor(3)
@@ -100,6 +102,10 @@ class Categorical(Distribution):
     @property
     def mean(self):
         return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
+
+    @property
+    def mode(self):
+        return self.probs.argmax(axis=-1)
 
     @property
     def variance(self):

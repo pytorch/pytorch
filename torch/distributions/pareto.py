@@ -4,6 +4,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Pareto']
 
 class Pareto(TransformedDistribution):
     r"""
@@ -11,6 +12,7 @@ class Pareto(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Pareto(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Pareto distribution with scale=1 and alpha=1
         tensor([ 1.5623])
@@ -40,6 +42,10 @@ class Pareto(TransformedDistribution):
         return a * self.scale / (a - 1)
 
     @property
+    def mode(self):
+        return self.scale
+
+    @property
     def variance(self):
         # var is inf for alpha <= 2
         a = self.alpha.clamp(min=2)
@@ -47,7 +53,7 @@ class Pareto(TransformedDistribution):
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self):
-        return constraints.greater_than(self.scale)
+        return constraints.greater_than_eq(self.scale)
 
     def entropy(self):
         return ((self.scale / self.alpha).log() + (1 + self.alpha.reciprocal()))

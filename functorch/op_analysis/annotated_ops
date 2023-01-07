@@ -1,0 +1,570 @@
+data, misc
+rename, named
+align_to, named
+align_as, named
+align_tensors, named
+refine_names, named
+dropout, composite pointwise
+feature_dropout, composite pointwise
+alpha_dropout, reduction
+feature_alpha_dropout, reduction
+abs, primitive pointwise
+absolute, alias
+angle, composite pointwise
+view_as_real, complex
+view_as_complex, complex
+sgn, primitive pointwise
+real, complex
+imag, complex
+conj, complex
+conj_physical, complex
+resolve_conj, complex
+acos, primitive pointwise
+arccos, alias
+add, primitive pointwise
+addmv, composite matmul
+addr, composite pointwise
+affine_grid_generator, factory
+all, reduction
+any, reduction
+arange, factory
+argmax, reduction
+argmin, reduction
+acosh, primitive pointwise
+arccosh, alias
+asinh, primitive pointwise
+arcsinh, alias
+atanh, primitive pointwise
+arctanh, alias
+as_strided, view/reshape
+asin, primitive pointwise
+arcsin, alias
+atan, primitive pointwise
+arctan, alias
+atleast_1d, view/reshape
+atleast_2d, view/reshape
+atleast_3d, view/reshape
+baddbmm, composite matmul
+bartlett_window, factory
+bernoulli, factory
+bilinear, composite matmul
+binary_cross_entropy, reduction
+binary_cross_entropy_with_logits, reduction
+bincount, misc
+bitwise_not, primitive pointwise
+copysign, composite pointwise
+logical_not, composite pointwise
+logical_xor, composite pointwise
+logical_and, composite pointwise
+logical_or, composite pointwise
+blackman_window, factory
+bmm, composite matmul
+broadcast_tensors, view/reshape
+broadcast_to, view/reshape
+cat, view/reshape
+block_diag, view/reshape
+ceil, primitive pointwise
+chain_matmul, alias
+unsafe_chunk, view/reshape
+chunk, view/reshape
+tensor_split, view/reshape
+clamp, composite pointwise
+clamp_max, composite pointwise
+clamp_min, composite pointwise
+clip, alias
+complex, complex
+polar, composite pointwise
+constant_pad_nd, view/reshape
+contiguous, view/reshape
+cos, primitive pointwise
+cosh, primitive pointwise
+cosine_embedding_loss, reduction
+count_nonzero, reduction
+cummax, reduction
+cummin, reduction
+cumprod, reduction
+cumsum, reduction
+ctc_loss, misc
+diag_embed, view/reshape
+diagflat, view/reshape
+diagonal, view/reshape
+diff, reduction
+gradient, misc
+div, primitive pointwise
+divide, alias
+true_divide, primitive pointwise
+dot, reduction
+vdot, reduction
+einsum, composite matmul
+embedding, misc
+row_stack, alias
+embedding_bag, reduction
+empty, factory
+new_empty, factory
+new_empty_strided, factory
+new_full, factory
+new_zeros, factory
+new_ones, factory
+empty_quantized, factory
+empty_like, factory
+empty_strided, factory
+erf, primitive pointwise
+erfc, composite pointwise
+exp, primitive pointwise
+exp2, composite pointwise
+expm1, composite pointwise
+expand, view/reshape
+expand_as, view/reshape
+eye, factory
+flatten, view/reshape
+unflatten, view/reshape
+floor, primitive pointwise
+floor_divide, composite pointwise
+frac, primitive pointwise
+full, factory
+full_like, factory
+from_file, misc
+gcd, primitive pointwise
+lcm, composite pointwise
+grid_sampler, misc
+grid_sampler_2d, misc
+grid_sampler_3d, misc
+hann_window, factory
+hamming_window, factory
+kaiser_window, factory
+hinge_embedding_loss, reduction
+group_norm, reduction
+index, scatter/gather
+index_copy, scatter/gather
+index_put, scatter/gather
+instance_norm, reduction
+inverse, linalg
+isclose, composite pointwise
+isnan, composite pointwise
+isreal, composite pointwise
+kl_div, reduction
+kron, composite pointwise
+kthvalue, reduction
+layer_norm, reduction
+nan_to_num, composite pointwise
+linear, composite matmul
+fbgemm_linear_int8_weight_fp32_activation, fbgemm
+fbgemm_linear_int8_weight, fbgemm
+fbgemm_linear_quantize_weight, fbgemm
+fbgemm_pack_gemm_matrix_fp16, fbgemm
+fbgemm_linear_fp16_weight_fp32_activation, fbgemm
+fbgemm_linear_fp16_weight, fbgemm
+fbgemm_pack_quantized_matrix, fbgemm
+ldexp, composite pointwise
+linspace, factory
+log, primitive pointwise
+log10, composite pointwise
+log1p, composite pointwise
+log2, composite pointwise
+logaddexp, reduction
+logaddexp2, reduction
+xlogy, composite pointwise
+logdet, linalg
+logspace, factory
+log_softmax, reduction
+logcumsumexp, reduction
+logsumexp, reduction
+margin_ranking_loss, reduction
+matmul, composite matmul
+matrix_rank, linalg
+matrix_power, alias
+matrix_exp, linalg
+max, reduction
+amax, reduction
+mean, reduction
+median, reduction
+nanmedian, reduction
+min, reduction
+amin, reduction
+mm, composite matmul
+mode, misc
+mul, reduction
+multiply, alias
+mv, composite matmul
+mvlgamma, primitive pointwise
+narrow_copy, view/reshape
+narrow, view/reshape
+ones, factory
+ones_like, factory
+pairwise_distance, reduction
+cdist, reduction
+pdist, reduction
+cosine_similarity, reduction
+permute, scatter/gather
+movedim, view/reshape
+moveaxis, alias
+numpy_T, view/reshape
+pixel_shuffle, view/reshape
+pixel_unshuffle, view/reshape
+channel_shuffle, view/reshape
+pin_memory, misc
+pinverse, linalg
+poisson_nll_loss, reduction
+rad2deg, composite pointwise
+deg2rad, composite pointwise
+scalar_tensor, factory
+rand, factory
+rand_like, factory
+randint, factory
+randint_like, factory
+randn, factory
+randn_like, factory
+randperm, factory
+range, factory
+ravel, view/reshape
+reciprocal, composite pointwise
+neg, composite pointwise
+negative, alias
+repeat, view/reshape
+repeat_interleave, view/reshape
+reshape, view/reshape
+reshape_as, view/reshape
+round, primitive pointwise
+rrelu, composite pointwise
+relu, composite pointwise
+relu6, composite pointwise
+prelu, composite pointwise
+gelu, composite pointwise
+hardshrink, composite pointwise
+rsqrt, composite pointwise
+select, view/reshape
+selu, composite pointwise
+celu, composite pointwise
+silu, composite pointwise
+mish, composite pointwise
+sigmoid, composite pointwise
+logit, composite pointwise
+sin, primitive pointwise
+sinc, composite pointwise
+sinh, primitive pointwise
+detach, misc
+slice, view/reshape
+slogdet, linalg
+smm, sparse
+softmax, reduction
+unsafe_split, view/reshape
+split, view/reshape
+unsafe_split_with_sizes, view/reshape
+split_with_sizes, view/reshape
+hsplit, view/reshape
+vsplit, view/reshape
+dsplit, view/reshape
+squeeze, view/reshape
+sspaddmm, sparse
+stack, view/reshape
+hstack, view/reshape
+vstack, view/reshape
+dstack, view/reshape
+stft, fft
+istft, fft
+sum, reduction
+nansum, reduction
+sum_to_size, reduction
+sqrt, primitive pointwise
+square, composite pointwise
+std, reduction
+std_mean, reduction
+prod, reduction
+t, view/reshape
+tan, primitive pointwise
+tanh, primitive pointwise
+tensordot, composite matmul
+threshold, composite pointwise
+tile, view/reshape
+transpose, view/reshape
+one_hot, scatter/gather
+flip, view/reshape
+fliplr, view/reshape
+flipud, view/reshape
+roll, view/reshape
+rot90, view/reshape
+trapz, composite pointwise
+triplet_margin_loss, reduction
+trunc, composite pointwise
+fix, alias
+type_as, misc
+unique_dim, misc
+unique_consecutive, misc
+unique_dim_consecutive, misc
+unsqueeze, view/reshape
+vander, factory
+var, reduction
+var_mean, reduction
+view_as, view/reshape
+where, misc
+norm_except_dim, reduction
+zeros, factory
+zeros_like, factory
+poisson, factory
+binomial, factory
+norm, reduction
+frexp, composite pointwise
+frobenius_norm, reduction
+nuclear_norm, reduction
+clone, view/reshape
+positive, composite pointwise
+sub, primitive pointwise
+subtract, alias
+rsub, primitive pointwise
+heaviside, composite pointwise
+addmm, composite matmul
+sparse_csr_tensor, sparse
+sparse_coo_tensor, sparse
+sparse_mask, sparse
+to_dense, sparse
+coalesce, sparse
+indices, sparse
+values, sparse
+crow_indices, sparse
+col_indices, sparse
+hspmm, sparse
+unbind, view/reshape
+to_sparse, sparse
+quantize_per_tensor, quantize
+quantize_per_channel, quantize
+dequantize, quantize
+q_per_channel_scales, quantize
+q_per_channel_zero_points, quantize
+int_repr, quantize
+fake_quantize_per_tensor_affine, quantize
+fake_quantize_per_tensor_affine_cachemask, quantize
+fake_quantize_per_channel_affine, quantize
+fake_quantize_per_channel_affine_cachemask, quantize
+choose_qparams_optimized, quantize
+to, misc
+meshgrid, view/reshape
+cartesian_prod, misc
+combinations, misc
+lstm, rnn
+gru, rnn
+rnn_tanh, rnn
+rnn_relu, rnn
+lstm_cell, rnn
+gru_cell, rnn
+rnn_tanh_cell, rnn
+rnn_relu_cell, rnn
+quantized_lstm_cell, rnn
+quantized_gru_cell, rnn
+quantized_rnn_relu_cell, rnn
+quantized_rnn_tanh_cell, rnn
+masked_fill, misc
+masked_scatter, misc
+view, view/reshape
+put, scatter/gather
+index_add, scatter/gather
+index_fill, scatter/gather
+scatter, scatter/gather
+scatter_add, scatter/gather
+bitwise_and, primitive pointwise
+bitwise_or, primitive pointwise
+bitwise_xor, primitive pointwise
+addbmm, composite matmul
+diag, view/reshape
+cross, misc
+triu, view/reshape
+tril, view/reshape
+tril_indices, factory
+triu_indices, factory
+trace, reduction
+ne, composite pointwise
+not_equal, alias
+eq, primitive pointwise
+ge, primitive pointwise
+greater_equal, alias
+le, primitive pointwise
+less_equal, alias
+gt, primitive pointwise
+greater, alias
+lt, primitive pointwise
+less, alias
+take, scatter/gather
+take_along_dim, scatter/gather
+index_select, scatter/gather
+masked_select, scatter/gather
+nonzero, misc
+nonzero_numpy, misc
+gather, scatter/gather
+addcmul, composite pointwise
+addcdiv, composite pointwise
+cross_entropy_loss, reduction
+lstsq, alias
+triangular_solve, linalg
+symeig, linalg
+eig, linalg
+svd, linalg
+swapaxes, alias
+swapdims, alias
+cholesky, linalg
+cholesky_solve, linalg
+solve, linalg
+cholesky_inverse, linalg
+qr, linalg
+geqrf, linalg
+orgqr, alias
+ormqr, linalg
+lu_solve, linalg
+lu_unpack, linalg
+multinomial, misc
+lgamma, primitive pointwise
+digamma, primitive pointwise
+polygamma, primitive pointwise
+erfinv, primitive pointwise
+i0, primitive pointwise
+sign, composite pointwise
+signbit, composite pointwise
+dist, reduction
+atan2, primitive pointwise
+lerp, composite pointwise
+histc, misc
+fmod, primitive pointwise
+hypot, composite pointwise
+igamma, primitive pointwise
+igammac, primitive pointwise
+nextafter, composite pointwise
+remainder, composite pointwise
+fmin, reduction
+fmax, reduction
+maximum, composite pointwise
+minimum, composite pointwise
+quantile, misc
+nanquantile, misc
+sort, misc
+msort, misc
+argsort, misc
+topk, misc
+renorm, reduction
+unfold, misc
+pow, primitive pointwise
+float_power, composite pointwise
+normal, factory
+alias, misc
+bucketize, misc
+searchsorted, misc
+mse_loss, reduction
+l1_loss, reduction
+multi_margin_loss, reduction
+multilabel_margin_loss, reduction
+multilabel_margin_loss_forward, reduction
+nll_loss, reduction
+nll_loss_nd, reduction
+nll_loss_forward, reduction
+nll_loss2d, reduction
+nll_loss2d_forward, reduction
+smooth_l1_loss, reduction
+huber_loss, reduction
+soft_margin_loss, reduction
+elu, composite pointwise
+glu, composite pointwise
+hardsigmoid, composite pointwise
+hardtanh, composite pointwise
+hardswish, composite pointwise
+leaky_relu, composite pointwise
+log_sigmoid, composite pointwise
+log_sigmoid_forward, composite pointwise
+rrelu_with_noise, composite pointwise
+softplus, composite pointwise
+softshrink, composite pointwise
+reflection_pad1d, misc
+reflection_pad2d, misc
+replication_pad1d, misc
+replication_pad2d, misc
+replication_pad3d, misc
+upsample_linear1d, misc
+upsample_bilinear2d, misc
+upsample_trilinear3d, misc
+upsample_bicubic2d, misc
+upsample_nearest1d, misc
+upsample_nearest2d, misc
+upsample_nearest3d, misc
+col2im, misc
+column_stack, view/reshape
+im2col, view/reshape
+isfinite, composite pointwise
+isinf, composite pointwise
+isposinf, composite pointwise
+isneginf, composite pointwise
+special_entr, primitive pointwise
+special_expm1, alias
+special_exp2, alias
+special_gammaln, alias
+special_erf, alias
+special_erfc, alias
+special_erfinv, alias
+special_ndtr, primitive pointwise
+special_xlog1py, composite pointwise
+special_i0, alias
+special_i0e, composite pointwise
+special_i1, primitive pointwise
+special_i1e, composite pointwise
+special_logit, composite pointwise
+special_expit, composite pointwise
+fft_fft, fft
+fft_ifft, fft
+fft_rfft, fft
+fft_irfft, fft
+fft_hfft, fft
+fft_ihfft, fft
+fft_fft2, fft
+fft_ifft2, fft
+fft_rfft2, fft
+fft_irfft2, fft
+fft_fftn, fft
+fft_ifftn, fft
+fft_rfftn, fft
+fft_irfftn, fft
+fft_fftfreq, fft
+fft_rfftfreq, fft
+fft_fftshift, fft
+fft_ifftshift, fft
+linalg_cholesky_ex, alias
+linalg_cholesky, alias
+linalg_det, linalg
+det, alias
+linalg_lstsq, linalg
+linalg_slogdet, alias
+linalg_eig, alias
+linalg_eigvals, alias
+linalg_eigh, linalg
+linalg_eigvalsh, linalg
+linalg_householder_product, linalg
+linalg_inv_ex, alias
+linalg_inv, alias
+inner, reduction
+outer, composite pointwise
+ger, alias
+linalg_norm, reduction
+linalg_vector_norm, reduction
+linalg_matrix_norm, reduction
+linalg_svd, alias
+linalg_svdvals, linalg
+linalg_cond, linalg
+linalg_pinv, alias
+linalg_solve, alias
+linalg_tensorinv, linalg
+linalg_tensorsolve, linalg
+linalg_qr, alias
+linalg_matrix_power, linalg
+linalg_matrix_rank, alias
+linalg_multi_dot, linalg
+segment_reduce, misc
+pad_sequence, misc
+flatten_dense_tensors, misc
+unflatten_dense_tensors, misc
+bitwise_left_shift, primitive pointwise
+bitwise_right_shift, primitive pointwise
+trapezoid, reduction
+special_ndtri, primitive pointwise
+special_psi, primitive pointwise
+special_digamma, primitive pointwise
+special_erfcx, primitive pointwise
+special_xlogy, primitive pointwise
+special_zeta, primitive pointwise
+special_sinc, primitive pointwise
+special_round, primitive pointwise
+special_log1p, primitive pointwise
+isin, reduction

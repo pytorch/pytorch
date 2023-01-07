@@ -4,8 +4,8 @@
 #include <torch/types.h>
 
 #include <cstddef>
-#include <vector>
 #include <mutex>
+#include <vector>
 
 namespace torch {
 namespace serialize {

@@ -139,7 +139,7 @@ torch.device
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
 
-The :class:`torch.device` contains a device type (``'cpu'`` or ``'cuda'``) and optional device
+The :class:`torch.device` contains a device type (``'cpu'``, ``'cuda'`` or ``'mps'``) and optional device
 ordinal for the device type. If the device ordinal is not present, this object will always represent
 the current device for the device type, even after :func:`torch.cuda.set_device()` is called; e.g.,
 a :class:`torch.Tensor` constructed with device ``'cuda'`` is equivalent to ``'cuda:X'`` where X is
@@ -158,6 +158,9 @@ Via a string:
     >>> torch.device('cpu')
     device(type='cpu')
 
+    >>> torch.device('mps')
+    device(type='mps')
+
     >>> torch.device('cuda')  # current cuda device
     device(type='cuda')
 
@@ -167,6 +170,9 @@ Via a string and device ordinal:
 
     >>> torch.device('cuda', 0)
     device(type='cuda', index=0)
+
+    >>> torch.device('mps', 0)
+    device(type='mps', index=0)
 
     >>> torch.device('cpu', 0)
     device(type='cpu', index=0)
@@ -244,11 +250,15 @@ or will be allocated.
 Possible values are:
 
 - ``torch.contiguous_format``:
-  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in decreasing order.
+  Tensor is or will be allocated in dense non-overlapping memory. Strides represented by values in decreasing order.
 
 - ``torch.channels_last``:
-  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in
+  Tensor is or will be allocated in dense non-overlapping memory. Strides represented by values in
   ``strides[0] > strides[2] > strides[3] > strides[1] == 1`` aka NHWC order.
+
+- ``torch.channels_last_3d``:
+  Tensor is or will be allocated in dense non-overlapping memory. Strides represented by values in
+  ``strides[0] > strides[2] > strides[3] > strides[4] > strides[1] == 1`` aka NDHWC order.
 
 - ``torch.preserve_format``:
   Used in functions like `clone` to preserve the memory format of the input tensor. If input tensor is

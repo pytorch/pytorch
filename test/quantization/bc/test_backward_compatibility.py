@@ -9,8 +9,8 @@ from typing import Set
 # torch
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 from torch.fx import GraphModule
 
@@ -171,9 +171,10 @@ class TestSerialization(TestCase):
             m: torch.nn.Module,
             input_tensor: torch.Tensor,
         ) -> torch.nn.Module:
+            example_inputs = (input_tensor,)
             # do the quantizaton transforms and save result
             qconfig = torch.quantization.get_default_qconfig('fbgemm')
-            mp = quantize_fx.prepare_fx(m, {'': qconfig})
+            mp = quantize_fx.prepare_fx(m, {'': qconfig}, example_inputs=example_inputs)
             mp(input_tensor)
             mq = quantize_fx.convert_fx(mp)
             return mq

@@ -4,9 +4,10 @@
 // i.e. how to make a vector<IValue> from a set of concrete arguments.
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/stack.h>
 #include <c10/core/TensorOptions.h>
 
-#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/boxing/BoxedKernel.h>
 
 #include <c10/util/Metaprogramming.h>
 
@@ -80,6 +81,53 @@ torch::jit::Stack boxArgs(Args... args) {
   stack.reserve(sizeof...(Args));
   torch::jit::push(stack, std::forward<Args>(args)...);
   return stack;
+}
+
+template <class T>
+static inline constexpr size_t boxed_size_one() {
+  static_assert(!std::is_same<std::decay_t<T>, c10::TensorOptions>::value, "need to patch this path to support TensorOptions passed by reference");
+  return 1;
+}
+
+// torch::jit::push pushes 4 values for a TensorOptions; this needs to
+// be kept in sync.
+template <>
+inline constexpr size_t boxed_size_one<c10::TensorOptions>() {
+  return 4;
+}
+
+// NOTE: this could probably be simplified with C++17 fold expressions.
+template <typename...>
+struct BoxedSize : std::integral_constant<size_t, 0> {};
+template <class T, class... Args>
+struct BoxedSize<T, Args...> : std::integral_constant<size_t, boxed_size_one<T>() + BoxedSize<Args...>::value> {};
+
+template <class... Args>
+static inline constexpr size_t boxed_size() {
+  return BoxedSize<Args...>::value;
+}
+
+using IValueAlignedStorage = std::aligned_storage_t<sizeof(IValue), alignof(IValue)>;
+
+template <typename T>
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValueAlignedStorage* dest, T& arg, int& lastIdx) {
+  new (&dest[lastIdx]) IValue(arg);
+  lastIdx++;
+}
+
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValueAlignedStorage* dest, c10::TensorOptions options, int& lastIdx) {
+  new (&dest[lastIdx++]) IValue(c10::typeMetaToScalarType(options.dtype()));
+  new (&dest[lastIdx++]) IValue(options.layout());
+  new (&dest[lastIdx++]) IValue(options.device());
+  new (&dest[lastIdx++]) IValue(options.pinned_memory());
+}
+
+inline void boxArgsToStack(IValueAlignedStorage*, int&) {}
+
+template<typename T, typename... Args>
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(IValueAlignedStorage* dest, int& lastIdx, T& arg, Args &... args) {
+  boxToStack(dest, arg, lastIdx);
+  boxArgsToStack(dest, lastIdx, args...);
 }
 
 //
@@ -170,14 +218,13 @@ struct BoxedKernelWrapper<
   >
 > {
   static Result call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
+    const BoxedKernel& boxed_kernel_func,
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     Args... args
   ) {
     torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
 
     return guts::if_constexpr<!std::is_same<void, Result>::value>(
       [&] (auto delay_check) {
@@ -211,14 +258,13 @@ struct BoxedKernelWrapper<
   std::enable_if_t<can_box_all<OtherArgs...>::value, void>
 > {
   static at::Tensor& call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
+    const BoxedKernel& boxed_kernel_func,
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     at::Tensor& outArg, OtherArgs... otherArgs
   ) {
     torch::jit::Stack stack = boxArgs<at::Tensor&, OtherArgs...>(outArg, std::forward<OtherArgs>(otherArgs)...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
       "Boxed kernel was expected to return a single value on the stack, ",
@@ -238,14 +284,13 @@ struct BoxedKernelWrapper<
   std::enable_if_t<can_box_all<OtherArgs...>::value, void>
 > {
   static const at::Tensor& call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
+    const BoxedKernel& boxed_kernel_func,
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     const at::Tensor& outArg, OtherArgs... otherArgs
   ) {
     torch::jit::Stack stack = boxArgs(outArg, otherArgs...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
       "Boxed kernel was expected to return a single value on the stack, ",
@@ -276,14 +321,13 @@ struct BoxedKernelWrapper<
   >
 > {
   static at::Tensor& call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
+    const BoxedKernel& boxed_kernel_func,
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     FirstArg firstArg, RestArgs... restArgs
   ) {
     torch::jit::Stack stack = boxArgs<FirstArg, RestArgs...>(std::forward<FirstArg>(firstArg), std::forward<RestArgs>(restArgs)...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
       "Boxed kernel was expected to return a single value on the stack, ",
@@ -313,8 +357,7 @@ struct BoxedKernelWrapper<
   >
 > {
   static Result call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
+    const BoxedKernel& boxed_kernel_func,
     const OperatorHandle& opHandle,
     DispatchKeySet dispatchKeySet,
     Args... args
@@ -323,7 +366,7 @@ struct BoxedKernelWrapper<
     constexpr int RetCount = std::tuple_size<Result>();
 
     torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
+    boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == RetCount,
       "Boxed kernel was expected to return ", RetCount, " values on the stack, ",

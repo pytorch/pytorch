@@ -24,20 +24,23 @@ inline Tensor affine_grid(
         "Expected a batch of 2D affine matrices of shape Nx2x3 for size ",
         size,
         ". Got ",
-        theta.sizes(), ".");
+        theta.sizes(),
+        ".");
   } else if (size.size() == 5) {
     TORCH_CHECK(
         theta.dim() == 3 && theta.size(-2) == 3 && theta.size(-1) == 4,
         "Expected a batch of 3D affine matrices of shape Nx3x4 for size ",
         size,
         ". Got ",
-        theta.sizes(), ".");
+        theta.sizes(),
+        ".");
   } else {
     TORCH_CHECK(
         false,
         "affine_grid only supports 4D and 5D sizes, ",
         "for 2D and 3D affine transforms, respectively. ",
-        "Got size ", size);
+        "Got size ",
+        size);
   }
 
   if (*std::min_element(size.begin(), size.end()) <= 0) {
@@ -77,39 +80,43 @@ inline Tensor grid_sample(
   }
 
   if (!align_corners.has_value()) {
-    TORCH_WARN("Default grid_sample and affine_grid behavior has changed ",
-                   "to align_corners=False since 1.3.0. Please specify ",
-                   "align_corners=True if the old behavior is desired. ",
-                   "See the documentation of grid_sample for details.");
+    TORCH_WARN(
+        "Default grid_sample and affine_grid behavior has changed ",
+        "to align_corners=False since 1.3.0. Please specify ",
+        "align_corners=True if the old behavior is desired. ",
+        "See the documentation of grid_sample for details.");
     align_corners = false;
   }
 
-  return torch::grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners.value());
+  return torch::grid_sampler(
+      input, grid, mode_enum, padding_mode_enum, align_corners.value());
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.grid_sample
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.grid_sample
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::GridSampleFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::GridSampleFuncOptions`
+/// class to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::grid_sample(input, grid, F::GridSampleFuncOptions().mode(torch::kBilinear).padding_mode(torch::kZeros).align_corners(true));
+/// F::grid_sample(input, grid,
+/// F::GridSampleFuncOptions().mode(torch::kBilinear).padding_mode(torch::kZeros).align_corners(true));
 /// ```
 inline Tensor grid_sample(
     const Tensor& input,
     const Tensor& grid,
     const GridSampleFuncOptions& options = {}) {
   return detail::grid_sample(
-    input,
-    grid,
-    options.mode(),
-    options.padding_mode(),
-    options.align_corners());
+      input,
+      grid,
+      options.mode(),
+      options.padding_mode(),
+      options.align_corners());
 }
 
 } // namespace functional

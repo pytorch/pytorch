@@ -1,9 +1,27 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 
 #include <ATen/native/Histogram.h>
 #include <ATen/native/Resize.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_histogramdd_bin_edges.h>
+#include <ATen/ops/_histogramdd_bin_edges_native.h>
+#include <ATen/ops/_histogramdd_from_bin_cts.h>
+#include <ATen/ops/_histogramdd_from_bin_cts_native.h>
+#include <ATen/ops/_histogramdd_from_bin_tensors.h>
+#include <ATen/ops/_histogramdd_from_bin_tensors_native.h>
+#include <ATen/ops/aminmax.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/histc_native.h>
+#include <ATen/ops/histogram_native.h>
+#include <ATen/ops/histogramdd_native.h>
+#include <ATen/ops/linspace_native.h>
+#endif
 
 #include <numeric>
 #include <tuple>

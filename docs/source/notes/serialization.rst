@@ -224,7 +224,7 @@ this:
 
           def forward(self, input):
             if input.dim() > 1:
-            return torch.tensor(0)
+                return torch.tensor(0)
 
             out0 = self.l0(input)
             out0_relu = torch.nn.functional.relu(out0)
@@ -282,6 +282,7 @@ given two integer inputs:
 ::
 
     # PyTorch 1.5 (and earlier)
+    >>> a = torch.tensor(5)
     >>> b = torch.tensor(3)
     >>> a / b
     tensor(1)

@@ -1,10 +1,4 @@
-py_library(
-    name = "autograd",
-    srcs = glob(["*.py"]),
-    data = glob([
-        "*.yaml",
-        "templates/*",
-    ]),
-    visibility = ["//:__subpackages__"],
-    deps = ["//tools/codegen"],
-)
+load("//:tools/bazel.bzl", "rules")
+load(":build.bzl", "define_targets")
+
+define_targets(rules = rules)

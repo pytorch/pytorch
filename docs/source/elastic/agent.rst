@@ -59,3 +59,18 @@ to implement.
    :private-members:
 
 .. autoclass:: torch.distributed.elastic.agent.server.api.RunResult
+
+
+Watchdog in the Agent
+---------------------
+
+A named pipe based watchdog can be enabled in ```LocalElasticAgent``` if an
+environment variable ``TORCHELASTIC_ENABLE_FILE_TIMER`` with value 1 has
+been defined in the ```LocalElasticAgent``` process.
+Optionally, another environment variable ```TORCHELASTIC_TIMER_FILE```
+can be set with a unique file name for the named pipe. If the environment
+variable ```TORCHELASTIC_TIMER_FILE``` is not set, ```LocalElasticAgent```
+will internally create a unique file name and set it to the environment
+variable ```TORCHELASTIC_TIMER_FILE```, and this environment variable will
+be propagated to the worker processes to allow them to connect to the same
+named pipe that ```LocalElasticAgent``` uses.

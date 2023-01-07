@@ -80,5 +80,5 @@ TEST(ShapeTest, Ostream) {
   EXPECT_EQ(shape.to_string(), ss.str());
 }
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

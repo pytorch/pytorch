@@ -1,6 +1,6 @@
 #include "caffe2/image/image_input_op.h"
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -26,7 +26,7 @@ OPERATOR_SCHEMA(ImageInput)
       int batch_size = helper.GetSingleArgument<int>("batch_size", 0);
       int crop = helper.GetSingleArgument<int>("crop", -1);
       int color = helper.GetSingleArgument<int>("color", 1);
-      CHECK_GT(crop, 0);
+      TORCH_CHECK_GT(crop, 0);
       out[0] = CreateTensorShape(
           vector<int>{batch_size, crop, crop, color ? 3 : 1},
           TensorProto::FLOAT);
@@ -160,7 +160,7 @@ The dimension of the output image will always be cropxcrop
 
 NO_GRADIENT(ImageInput);
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(ImageInput, IDEEPFallbackOp<ImageInputOp<CPUContext>>);
 #endif
 

@@ -26,6 +26,25 @@ jobs:
       - uses: actions/github-script@v6
         with:
           script: |
+            // Do some dumb retries on requests.
+            const retries = 7;
+            const baseBackoff = 100;
+            const sleep = timeout => new Promise(resolve => setTimeout(resolve, timeout));
+            github.hook.wrap('request', async (request, options) => {
+              for (let attempt = 1; attempt <= retries; attempt++) {
+                try {
+                  return await request(options);
+                } catch (err) {
+                  if (attempt < retries) {
+                    core.warning(`Request getting retried. Attempt: ${attempt}`);
+                    await sleep(baseBackoff * Math.pow(2, attempt));
+                    continue;
+                  }
+                  throw err;
+                }
+              }
+            });
+
             const MAX_API_REQUESTS = 100;
 
             // If a PRs not labeled stale, label them stale after no update for 60 days.

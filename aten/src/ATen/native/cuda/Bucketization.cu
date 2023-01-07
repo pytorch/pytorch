@@ -10,7 +10,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_torch_cuda_cu_linker_symbol_op_native.h>
 #include <ATen/ops/bucketize_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/searchsorted_native.h>
@@ -189,11 +188,6 @@ Tensor searchsorted_cuda(
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
   at::native::searchsorted_out_cuda(sorted_sequence, self, out_int32, right, side_opt, sorter, result);
   return result;
-}
-
-// See [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu] in native_functions.yaml
-Tensor _torch_cuda_cu_linker_symbol_op_cuda(const Tensor& self) {
-  return self;
 }
 
 Tensor searchsorted_cuda(

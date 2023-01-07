@@ -54,8 +54,12 @@
 
 using namespace torch::jit::tensorexpr;
 
+#ifdef TORCH_ENABLE_LLVM
+
 // Helper function to print a snippet from a big multi-line string
 static void printLinesToFrom(const std::string& input_str, int from, int to);
+
+#endif
 
 int main(int argc, char* argv[]) {
   std::cout << "*** Structure of tensor expressions and statements ***"

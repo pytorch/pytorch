@@ -39,7 +39,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | reduce_scatter | ✘   | ✘   | ✘   | ✘   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -190,6 +190,8 @@ joined.
 
 .. autofunction:: is_nccl_available
 
+.. autofunction:: is_gloo_available
+
 .. autofunction:: is_torchelastic_launched
 
 --------------------------------------------------------------------------------
@@ -331,6 +333,12 @@ an opaque group handle that can be given as a ``group`` argument to all collecti
 
 .. autofunction:: new_group
 
+.. autofunction:: get_group_rank
+
+.. autofunction:: get_global_rank
+
+.. autofunction:: get_process_group_ranks
+
 Point-to-point communication
 ----------------------------
 
@@ -349,6 +357,10 @@ as they should never be created manually, but they are guaranteed to support two
 .. autofunction:: isend
 
 .. autofunction:: irecv
+
+.. autofunction:: batch_isend_irecv
+
+.. autoclass:: P2POp
 
 Synchronous and asynchronous collective operations
 --------------------------------------------------
@@ -417,6 +429,8 @@ Collective functions
 
 .. autofunction:: all_gather
 
+.. autofunction:: all_gather_into_tensor
+
 .. autofunction:: all_gather_object
 
 .. autofunction:: gather
@@ -428,6 +442,10 @@ Collective functions
 .. autofunction:: scatter_object_list
 
 .. autofunction:: reduce_scatter
+
+.. autofunction:: reduce_scatter_tensor
+
+.. autofunction:: all_to_all_single
 
 .. autofunction:: all_to_all
 
@@ -463,6 +481,9 @@ Please refer to the `profiler documentation <https://pytorch.org/docs/master/pro
 
 Multi-GPU collective functions
 ------------------------------
+
+.. warning::
+    The multi-GPU functions will be deprecated. If you must use them, please revisit our documentation later.
 
 If you have more than one GPU on each node, when using the NCCL and Gloo backend,
 :func:`~torch.distributed.broadcast_multigpu`
@@ -629,7 +650,7 @@ The following error message is produced on rank 0, allowing the user to determin
 ``TORCH_DISTRIBUTED_DEBUG``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Next, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigger additional useful logging and collective synchronization checks to ensure all ranks
+With ``TORCH_CPP_LOG_LEVEL=INFO``, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigger additional useful logging and collective synchronization checks to ensure all ranks
 are synchronized appropriately. ``TORCH_DISTRIBUTED_DEBUG`` can be set to either ``OFF`` (default), ``INFO``, or ``DETAIL`` depending on the debugging level
 required. Please note that the most verbose option, ``DETAIL`` may impact the application performance and thus should only be used when debugging issues.
 
@@ -678,6 +699,7 @@ include data such as forward time, backward time, gradient communication time, e
     if __name__ == "__main__":
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29501"
+        os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
         os.environ[
             "TORCH_DISTRIBUTED_DEBUG"
         ] = "DETAIL"  # set to DETAIL for runtime logging.
@@ -778,6 +800,7 @@ application crashes, rather than a hang or uninformative error message. As an ex
     if __name__ == "__main__":
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29501"
+        os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
         os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
         mp.spawn(worker, nprocs=2, args=())
 
@@ -819,6 +842,13 @@ following matrix shows how the log level can be adjusted via the combination of 
 | ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
 +-------------------------+-----------------------------+------------------------+
 
+Distributed has a custom Exception type derived from `RuntimeError` called `torch.distributed.DistBackendError`. This exception is thrown when a backend-specific error occurs. For example, if
+the `NCCL` backend is used and the user attempts to use a GPU that is not available to the `NCCL` library.
+
+.. autoclass:: torch.distributed.DistBackendError
+
+.. warning::
+    The DistBackendError exception type is an experimental feature is subject to change.
 
 .. Distributed modules that are missing specific entries.
 .. Adding them here for tracking purposes until they are more permanently fixed.
@@ -836,3 +866,4 @@ following matrix shows how the log level can be adjusted via the combination of 
 .. py:module:: torch.distributed.pipeline
 .. py:module:: torch.distributed.pipeline.sync
 .. py:module:: torch.distributed.pipeline.sync.skip
+.. py:module:: torch.distributed.tensor

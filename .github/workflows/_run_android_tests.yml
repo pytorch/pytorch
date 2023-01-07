@@ -1,0 +1,43 @@
+name: android-tests
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash -e -l {0}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - name: Setup miniconda
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: 3.8
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Build PyTorch Android
+        run: |
+          # Install NDK 21 after GitHub update
+          # https://github.com/actions/virtual-environments/issues/5595
+          ANDROID_ROOT="/usr/local/lib/android"
+          ANDROID_SDK_ROOT="${ANDROID_ROOT}/sdk"
+          SDKMANAGER="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          echo "y" | ${SDKMANAGER} "ndk;21.4.7075529"
+
+          export ANDROID_NDK="${ANDROID_SDK_ROOT}/ndk-bundle"
+          ln -sfn ${ANDROID_SDK_ROOT}/ndk/21.4.7075529 ${ANDROID_NDK}
+
+          echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
+          ${CONDA_RUN} ./scripts/build_pytorch_android.sh x86
+
+      - name: Run tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 25
+          script: ./android/run_tests.sh

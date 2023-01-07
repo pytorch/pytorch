@@ -5,11 +5,14 @@
 #include <Python.h>
 #include <ATen/ATen.h>
 
+#include <c10/core/SymNodeImpl.h>
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/utils/pybind.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/utils/pybind.h>
 
 // NOTE: See [Sharded File] comment in VariableType
 

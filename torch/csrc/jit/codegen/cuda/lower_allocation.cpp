@@ -58,11 +58,8 @@ class AllocationInserter : public kir::ExprMutator {
   // Fills info.buffer, info.alloc_pos, info.init_for_loop,
   // info.init_place_before, info.alloc_for_loop, info.alloc_place_before
   void fillAllocationInformation(AllocationInformation& info, Expr* expr) {
-    size_t alloc_pos = 0;
-    kir::ForLoop* init_for_loop = nullptr;
-    size_t fl_idx_next = 0;
     auto loop_alloc_info =
-        loop_utils::getAllocInformation(info.buffer, for_loops_);
+        lower_utils::getAllocInformation(info.buffer, for_loops_);
 
     info.init_for_loop = loop_alloc_info.init_for_loop;
     info.alloc_for_loop = loop_alloc_info.alloc_for_loop;
@@ -123,8 +120,8 @@ class AllocationInserter : public kir::ExprMutator {
           info.buffer->axis(axis_i)->isBroadcast()) {
         continue;
       }
-      auto concrete_id = gpu_lower->caParallelMap().getConcreteMappedID(
-          info.buffer->axis(axis_i));
+      auto concrete_id = gpu_lower->caMap()->getConcreteMappedID(
+          info.buffer->axis(axis_i), IdMappingMode::LOOP);
       init_dims.push_back(concrete_id);
     }
     Expr* init_expr =
@@ -134,7 +131,7 @@ class AllocationInserter : public kir::ExprMutator {
          ++init_loop_it) {
       auto id = *init_loop_it;
       kir::ForLoop* new_loop = nullptr;
-      auto extent_with_halo = gpu_lower->haloInfo().getExtent(id);
+      auto extent_with_halo = gpu_lower->haloInfo()->getExtent(id);
       if (extent_with_halo) {
         new_loop = IrBuilder::create<kir::ForLoop>(
             id,
@@ -144,7 +141,8 @@ class AllocationInserter : public kir::ExprMutator {
             nullptr,
             false,
             nullptr,
-            false);
+            false,
+            DoubleBufferLoopStage::NotApplicable);
       } else {
         new_loop = IrBuilder::create<kir::ForLoop>(id);
       }
@@ -163,13 +161,12 @@ class AllocationInserter : public kir::ExprMutator {
     std::vector<Val*> alloc_dims;
 
     for (const auto id : maybe_rfactor_domain) {
-      if (id->isReduction() || id->isStride() ||
-          id->getIterType() == IterType::BroadcastWithoutStride) {
+      if (id->isReduction() || id->isStride() || id->isBroadcast()) {
         continue;
       }
       auto extent = id->extent();
       // Use halo-extended extent if found
-      auto halo_extent = gpu_lower->haloInfo().getRootAxisInfo(id);
+      auto halo_extent = gpu_lower->haloInfo()->getRootAxisInfo(id);
       if (halo_extent.hasHalo()) {
         extent = IrBuilder::addExpr(
             extent, IrBuilder::create<Int>(halo_extent.width()));
@@ -216,7 +213,7 @@ class AllocationInserter : public kir::ExprMutator {
 
     // Get the halo extent if found
     auto getExtent = [this](IterDomain* id) {
-      auto extent = gpu_lower->haloInfo().getExtent(id);
+      auto extent = gpu_lower->haloInfo()->getExtent(id);
       if (extent == nullptr) {
         extent = id->extent();
       }
@@ -336,8 +333,8 @@ class AllocationInserter : public kir::ExprMutator {
         continue;
       }
 
-      auto concrete_id = gpu_lower->caParallelMap().getConcreteMappedID(
-          info.buffer->axis(axis_i));
+      auto concrete_id = gpu_lower->caMap()->getConcreteMappedID(
+          info.buffer->axis(axis_i), IdMappingMode::LOOP);
       const bool is_block_dim =
           isParallelTypeBlockDim(concrete_id->getParallelType());
       const bool is_thread_dim =
@@ -371,7 +368,7 @@ class AllocationInserter : public kir::ExprMutator {
 
       auto extent = concrete_id->extent();
 
-      if (gpu_lower->haloInfo().getExtent(info.buffer->axis(axis_i)) !=
+      if (gpu_lower->haloInfo()->getExtent(info.buffer->axis(axis_i)) !=
           nullptr) {
         has_halo = true;
       }
@@ -411,7 +408,7 @@ class AllocationInserter : public kir::ExprMutator {
 
     // Double the allocation size if double-buffered. Record the
     // original size for indexing.
-    if (info.buffer->isDoubleBuffered()) {
+    if (info.buffer->isDoubleBuffered() || info.buffer->isCircularBuffered()) {
       Val* original_alloc_size = nullptr;
       for (auto alloc_dim : alloc_dims) {
         if (original_alloc_size == nullptr) {
@@ -423,7 +420,11 @@ class AllocationInserter : public kir::ExprMutator {
       }
       GpuLower::current()->doubleBufferInfo().setOriginalAllocSize(
           info.buffer, original_alloc_size);
-      alloc_dims.push_back(IrBuilder::create<Int>(2));
+      int double_buffer_stage = 2;
+      if (info.buffer->isCircularBuffered()) {
+        double_buffer_stage = info.buffer->circularBufferDepth();
+      }
+      alloc_dims.push_back(IrBuilder::create<Int>(double_buffer_stage));
     }
 
     // Create the allocation node
@@ -439,7 +440,8 @@ class AllocationInserter : public kir::ExprMutator {
 
     // // Found where the allocation needs to be inserted
 
-    for (auto out : expr->outputs()) {
+    for (const auto i : c10::irange(expr->outputs().size())) {
+      auto out = expr->output(i);
       if (!out->isA<TensorView>()) {
         continue;
       }
@@ -453,6 +455,11 @@ class AllocationInserter : public kir::ExprMutator {
             default_val == nullptr,
             "Reduction should not have a default initialization value for predicate elimination.");
         init = expr->as<ReductionOp>()->init();
+      } else if (expr->isA<GroupedReductionOp>() && out_tv->hasReduction()) {
+        TORCH_INTERNAL_ASSERT(
+            default_val == nullptr,
+            "Reduction should not have a default initialization value for predicate elimination.");
+        init = expr->as<GroupedReductionOp>()->initVal(i);
       } else if (expr->isA<MmaOp>()) {
         init = expr->as<MmaOp>()->init();
       } else if (expr->isA<WelfordOp>()) {
@@ -471,6 +478,11 @@ class AllocationInserter : public kir::ExprMutator {
               out->name() == welford->outN()->name(), "Unreachable");
           init = welford->initN();
         }
+      } else if (expr->isA<GroupedWelfordOp>()) {
+        TORCH_INTERNAL_ASSERT(
+            default_val == nullptr,
+            "Welford should not have a default initialization value for predicate elimination.");
+        init = expr->as<GroupedWelfordOp>()->getInitValOfOutput(out);
       } else if (default_val != nullptr) {
         init = default_val;
       }

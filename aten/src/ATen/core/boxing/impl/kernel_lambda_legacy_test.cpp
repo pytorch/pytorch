@@ -456,8 +456,8 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithStringList
   auto output = std::move(outputs[0]).toList();
 
   EXPECT_EQ(2, output.size());
-  EXPECT_EQ("value1", output.get(0).toString()->string());
-  EXPECT_EQ("value2", output.get(1).toString()->string());
+  EXPECT_EQ("value1", output.get(0).toStringRef());
+  EXPECT_EQ("value2", output.get(1).toStringRef());
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
@@ -494,7 +494,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ("value2", outputs[0].toString()->string());
+  EXPECT_EQ("value2", outputs[0].toStringRef());
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
@@ -552,7 +552,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedM
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ("value2", outputs[0].toString()->string());
+  EXPECT_EQ("value2", outputs[0].toStringRef());
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapOutput_whenRegistered_thenCanBeCalled) {
@@ -832,7 +832,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
   EXPECT_EQ(3, outputs.size());
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(outputs[0].toTensor()));
   EXPECT_TRUE(outputs[1].isNone());
-  EXPECT_EQ("text", outputs[2].toString()->string());
+  EXPECT_EQ("text", outputs[2].toStringRef());
 
   outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::IValue(), 4, c10::IValue());
   EXPECT_EQ(3, outputs.size());

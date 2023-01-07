@@ -1,7 +1,15 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/native/Pool.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/avg_pool2d_backward_native.h>
+#include <ATen/ops/avg_pool2d_native.h>
+#endif
 
 namespace at {
 
@@ -65,20 +73,22 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
 
   /* resize output */
   if (input.ndimension() == 3) {
-    set_output(
+    set_output_raw_strided(
         0,
         {nInputPlane,
          outputHeight,
          outputWidth},
+        {},
         input.options());
   }
   else {
-    set_output(
+    set_output_raw_strided(
         0,
         {nbatch,
          nInputPlane,
          outputHeight,
          outputWidth},
+        {},
         input.options().memory_format(memory_format));
   }
 
@@ -134,7 +144,7 @@ TORCH_META_FUNC(avg_pool2d_backward) (
     memory_format);
 
   /* resize output */
-  set_output(0, input.sizes(), input.options().memory_format(memory_format));
+  set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format));
 }
 
 } // namespace meta

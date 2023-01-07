@@ -23,7 +23,7 @@ set -ex
 #       but since DOCS_INSTALL_PATH can be derived from DOCS_VERSION it's probably better to
 #       try and gather it first, just so we don't potentially break people who rely on this script
 # Argument 2: What version of the docs we are building.
-version="${2:-${DOCS_VERSION:-main}}"
+version="${2:-${DOCS_VERSION:-master}}"
 if [ -z "$version" ]; then
 echo "error: python_doc_push_script.sh: version (arg2) not specified"
   exit 1
@@ -38,7 +38,7 @@ echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
 fi
 
 is_main_doc=false
-if [ "$version" == "main" ]; then
+if [ "$version" == "master" ]; then
   is_main_doc=true
 fi
 
@@ -135,6 +135,9 @@ git commit -m "Generate Python docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
 
 if [[ "${WITH_PUSH:-}" == true ]]; then
+  # push to a temp branch first to trigger CLA check and satisfy branch protections
+  git push -u origin HEAD:pytorchbot/temp-branch-py -f
+  sleep 30
   git push -u origin "${branch}"
 fi
 

@@ -47,6 +47,7 @@ void poisson_cuda_kernel(
     at::PhiloxCudaState philox_args) {
   auto functor = [philox_args] __device__(
           scalar_t & ret_val, const scalar_t& lambda) {
+        CUDA_KERNEL_ASSERT(lambda >= 0 && "invalid Poisson rate, expected rate to be non-negative");
         auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
         curand_init(std::get<0>(seeds),

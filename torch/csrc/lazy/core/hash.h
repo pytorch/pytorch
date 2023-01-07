@@ -4,14 +4,14 @@
  */
 #pragma once
 
-#include <cstring>
-#include <set>
-#include <string>
-#include <vector>
 #include <ATen/Tensor.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/int128.h>
 #include <torch/csrc/Export.h>
+#include <cstring>
+#include <set>
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace lazy {
@@ -93,17 +93,17 @@ static inline hash_t Hash(const c10::Layout& value) {
 }
 
 static inline hash_t Hash(const c10::Scalar& value) {
-  switch(value.type()){
-  case c10::ScalarType::ComplexDouble:
-    return Hash(value.toComplexDouble());
-  case c10::ScalarType::Double:
-    return Hash(value.toDouble());
-  case c10::ScalarType::Long:
-    return Hash(value.toLong());
-  case c10::ScalarType::Bool:
-    return Hash(value.toBool());
-  default:
-    TORCH_INTERNAL_ASSERT(false, "Unknown scalar type.", value.type());
+  switch (value.type()) {
+    case c10::ScalarType::ComplexDouble:
+      return Hash(value.toComplexDouble());
+    case c10::ScalarType::Double:
+      return Hash(value.toDouble());
+    case c10::ScalarType::Long:
+      return Hash(value.toLong());
+    case c10::ScalarType::Bool:
+      return Hash(value.toBool());
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unknown scalar type.", value.type());
   }
 }
 

@@ -2,7 +2,6 @@
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/irange.h>
 
 #include <torch/csrc/jit/codegen/cuda/contiguity.h>
@@ -23,18 +22,29 @@
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
 #include <nvfuser_resources/fused_reduction.h>
+#include <nvfuser_resources/fused_welford_helper.h>
+#include <nvfuser_resources/fused_welford_impl.h>
 #include <nvfuser_resources/grid_broadcast.h>
 #include <nvfuser_resources/grid_reduction.h>
 #include <nvfuser_resources/grid_sync.h>
 #include <nvfuser_resources/helpers.h>
 #include <nvfuser_resources/index_utils.h>
+#include <nvfuser_resources/memory.h>
 #include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/swizzle.h>
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/tensorcore.h>
 #include <nvfuser_resources/tuple.h>
 #include <nvfuser_resources/type_traits.h>
 #include <nvfuser_resources/warp.h>
 #include <nvfuser_resources/welford.h>
+
+#ifdef USE_ROCM
+#include <nvfuser_resources/array_rocm.h>
+#include <nvfuser_resources/bf16_support_rocm.h>
+#include <nvfuser_resources/block_sync_default_rocm.h>
+#include <nvfuser_resources/warp_rocm.h>
+#endif
 
 #ifndef USE_ROCM
 #include <cuda_occupancy.h>
@@ -51,11 +61,9 @@ namespace executor_utils {
 std::string kernelPreamble() {
   std::stringstream ss;
 
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   ss << nvfuser_resources::fp16_support_cu;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   ss << nvfuser_resources::bf16_support_cu;
-#endif
 #else
   ss << R"(
 #ifndef __noinline__
@@ -71,12 +79,18 @@ std::string kernelPreamble() {
 #define __align__(x) __attribute__((aligned(x)))
 #endif
   )";
+  // fp16 support is automatic, bf16 is not
+  ss << nvfuser_resources::bf16_support_rocm_cu;
 #endif
 
   // Base classes and helpers
   ss << nvfuser_resources::tensor_cu;
   ss << nvfuser_resources::type_traits_cu;
+#ifndef USE_ROCM
   ss << nvfuser_resources::array_cu;
+#else
+  ss << nvfuser_resources::array_rocm_cu;
+#endif
   ss << nvfuser_resources::random_numbers_cu;
   ss << nvfuser_resources::helpers_cu;
   ss << nvfuser_resources::index_utils_cu;
@@ -86,7 +100,11 @@ std::string kernelPreamble() {
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     ss << nvfuser_resources::block_sync_atomic_cu;
   } else {
+#ifndef USE_ROCM
     ss << nvfuser_resources::block_sync_default_cu;
+#else
+    ss << nvfuser_resources::block_sync_default_rocm_cu;
+#endif
   }
   ss << nvfuser_resources::grid_sync_cu;
 
@@ -96,9 +114,17 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::grid_broadcast_cu;
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
+#ifndef USE_ROCM
   ss << nvfuser_resources::warp_cu;
   ss << nvfuser_resources::tensorcore_cu;
+  ss << nvfuser_resources::memory_cu;
+#else
+  ss << nvfuser_resources::warp_rocm_cu;
+#endif
+  ss << nvfuser_resources::fused_welford_helper_cu;
   ss << nvfuser_resources::fused_reduction_cu;
+  ss << nvfuser_resources::fused_welford_impl_cu;
+  ss << nvfuser_resources::swizzle_cu;
 
   // Random utilities
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
@@ -127,7 +153,7 @@ bool validateKernelArgTensor(
   }
 
   if (!is_cpu_scalar(arg) && !arg.is_cuda()) {
-    msg << "Argumnet is a CPU tensor which is not supported in fusions.\n";
+    msg << "Argument is a CPU tensor which is not supported in fusions.\n";
     return false;
   }
 
@@ -156,6 +182,7 @@ bool validateKernelArgTensor(
   at::ScalarType arg_data_type = arg.scalar_type();
   DataType param_data_type = *param->getDataType();
   bool match = false;
+  // TODO: remove this switch with `aten_to_data_type`
   switch (arg_data_type) {
     case at::ScalarType::Double:
       match = param_data_type == DataType::Double;
@@ -197,36 +224,36 @@ bool validateKernelArgTensor(
 
 // Return false if  arg_type doesn't match the type in param
 bool validateKernelArgScalar(
-    const c10::IValue& arg,
+    const ArgAbstract* arg,
     const Val* param,
     std::stringstream& msg) {
-  if (!arg.isScalar()) {
-    msg << "Argument is a scalar, but the parameter is not."
-        << "\n";
-    return false;
-  }
+  TORCH_INTERNAL_ASSERT(
+      param->getDataType().has_value(), "kernel param should have data type");
   DataType param_type = *param->getDataType();
   bool match = false;
-  switch (arg.toScalar().type()) {
-    case c10::ScalarType::Long:
+  switch (arg->type()) {
+    case ArgType::Long:
       match = param_type == DataType::Int || param_type == DataType::Int32;
       break;
-    case c10::ScalarType::ComplexDouble:
-      match = param_type == DataType::ComplexDouble ||
-          param_type == DataType::ComplexFloat;
-      break;
-    case c10::ScalarType::Double:
+    case ArgType::Double:
       match = param_type == DataType::Double || param_type == DataType::Float ||
           param_type == DataType::Half || param_type == DataType::BFloat16;
       break;
-    case c10::ScalarType::Bool:
+    case ArgType::Bool:
       match = param_type == DataType::Bool;
       break;
+    case ArgType::ComplexDouble:
+      match = param_type == DataType::ComplexDouble ||
+          param_type == DataType::ComplexFloat;
+      break;
     default:
-      match = false;
+      // TODO: We need to verify that param is actually a scalar
+      msg << "Argument is not a scalar, but the parameter is."
+          << "\n";
+      return false;
   }
   if (!match) {
-    msg << "Argument type is " << arg.toScalar().type()
+    msg << "Argument type is " << argTypeToString(arg->type())
         << ", but the parameter is " << param_type << "\n";
   }
   return match;
@@ -235,12 +262,23 @@ bool validateKernelArgScalar(
 // Return false if arg and param don't match up and if arg's device (if a
 // tensor) doesn't match provided device
 bool validateKernelArg(
-    const c10::IValue& arg,
+    const ArgAbstract* arg,
     const Val* param,
     const c10::Device& device,
     std::stringstream& msg) {
-  if (arg.isTensor()) {
-    return validateKernelArgTensor(arg.toTensor(), param, device, msg);
+  if (auto tensor_arg_abstract = dynamic_cast<const TensorArgAbstract*>(arg)) {
+    // TODO: don't use get tensor here. We would want to remove tensor reference
+    // for async compilation
+    return validateKernelArgTensor(
+        tensor_arg_abstract->getTensor(), param, device, msg);
+  } else if (arg->isType(ArgType::CpuScalarTensor)) {
+    // TODO: merge this one with above
+    // TODO: we need to check cpu scalar dtyp matches param
+    bool match = param->as<TensorView>()->isCpuScalar();
+    if (!match) {
+      msg << "Argument is scalar type, but kernel parameter is not\n";
+    }
+    return match;
   } else {
     return validateKernelArgScalar(arg, param, msg);
   }
@@ -328,7 +366,7 @@ bool checkValidMisalignedTensors(
 
 void validateKernelInputs(
     Fusion* fusion,
-    const at::ArrayRef<IValue>& inputs,
+    const KernelArgumentHolder& args,
     const c10::Device& device) {
   FUSER_PERF_SCOPE("executor_utils::ValidateKernelInputs");
 
@@ -336,13 +374,12 @@ void validateKernelInputs(
   FusionGuard fg(fusion);
   // Check inputs
   TORCH_INTERNAL_ASSERT(
-      inputs.size() == fusion->inputs().size(),
-      "Wrong number of kernel inputs.");
+      args.size() == fusion->inputs().size(), "Wrong number of kernel inputs.");
 
   std::stringstream msg;
   bool mismatch = false;
-  for (const auto i : c10::irange(inputs.size())) {
-    const IValue& arg = inputs[i];
+  for (const auto i : c10::irange(args.size())) {
+    const ArgAbstract* arg = args[i];
     const Val* param = fusion->inputs()[i];
     mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
   }
@@ -369,7 +406,7 @@ void validateKernelOutputs(
   for (const auto i : c10::irange(outputs.size())) {
     const at::Tensor& arg = outputs[i];
     const Val* param = fusion->outputs()[i];
-    mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
+    mismatch = !validateKernelArgTensor(arg, param, device, msg) || mismatch;
   }
   TORCH_INTERNAL_ASSERT(
       !mismatch, "Found one or more invalid arguments: ", msg.str());
@@ -522,6 +559,13 @@ std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo
 void validateAlignedVectorizeExtents(
     const VectorizedSetInfo& info,
     kir::ExpressionEvaluator& expr_eval) {
+  TORCH_INTERNAL_ASSERT(
+      !info.contig_root_ids.empty(),
+      "No root ID found for vectorization with ",
+      info.consumer_tv->toString(),
+      " and ",
+      info.producer_tv->toString());
+
   int64_t vectorized_merged_domain_extent = 1;
   for (auto id : info.contig_root_ids) {
     auto extent_val = expr_eval.evaluate(id->extent());
@@ -532,7 +576,7 @@ void validateAlignedVectorizeExtents(
         " as the extent of a vectorized root domain, ",
         id->toString(),
         ", is unknown.");
-    vectorized_merged_domain_extent *= extent_val.value();
+    vectorized_merged_domain_extent *= extent_val->as<int64_t>();
   }
 
   TORCH_INTERNAL_ASSERT(
@@ -546,13 +590,9 @@ void validateAlignedVectorizeExtents(
 }
 
 void validateAlignedVectorizedFusionInputOutput(
-    const IValue& aten_val,
+    const at::Tensor& aten_tensor,
     int word_size,
     TensorView* tv) {
-  TORCH_INTERNAL_ASSERT(aten_val.isTensor());
-
-  const auto& aten_tensor = aten_val.toTensor();
-
   TORCH_INTERNAL_ASSERT(
       reinterpret_cast<size_t>(aten_tensor.data_ptr()) %
               (word_size * aten_tensor.dtype().itemsize()) ==
@@ -573,11 +613,13 @@ void validateAlignedVectorizedFusionInputOutput(
   bool still_rightmost = true;
   for (auto i = aten_tensor.ndimension() - 1; i >= 0; --i) {
     const auto stride = aten_tensor.strides().at(i);
-    // If this domain is contiguous, then not necessary to check the
-    // stride. Otherwise, stride must be 1 if it's rightmost or
-    // divisible by word_size.
+    const auto size = aten_tensor.sizes().at(i);
+    // If this domain is contiguous or size == 1, then not necessary to check
+    // the stride. Otherwise, stride must be 1 if it's rightmost or
+    // divisible by word_size
     TORCH_INTERNAL_ASSERT(
-        stride == cur_contig_stride || (still_rightmost && stride == 1) ||
+        stride == cur_contig_stride || size == 1 ||
+            (still_rightmost && stride == 1) ||
             (!still_rightmost && stride % word_size == 0),
         "Vectorization of ",
         tv->toString(),
@@ -590,15 +632,18 @@ void validateAlignedVectorizedFusionInputOutput(
         stride)
     // If the domain is size-1, the next domain is still considered
     // rightmost.
-    const auto size = aten_tensor.sizes().at(i);
     still_rightmost = still_rightmost && size == 1;
-    cur_contig_stride = stride * size;
+    // We do not update cur_contig_stride for size==1 dimensions,
+    // since we have specialized vectorization stride check for them
+    if (size != 1) {
+      cur_contig_stride = stride * size;
+    }
   }
 }
 
 void validateAlignedVectorizedTensors(
     kir::Kernel* kernel,
-    const at::ArrayRef<IValue>& inputs,
+    const KernelArgumentHolder& args,
     const std::vector<at::Tensor>& outputs,
     caching::ExecutorCompileTimeInfoCache* data_cache,
     kir::ExpressionEvaluator& expr_eval) {
@@ -611,9 +656,6 @@ void validateAlignedVectorizedTensors(
 
   // Verify extents of aligned vectorized tensors
   for (const auto& vec_info : kernel->summary().vectorized_set_info) {
-    auto in_tv = vec_info.producer_tv;
-    auto out_tv = vec_info.consumer_tv;
-
     if (vec_info.vectorized_leaf_id->getParallelType() ==
         ParallelType::Vectorize) {
       validateAlignedVectorizeExtents(vec_info, expr_eval);
@@ -626,9 +668,12 @@ void validateAlignedVectorizedTensors(
                       .aligned_vectorized_inp_tensor_pos) {
     auto tv = kernel->inputs().at(pos)->as<TensorView>();
     auto word_size = kernel->summary().vectorized_accesses.at(tv);
-    validateAlignedVectorizedFusionInputOutput(inputs[pos], word_size, tv);
+    auto tensor_arg_abstract =
+        dynamic_cast<const TensorArgAbstract*>(args[pos]);
+    TORCH_INTERNAL_ASSERT(tensor_arg_abstract, "alias io only supports tensor");
+    validateAlignedVectorizedFusionInputOutput(
+        tensor_arg_abstract->getTensor(), word_size, tv);
   }
-
   if (!outputs.empty()) {
     for (auto pos : tensor_vectorization_validation_entry.get()
                         .aligned_vectorized_out_tensor_pos) {
@@ -644,7 +689,7 @@ void validateAlignedVectorizedTensors(
 // could be improved to include shared memory.
 void validateMisalignedVectorizedTensors(
     kir::Kernel* kernel,
-    const at::ArrayRef<IValue>& inputs,
+    const KernelArgumentHolder& args,
     const std::vector<at::Tensor>& outputs,
     caching::ExecutorCompileTimeInfoCache* data_cache,
     kir::ExpressionEvaluator& expr_eval) {
@@ -665,7 +710,13 @@ void validateMisalignedVectorizedTensors(
       inp_misaligned_tensors_pos.begin(),
       inp_misaligned_tensors_pos.end(),
       std::back_inserter(inp_misaligned_tensors),
-      [&inputs](int idx) { return inputs[idx]; });
+      [&args](int idx) {
+        auto tensor_arg_abstract =
+            dynamic_cast<const TensorArgAbstract*>(args[idx]);
+        TORCH_INTERNAL_ASSERT(
+            tensor_arg_abstract, "alias io only supports tensor");
+        return tensor_arg_abstract->getTensor();
+      });
 
   const auto& out_misaligned_tensors_pos =
       tensor_vectorization_validation_entry.get().out_misaligned_tensors_pos;
@@ -719,58 +770,79 @@ void validateVectorizedSplits(
 
 void validateVectorizedTensors(
     kir::Kernel* kernel,
-    const at::ArrayRef<IValue>& inputs,
+    const KernelArgumentHolder& args,
     const std::vector<at::Tensor>& outputs,
     caching::ExecutorCompileTimeInfoCache* data_cache,
     kir::ExpressionEvaluator& expr_eval) {
   FUSER_PERF_SCOPE("FusionExecutor::validateVectorizedTensors");
 
   validateAlignedVectorizedTensors(
-      kernel, inputs, outputs, data_cache, expr_eval);
+      kernel, args, outputs, data_cache, expr_eval);
 
   validateMisalignedVectorizedTensors(
-      kernel, inputs, outputs, data_cache, expr_eval);
+      kernel, args, outputs, data_cache, expr_eval);
 
   validateVectorizedSplits(kernel, expr_eval);
 }
 
-kir::ExpressionEvaluator bindKernelInputs(
-    const at::ArrayRef<IValue>& aten_inputs,
-    kir::Kernel* kernel,
-    bool check_consistency) {
-  FUSER_PERF_SCOPE("executor_utils::BindKernelInputs");
+namespace {
 
-  TORCH_INTERNAL_ASSERT(
-      kernel->inputs().size() == aten_inputs.size(),
-      "Something went wrong configuring launch. Inputs no longer match.");
+template <typename EXPR_EVALUATOR>
+void bindInputForExprEvaluation(
+    Val* val,
+    const ArgAbstract* arg,
+    bool check_consistency,
+    EXPR_EVALUATOR& expr_eval) {
+  if (val->getValType() == ValType::TensorView) {
+    TensorView* cg_tensor = val->as<TensorView>();
+    auto root_domain =
+        TensorDomain::noReductions(cg_tensor->getMaybeRFactorDomain());
 
-  kir::ExpressionEvaluator expr_eval;
-  const auto& inputs = kernel->inputs();
-
-  for (const auto i : c10::irange(inputs.size())) {
-    const auto input = inputs[i];
-
-    if (auto tensor_input = dynamic_cast<TensorView*>(input)) {
+    if (root_domain.size() == 0) {
       TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].isTensor(),
-          "Something went wrong configuring launch. Inputs no longer match at index:",
-          i);
-
-      const auto aten_tensor = aten_inputs[i].toTensor();
-      const auto root_domain = TensorDomain::noReductions(
-          tensor_input->domain()->getMaybeRFactorDomain());
+          arg->isType(ArgType::CpuScalarTensor) ||
+              (arg->isType(ArgType::Tensor) &&
+               dynamic_cast<const TensorArgAbstract*>(arg)->getRank() == 0),
+          "Something went wrong configuring launch. Inputs is not rank 0 tensor");
+    } else {
       TORCH_INTERNAL_ASSERT(
-          aten_tensor.ndimension() == static_cast<int>(root_domain.size()),
-          "Something went wrong configuring launch. Inputs no longer match.");
+          arg->isType(ArgType::Tensor),
+          "Something went wrong configuring launch. Inputs do not match.");
+
+      auto tensor_arg_abstract = dynamic_cast<const TensorArgAbstract*>(arg);
+      TORCH_INTERNAL_ASSERT(
+          tensor_arg_abstract &&
+              tensor_arg_abstract->getRank() == (int64_t)root_domain.size(),
+          "Something went wrong configuring launch. Inputs rank does not match.");
 
       for (const auto dim : c10::irange(root_domain.size())) {
+        const auto tensor_arg_size = tensor_arg_abstract->getSize(dim);
+        const auto tensor_arg_stride = tensor_arg_abstract->getStride(dim);
         const auto extent = root_domain[dim]->extent();
-        const auto value = aten_tensor.sizes()[dim];
-        if (value == 0 && tensor_input->uses().empty()) {
-          // If there's no uses, ignore there's a size-0 dimension.
-          continue;
+        if (root_domain[dim]->hasExpandedExtent()) {
+          TORCH_INTERNAL_ASSERT(
+              tensor_arg_stride == 0,
+              "Expecting an expanded dimension on dimension ",
+              dim,
+              " but found stride ",
+              tensor_arg_stride);
+          // Could support dynamic size on expanded dimension, so may not have
+          // an inferable expanded extent here. This check might be better to do
+          // once all values are bound.
+          auto maybe_expanded_size =
+              expr_eval.evaluate(root_domain[dim]->expandedExtent());
+          if (maybe_expanded_size.has_value()) {
+            TORCH_CHECK(
+                *maybe_expanded_size == tensor_arg_size,
+                "Expecting expanded extent of ",
+                *maybe_expanded_size,
+                " but received value of ",
+                tensor_arg_size);
+          }
         }
-        TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
+
+        const auto value =
+            root_domain[dim]->hasExpandedExtent() ? 1 : tensor_arg_size;
         bool should_bind = true;
         if (check_consistency) {
           const auto prev_value = expr_eval.evaluate(extent);
@@ -781,7 +853,7 @@ kir::ExpressionEvaluator bindKernelInputs(
                 extent->toString(),
                 " to ",
                 value,
-                "but it's already set to ",
+                " but it's already set to ",
                 *prev_value);
             should_bind = false;
           }
@@ -790,80 +862,68 @@ kir::ExpressionEvaluator bindKernelInputs(
           expr_eval.bind(extent, value);
         }
       }
-      // NOLINTNEXTLINE: https://bugs.llvm.org/show_bug.cgi?id=48525
-    } else if (input->isScalar() && input->dtype() == DataType::Int) {
+    }
+  } else if (val->getValType().value() == ValType::Scalar) {
+    if (val->getDataType().value() == DataType::Int) {
       TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].type()->kind() == c10::TypeKind::IntType,
-          "kernel expected Scalar Int inputs, but found",
-          aten_inputs[i].type()->str());
-      expr_eval.bind(input, aten_inputs[i].toInt());
+          arg->isType(ArgType::Long),
+          "fusion expected Scalar Int inputs, but found ",
+          argTypeToString(arg->type()));
+      expr_eval.bind(val, *static_cast<const int64_t*>(arg->arg()));
+    } else if (val->getDataType().value() == DataType::Double) {
+      TORCH_INTERNAL_ASSERT(
+          arg->isType(ArgType::Double),
+          "fusion expected Scalar Double inputs, but found ",
+          argTypeToString(arg->type()));
+      expr_eval.bind(val, *static_cast<const double*>(arg->arg()));
     }
   }
+}
 
+} // namespace
+
+kir::ExpressionEvaluator bindKernelInputs(
+    const KernelArgumentHolder& args,
+    kir::Kernel* kernel,
+    bool check_consistency) {
+  FUSER_PERF_SCOPE("executor_utils::BindKernelInputs");
+
+  TORCH_INTERNAL_ASSERT(
+      kernel->inputs().size() == args.size(),
+      "Something went wrong configuring launch. Inputs no longer match.");
+
+  kir::ExpressionEvaluator expr_eval;
+  const auto& inputs = kernel->inputs();
+
+  for (const auto i : c10::irange(inputs.size())) {
+    bindInputForExprEvaluation(
+        inputs[i], args[i], check_consistency, expr_eval);
+  }
   return expr_eval;
 }
 
 ExpressionEvaluator bindFusionInputs(
-    const at::ArrayRef<IValue>& aten_inputs,
+    const KernelArgumentHolder& args,
     Fusion* fusion) {
   FUSER_PERF_SCOPE("executor_utils::BindFusionInputs");
 
-  TORCH_INTERNAL_ASSERT(
-      fusion->inputs().size() == aten_inputs.size(),
-      "Something went wrong configuring launch. Inputs do not match.");
-
-  ExpressionEvaluator evaluator(fusion);
   auto inputs = fusion->inputs();
+  TORCH_INTERNAL_ASSERT(
+      inputs.size() == args.size(),
+      "Something went wrong configuring launch. Inputs do not match.\n",
+      "inputs: ",
+      ir_utils::toString(inputs),
+      " args size: ",
+      args.size());
+
+  ExpressionEvaluator expr_eval(fusion);
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.
-  for (const auto i : c10::irange(fusion->inputs().size())) {
-    if (inputs[i]->getValType() == ValType::TensorView) {
-      TensorView* cg_tensor = inputs[i]->as<TensorView>();
-
-      TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].isTensor(),
-          "Something went wrong configuring launch. Inputs do not match.");
-
-      auto aten_tensor = aten_inputs[i].toTensor();
-      auto root_dom =
-          TensorDomain::noReductions(cg_tensor->getMaybeRFactorDomain());
-      TORCH_INTERNAL_ASSERT(
-          aten_tensor.ndimension() == (int64_t)root_dom.size(),
-          "Something went wrong configuring launch. Inputs do not match.");
-      for (const auto dim : c10::irange(root_dom.size())) {
-        const auto extent = root_dom[dim]->extent();
-        const auto value = aten_tensor.sizes()[dim];
-        if (value == 0 && cg_tensor->uses().empty()) {
-          // If there's no uses, ignore there's a size-0 dimension.
-          continue;
-        }
-        TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
-        const auto prev_value = evaluator.evaluate(extent);
-        if (prev_value.has_value()) {
-          TORCH_CHECK(
-              *prev_value == value,
-              "Attempting to bind ",
-              extent,
-              " to ",
-              value,
-              "but it's already set to ",
-              *prev_value);
-        } else {
-          evaluator.bind(extent, value);
-        }
-      }
-    } else if (
-        inputs[i]->getValType().value() == ValType::Scalar &&
-        inputs[i]->getDataType().value() == DataType::Int) {
-      TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].type()->kind() == c10::TypeKind::IntType,
-          "fusion expected Scalar Int inputs, but found",
-          aten_inputs[i].type()->str());
-      evaluator.bind(inputs[i], aten_inputs[i].toInt());
-    }
+  for (const auto i : c10::irange(inputs.size())) {
+    bindInputForExprEvaluation(inputs[i], args[i], true, expr_eval);
   }
-  return evaluator;
+  return expr_eval;
 }
 
 void initializeCudaContext() {
@@ -873,18 +933,55 @@ void initializeCudaContext() {
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(nullptr);
+        *(c10::cuda::getFreeMutex()));
+    C10_CUDA_CHECK(cudaFree(nullptr));
   }
 }
 
-NvrtcFunction nvrtcCompile(
+namespace {
+
+// Dump PTX or CUBIN to a file
+#if CUDA_VERSION >= 11010
+void dumpCompiledCodeToFile(
+    const nvrtcProgram& program,
+    int fusion_id,
+    bool dump_cubin) {
+  const auto getSize = dump_cubin
+      ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+      : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+  const auto getCode = dump_cubin ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+                                  : at::globalContext().getNVRTC().nvrtcGetPTX;
+  size_t size = 0;
+  AT_CUDA_NVRTC_CHECK(getSize(program, &size));
+  std::vector<char> code(size);
+  AT_CUDA_NVRTC_CHECK(getCode(program, code.data()));
+  std::stringstream file_name;
+  file_name << "__tmp_kernel" << fusion_id << "."
+            << (dump_cubin ? "cubin" : "ptx");
+  std::cout << "PRINTING: " << file_name.str() << std::endl;
+  std::ofstream out(file_name.str());
+  TORCH_INTERNAL_ASSERT(out.is_open());
+  out.write(code.data(), size);
+  out.close();
+}
+#endif
+
+} // namespace
+
+std::pair<NvrtcFunction, std::string> nvrtcCompile(
     const std::string& code,
     const std::string& func_name,
     int id,
     c10::optional<int> opt_block_size) {
   FUSER_PERF_SCOPE("executor_utils::NVRTC");
+  if (isOptionDisabled(DisableOption::ArchCheck)) {
+    TORCH_WARN(
+        "NVFuser Compile: arch check disabled, should not compile any kernel");
+  }
+
   initializeCudaContext();
+
+  std::stringstream ptxas_log;
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
 
@@ -895,9 +992,12 @@ NvrtcFunction nvrtcCompile(
   nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
   {
+    std::stringstream ss;
+    ss << "__tmp_kernel" << id << ".cu";
+    std::string name = ss.str();
     FUSER_PERF_SCOPE("executor_utils::NvrtcCreateProgram");
     AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
-        &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+        &program, code.c_str(), name.c_str(), 0, nullptr, nullptr));
   }
 
   ResourceGuard holdProgram([&] {
@@ -906,8 +1006,8 @@ NvrtcFunction nvrtcCompile(
         at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
   });
 
-#ifdef __HIP_PLATFORM_HCC__
-  std::vector<const char*> args = {"--std=c++14"};
+#ifdef USE_ROCM
+  std::vector<const char*> args = {"--std=c++17"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
 #endif
@@ -916,6 +1016,12 @@ NvrtcFunction nvrtcCompile(
   // compile to sass is not allowed prior to CUDA 11.1
   compile_to_sass = false;
 #endif
+
+  if (isOptionDisabled(DisableOption::CompileToSass)) {
+    // Allows manually disabling compilation to sass
+    //  so the intermediate ptx could be checked.
+    compile_to_sass = false;
+  }
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
   // (since older driver doesn't necessrily recognize PTX emitted by new
@@ -928,30 +1034,34 @@ NvrtcFunction nvrtcCompile(
       std::to_string(minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
+      "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
-  const char* disable_fma = getenv("PYTORCH_NVFUSER_DISABLE_FMA");
-#ifdef __HIP_PLATFORM_HCC__
-  if (disable_fma && atoi(disable_fma)) {
+  const bool disable_fma = isOptionDisabled(DisableOption::Fma);
+#ifdef USE_ROCM
+  if (disable_fma) {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
   }
 #else
-  if (disable_fma && atoi(disable_fma)) {
+  if (disable_fma) {
     args.push_back("--fmad=false");
   } else {
     args.push_back("--fmad=true");
   }
 #endif
-
-#ifndef NDEBUG
   // Add line info to generated kernels
-  args.push_back("-lineinfo");
-#else
+  if (isDebugDumpEnabled(DebugDumpOption::DebugInfo)) {
+    args.push_back("-lineinfo");
+  }
+#ifdef NDEBUG
   // Avoid excessive register usage from assertion
   args.push_back("-DNDEBUG");
 #endif
+
+  if (isOptionEnabled(EnableOption::KernelProfile)) {
+    args.push_back("-DPYTORCH_NVFUSER_PROFILE_KERNEL");
+  }
 
   const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
   std::string jit_opt_level = "-O";
@@ -963,7 +1073,8 @@ NvrtcFunction nvrtcCompile(
   std::vector<char> info_log;
   unsigned int log_size = 8196;
 
-  if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
+  if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog) ||
+      isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
     // show register usage in compilation log
     if (compile_to_sass) {
       args.push_back("--ptxas-options");
@@ -984,6 +1095,12 @@ NvrtcFunction nvrtcCompile(
   if (ptxas_opt_level) {
     int val = atoi(ptxas_opt_level);
     if (val <= 4 && val >= 0) {
+      if (val < 4) {
+        TORCH_WARN(
+            "ptxas optimization level manually set as ",
+            val,
+            ", which could negatively affect performance. Try removing env variable PYTORCH_NVFUSER_JIT_OPT_LEVEL for optimal performance.");
+      }
       if (compile_to_sass) {
         jit_opt_level += std::to_string(val);
         args.push_back("--ptxas-options");
@@ -1025,14 +1142,20 @@ NvrtcFunction nvrtcCompile(
     // The maximum possible count allowed by ptxas is 255
     max_register = static_cast<uint32_t>(
         std::min(effective_max_reg_per_warp / warp_size, 255));
-
     if (compile_to_sass) {
       max_register_usage += std::to_string(max_register);
+      args.push_back("--ptxas-options");
       args.push_back(max_register_usage.c_str());
     } else {
       options.push_back(CU_JIT_MAX_REGISTERS);
       option_vals.push_back((void*)(intptr_t)max_register);
     }
+
+    ptxas_log << "\nCompile options: ";
+    for (auto arg : args) {
+      ptxas_log << arg << " ";
+    }
+    ptxas_log << " ; block size=" << opt_block_size.value() << "\n";
   }
 #endif
 
@@ -1045,26 +1168,21 @@ NvrtcFunction nvrtcCompile(
     const auto result = at::globalContext().getNVRTC().nvrtcCompileProgram(
         program, args.size(), args.data());
 
-    if (result != NVRTC_SUCCESS) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t logsize;
-      at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      std::vector<char> log(logsize);
-      at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+    size_t logsize = 0;
+    at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
 
+    std::vector<char> log(logsize);
+    at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+
+    if (result != NVRTC_SUCCESS) {
       TORCH_INTERNAL_ASSERT(
           false, code.c_str(), "\nCUDA NVRTC compile error: ", log.data());
-    } else if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t logsize;
-      at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
-      std::vector<char> log(logsize);
-      at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
-
-      std::cout << log.data() << std::endl;
     }
 
+    ptxas_log << log.data() << std::endl;
+    if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
+      std::cout << log.data() << std::endl;
+    }
     AT_CUDA_NVRTC_CHECK(result);
   }
 
@@ -1098,90 +1216,25 @@ NvrtcFunction nvrtcCompile(
 
   NvrtcFunction compiled_kernel_;
 
-  // TODO: We do go through different code path, should investigate whether this
-  // has an impact on generated binary.
-#ifndef __HIP_PLATFORM_HCC__
-  const char* prefix_env = getenv("PYTORCH_NVFUSER_CUBIN");
-  if (prefix_env) {
-    FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadCUBIN");
+#ifndef USE_ROCM
 
-    // Output ptx file
-    std::stringstream output_file_name;
-    output_file_name << prefix_env << "_" << id
-                     << (compile_to_sass ? ".cubin" : ".ptx");
-    std::ofstream outputFile(output_file_name.str().c_str(), std::ios::out);
-    if (outputFile.is_open()) {
-      outputFile.write(ptx.data(), ptx.size());
-      outputFile.close();
-    }
+#if CUDA_VERSION >= 11010
+  if (isDebugDumpEnabled(DebugDumpOption::Ptx)) {
+    dumpCompiledCodeToFile(program, id, false);
+  }
 
-    if (compile_to_sass) {
-      FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadPTX");
+  if (isDebugDumpEnabled(DebugDumpOption::Cubin)) {
+    TORCH_INTERNAL_ASSERT(
+        compile_to_sass,
+        "CUBIN not available as the kernel was compiled only to PTX");
+    dumpCompiledCodeToFile(program, id, true);
+  }
+#endif
 
-      // load sass directly
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
-          &(compiled_kernel_.module),
-          ptx.data(),
-          options.size(),
-          options.data(),
-          option_vals.data()));
-    } else {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      CUlinkState linkState;
-
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkCreate(
-          // 0, nullptr, nullptr, &linkState));
-          options.size(),
-          options.data(),
-          option_vals.data(),
-          &linkState));
-
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkAddData(
-          linkState,
-          CU_JIT_INPUT_PTX,
-          ptx.data(),
-          ptx_size,
-          "compiling PTX",
-          0,
-          nullptr,
-          nullptr));
-
-      if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
-        std::cout << info_log.data() << std::endl;
-      }
-
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t cubinSize;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      void* cubin;
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkComplete(
-          linkState, &cubin, &cubinSize));
-
-      // Output binary file
-      std::stringstream cubin_file_name;
-      cubin_file_name << prefix_env << "_" << id << ".cubin";
-
-      std::ofstream myCubinFile(
-          cubin_file_name.str().c_str(), std::ios::out | std::ios::binary);
-
-      if (myCubinFile.is_open()) {
-        myCubinFile.write(static_cast<const char*>(cubin), cubinSize);
-        myCubinFile.close();
-      }
-      // load compiled cubin
-      // AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
-      //     &(compiled_kernel_.module), cubin));
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
-          &(compiled_kernel_.module),
-          cubin,
-          options.size(),
-          options.data(),
-          option_vals.data()));
-    }
-  } else {
+  {
     FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadPTX");
 
-    // load ptx directly
+    // load ptx or cubin directly
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
         &(compiled_kernel_.module),
         ptx.data(),
@@ -1205,7 +1258,11 @@ NvrtcFunction nvrtcCompile(
       compiled_kernel_.module,
       lowered_kernel_name));
 
-  return compiled_kernel_;
+  TORCH_CHECK(
+      !isOptionDisabled(DisableOption::ArchCheck),
+      "NVFuser Compile: arch check disabled, should not return any compiled kernel");
+
+  return {compiled_kernel_, ptxas_log.str()};
 }
 
 namespace caching {
@@ -1276,8 +1333,8 @@ std::vector<IterDomain*> getParallelBindingsIterDomains(
           // Want to keep the broadcast dimensions if they are not resolved
           // TODO: piping down the parallel dimension map here would
           //  be helpful
-          auto& parallel_map = lower->caParallelMap();
-          if (parallel_map.getConcreteMappedID(id) == id) {
+          if (lower->caMap()->getConcreteMappedID(id, IdMappingMode::LOOP) ==
+              id) {
             parallel_ids.push_back(id);
           }
         } else {
@@ -1323,16 +1380,14 @@ std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
     GpuLower* lower,
     std::vector<IterDomain*>& parallel_binding_ids) {
   auto parallel_iter_extents_ptr = std::make_unique<ParallelExtentMap>();
-  auto& parallel_map = lower->caParallelMap();
+  const auto& ca_map = lower->caMap();
   std::vector<IterDomain*> mapped;
   bool is_tidx_warp_padded = lower->getWarpPaddedParallelInfo().is_tidx_padded;
 
   for (auto id : parallel_binding_ids) {
     if (std::any_of(
-            mapped.begin(),
-            mapped.end(),
-            [id, &parallel_map](IterDomain* mapped_id) {
-              return parallel_map.areMapped(mapped_id, id);
+            mapped.begin(), mapped.end(), [id, &ca_map](IterDomain* mapped_id) {
+              return ca_map->areMapped(mapped_id, id, IdMappingMode::LOOP);
             })) {
       if (id->getParallelType() != ParallelType::TIDx || !is_tidx_warp_padded) {
         continue;
@@ -1340,7 +1395,8 @@ std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
     }
 
     insertParallelExtent(
-        parallel_map.getConcreteMappedID(id), parallel_iter_extents_ptr);
+        ca_map->getConcreteMappedID(id, IdMappingMode::LOOP),
+        parallel_iter_extents_ptr);
     mapped.push_back(id);
   }
 

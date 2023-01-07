@@ -50,8 +50,9 @@ class Cloneable : public virtual Module {
         "and not the constructor?");
     for (const auto& parameter : named_parameters(/*recurse=*/false)) {
       auto& tensor = *parameter;
-      auto data = device && tensor.device() != *device ?
-          tensor.to(*device) : autograd::Variable(tensor).clone();
+      auto data = device && tensor.device() != *device
+          ? tensor.to(*device)
+          : autograd::Variable(tensor).clone();
       copy->parameters_[parameter.key()].set_data(data);
     }
     TORCH_CHECK(
@@ -62,8 +63,9 @@ class Cloneable : public virtual Module {
         "and not the constructor?");
     for (const auto& buffer : named_buffers(/*recurse=*/false)) {
       auto& tensor = *buffer;
-      auto data = device && tensor.device() != *device ?
-          tensor.to(*device) : autograd::Variable(tensor).clone();
+      auto data = device && tensor.device() != *device
+          ? tensor.to(*device)
+          : autograd::Variable(tensor).clone();
       copy->buffers_[buffer.key()].set_data(data);
     }
     TORCH_CHECK(

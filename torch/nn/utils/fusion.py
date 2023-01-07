@@ -27,10 +27,10 @@ def fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, trans
     else:
         shape = [-1, 1] + [1] * (len(conv_w.shape) - 2)
 
-    conv_w = conv_w * (bn_w * bn_var_rsqrt).reshape(shape)
-    conv_b = (conv_b - bn_rm) * bn_var_rsqrt * bn_w + bn_b
+    fused_conv_w = conv_w * (bn_w * bn_var_rsqrt).reshape(shape)
+    fused_conv_b = (conv_b - bn_rm) * bn_var_rsqrt * bn_w + bn_b
 
-    return torch.nn.Parameter(conv_w), torch.nn.Parameter(conv_b)
+    return torch.nn.Parameter(fused_conv_w, conv_w.requires_grad), torch.nn.Parameter(fused_conv_b, conv_b.requires_grad)
 
 def fuse_linear_bn_eval(linear, bn):
     assert(not (linear.training or bn.training)), "Fusion only for eval!"
@@ -50,4 +50,4 @@ def fuse_linear_bn_weights(linear_w, linear_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b)
     fused_w = linear_w * bn_scale.unsqueeze(-1)
     fused_b = (linear_b - bn_rm) * bn_scale + bn_b
 
-    return torch.nn.Parameter(fused_w), torch.nn.Parameter(fused_b)
+    return torch.nn.Parameter(fused_w, linear_w.requires_grad), torch.nn.Parameter(fused_b, linear_b.requires_grad)

@@ -1,11 +1,30 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/Config.h>
 
 #include <ATen/native/mkldnn/Matmul.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/CPUFunctions.h>
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/addmv.h>
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/dot.h>
+#include <ATen/ops/dot_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mul_cpu_dispatch.h>
+#include <ATen/ops/mv_native.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/vdot_native.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -16,7 +35,7 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
   TORCH_CHECK(mat.size(1) == vec.size(0) && (mat.size(0) == self.numel() || self.numel() == 1),
      "size mismatch, got ", self.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
-  set_output(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
+  set_output_raw_strided(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
 }
 }
 
@@ -165,7 +184,7 @@ Tensor dot(const Tensor &self, const Tensor &other){
     return r;
   }
 
-  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "dot", [&] {
+  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::BFloat16, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
     return result;

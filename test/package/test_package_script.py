@@ -6,11 +6,7 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    IS_SANDCASTLE,
-    run_tests,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
 
 try:
     from .common import PackageTestCase
@@ -538,10 +534,7 @@ class TestPackageScript(PackageTestCase):
         Test tensors shared across eager and ScriptModules on load
         are the same.
         """
-        from package_a.test_module import (
-            ModWithTensor,
-            ModWithTwoSubmodsAndTensor,
-        )
+        from package_a.test_module import ModWithTensor, ModWithTwoSubmodsAndTensor
 
         shared_tensor = torch.ones(3, 3)
 
@@ -595,10 +588,7 @@ class TestPackageScript(PackageTestCase):
         the backing cpp TensorImpl is. We load/save storages based off of this
         cpp TensorImpl and not the python identity.
         """
-        from package_a.test_module import (
-            ModWithTensor,
-            ModWithTwoSubmodsAndTensor,
-        )
+        from package_a.test_module import ModWithTensor, ModWithTwoSubmodsAndTensor
 
         shared_tensor = torch.ones(3, 3)
 

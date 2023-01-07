@@ -76,7 +76,7 @@ class MklSparseCsrDescriptor
     : public MklSparseDescriptor<sparse_matrix, &mkl_sparse_destroy> {
  public:
   MklSparseCsrDescriptor(const Tensor& input) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_sparse_csr());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY((input.layout() == kSparseCsr || input.layout() == kSparseBsr));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 2);
 
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -100,8 +100,10 @@ class MklSparseCsrDescriptor
 
     sparse_matrix_t raw_descriptor;
 
-    // Assuming that the last two dimensions are block elements of the matrix
-    if (values.dim() == 3 && crow_indices.dim() == 1 && col_indices.dim() == 1) {
+    if (input.layout() == kSparseBsr) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          values.dim() == 3 && crow_indices.dim() == 1 &&
+          col_indices.dim() == 1);
       TORCH_CHECK(
           values.size(-1) == values.size(-2),
           "MKL Sparse doesn't support matrices with non-square blocks.");

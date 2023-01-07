@@ -18,8 +18,28 @@
 
 using namespace torch::jit::fuser::cuda;
 
-std::string toString(ReductionParams rparams);
-std::string toString(PointwiseParams params);
+// Make a tensor that is known to be non-contiguous of dimensionality=ndims,
+// but unknown sizes
+TensorView* makeSymbolicTensor(size_t ndims, DataType dtype = DataType::Float);
+
+// Make a tensor that is known to be fully contiguous of dimensionality=ndims,
+// but unknown sizes. Taken from test_gpu.cpp
+TensorView* makeContigTensor(size_t ndims, DataType dtype = DataType::Float);
+
+// Make a non-contiguous tensor of compile-time known sizes
+TensorView* makeConcreteTensor(
+    std::vector<int64_t> shape,
+    DataType dtype = DataType::Float);
+
+// Make a contiguous tensor of compile-time known sizes
+TensorView* makeContigConcreteTensor(
+    std::vector<int64_t> shape,
+    DataType dtype = DataType::Float);
+
+std::string toString(const ReductionParams& rparams);
+std::string toString(const PointwiseParams& params);
+std::string toString(const TransposeParams& params);
+std::string toString(const std::shared_ptr<HeuristicParams>& params);
 std::string toString(LaunchParams lparams);
 
 // Run benchmark iterations with provided inputs. If not segmented, report
@@ -32,34 +52,31 @@ void runBenchmarkIterations(
 
 void clearL2Cache();
 
-// Make a tensor that is known to be fully contiguous of dimensionality=ndims,
-// but unknown sizes. Taken from test_gpu.cpp
-TensorView* makeContigTensor(size_t ndims, DataType dtype = DataType::Float);
-
 class CudaKernelTimer {
  public:
   CudaKernelTimer() {
     // Setup
-    cudaEventCreate(&start_event);
-    cudaEventCreate(&finish_event);
-    cudaEventRecord(start_event);
+    C10_CUDA_CHECK(cudaEventCreate(&start_event));
+    C10_CUDA_CHECK(cudaEventCreate(&finish_event));
+    C10_CUDA_CHECK(cudaEventRecord(start_event));
   }
 
   ~CudaKernelTimer() {
-    cudaEventDestroy(start_event);
-    cudaEventDestroy(finish_event);
+    C10_CUDA_IGNORE_ERROR(cudaEventDestroy(start_event));
+    C10_CUDA_IGNORE_ERROR(cudaEventDestroy(finish_event));
   }
 
   void restart() {
-    cudaEventRecord(start_event);
+    C10_CUDA_CHECK(cudaEventRecord(start_event));
   }
 
   float elapsed() {
     // Record
-    cudaEventRecord(finish_event);
-    cudaEventSynchronize(start_event);
-    cudaEventSynchronize(finish_event);
-    cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event);
+    C10_CUDA_CHECK(cudaEventRecord(finish_event));
+    C10_CUDA_CHECK(cudaEventSynchronize(start_event));
+    C10_CUDA_CHECK(cudaEventSynchronize(finish_event));
+    C10_CUDA_CHECK(
+        cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event));
     return kernel_time_ms_;
   }
 

@@ -23,39 +23,6 @@ namespace {
 
 using scale_t = std::vector<c10::optional<double>>;
 
-static inline int64_t nearest_idx(
-    int64_t output_index,
-    int64_t input_size,
-    int64_t output_size,
-    c10::optional<double> scales) {
-  // This method specificly treats cases: output_size == input_size or
-  // output_size == 2 * input_size, that we would like to get rid of
-  // We keep this method for BC and consider as deprecated.
-  // See nearest_exact_idx as replacement
-  if (output_size == input_size) {
-    // scale_factor = 1, simply copy
-    return output_index;
-  } else if (output_size == 2 * input_size) {
-    // scale_factor = 2, shift input index
-    return output_index >> 1;
-  } else {
-    float scale = compute_scales_value<float>(scales, input_size, output_size);
-    return nearest_neighbor_compute_source_index(scale, output_index, input_size);
-  }
-}
-
-static inline int64_t nearest_exact_idx(
-    int64_t output_index,
-    int64_t input_size,
-    int64_t output_size,
-    c10::optional<double> scales) {
-  float scale = compute_scales_value<float>(scales, input_size, output_size);
-  return nearest_neighbor_exact_compute_source_index(scale, output_index, input_size);
-}
-
-// Define a typedef to dispatch to nearest_idx or nearest_exact_idx
-typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, c10::optional<double>);
-
 // Helper structs and methods for cpu_upsample_linear
 //
 // Interpolation methods that used below are separable, and as such we can compute the interpolation
@@ -461,6 +428,16 @@ void cpu_upsample_nearest_channels_last(
   }
 }
 
+template <typename scalar_t, typename accscalar_t>
+inline VecType<scalar_t> interpolate(const scalar_t* t, accscalar_t w) {
+  return VecType<scalar_t>::loadu(t) * VecType<scalar_t>(w);
+}
+
+template <typename scalar_t, typename accscalar_t, typename... Args>
+inline VecType<scalar_t> interpolate(const scalar_t* t, accscalar_t w, Args... args) {
+  return VecType<scalar_t>::loadu(t) * VecType<scalar_t>(w) + interpolate(args...);
+}
+
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_linear_channels_last(
     const Tensor& output_,
@@ -494,11 +471,12 @@ void cpu_upsample_linear_channels_last(
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
   int64_t output_slice_size = output_depth * output_height * output_width * channels;
 
+  using opmath_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<scalar_t>;
   auto loop2d = [&](int64_t begin, int64_t end) {
-    const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
+    const auto height_scale = area_pixel_compute_scale<opmath_t>(
         input_height, output_height, align_corners, scales[0]);
-    const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
+    const auto width_scale = area_pixel_compute_scale<opmath_t>(
         input_width, output_width, align_corners, scales[1]);
 
     auto input_indexr = [=](int64_t n, int64_t h, int64_t w) {
@@ -508,7 +486,7 @@ void cpu_upsample_linear_channels_last(
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ih0, ih1, iw0, iw1;
-    scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
+    opmath_t h0lambda, h1lambda, w0lambda, w1lambda;
     for (const auto n : c10::irange(begin, end)) {
       for (const auto oh : c10::irange(output_height)) {
         compute_source_index_and_lambda(
@@ -523,23 +501,19 @@ void cpu_upsample_linear_channels_last(
           scalar_t* i01 = input_indexr(n, ih0, iw1);
           scalar_t* i10 = input_indexr(n, ih1, iw0);
           scalar_t* i11 = input_indexr(n, ih1, iw1);
+          opmath_t w00 = h0lambda * w0lambda;
+          opmath_t w01 = h0lambda * w1lambda;
+          opmath_t w10 = h1lambda * w0lambda;
+          opmath_t w11 = h1lambda * w1lambda;
 
           int64_t size = channels;
           int64_t d = 0;
           for (; d < size - (size % Vec::size()); d += Vec::size()) {
-            Vec out_vec =
-                Vec(h0lambda * w0lambda) * Vec::loadu(i00 + d) + /* h0 * w0 * i00 */
-                Vec(h0lambda * w1lambda) * Vec::loadu(i01 + d) + /* h0 * w1 * i01 */
-                Vec(h1lambda * w0lambda) * Vec::loadu(i10 + d) + /* h1 * w0 * i10 */
-                Vec(h1lambda * w1lambda) * Vec::loadu(i11 + d);  /* h1 * w1 * i11 */
+            auto out_vec = interpolate(i00 + d, w00, i01 + d, w01, i10 + d, w10, i11 + d, w11);
             out_vec.store(out + d);
           }
           for (; d < size; d++) {
-            out[d] =
-                h0lambda * w0lambda * i00[d] + /* h0 * w0 * i00 */
-                h0lambda * w1lambda * i01[d] + /* h0 * w1 * i01 */
-                h1lambda * w0lambda * i10[d] + /* h1 * w0 * i10 */
-                h1lambda * w1lambda * i11[d];  /* h1 * w1 * i11 */
+            out[d] = i00[d] * w00 + i01[d] * w01 + i10[d] * w10 + i11[d] * w11;
           }
         }
       }
@@ -547,11 +521,11 @@ void cpu_upsample_linear_channels_last(
   };
 
   auto loop3d = [&](int64_t begin, int64_t end) {
-    const scalar_t depth_scale = area_pixel_compute_scale<scalar_t>(
+    const auto depth_scale = area_pixel_compute_scale<opmath_t>(
         input_depth, output_depth, align_corners, scales[0]);
-    const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
+    const auto height_scale = area_pixel_compute_scale<opmath_t>(
         input_height, output_height, align_corners, scales[1]);
-    const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
+    const auto width_scale = area_pixel_compute_scale<opmath_t>(
         input_width, output_width, align_corners, scales[2]);
 
     auto input_indexr = [=](int64_t n, int64_t d, int64_t h, int64_t w) {
@@ -562,7 +536,7 @@ void cpu_upsample_linear_channels_last(
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t id0, id1, ih0, ih1, iw0, iw1;
-    scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
+    opmath_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
     for (const auto n : c10::irange(begin, end)) {
       for (const auto od : c10::irange(output_depth)) {
         compute_source_index_and_lambda(
@@ -585,31 +559,27 @@ void cpu_upsample_linear_channels_last(
             scalar_t* i101 = input_indexr(n, id1, ih0, iw1);
             scalar_t* i110 = input_indexr(n, id1, ih1, iw0);
             scalar_t* i111 = input_indexr(n, id1, ih1, iw1);
+            opmath_t w000 = d0lambda * h0lambda * w0lambda;
+            opmath_t w001 = d0lambda * h0lambda * w1lambda;
+            opmath_t w010 = d0lambda * h1lambda * w0lambda;
+            opmath_t w011 = d0lambda * h1lambda * w1lambda;
+            opmath_t w100 = d1lambda * h0lambda * w0lambda;
+            opmath_t w101 = d1lambda * h0lambda * w1lambda;
+            opmath_t w110 = d1lambda * h1lambda * w0lambda;
+            opmath_t w111 = d1lambda * h1lambda * w1lambda;
 
             int64_t size = channels;
             int64_t d = 0;
             for (; d < size - (size % Vec::size()); d += Vec::size()) {
-              Vec out_vec =
-                  Vec(d0lambda * h0lambda * w0lambda) * Vec::loadu(i000 + d) + /* d0 * h0 * w0 * i000 */
-                  Vec(d0lambda * h0lambda * w1lambda) * Vec::loadu(i001 + d) + /* d0 * h0 * w1 * i001 */
-                  Vec(d0lambda * h1lambda * w0lambda) * Vec::loadu(i010 + d) + /* d0 * h1 * w0 * i010 */
-                  Vec(d0lambda * h1lambda * w1lambda) * Vec::loadu(i011 + d) + /* d0 * h1 * w1 * i011 */
-                  Vec(d1lambda * h0lambda * w0lambda) * Vec::loadu(i100 + d) + /* d1 * h0 * w0 * i100 */
-                  Vec(d1lambda * h0lambda * w1lambda) * Vec::loadu(i101 + d) + /* d1 * h0 * w1 * i101 */
-                  Vec(d1lambda * h1lambda * w0lambda) * Vec::loadu(i110 + d) + /* d1 * h1 * w0 * i110 */
-                  Vec(d1lambda * h1lambda * w1lambda) * Vec::loadu(i111 + d);  /* d1 * h1 * w1 * i111 */
+              auto out_vec = interpolate(
+                  i000 + d, w000, i001 + d, w001, i010 + d, w010, i011 + d, w011,
+                  i100 + d, w100, i101 + d, w101, i110 + d, w110, i111 + d, w111);
               out_vec.store(out + d);
             }
             for (; d < size; d++) {
               out[d] =
-                  d0lambda * h0lambda * w0lambda * i000[d] + /* d0 * h0 * w0 * i000 */
-                  d0lambda * h0lambda * w1lambda * i001[d] + /* d0 * h0 * w1 * i001 */
-                  d0lambda * h1lambda * w0lambda * i010[d] + /* d0 * h1 * w0 * i010 */
-                  d0lambda * h1lambda * w1lambda * i011[d] + /* d0 * h1 * w1 * i011 */
-                  d1lambda * h0lambda * w0lambda * i100[d] + /* d1 * h0 * w0 * i100 */
-                  d1lambda * h0lambda * w1lambda * i101[d] + /* d1 * h0 * w1 * i101 */
-                  d1lambda * h1lambda * w0lambda * i110[d] + /* d1 * h1 * w0 * i110 */
-                  d1lambda * h1lambda * w1lambda * i111[d];  /* d1 * h1 * w1 * i111 */
+                  i000[d] * w000 + i001[d] * w001 + i010[d] * w010 + i011[d] * w011 +
+                  i100[d] * w100 + i101[d] * w101 + i110[d] * w110 + i111[d] * w111;
             }
           }
         }
@@ -643,8 +613,7 @@ struct HelperInterpBase {
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
 
-    for (const auto j : c10::irange(interp_size)) {
-      (void)j; //Suppress unused variable warning
+    for (const auto j C10_UNUSED : c10::irange(interp_size)) {
       output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
       output.emplace_back(empty(new_shape, CPU(output_type)));
     }
@@ -765,8 +734,7 @@ struct HelperInterpNearest : public HelperInterpBase {
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
 
-    for (const auto j : c10::irange(interp_size)) {
-      (void)j; //Suppress unused variable warning
+    for (const auto j C10_UNUSED : c10::irange(interp_size)) {
       output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
       // Defines weights for consistency, but not used
       output.emplace_back(at::ones(new_shape, CPU(output_type)));
@@ -795,9 +763,8 @@ struct HelperInterpNearest : public HelperInterpBase {
     HelperInterpNearest::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpNearest::interp_size);
 
-    AT_DISPATCH_FLOATING_TYPES(
-      scalar_type, "compute_indices_weights_nearest", [&] {
-
+    AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, scalar_type, "compute_indices_weights_nearest", [&] {
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
         auto input_index_ptr = output[0].data_ptr<int64_t>();
@@ -808,10 +775,11 @@ struct HelperInterpNearest : public HelperInterpBase {
         // index_f32 = (output_index) * scale
         // input_index = floor(index_f32)
         // Same as OpenCV INTER_NEAREST
-
+        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto i : c10::irange(output_size)) {
-          const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
-              scale, i, /*align_corners=*/true, /*cubic=*/false);
+          const auto real_input_index =
+              area_pixel_compute_source_index<opmath_t>(
+                  scale, i, /*align_corners=*/true, /*cubic=*/false);
           input_index = static_cast<int64_t>(floorf(real_input_index));
           input_index_ptr[i] = static_cast<int64_t>(std::min(input_index, input_size - 1)) * stride;
         }
@@ -848,7 +816,6 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
 
     AT_DISPATCH_FLOATING_TYPES(
       scalar_type, "compute_indices_weights_nearest", [&] {
-
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
         auto input_index_ptr = output[0].data_ptr<int64_t>();
@@ -859,10 +826,11 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
         // index_f32 = (output_index + 0.5) * scale - 0.5
         // input_index = round(index_f32)
         // Same as Pillow and Scikit-Image/Scipy ndi.zoom
-
+        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto i : c10::irange(output_size)) {
-          const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
-              scale, i, /*align_corners=*/align_corners, /*cubic=*/false);
+          const auto real_input_index =
+              area_pixel_compute_source_index<opmath_t>(
+                  scale, i, /*align_corners=*/align_corners, /*cubic=*/false);
           input_index = static_cast<int64_t>(floorf(real_input_index + 0.5));
           input_index_ptr[i] = static_cast<int64_t>(std::min(input_index, input_size - 1)) * stride;
         }
@@ -895,10 +863,8 @@ struct HelperInterpLinear : public HelperInterpBase {
     std::vector<Tensor> output;
     HelperInterpLinear::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpLinear::interp_size);
-
-    AT_DISPATCH_FLOATING_TYPES(
-      scalar_type, "compute_indices_weights_linear", [&] {
-
+    AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, scalar_type, "compute_indices_weights_linear", [&] {
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
         auto input_index0_ptr = output[0].data_ptr<int64_t>();
@@ -998,9 +964,8 @@ struct HelperInterpCubic : public HelperInterpBase {
     HelperInterpCubic::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpCubic::interp_size);
 
-    AT_DISPATCH_FLOATING_TYPES(
-      scalar_type, "compute_indices_weights_cubic", [&] {
-
+    AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, scalar_type, "compute_indices_weights_cubic", [&] {
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
         int64_t input_index;
@@ -1010,11 +975,11 @@ struct HelperInterpCubic : public HelperInterpBase {
 
         int64_t * idx_ptr;
         scalar_t * wt_ptr;
-
+        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto i : c10::irange(output_size)) {
-
-          const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
-              scale, i, align_corners, /*cubic=*/true);
+          const auto real_input_index =
+              area_pixel_compute_source_index<opmath_t>(
+                  scale, i, align_corners, /*cubic=*/true);
           input_index = static_cast<int64_t>(floorf(real_input_index));
           get_cubic_upsample_coefficients<scalar_t>(coeffs, real_input_index - input_index);
 
@@ -1121,7 +1086,7 @@ void upsample_generic_Nd_kernel_impl(
 
   constexpr int interp_size = F::interp_size;
   auto input_scalar_type = input.scalar_type();
-  if (interp_size == 1 && input_scalar_type == at::ScalarType::Byte) {
+  if ((interp_size == 1 && input_scalar_type == at::ScalarType::Byte)) {
     // nearest also supports uint8 tensor, but we have to use float
     // with compute_indices_weights
     input_scalar_type = at::ScalarType::Float;
@@ -1154,14 +1119,14 @@ void upsample_generic_Nd_kernel_impl(
 
   if (interp_size > 1) {
     // Nearest also supports uint8 tensor, so need to handle it separately
-    AT_DISPATCH_FLOATING_TYPES(
-        iter.dtype(), "upsample_generic_Nd", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        at::ScalarType::BFloat16, iter.dtype(), "upsample_generic_Nd", [&] {
         // MSVC can not catch constexpr int interp_size here
         constexpr int mode = F::interp_size;
         cpu_upsample_generic<scalar_t, out_ndims, mode>(iter);
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte,
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Byte, at::ScalarType::BFloat16,
         iter.dtype(), "upsample_generic_Nd", [&] {
         constexpr int mode = F::interp_size;
         cpu_upsample_generic<scalar_t, out_ndims, mode>(iter);
@@ -1214,7 +1179,6 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
 
   int interp_size = F::interp_size;
   auto input_scalar_type = input.scalar_type();
-
   if (interp_size == 1 && input_scalar_type == at::ScalarType::Byte) {
     // nearest also supports uint8 tensor, but we have to use float
     // with compute_indices_weights
@@ -1296,13 +1260,38 @@ void _upsample_nearest_exact1d_kernel_impl(
     output, input, false, {scales_w});
 }
 
+int _use_vectorized_kernel_cond_2d(
+    const Tensor& output,
+    const Tensor& input) {
+      // This condition is used to know whether we should dispatch to a vectorized
+      // kernel, or to the more general upsample_generic_Nd_kernel_impl(). For now,
+      // the vectorized kernels are only optimized for channels_last and when C >= 4
+      // (shape = NCHW). For a very wide range of use-cases (typically image or mask
+      // resizing where we have C < 4), using upsample_generic_Nd_kernel_impl() is
+      // actually faster. On top of that, benchmarks showed that this also depends on
+      // the *output* size (output_H + output_W), for both upsampling and
+      // downsampling. The current 128 threshold was determined through benchmarks.
+      return ((input.is_contiguous(at::MemoryFormat::ChannelsLast)) && (input.size(1) > 3)) || ((output.size(-2) + output.size(-1)) <= 128);
+}
+
+int _use_vectorized_kernel_cond_3d(
+    // Similar to _use_vectorized_kernel_cond_2d() but for 3d resampling (e.g. videos)
+    // Note that unlike the 2d case, this is not subject to small output size
+    // overhead - hence the absence of the 128 threshold in the condition.
+    const Tensor& output,
+    const Tensor& input) {
+      return ((input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) && (input.size(1) > 3));
+}
+
+
 void upsample_nearest2d_kernel_impl(
     const Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
+  if (_use_vectorized_kernel_cond_2d(output, input)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Byte, at::ScalarType::BFloat16,
+        input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_idx>(output, input, {scales_h, scales_w});
     });
   } else {
@@ -1316,7 +1305,7 @@ void _upsample_nearest_exact2d_kernel_impl(
     const Tensor& input,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+  if (_use_vectorized_kernel_cond_2d(output, input)) {
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_exact_idx>(output, input, {scales_h, scales_w});
     });
@@ -1332,8 +1321,9 @@ void upsample_nearest3d_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
+  if (_use_vectorized_kernel_cond_3d(output, input)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Byte, at::ScalarType::BFloat16,
+        input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_idx>(output, input, {scales_d, scales_h, scales_w});
     });
   } else {
@@ -1348,7 +1338,7 @@ void _upsample_nearest_exact3d_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+  if (_use_vectorized_kernel_cond_3d(output, input)) {
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_exact_idx>(output, input, {scales_d, scales_h, scales_w});
     });
@@ -1374,9 +1364,13 @@ void upsample_bilinear2d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 
-  // Temporarily dispatch to original channels last implementation
-  if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "upsample_bilinear2d_channels_last", [&] {
+  // See note above about _use_vectorized_kernel_cond_2d(output, input). The extra cond is present
+  // because benchmarks showed that with only 1 thread, images (C == 3) were
+  // slightly faster with the vectorized kernel than with the generic one.
+  // That's not the case for masks though (C == 1), which strongly benefit from
+  // using the generic kernel.
+  if ((_use_vectorized_kernel_cond_2d(output, input)) || (at::get_num_threads() == 1 && input.size(1) == 3)) {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, input.scalar_type(), "upsample_bilinear2d_channels_last", [&] {
       cpu_upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_h, scales_w});
     });
   } else {
@@ -1403,8 +1397,8 @@ void upsample_trilinear3d_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "upsample_trilinear3d_channels_last", [&] {
+  if ((_use_vectorized_kernel_cond_3d(output, input))) {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, input.scalar_type(), "upsample_trilinear3d_channels_last", [&] {
       cpu_upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_d, scales_h, scales_w});
     });
   } else {
@@ -1432,156 +1426,6 @@ void upsample_bicubic2d_aa_kernel_impl(
 
   separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
       output, input, align_corners, {scales_h, scales_w});
-}
-
-template <typename scalar_t, typename scale_type, nearest_idx_fn_t nearest_idx_fn>
-void cpu_upsample_nearest_backward(
-    const Tensor& grad_input_,
-    const Tensor& grad_output_,
-    const scale_type& scales) {
-  TORCH_CHECK(grad_input_.dtype() == grad_output_.dtype(), "expected dtype ", grad_output_.dtype(),
-              " for `grad_input` but got dtype ", grad_input_.dtype());
-
-  auto grad_output = grad_output_.contiguous();
-  auto grad_input = grad_input_.contiguous();
-
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
-  auto input_sizes = grad_input.sizes().vec();
-  auto output_sizes = grad_output.sizes().vec();
-  auto ndim = input_sizes.size();
-
-  // treat nbatch and channels as one dimension
-  int64_t channels = input_sizes[0] * input_sizes[1];
-  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
-  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
-  int64_t input_width = input_sizes[ndim - 1];
-  int64_t output_width = output_sizes[ndim - 1];
-
-  int64_t output_slice_size = output_depth * output_height * output_width;
-  int64_t input_slice_size = input_depth * input_height * input_width;
-
-  auto loop1d = [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
-      for (const auto ow : c10::irange(output_width)) {
-        int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[0]);
-        int64_t output_offset = c * output_slice_size + ow;
-        int64_t input_offset = c * input_slice_size + iw;
-        grad_input_data[input_offset] += grad_output_data[output_offset];
-      }
-    }
-  };
-
-  auto loop2d = [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
-      for (const auto oh : c10::irange(output_height)) {
-        int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[0]);
-        for (const auto ow : c10::irange(output_width)) {
-          int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[1]);
-          int64_t output_offset = c * output_slice_size + oh * output_width + ow;
-          int64_t input_offset = c * input_slice_size + ih * input_width + iw;
-          grad_input_data[input_offset] += grad_output_data[output_offset];
-        }
-      }
-    }
-  };
-
-  auto loop3d = [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
-      for (const auto od : c10::irange(output_depth)) {
-        int64_t id = nearest_idx_fn(od, input_depth, output_depth, scales[0]);
-        for (const auto oh : c10::irange(output_height)) {
-          int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[1]);
-          for (const auto ow : c10::irange(output_width)) {
-            int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[2]);
-            int64_t output_offset = c * output_slice_size +
-                od *  output_height * output_width + oh * output_width + ow;
-            int64_t input_offset = c * input_slice_size +
-                id * input_height * input_width + ih * input_width + iw;
-            grad_input_data[input_offset] += grad_output_data[output_offset];
-          }
-        }
-      }
-    }
-  };
-
-  if (ndim == 3) {
-    // upsample nearest 1d
-    at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop1d);
-  } else if (ndim == 4) {
-    // upsample nearest 2d
-    at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size , loop2d);
-  } else {
-    // upsample nearest 3d
-    TORCH_INTERNAL_ASSERT(ndim == 5);
-    at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop3d);
-  }
-
-  if (!grad_input_.is_contiguous()) {
-    grad_input_.copy_(grad_input);
-  }
-}
-
-void upsample_nearest1d_backward_kernel_impl(
-    const Tensor& grad_input,
-    const Tensor& grad_output,
-    c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_w});
-  });
-}
-
-void _upsample_nearest_exact1d_backward_kernel_impl(
-    const Tensor& grad_input,
-    const Tensor& grad_output,
-    c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "_upsample_nearest_exact1d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_w});
-  });
-}
-
-void upsample_nearest2d_backward_kernel_impl(
-    const Tensor& grad_input,
-    const Tensor& grad_output,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_h, scales_w});
-  });
-}
-
-void _upsample_nearest_exact2d_backward_kernel_impl(
-    const Tensor& grad_input,
-    const Tensor& grad_output,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "_upsample_nearest_exact2d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_h, scales_w});
-  });
-}
-
-void upsample_nearest3d_backward_kernel_impl(
-    const Tensor& grad_input,
-    const Tensor& grad_output,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
-  });
-}
-
-void _upsample_nearest_exact3d_backward_kernel_impl(
-    const Tensor& grad_input,
-    const Tensor& grad_output,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "_upsample_nearest_exact3d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
-  });
 }
 
 template <
@@ -1733,12 +1577,6 @@ REGISTER_DISPATCH(upsample_nearest2d_kernel, &upsample_nearest2d_kernel_impl);
 REGISTER_DISPATCH(_upsample_nearest_exact2d_kernel, &_upsample_nearest_exact2d_kernel_impl);
 REGISTER_DISPATCH(upsample_nearest3d_kernel, &upsample_nearest3d_kernel_impl);
 REGISTER_DISPATCH(_upsample_nearest_exact3d_kernel, &_upsample_nearest_exact3d_kernel_impl);
-REGISTER_DISPATCH(upsample_nearest1d_backward_kernel, &upsample_nearest1d_backward_kernel_impl);
-REGISTER_DISPATCH(_upsample_nearest_exact1d_backward_kernel, &_upsample_nearest_exact1d_backward_kernel_impl);
-REGISTER_DISPATCH(upsample_nearest2d_backward_kernel, &upsample_nearest2d_backward_kernel_impl);
-REGISTER_DISPATCH(_upsample_nearest_exact2d_backward_kernel, &_upsample_nearest_exact2d_backward_kernel_impl);
-REGISTER_DISPATCH(upsample_nearest3d_backward_kernel, &upsample_nearest3d_backward_kernel_impl);
-REGISTER_DISPATCH(_upsample_nearest_exact3d_backward_kernel, &_upsample_nearest_exact3d_backward_kernel_impl);
 
 REGISTER_DISPATCH(upsample_linear1d_kernel, &upsample_linear1d_kernel_impl);
 REGISTER_DISPATCH(upsample_bilinear2d_kernel, &upsample_bilinear2d_kernel_impl);

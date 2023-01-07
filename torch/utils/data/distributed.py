@@ -5,6 +5,7 @@ import torch
 from . import Sampler, Dataset
 import torch.distributed as dist
 
+__all__ = ["DistributedSampler", ]
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -48,6 +49,7 @@ class DistributedSampler(Sampler[T_co]):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> sampler = DistributedSampler(dataset) if is_distributed else None
         >>> loader = DataLoader(dataset, shuffle=(sampler is None),
         ...                     sampler=sampler)

@@ -2,8 +2,8 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/Export.h>
-#include <torch/types.h>
 #include <torch/enum.h>
+#include <torch/types.h>
 
 #include <torch/nn/modules/container/any.h>
 #include <torch/nn/options/transformerlayer.h>
@@ -20,14 +20,18 @@ namespace nn {
 /// auto options = TransformerOptions().d_model(4).nhead(2).dropout(0.0);
 /// ```
 struct TORCH_API TransformerOptions {
-
   // The following constructors are commonly used
   // Please don't add more unless it is proved as a common usage
   TransformerOptions() = default;
   TransformerOptions(int64_t d_model, int64_t nhead);
-  TransformerOptions(int64_t d_model, int64_t nhead, int64_t num_encoder_layers, int64_t num_decoder_layers);
+  TransformerOptions(
+      int64_t d_model,
+      int64_t nhead,
+      int64_t num_encoder_layers,
+      int64_t num_decoder_layers);
 
-  /// the number of expected features in the encoder/decoder inputs (default=512)
+  /// the number of expected features in the encoder/decoder inputs
+  /// (default=512)
   TORCH_ARG(int64_t, d_model) = 512;
 
   /// the number of heads in the multiheadattention models (default=8)
@@ -45,7 +49,8 @@ struct TORCH_API TransformerOptions {
   /// the dropout value (default=0.1)
   TORCH_ARG(double, dropout) = 0.1;
 
-  /// the activation function of encoder/decoder intermediate layer (default=``torch::kReLU``)
+  /// the activation function of encoder/decoder intermediate layer
+  /// (default=``torch::kReLU``)
   TORCH_ARG(activation_t, activation) = torch::kReLU;
 
   /// custom encoder (default=None)
@@ -54,7 +59,6 @@ struct TORCH_API TransformerOptions {
   /// custom decoder (default=None)
   TORCH_ARG(AnyModule, custom_decoder);
 };
-
 
 } // namespace nn
 } // namespace torch

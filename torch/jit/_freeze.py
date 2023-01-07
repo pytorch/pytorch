@@ -26,12 +26,10 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
 
     Args:
         mod (:class:`ScriptModule`): a module to be frozen
-
         preserved_attrs (Optional[List[str]]): a list of attributes to preserve in addition to the forward method.
-        Attributes modified in preserved methods will also be preserved.
-
+            Attributes modified in preserved methods will also be preserved.
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly
-        preserve numerics. Full details of optimization can be found at `torch.jit.run_frozen_optimizations`.
+            preserve numerics. Full details of optimization can be found at `torch.jit.run_frozen_optimizations`.
 
     Returns:
         Frozen :class:`ScriptModule`.
@@ -138,9 +136,9 @@ def run_frozen_optimizations(
         mod (:class:`ScriptModule`): a frozen module to be optimized
 
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly
-        preserve numerics. These optimizations preserve default rtol and atol of `torch.testing.assert_allclose`
+        preserve numerics. These optimizations preserve default rtol and atol of `torch.testing.assert_close`
         when applied on a single transformation, however in a module where many transformations are applied
-        the rtol or atol may no longer fall within the default `assert_allclose` tolerance. Conv -> Batchnorm folding,
+        the rtol or atol may no longer fall within the default `assert_close` tolerance. Conv -> Batchnorm folding,
         Conv-Add/Sub, and Conv -> Mul/Div folding all may alter numerics.
 
     Returns:
@@ -164,7 +162,8 @@ def run_frozen_optimizations(
         assert "batch_norm" not in str(frozen_mod.graph)
 
     """
-    torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
+    if mod._c._has_method("forward"):
+        torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
 
     if preserved_methods is None:
         preserved_methods = []

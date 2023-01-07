@@ -2,10 +2,10 @@
 
 #include <math.h>
 
-#include <ATen/core/Tensor.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
-
 
 /**
  * Note [compute_scales_value]
@@ -56,7 +56,7 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
 
 inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
   if (!scales) {
-    return nullopt;
+    return c10::nullopt;
   }
   return scales->at(idx);
 }
@@ -266,15 +266,13 @@ static inline scalar_t area_pixel_compute_scale(
     bool align_corners,
     const c10::optional<double> scale) {
   // see Note [area_pixel_compute_scale]
-  if(align_corners){
+  if(align_corners) {
     if(output_size > 1) {
       return static_cast<scalar_t>(input_size - 1) / (output_size - 1);
-    }
-    else {
+    } else {
       return static_cast<scalar_t>(0);
     }
-  }
-  else{
+  } else {
     return compute_scales_value<scalar_t>(scale, input_size, output_size);
   }
 }
@@ -288,7 +286,8 @@ static inline scalar_t area_pixel_compute_source_index(
   if (align_corners) {
     return scale * dst_index;
   } else {
-    scalar_t src_idx = scale * (dst_index + 0.5) - 0.5;
+    scalar_t src_idx = scale * (dst_index + static_cast<scalar_t>(0.5)) -
+        static_cast<scalar_t>(0.5);
     // [Note] Follow Opencv resize logic:
     // We allow negative src_idx here and later will use
     //   dx = src_idx - floorf(src_idx)
@@ -301,7 +300,8 @@ static inline scalar_t area_pixel_compute_source_index(
     // where we should and then remove this cubic flag.
     // This matters in cubic mode, as we might need [-1, 0, 1, 2]
     // to interpolate and the weights can be affected.
-    return (!cubic && src_idx < 0) ? scalar_t(0) : src_idx;
+    return (!cubic && src_idx < static_cast<scalar_t>(0)) ? scalar_t(0)
+                                                          : src_idx;
   }
 }
 
@@ -327,6 +327,39 @@ static inline int64_t nearest_neighbor_exact_compute_source_index(
       std::min(static_cast<int64_t>(floorf((dst_index + 0.5) * scale)), input_size - 1);
   return src_index;
 }
+
+static inline int64_t nearest_idx(
+    int64_t output_index,
+    int64_t input_size,
+    int64_t output_size,
+    c10::optional<double> scales) {
+  // This method specificly treats cases: output_size == input_size or
+  // output_size == 2 * input_size, that we would like to get rid of
+  // We keep this method for BC and consider as deprecated.
+  // See nearest_exact_idx as replacement
+  if (output_size == input_size) {
+    // scale_factor = 1, simply copy
+    return output_index;
+  } else if (output_size == 2 * input_size) {
+    // scale_factor = 2, shift input index
+    return output_index >> 1;
+  } else {
+    float scale = compute_scales_value<float>(scales, input_size, output_size);
+    return nearest_neighbor_compute_source_index(scale, output_index, input_size);
+  }
+}
+
+static inline int64_t nearest_exact_idx(
+    int64_t output_index,
+    int64_t input_size,
+    int64_t output_size,
+    c10::optional<double> scales) {
+  float scale = compute_scales_value<float>(scales, input_size, output_size);
+    return nearest_neighbor_exact_compute_source_index(scale, output_index, input_size);
+}
+
+// Define a typedef to dispatch to nearest_idx or nearest_exact_idx
+typedef int64_t (*nearest_idx_fn_t)(int64_t, int64_t, int64_t, c10::optional<double>);
 
 template <typename scalar_t>
 static scalar_t upsample_get_value_bounded(
@@ -412,12 +445,20 @@ static inline void compute_source_index_and_lambda(
     lambda0 = static_cast<scalar_t>(1);
     lambda1 = static_cast<scalar_t>(0);
   } else {
-    const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
-        ratio, output_index, align_corners, /*cubic=*/false);
-    input_index0 = static_cast<int64_t>(real_input_index);
+    using opmath_t = at::opmath_type<scalar_t>;
+    const auto real_input_index =
+        area_pixel_compute_source_index<opmath_t>(
+            ratio, output_index, align_corners, /*cubic=*/false);
+    // when `real_input_index` becomes larger than the range the floating point
+    // type can accurately represent, the type casting to `int64_t` might exceed
+    // `input_size - 1`, causing overflow. So we guard it with `std::min` below.
+    input_index0 = std::min(static_cast<int64_t>(real_input_index), input_size - 1);
     int64_t offset = (input_index0 < input_size - 1) ? 1 : 0;
     input_index1 = input_index0 + offset;
-    lambda1 = real_input_index - input_index0;
+    lambda1 = std::min(
+      std::max(real_input_index - input_index0, static_cast<opmath_t>(0)),
+      static_cast<opmath_t>(1)
+    );
     lambda0 = static_cast<scalar_t>(1.) - lambda1;
   }
 }

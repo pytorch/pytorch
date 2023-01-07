@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 from typing import Dict, List
 
-from .glob_group import GlobPattern, GlobGroup
+from .glob_group import GlobGroup, GlobPattern
+
+__all__ = ["Directory"]
 
 
 class Directory:

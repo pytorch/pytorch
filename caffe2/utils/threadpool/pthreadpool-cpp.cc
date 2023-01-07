@@ -30,6 +30,11 @@ size_t PThreadPool::get_thread_count() const {
 }
 
 void PThreadPool::set_thread_count(const size_t thread_count) {
+  // No need to do anything if the count is same
+  if (thread_count == get_thread_count()) {
+    return;
+  }
+
   std::lock_guard<std::mutex> lock{mutex_};
 
   // As it stands, pthreadpool is an entirely data parallel framework with no
@@ -83,7 +88,7 @@ size_t getDefaultNumThreads();
 PThreadPool* pthreadpool() {
   static auto threadpool =
     std::make_unique<PThreadPool>(getDefaultNumThreads());
-#if !(defined(WIN32)) && !(defined(__XROS__))
+#if !(defined(WIN32))
   static std::once_flag flag;
   std::call_once(flag, []() {
     pthread_atfork(nullptr, nullptr, child_atfork);

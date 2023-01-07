@@ -57,7 +57,7 @@ def visualize_graph_executor(state, name_prefix, pb_graph, inline_graph):
         state (GraphExecutor or GraphExecutorState): GraphExecutor to display.
         name_prefix (str): Name prefix of the containing subgraph.
         pb_graph (GraphDef): graph to append to.
-        inline_graph (callable): a function that handles setting up a value_map,
+        inline_graph (Callable): a function that handles setting up a value_map,
             so that some graphs in here can be inlined. This is necessary, because
             this will simply be `visualize` for the top-level GraphExecutor,
             or `inline_graph` for all nested ones.

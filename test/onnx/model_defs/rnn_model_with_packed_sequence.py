@@ -4,7 +4,7 @@ from torch.nn.utils import rnn as rnn_utils
 
 class RnnModelWithPackedSequence(nn.Module):
     def __init__(self, model, batch_first):
-        super(RnnModelWithPackedSequence, self).__init__()
+        super().__init__()
         self.model = model
         self.batch_first = batch_first
 
@@ -16,9 +16,10 @@ class RnnModelWithPackedSequence(nn.Module):
         ret, _ = rnn_utils.pad_packed_sequence(ret, self.batch_first)
         return tuple([ret] + list(rets))
 
+
 class RnnModelWithPackedSequenceWithoutState(nn.Module):
     def __init__(self, model, batch_first):
-        super(RnnModelWithPackedSequenceWithoutState, self).__init__()
+        super().__init__()
         self.model = model
         self.batch_first = batch_first
 
@@ -29,9 +30,10 @@ class RnnModelWithPackedSequenceWithoutState(nn.Module):
         ret, _ = rnn_utils.pad_packed_sequence(ret, self.batch_first)
         return list([ret] + list(rets))
 
+
 class RnnModelWithPackedSequenceWithState(nn.Module):
     def __init__(self, model, batch_first):
-        super(RnnModelWithPackedSequenceWithState, self).__init__()
+        super().__init__()
         self.model = model
         self.batch_first = batch_first
 

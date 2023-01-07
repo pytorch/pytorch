@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -22,6 +22,14 @@ std::unordered_map<std::string, worker_id_t> collectNames(
 // before it. NOTE: This needs to be called with the Dynamic RPC group
 // membership management token held.
 std::unordered_map<std::string, worker_id_t> collectCurrentNames(
+    ::c10d::PrefixStore store,
+    const worker_id_t selfId,
+    const std::string& selfName);
+
+// Remove name frmo Store, used in dynamic RPC groups.
+// NOTE: This needs to be called with the Dynamic RPC group
+// membership management token held.
+void removeCurrentName(
     ::c10d::PrefixStore store,
     const worker_id_t selfId,
     const std::string& selfName);

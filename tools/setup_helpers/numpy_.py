@@ -10,7 +10,7 @@ from .env import check_negative_env_flag
 
 # Set USE_NUMPY to what the user wants, because even if we fail here, cmake
 # will check for the presence of NumPy again (`cmake/Dependencies.cmake`).
-USE_NUMPY = not check_negative_env_flag('USE_NUMPY')
+USE_NUMPY = not check_negative_env_flag("USE_NUMPY")
 NUMPY_INCLUDE_DIR = None
 
 if USE_NUMPY:

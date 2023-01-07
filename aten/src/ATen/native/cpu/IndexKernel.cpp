@@ -9,6 +9,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/AtomicAddFloat.h>
+#include <ATen/native/cpu/IndexKernelUtils.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
@@ -19,91 +20,8 @@ namespace {
 
 using namespace vec;
 
-struct Indexer {
-  Indexer(int64_t num_indexers, char** indexers, const int64_t* indexer_strides,
-          IntArrayRef original_sizes, IntArrayRef original_strides)
-    : num_indexers(num_indexers)
-    , indexers(indexers)
-    , indexer_strides(indexer_strides)
-    , original_strides(original_strides.data())
-    , original_sizes(original_sizes.data()) {
-    AT_ASSERT(static_cast<int64_t>(original_strides.size()) == num_indexers);
-    AT_ASSERT(static_cast<int64_t>(original_sizes.size()) == num_indexers);
-  }
-
-  int64_t num_indexers;
-  char** indexers;
-  const int64_t* indexer_strides;
-  const int64_t* original_strides;
-  const int64_t* original_sizes;
-
-  int64_t get(int64_t idx) {
-    int64_t offset = 0;
-    for (const auto j : c10::irange(num_indexers)) {
-      int64_t value = *(int64_t*)&indexers[j][idx * indexer_strides[j]];
-      int64_t size = original_sizes[j];
-      TORCH_CHECK_INDEX(value >= -size && value < size,
-                        "index ", value, " is out of bounds for dimension ", j, " with size ", size);
-      if (value < 0) {
-        value += size;
-      }
-      offset += value * original_strides[j];
-    }
-    return offset;
-  }
-};
-
-static bool is_constant_index(int ntensor, const int64_t* strides) {
-  AT_ASSERT(ntensor >= 3);
-  for (const auto arg : c10::irange(2, ntensor)) {
-    if (strides[arg] != 0) {
-      return false;
-    }
-  }
-  return true;
-}
-
-template <typename scalar_t, typename func_t>
-void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride,
-                      const func_t& f, bool serial_execution=false)
-{
-  int ntensor = iter.ntensors();
-  // When launch the index parallel version, set a relative samll grain size less than the INTERNAL::GRAIN_SIZE
-  // to make the whole available thread numbers get more balanced work load and a better cache location.
-  // The grain size here is chosen by the op benchmark to overcome the thread launch overhead
-  const int index_parallel_grain_size = 3000;
-  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-    auto indexer = Indexer(ntensor - 2, &data[2], &strides[2], index_size, index_stride);
-    char* dst = data[0];
-    char* src = data[1];
-    if (is_constant_index(ntensor, strides)) {
-      // specialization for when every element uses the same index
-      int64_t offset = indexer.get(0);
-      if (strides[0] == sizeof(scalar_t) && strides[1] == sizeof(scalar_t)) {
-        for (const auto i : c10::irange(n)) {
-          f(dst + strides[0] * i, src + strides[1] * i, offset);
-        }
-      } else {
-        for (const auto i : c10::irange(n)) {
-          f(dst + strides[0] * i, src + strides[1] * i, offset);
-        }
-      }
-    } else {
-      for (const auto i : c10::irange(n)) {
-        int64_t offset = indexer.get(i);
-        f(dst + strides[0] * i, src + strides[1] * i, offset);
-      }
-    }
-  };
-  if (serial_execution) {
-    iter.serial_for_each(loop, {0, iter.numel()});
-  } else {
-    iter.for_each(loop, index_parallel_grain_size);
-  }
-}
-
-void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_cpu", [&] {
     cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
       *(scalar_t*)dst = *(scalar_t*)(src + offset);
@@ -156,8 +74,7 @@ void cpu_take_put_kernel(
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
-    for (const auto elem : c10::irange(n)) {
-      (void)elem; //Suppress unused variable warning
+    for (const auto elem C10_UNUSED : c10::irange(n)) {
       auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
       auto& iterated = *reinterpret_cast<scalar_t*>(iterated_data_bytes);
 
@@ -234,7 +151,7 @@ void take_kernel(
 
 void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   // NOTE: duplicate indices are only supported if accumulate is true.
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_put", [&] {
     // See Note [Enabling Deterministic Operations]
     // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
@@ -274,8 +191,7 @@ void index_fill_kernel(
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
-      for (const auto elem : c10::irange(n)) {
-        (void)elem; //Suppress unused variable warning
+      for (const auto elem C10_UNUSED : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
@@ -301,8 +217,7 @@ void index_fill_kernel(
       if (idx < 0) {
         idx += self_dim_size;
       }
-      for (const auto elem : c10::irange(n)) {
-        (void)elem; //Suppress unused variable warning
+      for (const auto elem C10_UNUSED: c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
 
         self_data[idx * self_dim_stride] = fill_val;
@@ -335,8 +250,7 @@ void index_copy_kernel(
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
       auto* source_data_bytes = data[2];
-      for (const auto elem : c10::irange(n)) {
-        (void)elem; //Suppress unused variable warning
+      for (const auto elem C10_UNUSED : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
@@ -359,8 +273,7 @@ void index_copy_kernel(
       TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
             "index_copy_(): index ", idx, " is out of bounds for dimension ",
             dim, " with size ", self_dim_size);
-      for (const auto elem : c10::irange(n)) {
-        (void)elem; //Suppress unused variable warning
+      for (const auto elem C10_UNUSED : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
 
@@ -409,7 +322,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
 }
 
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kBool, kBFloat16, kHalf,
     iter.dtype(), "masked_fill", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
       auto mask_dtype = iter.input_dtype(0);
@@ -544,6 +457,75 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
     });
 }
 
+
+template <typename scalar_t>
+void cpu_hflip_vec(at::TensorIterator& iter) {
+
+  auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
+
+    static constexpr int ntensors = 3;
+    std::array<char*, ntensors> data_arr;
+    std::copy_n(base, ntensors, data_arr.data());
+    const int64_t *outer_strides = &strides[ntensors];
+
+    using Vec = Vectorized<scalar_t>;
+
+    constexpr auto stride = sizeof(scalar_t);
+    TORCH_INTERNAL_ASSERT(stride == -strides[0] && stride == strides[1]);
+
+    for (const auto j C10_UNUSED : c10::irange(size1)) {
+
+      // vectorized loop with negative stride for output
+      char** C10_RESTRICT data_ = data_arr.data();
+      int64_t n = size0;
+
+      char* C10_RESTRICT data[ntensors];
+      for (const auto arg : c10::irange(ntensors)) {
+        data[arg] = data_[arg];
+      }
+
+      int64_t i = 0;
+
+      // data[0] unaligned pre-pass
+      int64_t offset = (j * n + (n - i - Vec::size())) % 32;
+      offset = (offset >= n) ? n : offset;
+      for (; i < offset; i++) {
+        scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
+        *out_ptr = *(scalar_t *)(data[1] + i * stride);
+      }
+      // Empirically found that it is faster to process 3 data items together vs 2 or 4
+      for (; i <= n - 3 * Vec::size(); i += 3 * Vec::size()) {
+        auto out1 = Vec::loadu(data[1] + i * stride);
+        auto out2 = Vec::loadu(data[1] + (i + Vec::size()) * stride);
+        auto out3 = Vec::loadu(data[1] + (i + 2 * Vec::size()) * stride);
+        // flip the vector: 1234 -> 4321
+        out1 = flip(out1);
+        out2 = flip(out2);
+        out3 = flip(out3);
+        out1.store(data[0] - (i + Vec::size() - 1) * stride);
+        out2.store(data[0] - (i + 2 * Vec::size() - 1) * stride);
+        out3.store(data[0] - (i + 3 * Vec::size() - 1) * stride);
+      }
+      if (i < n) {
+        for (; i < n; i++) {
+          scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
+          *out_ptr = *(scalar_t *)(data[1] + i * stride);
+        }
+      }
+
+      // advance:
+      for (const auto arg : c10::irange(data_arr.size())) {
+        data_arr[arg] += outer_strides[arg];
+      }
+    }
+  };
+
+  int64_t grain_size = at::internal::GRAIN_SIZE;
+  iter.for_each(loop2d, grain_size);
+  iter.cast_outputs();
+}
+
+
 void flip_kernel(TensorIterator& iter, const bool quantized) {
   if (quantized) {
     AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cpu",
@@ -553,6 +535,29 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         });
     });
   } else {
+    // Special case: horizontal flip with vectorization and input is contiguous
+    // Context: horizontal flip leads to strides[0] < 0 and
+    // thus is_contiguous condition is not satisfied and non-vectorized code path is taken.
+    auto output_strides = iter.strides(0);
+    auto input_strides = iter.strides(1);
+    if (iter.ndim() > 0 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1)) {
+      auto iter_dtype = iter.dtype();
+      if (iter_dtype == kByte) {
+        return cpu_hflip_vec<uint8_t>(iter);
+      } else if (iter_dtype == kFloat) {
+        return cpu_hflip_vec<float>(iter);
+      } else if (iter_dtype == kInt) {
+        return cpu_hflip_vec<int32_t>(iter);
+      } else if (iter_dtype == kShort) {
+        return cpu_hflip_vec<int16_t>(iter);
+      } else if (iter_dtype == kLong) {
+        return cpu_hflip_vec<int64_t>(iter);
+      } else if (iter_dtype == kDouble) {
+        return cpu_hflip_vec<double>(iter);
+      }
+      // other dtypes are handled below with cpu_kernel_vec
+    }
+
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
         [&iter] { cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {

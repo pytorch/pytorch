@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
+#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -10,6 +11,7 @@
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/lower_bank_conflict.h>
 
 namespace torch {
 namespace jit {
@@ -30,6 +32,9 @@ FusionGuard::~FusionGuard() {
 Fusion* FusionGuard::getCurFusion() {
   return ACTIVE_FUSION;
 }
+void FusionGuard::setCurFusion(Fusion* fusion) {
+  ACTIVE_FUSION = fusion;
+}
 
 void swap(Fusion& a, Fusion& b) noexcept {
   FUSER_PERF_SCOPE("Fusion swap");
@@ -47,9 +52,9 @@ void swap(Fusion& a, Fusion& b) noexcept {
 }
 
 std::unique_ptr<SegmentedFusion> Fusion::segment(
-    const at::ArrayRef<IValue>& inputs) {
+    const KernelArgumentHolder& args) {
   FUSER_PERF_SCOPE("Segment Fusion");
-  return SegmentCandidateFinder::segment(this, inputs);
+  return SegmentCandidateFinder::segment(this, args);
 }
 
 IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
@@ -63,6 +68,12 @@ IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
 
   to->inputs_ = ir_cloner.clone(from->inputs_);
   to->outputs_ = ir_cloner.clone(from->outputs_);
+  for (auto inp : to->inputs_) {
+    inp->setIsFusionInput(true);
+  }
+  for (auto out : to->outputs_) {
+    out->setIsFusionOutput(true);
+  }
 
   // TODO: put this into ir_cloner instead
   for (const auto& entry : from->io_alias_) {
@@ -220,15 +231,6 @@ void Fusion::addOutput(Val* output) {
   all_tv_uses_valid_ = false;
 }
 
-void Fusion::addOutput(WelfordResult& wr) {
-  // Want to always make sure the avg gets added last
-  //  since avg will be the out() value of welfordOp,
-  //  and want to make it the top of the computeAt chain
-  addOutput(wr.var_sum);
-  addOutput(wr.n);
-  addOutput(wr.avg);
-}
-
 void Fusion::removeInput(Val* input) {
   auto find_input = std::find(inputs_.begin(), inputs_.end(), input);
   if (find_input != inputs_.end()) {
@@ -252,7 +254,11 @@ void Fusion::replaceOutput(Val* output, Val* replacement) {
   TORCH_CHECK(find_output != outputs_.end(), "Unable to find output in Fusion");
 
   if (find_output != outputs_.end()) {
-    *find_output = replacement;
+    std::replace_if(
+        outputs_.begin(),
+        outputs_.end(),
+        [&output](Val* v) { return v == output; },
+        replacement);
 
     if (replacement->getValType().value() == ValType::TensorView) {
       replacement->setIsFusionOutput(true);
@@ -334,6 +340,20 @@ void Fusion::printKernel(DataType index_type) {
   std::cout << codegen::generateCudaKernel(GpuLower(this, index_type).kernel());
 }
 
+std::unordered_map<std::string, std::pair<int, int>> Fusion::bankConflictInfo(
+    DataType index_type) {
+  GpuLower lower(this, index_type);
+  auto kernel = lower.kernel();
+  auto info = getBankConflictInfo(kernel);
+  // The container of exprs goes out of scope, so we return a map of string here
+  std::unordered_map<std::string, std::pair<int, int>> result;
+  result.reserve(info.size());
+  for (auto i : info) {
+    result[i.first->toString()] = i.second;
+  }
+  return result;
+}
+
 void Fusion::printMath(bool from_outputs_only) {
   FUSER_PERF_SCOPE("Fusion::printMath");
 
@@ -366,6 +386,19 @@ void Fusion::printMath(bool from_outputs_only) {
     std::cout << expr;
   }
   std::cout << "}\n\n";
+}
+
+std::vector<Val*> Fusion::inputsAndCreated() {
+  auto result = inputs_;
+  for (auto expr : exprs()) {
+    auto tv_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
+    if (tv_inputs.empty()) {
+      for (auto v : expr->outputs()) {
+        result.emplace_back(v);
+      }
+    }
+  }
+  return result;
 }
 
 void Fusion::printTransforms() {
@@ -503,7 +536,19 @@ std::vector<Val*> Fusion::usedMathVals() {
   return used_math_vals;
 }
 
-std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
+std::vector<Val*> Fusion::terminatingMathVals() {
+  VectorOfUniqueEntries<Val*> result;
+  auto used_vals = usedMathVals();
+  for (auto v : used_vals) {
+    // Locate the vals that are not expr outputs but have valid definitions.
+    if (unordered_uses(v).empty() && v->definition() != nullptr) {
+      result.pushBack(v);
+    }
+  }
+  return result.vector();
+}
+
+std::unordered_set<Expr*> Fusion::unordered_uses(const Val* val) const {
   return std::unordered_set<Expr*>(val->uses().begin(), val->uses().end());
 }
 
@@ -514,14 +559,15 @@ Expr* Fusion::definition(const Val* val) const {
 
 // Indicate to kernel to set itself up to generate random numbers
 bool Fusion::isStochastic() {
-  for (auto expr : exprs())
-    if (expr->getExprType() == ExprType::UnaryOp)
-      if (expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike)
-        return true;
+  for (auto expr : exprs()) {
+    if (expr->getExprType() == ExprType::RNGOp) {
+      return true;
+    }
+  }
   return false;
 }
 
-std::vector<Val*> Fusion::getTerminatingOutputs() {
+std::vector<Val*> Fusion::getTerminatingOutputs() const {
   FUSER_PERF_SCOPE("getTerminatingOutputs");
 
   auto is_reachable_to_output = [](Val* val) {
@@ -588,7 +634,7 @@ bool Fusion::isAliasCompatible(Val* left, Val* right) {
 }
 
 void Fusion::aliasOutputToInput(Val* output, Val* input) {
-  // Because we could cast output when input is casted.
+  // Because we could cast output when input is cast.
   TORCH_INTERNAL_ASSERT(
       !output->isFusionOutput(),
       "Do NOT add aliased output to fusion output outside of `aliasOutputToInput");

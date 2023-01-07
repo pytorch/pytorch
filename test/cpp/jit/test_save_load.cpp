@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/jit/test_utils.h>
+#include <iostream>
 #include <sstream>
 
+#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -25,6 +28,18 @@ Module roundtripThroughMobile(const Module& m) {
   mobile::Module mobilem = jitModuleToMobile(m, options);
   return jitModuleFromSourceAndConstants(
       mobilem._ivalue(), files, constants, 8);
+}
+
+template <class Functor>
+inline void expectThrowsEq(Functor&& functor, const char* expectedMessage) {
+  try {
+    std::forward<Functor>(functor)();
+  } catch (const Error& e) {
+    EXPECT_STREQ(e.what_without_backtrace(), expectedMessage);
+    return;
+  }
+  ADD_FAILURE() << "Expected to throw exception with message \""
+                << expectedMessage << "\" but didn't throw";
 }
 
 } // namespace
@@ -236,6 +251,71 @@ TEST(TestSourceRoundTrip,
     auto refd = ref.toTensor().item<float>();
     AT_ASSERT(resd == refd);
   }
+}
+
+TEST(SerializationTest, ParentDirNotExist) {
+  expectThrowsEq(
+      []() {
+        auto t = torch::nn::Linear(5, 5);
+        torch::save(t, "./doesnotexist/file.pt");
+      },
+      "Parent directory ./doesnotexist does not exist.");
+}
+
+TEST(SerializationTest, CalculateNecessaryArgsTest) {
+  auto schema = torch::schema(
+      "sync_stream(int stream_id = -1) -> ()",
+      c10::AliasAnalysisKind::CONSERVATIVE);
+
+  auto graph = std::make_shared<Graph>();
+  auto one_val = graph->insertConstant(-1);
+  auto necessary = CalculateNecessaryArgs(schema.arguments(), {one_val}, true);
+  EXPECT_EQ(0, necessary.first);
+  EXPECT_EQ(0, necessary.second);
+}
+
+TEST(TestSaveLoad, LoadWithoutDebugInfo) { // NOLINT (use =delete in gtest)
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(
+      R"(
+    def test_func(self, x):
+      b = 4
+      return self.foo + x + b
+    )");
+  m.define(
+      R"(
+    def exception(self):
+      assert False, "message"
+    )");
+  std::stringstream ss;
+  m.save(ss);
+  ss.seekg(0);
+  caffe2::serialize::PyTorchStreamReader reader(&ss);
+  reader.setShouldLoadDebugSymbol(true);
+  EXPECT_TRUE(reader.hasRecord("code/__torch__.py.debug_pkl"));
+  reader.setShouldLoadDebugSymbol(false);
+  EXPECT_FALSE(reader.hasRecord("code/__torch__.py.debug_pkl"));
+  ss.seekg(0);
+  Module m2 = torch::jit::load(ss);
+  std::string error_msg = R"(
+    def exception(self):
+      assert False, "message"
+      ~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE)";
+  ASSERT_THROWS_WITH_MESSAGE(m2.run_method("exception"), error_msg);
+
+  ss.seekg(0);
+  // NO DEBUG trace so error message points to torchscript generated
+  // source instead of original python source.
+  std::string error2 = R"(
+    def exception(self: __torch__.m) -> NoneType:
+      _0 = uninitialized(NoneType)
+      ops.prim.RaiseException("AssertionError: message")
+      ~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+      return _0
+  )";
+  Module m3 = torch::jit::load(ss, c10::nullopt, false);
+  ASSERT_THROWS_WITH_MESSAGE(m3.run_method("exception"), error2);
 }
 
 } // namespace jit

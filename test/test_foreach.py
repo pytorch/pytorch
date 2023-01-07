@@ -9,7 +9,7 @@ import unittest
 
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW, skipIfTorchDynamo
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta, ops)
 from torch.testing._internal.common_methods_invocations import (
@@ -31,6 +31,7 @@ Scalars = (
     complex(1.0 - random.random(), 1.0 - random.random()),
 )
 
+
 def getScalarLists(N):
     return (
         ("int", [random.randint(0, 9) + 1 for _ in range(N)]),
@@ -41,7 +42,9 @@ def getScalarLists(N):
         ("mixed", [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 4)]),
     )
 
+
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
+
 
 class RegularFuncWrapper:
 
@@ -88,6 +91,7 @@ class ForeachFuncWrapper:
         # note(mkozuki): inplace foreach functions are void functions.
         return inputs[0] if self._is_inplace else actual
 
+
 class TestForeach(TestCase):
 
     @property
@@ -97,7 +101,7 @@ class TestForeach(TestCase):
     # note(mkozuki): It might be the case that the expected number of `cudaLaunchKernel`s
     # is greater than 1 once foreach functions internally separate their input `TensorList`s by
     # devices & dtypes into vectors of tensors.
-    def _get_funcs(self, op, n_expected_cudaLaunchKernels):
+    def _get_funcs(self, op, n_expected_cudaLaunchKernels: int):
         return (
             ForeachFuncWrapper(op.method_variant, n_expected_cudaLaunchKernels),
             RegularFuncWrapper(op.ref),
@@ -159,7 +163,7 @@ class TestForeach(TestCase):
         inputs = [
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
             [
-                make_tensor((N - i , 1), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
+                make_tensor((N - i, 1), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
             ],
         ]
         self._binary_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath, is_inplace=False)
@@ -248,7 +252,7 @@ class TestForeach(TestCase):
             for _, scalarlist in getScalarLists(N):
                 self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, False, False)
 
-    def _pointwise_test(self, dtype, op, ref, inputs, is_fastpath, is_inplace, *, values=None):
+    def _pointwise_test(self, dtype, op, ref, inputs, is_fastpath, is_inplace, *, values=None, custom_values_err=None):
         ref_inputs = [[t.clone().detach() for t in inputs[0]], inputs[1], inputs[2]] if is_inplace else inputs
         try:
             actual = op(inputs, self.is_cuda, is_fastpath)
@@ -262,13 +266,18 @@ class TestForeach(TestCase):
             try:
                 actual = op(inputs + [values], self.is_cuda, is_fastpath)
             except RuntimeError as e:
-                with self.assertRaisesRegex(type(e), re.escape(str(e))):
-                    ref(ref_inputs, values=values)
+                # Match with error messages from regular non-foreach reference if no
+                # custom error message was provided.
+                if custom_values_err is None:
+                    with self.assertRaisesRegex(type(e), re.escape(str(e))):
+                        ref(ref_inputs, values=values)
+                else:
+                    self.assertEqual(re.escape(str(e)), re.escape(custom_values_err))
             else:
                 expected = ref(ref_inputs, values=values)
                 self.assertEqual(expected, actual)
 
-    def _test_pointwise_op(self, device, dtype, opinfo, N, is_fastpath, disable_fastpath, *, values=None):
+    def _test_pointwise_op(self, device, dtype, opinfo, N, is_fastpath, disable_fastpath, *, values=None, custom_values_err=None):
         n_expected_cudaLaunchKernels = N if disable_fastpath else 1
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
         inputs = [
@@ -276,8 +285,10 @@ class TestForeach(TestCase):
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
         ]
-        self._pointwise_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False, values=values)
-        self._pointwise_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True, values=values)
+        self._pointwise_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False,
+                             values=values, custom_values_err=custom_values_err)
+        self._pointwise_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath,
+                             is_inplace=True, values=values, custom_values_err=custom_values_err)
 
         # Tests of implicit broadcasting
         inputs = [
@@ -289,9 +300,11 @@ class TestForeach(TestCase):
                 make_tensor((1, N - i), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
             ],
         ]
-        self._pointwise_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath, is_inplace=False, values=values)
+        self._pointwise_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath,
+                             is_inplace=False, values=values, custom_values_err=custom_values_err)
         self._pointwise_test(
-            dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath, is_inplace=True, values=values)
+            dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath,
+            is_inplace=True, values=values, custom_values_err=custom_values_err)
 
     @skipMeta
     @ops(foreach_pointwise_op_db)
@@ -302,9 +315,24 @@ class TestForeach(TestCase):
             self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath)
             for scalar in Scalars:
                 self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath, values=scalar)
-            for _, scalarlist in getScalarLists(N):
+            for case, scalarlist in getScalarLists(N):
                 self._test_pointwise_op(
                     device, dtype, op, N, True, disable_fastpath, values=scalarlist)
+                self._test_pointwise_op(
+                    device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalarlist))
+                self._test_pointwise_op(
+                    device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalarlist)[0],
+                    custom_values_err="Expected packed scalar Tensor to be of dimension 1. Got 0 instead.")
+                if device == "cuda":
+                    self._test_pointwise_op(
+                        device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalarlist, device="cuda"),
+                        custom_values_err="Expected scalars to be on CPU, got cuda:0 instead.")
+                self._test_pointwise_op(
+                    device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalarlist)[:2],
+                    custom_values_err=f"Expected length of scalars to match input of length {len(scalarlist)} but got 2 instead.")
+                self._test_pointwise_op(
+                    device, dtype, op, N, True, disable_fastpath, values=torch.tensor([[0, 1], [2, 3]])[:, 1],
+                    custom_values_err="Expected scalars to be contiguous.")
 
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_slowpath(self, device, dtype, op):
@@ -313,9 +341,11 @@ class TestForeach(TestCase):
             self._test_pointwise_op(device, dtype, op, N, False, False)
             for scalar in Scalars:
                 self._test_pointwise_op(device, dtype, op, N, False, False, values=scalar)
-            for _, scalarlist in getScalarLists(N):
+            for case, scalarlist in getScalarLists(N):
                 self._test_pointwise_op(
                     device, dtype, op, N, False, False, values=scalarlist)
+                self._test_pointwise_op(
+                    device, dtype, op, N, False, False, values=torch.tensor(scalarlist))
 
     # note(mkozuki): fastpath test uses dtypes which fastpath implementation supports.
     # To confirm the dtypes of `OpInfo` cover the dtypes that the function support,
@@ -370,11 +400,17 @@ class TestForeach(TestCase):
         for N in N_values:
             self._test_unary(device, dtype, op, N, is_fastpath=False)
 
+    # note(crcrpar): `torch.maximum` and `torch.minimum` support `out` arg but there seem to be no inplace versions.
+    # So, compare `inplace_op` results with `ref`'s outputs.
     def _minmax_test(self, opinfo, inputs, is_fastpath, n_expected_cudaLaunchKernels):
-        op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
-        self.assertEqual(ref(inputs), op(inputs, self.is_cuda, is_fastpath))
+        op, ref, inplace_op, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
+        expected = ref(inputs)
+        self.assertEqual(expected, op(inputs, self.is_cuda, is_fastpath))
 
-    # note(mkozuki): in-place of foreach_minimum and foreach_maximum aren't implemented.
+        inplace_inputs = [[t.clone() for t in inputs[0]], inputs[1]]
+        inplace_op(inplace_inputs, self.is_cuda, is_fastpath)
+        self.assertEqual(expected, inplace_inputs[0])
+
     @ops(foreach_minmax_op_db)
     def test_minmax_fastpath(self, device, dtype, op):
         for N in N_values:
@@ -470,6 +506,7 @@ class TestForeach(TestCase):
             runtime_error = e
         self.assertIsNone(runtime_error)
 
+    @skipIfTorchDynamo("Different error msgs, TODO")
     @ops(foreach_binary_op_db, dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_binary_op_list_error_cases(self, device, dtype, op):
         foreach_op, foreach_op_, ref, ref_ = op.method_variant, op.inplace_variant, op.ref, op.ref_inplace

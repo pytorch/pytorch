@@ -4,7 +4,10 @@
 
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/env.h>
 
+#include <algorithm>
+#include <cctype>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -97,6 +100,30 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+bool Context::userEnabledFlashSDP() const {
+  return enabled_flashSDP;
+}
+
+void Context::setSDPUseFlash(bool e) {
+  enabled_flashSDP = e;
+}
+
+bool Context::userEnabledMemEfficientSDP() const {
+  return enabled_mem_efficientSDP;
+}
+
+void Context::setSDPUseMemEfficient(bool e) {
+  enabled_mem_efficientSDP = e;
+}
+
+bool Context::userEnabledMathSDP() const {
+  return enabled_mathSDP;
+}
+
+void Context::setSDPUseMath(bool e) {
+  enabled_mathSDP = e;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -118,7 +145,11 @@ bool Context::checkCuBLASConfigDeterministic() {
 
 void Context::alertCuBLASConfigNotDeterministic() const {
   static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
-  TORCH_CHECK(!deterministicAlgorithms() || cublas_config_deterministic,
+  if (C10_LIKELY(!deterministicAlgorithms() || cublas_config_deterministic)) {
+    return;
+  }
+
+  auto msg = c10::str(
     "Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or ",
     "`at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because ",
     "it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this ",
@@ -127,6 +158,12 @@ void Context::alertCuBLASConfigNotDeterministic() const {
     cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
     "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"
   );
+
+  if (deterministicAlgorithmsWarnOnly()) {
+    TORCH_WARN(msg);
+  } else {
+    TORCH_CHECK(false, msg);
+  }
 }
 
 bool Context::benchmarkCuDNN() const {
@@ -137,12 +174,53 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
+int Context::benchmarkLimitCuDNN() const {
+  return benchmark_limit_cudnn;
+}
+
+void Context::setBenchmarkLimitCuDNN(int b) {
+  benchmark_limit_cudnn = b;
+}
+
 bool Context::allowTF32CuBLAS() const {
-  return allow_tf32_cublas;
+  static bool allow_tf32_cublas_override = c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true;
+  return allow_tf32_cublas_override || float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
-  allow_tf32_cublas = b;
+  float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
+}
+
+Float32MatmulPrecision Context::float32MatmulPrecision() const {
+  return float32_matmul_precision;
+}
+
+void Context::setFloat32MatmulPrecision(Float32MatmulPrecision p) {
+  float32_matmul_precision = p;
+}
+
+void Context::setFloat32MatmulPrecision(const std::string &s) {
+  auto match = [this](const std::string & s_) {
+    // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
+    if (s_ == "highest") {
+      float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
+      return true;
+    } else if (s_ == "high") {
+      float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
+      return true;
+    } else if (s_ == "medium") {
+      float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
+      return true;
+    }
+    return false;
+  };
+  if (match(s)) { return; }
+  std::string sl;
+  std::transform(s.begin(), s.end(), sl.begin(),
+                 [](unsigned char c) -> unsigned char { return std::tolower(c); });
+  if (match(sl)) { return; }
+  TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
+    "setFloat32MatmulPrecision call has no effect.");
 }
 
 at::LinalgBackend Context::linalgPreferredBackend() const {
@@ -171,6 +249,15 @@ bool Context::allowFP16ReductionCuBLAS() const {
 void Context::setAllowFP16ReductionCuBLAS(bool b) {
   allow_fp16_reduction_cublas = b;
 }
+
+bool Context::allowBF16ReductionCuBLAS() const {
+  return allow_bf16_reduction_cublas;
+}
+
+void Context::setAllowBF16ReductionCuBLAS(bool b) {
+  allow_bf16_reduction_cublas = b;
+}
+
 
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
@@ -205,8 +292,24 @@ bool Context::hasLAPACK() {
 }
 
 at::QEngine Context::qEngine() const {
-  // If wasn't explicitly set - take the last one available
-  return quantized_engine.value_or(supportedQEngines().back());
+  static auto _quantized_engine = []() {
+    at::QEngine qengine = at::kNoQEngine;
+#if defined(C10_MOBILE) && defined(USE_PYTORCH_QNNPACK)
+    qengine = at::kQNNPACK;
+#endif
+
+#if AT_MKLDNN_ENABLED()
+    qengine = at::kONEDNN;
+#endif
+
+#ifdef USE_FBGEMM
+    if (fbgemm::fbgemmSupportedCPU()) {
+      qengine = at::kFBGEMM;
+    }
+#endif
+    return qengine;
+  }();
+  return quantized_engine.value_or(_quantized_engine);
 }
 
 void Context::setQEngine(at::QEngine e) {
@@ -242,9 +345,12 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
+      engines.push_back(at::kX86);
+      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kFBGEMM);
     }
 #endif
+
     return engines;
   }();
   return supported_qengines;
@@ -296,6 +402,26 @@ NoTF32Guard::~NoTF32Guard() {
 bool NoTF32Guard::should_disable_tf32() {
   return override_allow_tf32_flag;
 }
+
+#ifdef USE_ROCM
+// Ops can query this flag to know they are in the backward pass.
+// This information can be used, for example, to select implementations
+// with different numerical or performance characteristics.
+// See https://pytorch.org/docs/stable/notes/numerical_accuracy.html for details.
+thread_local bool ROCmBackwardPassGuard::is_backward_pass_;
+
+ROCmBackwardPassGuard::ROCmBackwardPassGuard() {
+  is_backward_pass_ = true;
+}
+
+ROCmBackwardPassGuard::~ROCmBackwardPassGuard() {
+  is_backward_pass_ = false;
+}
+
+bool ROCmBackwardPassGuard::is_backward_pass() {
+  return is_backward_pass_;
+}
+#endif
 
 bool Context::areVmapFallbackWarningsEnabled() const {
   return display_vmap_fallback_warnings_;

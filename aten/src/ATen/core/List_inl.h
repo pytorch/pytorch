@@ -118,9 +118,13 @@ namespace detail {
 
 namespace impl {
 
-template<class T, class Iterator>
-ListElementReference<T, Iterator>::operator T() const {
-  return c10::detail::list_element_to<T>(*iterator_);
+template <class T, class Iterator>
+ListElementReference<T, Iterator>::operator std::conditional_t<
+    std::is_reference<typename c10::detail::ivalue_to_const_ref_overload_return<
+        T>::type>::value,
+    const T&,
+    T>() const {
+  return iterator_->template to<T>();
 }
 
 template<class T, class Iterator>
@@ -148,7 +152,7 @@ void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Itera
 
 template<class T, class Iterator>
 bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs) {
-  T lhs_tmp = lhs;
+  const T& lhs_tmp = lhs;
   return lhs_tmp == rhs;
 }
 

@@ -5,6 +5,9 @@
 #include <ostream>
 #include <fstream>
 #include <algorithm>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
@@ -22,6 +25,7 @@
 
 namespace caffe2 {
 namespace serialize {
+constexpr c10::string_view kDebugPklSuffix(".debug_pkl");
 
 size_t istream_read_func(void *pOpaque, mz_uint64 file_ofs, void *pBuf, size_t n) {
   auto self = static_cast<PyTorchStreamReader*>(pOpaque);
@@ -47,6 +51,17 @@ static std::string basename(const std::string& name) {
     }
   }
   return name.substr(start, end - start);
+}
+
+static std::string parentdir(const std::string& name) {
+  size_t end = name.find_last_of('/');
+  if(end == std::string::npos)
+    end = name.find_last_of('\\');
+
+  if(end == std::string::npos)
+    return "";
+
+  return name.substr(0, end);
 }
 
 size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
@@ -128,7 +143,13 @@ void PyTorchStreamReader::init() {
     std::tie(version_ptr, version_size) = getRecord("version");
   }
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
-  version_ = caffe2::stoull(version);
+  try {
+    version_ = caffe2::stoull(version);
+  } catch (const std::invalid_argument &e) {
+    CAFFE_THROW("Couldn't parse the version ",
+                 version,
+                 " as Long Long.");
+  }
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (version_ < kMinSupportedFileFormatVersion) {
     CAFFE_THROW(
@@ -202,6 +223,10 @@ size_t getPadding(
 
 bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
+
+  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+    return false;
+  }
   std::string ss = archive_name_plus_slash_ + name;
   mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
   const mz_zip_error err = mz_zip_get_last_error(ar_.get());
@@ -235,8 +260,11 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
           ": ",
           buf);
     }
-    // NOLINTNEXTLINE(modernize-use-emplace)
-    out.push_back(buf + archive_name_plus_slash_.size());
+    if ((load_debug_symbol_) ||
+        (!c10::string_view(buf + archive_name_plus_slash_.size()).ends_with(kDebugPklSuffix))) {
+      // NOLINTNEXTLINE(modernize-use-emplace)
+      out.push_back(buf + archive_name_plus_slash_.size());
+    }
   }
   return out;
 }
@@ -256,6 +284,10 @@ size_t PyTorchStreamReader::getRecordID(const std::string& name) {
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
+  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+    at::DataPtr retval;
+    return std::make_tuple(std::move(retval), 0);
+  }
   size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
@@ -318,8 +350,7 @@ PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    const std::function<size_t(const void*, size_t)>& writer_func)
+    const std::function<size_t(const void*, size_t)> writer_func)
     : archive_name_("archive"),
       writer_func_(writer_func) {
   setup(archive_name_);
@@ -338,6 +369,13 @@ void PyTorchStreamWriter::setup(const string& file_name) {
         file_name,
         std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     valid("opening archive ", file_name.c_str());
+
+    const std::string dir_name = parentdir(file_name);
+    if(!dir_name.empty()) {
+      struct stat st;
+      bool dir_exists = (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
+      TORCH_CHECK(dir_exists, "Parent directory ", dir_name, " does not exist.");
+    }
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
       file_stream_.write(static_cast<const char*>(buf), nbytes);
@@ -389,6 +427,21 @@ void PyTorchStreamWriter::writeRecord(
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
+  // Ensurers that finalized is set to true even
+  // exception is raised during the method call.
+  // I.e. even partial call to writeEndOfFile() should mark
+  // file as finalized, otherwise double exception raised from
+  // destructor would would result in `std::terminate()`
+  // See https://github.com/pytorch/pytorch/issues/87997/
+  struct Finalizer {
+    Finalizer(bool& var): var_(var) {}
+    ~Finalizer() {
+      var_ = true;
+    }
+    private:
+     bool& var_;
+  } f(finalized_);
+
   auto allRecords = getAllWrittenRecords();
   // If no ".data/version" or "version" record in the output model, rewrites version info
   if(allRecords.find(".data/version") == allRecords.end() && allRecords.find("version") == allRecords.end()) {

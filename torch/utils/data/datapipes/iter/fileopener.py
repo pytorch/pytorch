@@ -1,20 +1,26 @@
 from io import IOBase
 from typing import Iterable, Tuple, Optional
 
+from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames, deprecation_warning
+from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames
+
+__all__ = [
+    "FileOpenerIterDataPipe",
+]
 
 
+@functional_datapipe("open_files")
 class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     r"""
-    Given pathnames, opens files and yield pathname and file stream in a tuple.
+    Given pathnames, opens files and yield pathname and file stream
+    in a tuple (functional name: ``open_files``).
 
     Args:
         datapipe: Iterable datapipe that provides pathnames
         mode: An optional string that specifies the mode in which
-            the file is opened by ``open()``. It defaults to ``b`` which
-            means open for reading in binary mode. Another option is
-            to use ``t`` for text mode
+            the file is opened by ``open()``. It defaults to ``r``, other options are
+            ``b`` for reading in binary mode and ``t`` for text mode.
         encoding: An optional string that specifies the encoding of the
             underlying file. It defaults to ``None`` to match the default encoding of ``open``.
         length: Nominal length of the datapipe
@@ -24,6 +30,7 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         to close them explicitly.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import FileLister, FileOpener, StreamReader
         >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith('.txt'))
         >>> dp = FileOpener(dp)
@@ -63,19 +70,3 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         if self.length == -1:
             raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length
-
-
-class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
-
-    def __new__(
-            cls,
-            datapipe: Iterable[str],
-            mode: str = 'b',
-            length: int = -1):
-        deprecation_warning(
-            cls.__name__,
-            deprecation_version="1.12",
-            removal_version="1.14",
-            new_class_name="FileOpener",
-        )
-        return FileOpenerIterDataPipe(datapipe=datapipe, mode=mode, length=length)

@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/Tensor.h>
@@ -125,13 +126,25 @@ void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
   auto col_indices = input.col_indices();
   auto input_values = input.values();
 
-  // MKL Sparse Inspector-Executor doesn't have a way to provide external
-  // buffers So we have to copy the memory allocated by MKL
-  std::memcpy(
-      input_values.data_ptr<scalar_t>(), values, nnz * sizeof(scalar_t));
-  std::memcpy(col_indices.data_ptr<MKL_INT>(), columns, nnz * sizeof(MKL_INT));
-  std::memcpy(
-      crow_indices.data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
+  // NB: When nnz is zero it is possible that input_values.data_ptr<scalar_t> is
+  // a nullptr, if input was created via empty. As such we need to check that
+  // nnz is not zero to avoid passing nullptr to std::memcpy. We will apply
+  // the same precautions to crow_indices.data_ptr<MKL_INT>.
+  //
+  // Otherwise ASAN will complain.
+
+  if (nnz > 0) {
+    // MKL Sparse Inspector-Executor doesn't have a way to provide external
+    // buffers So we have to copy the memory allocated by MKL
+    std::memcpy(
+        input_values.data_ptr<scalar_t>(), values, nnz * sizeof(scalar_t));
+    std::memcpy(
+        col_indices.data_ptr<MKL_INT>(), columns, nnz * sizeof(MKL_INT));
+  }
+  if (rows > 0) {
+    std::memcpy(
+        crow_indices.data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
+  }
   crow_indices.data_ptr<MKL_INT>()[rows] = nnz;
 }
 #endif
@@ -339,22 +352,132 @@ void addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2 && mat2.dim() == 2 && result.dim() == 2);
-  if (mat1.is_sparse_csr() && mat2.layout() == kStrided && result.layout() == kStrided) {
-    return addmm_dense_result(mat1, mat2, beta, alpha, result);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      mat1.dim() == 2 && mat2.dim() == 2 && result.dim() == 2);
+  TORCH_INTERNAL_ASSERT(
+      !((mat1.layout() == kStrided) && (mat2.layout() == kStrided) &&
+        (result.layout() == kStrided)),
+      "Expected at least one sparse input");
+
+  // Layout checks are nested mat1, mat2, result
+  // Conditions are ordered strided, csr, csc, bsr, bsc.
+  // Valid combinations terminate in a return
+  // Invalid combinations are omitted and will fall though to the TORCH check
+  // generating an informative error message
+  if (mat1.layout() == kStrided) {
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kStrided) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        return addmm_dense_result(
+            mat2.transpose(0, 1).to_sparse_csr(),
+            mat1.transpose(0, 1),
+            beta,
+            alpha,
+            result.transpose(0, 1));
+      }
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kStrided) {
+        return addmm_dense_result(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
+    if (mat2.layout() == kSparseBsc) {
+      if (result.layout() == kStrided) {
+        return addmm_dense_result(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
   }
-  if (mat1.layout() == kStrided && mat2.is_sparse_csr() && result.layout() == kStrided) {
-    // TODO: We can use MKL's transposition flags once we have CSC support.
-    return addmm_dense_result(mat2.transpose(0, 1), mat1.transpose(0, 1), beta, alpha, result.transpose(0, 1));
+  if (mat1.layout() == kSparseCsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        return addmm_dense_result(mat1, mat2, beta, alpha, result);
+      }
+    }
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kStrided) {
+        return addmm_sparse_input_dense_result(mat1, mat2, beta, alpha, result);
+      }
+      if (result.layout() == kSparseCsr) {
+        return addmm_sparse_result(mat1, mat2, beta, alpha, result);
+      }
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kStrided) {
+        // TODO: CSR @ CSC kernel would be very fast due to format alignment
+        return addmm_sparse_input_dense_result(
+            mat1, mat2.to_sparse_csr(), beta, alpha, result);
+      }
+      if (result.layout() == kSparseCsr) {
+        // TODO: CSR @ CSC kernel would be very fast due to format alignment
+        return addmm_sparse_result(
+            mat1, mat2.to_sparse_csr(), beta, alpha, result);
+      }
+    }
   }
-  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.layout() == kStrided) {
-    return addmm_sparse_input_dense_result(mat1, mat2, beta, alpha, result);
+  if (mat1.layout() == kSparseCsc) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        // TODO: avoid csc->csr conversion with native csc support
+        return addmm_dense_result(
+            mat1.to_sparse_csr(), mat2, beta, alpha, result);
+      }
+    }
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kSparseCsr) {
+        // TODO: avoid csc->csr conversion with native csc support
+        return addmm_sparse_result(
+            mat1.to_sparse_csr(), mat2, beta, alpha, result);
+      }
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kStrided) {
+        return addmm_sparse_input_dense_result(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+      if (result.layout() == kSparseCsr) {
+        // TODO avoid csc->csr
+        return addmm_sparse_result(
+            mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
+      }
+      if (result.layout() == kSparseCsc) {
+        return addmm_sparse_result(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
   }
-  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
-    return addmm_sparse_result(mat1, mat2, beta, alpha, result);
+  if (mat1.layout() == kSparseBsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        return addmm_dense_result(mat1, mat2, beta, alpha, result);
+      }
+    }
   }
-  TORCH_CHECK(false, "addmm: computation on CPU is not implemented for ",
-              result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
+  TORCH_CHECK(
+      false,
+      "addmm: computation on CPU is not implemented for ",
+      result.layout(),
+      " + ",
+      mat1.layout(),
+      " @ ",
+      mat2.layout());
 }
 
 /*

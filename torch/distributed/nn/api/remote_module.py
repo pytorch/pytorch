@@ -9,6 +9,7 @@ from typing import (
     Dict,
     Iterator,
     List,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -27,6 +28,7 @@ from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
 
+__all__ = ["RemoteModule"]
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
@@ -59,16 +61,23 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_buffers",
     "_non_persistent_buffers_set",
     "_backward_hooks",
+    "_backward_pre_hooks",
     "_is_full_backward_hook",
     "_forward_hooks",
+    "_forward_hooks_with_kwargs",
     "_forward_pre_hooks",
+    "_forward_pre_hooks_with_kwargs",
     "_state_dict_hooks",
+    "_state_dict_pre_hooks",
     "_load_state_dict_pre_hooks",
+    "_load_state_dict_post_hooks",
+    "_state_dict_pre_hooks",
     "_modules",
     # The two attributes below are generated methods, not available at pickling time.
     "forward_async",
     "forward",
 )
+
 
 # RPC handler.
 def _instantiate_template(module_interface_cls, enable_moving_cpu_tensors_to_cuda):
@@ -128,7 +137,7 @@ class _RemoteModule(nn.Module):
         It creates a user-specified module on a specified remote node.
         It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
-        It takes care of autograd recording to ensure the backward pass propogates
+        It takes care of autograd recording to ensure the backward pass propagates
         gradients back to the corresponding remote module.
         It can be shared across processors using `RPC framework <https://pytorch.org/docs/stable/rpc.html>`__,
         without incurring any overheads of copying the actual module,
@@ -191,6 +200,7 @@ class _RemoteModule(nn.Module):
         Example::
             Run the following code in two different processes:
 
+            >>> # xdoctest: +SKIP("distributed")
             >>> # On worker 0:
             >>> import torch
             >>> import torch.distributed.rpc as rpc
@@ -351,22 +361,32 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.to.__name__)
 
     def register_backward_hook(  # type: ignore[return]
-        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, Tensor]]
+        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, _grad_t]]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 
-    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
+    def register_forward_pre_hook(  # type: ignore[return]
+        self,
+        hook: Callable[..., None],
+        prepend: bool = False,
+        with_kwargs: bool = False,
+    ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_pre_hook.__name__)
 
-    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
+    def register_forward_hook(  # type: ignore[return]
+        self,
+        hook: Callable[..., None],
+        prepend: bool = False,
+        with_kwargs: bool = False,
+    ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_hook.__name__)
 
-    def state_dict(self, destination=None, prefix="", keep_vars=False):
+    def state_dict(self, *args, **kwargs):
         _raise_not_supported(self.state_dict.__name__)
 
     def load_state_dict(
         self,
-        state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
+        state_dict: Mapping[str, Any],
         strict: bool = True,
     ):
         _raise_not_supported(self.load_state_dict.__name__)
@@ -377,7 +397,10 @@ class _RemoteModule(nn.Module):
         )
 
     def named_parameters(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+        remove_duplicate: bool = True
     ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
@@ -385,7 +408,10 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.buffers.__name__)
 
     def named_buffers(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+        remove_duplicate: bool = True
     ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 
@@ -497,6 +523,7 @@ class _RemoteModule(nn.Module):
         Example::
             Run the following code in two different processes:
 
+            >>> # xdoctest: +SKIP("distributed")
             >>> # On worker 0:
             >>> import torch
             >>> import torch.distributed.rpc as rpc
@@ -577,7 +604,7 @@ class RemoteModule(_RemoteModule):
         It creates a user-specified module on a specified remote node.
         It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
-        It takes care of autograd recording to ensure the backward pass propogates
+        It takes care of autograd recording to ensure the backward pass propagates
         gradients back to the corresponding remote module.
 
         It generates two methods ``forward_async`` and ``forward`` based on the
@@ -618,6 +645,7 @@ class RemoteModule(_RemoteModule):
     Example::
         Run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP("distributed")
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc

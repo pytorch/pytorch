@@ -152,6 +152,11 @@ class C10_API SizesAndStrides {
     std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
 
+  void set_strides(IntArrayRef strides) {
+    TORCH_INTERNAL_ASSERT(strides.size() == size());
+    std::copy(strides.begin(), strides.end(), strides_begin());
+  }
+
   const int64_t* strides_data() const noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];

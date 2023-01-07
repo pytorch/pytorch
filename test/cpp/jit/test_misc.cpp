@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -490,10 +491,20 @@ TEST(ControlFlowTest, Basic) {
   ASSERT_EQ(256, run_binary("while_test", 2, 0));
 }
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define HAS_ASANUBSAN 1
+#endif
+#endif
+
+#ifndef HAS_ASANUBSAN
+// This test fails vptr UBSAN checks
+
 TEST(ProtoTest, Basic) {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
 }
+#endif
 
 // test a few features that are not directly used in schemas yet
 TEST(SchemaParserTest, NestedArrays) {
@@ -558,6 +569,37 @@ TEST(SchemaParserTest, Futures) {
 TEST(SchemaParserTest, AnnotatedAliasSets) {
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(a) foo) -> (Tensor(a))");
+}
+
+TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
+  const auto s = parseSchema(
+      "at::foo(Tensor(a!) self, Tensor(b!)[] out)"
+      " -> ()");
+  const AliasInfo* selfAliasInfo = s.arguments().at(0).alias_info();
+  const AliasInfo* outAliasInfo = s.arguments().at(1).alias_info();
+  ASSERT_TRUE(
+      selfAliasInfo->beforeSets() ==
+      std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+  ASSERT_TRUE(selfAliasInfo->isWrite());
+
+  ASSERT_TRUE(outAliasInfo->isWrite());
+  ASSERT_TRUE(outAliasInfo->beforeSets().empty());
+  ASSERT_EQ(outAliasInfo->containedTypes().size(), 1);
+
+  auto containedType = outAliasInfo->containedTypes()[0];
+
+  ASSERT_TRUE(containedType.isWrite());
+  ASSERT_TRUE(
+      containedType.beforeSets() ==
+      std::unordered_set<Symbol>{Symbol::fromQualString("alias::b")});
+}
+
+TEST(SchemaParserTest, AnnotatedAliasWithoutBeforeSet) {
+  EXPECT_THAT(
+      []() { parseSchema("at::foo(Tensor(!) self) -> Tensor"); },
+      ::testing::Throws<std::runtime_error>(::testing::Property(
+          &std::runtime_error::what,
+          ::testing::HasSubstr("expected ident but found '!' here"))));
 }
 
 TEST(SchemaParserTest, BeforeAfterSets) {
@@ -1049,8 +1091,7 @@ TEST(RecordFunctionTest, Callbacks) {
   GraphOptimizerEnabledGuard opt_guard(false);
 
   auto h1 = add_remove_test_add_cb<1>();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto h2 = add_remove_test_add_cb<2>();
+  add_remove_test_add_cb<2>();
   auto h3 = add_remove_test_add_cb<3>();
 
   { RECORD_USER_SCOPE("test"); }
@@ -1144,7 +1185,6 @@ TEST(RecordFunctionTest, Callbacks) {
   } // END: global test
   { // START: thread local test
     auto ctx_th = std::thread([]() {
-      const int test_val = 234;
       const std::string test_str = "test thread str";
       addThreadLocalCallback(RecordFunctionCallback(
           [](const RecordFunction&
@@ -1383,11 +1423,21 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   }
 }
 
+TEST(TestSymIntArrayRef, BasicConversion) {
+  const size_t X = 2, Y = 4, Z = 5;
+  std::vector<int64_t> tgt_size_v{2, 4, 5};
+  std::vector<c10::SymInt> tgt_size({SymInt(X), SymInt(Y), SymInt(Z)});
+  auto a = at::randn({1, 4, 1}, at::kCPU);
+  auto b = a.expand_symint(tgt_size);
+  auto c = a.expand(tgt_size_v);
+  ASSERT_TRUE(torch::allclose(b, c));
+}
+
 TEST(TestSymInt, NarrowCopyWithSymbolicInt) {
   static const size_t LENGTH = 5;
   auto a = at::randn({10}, at::kCPU);
   c10::SymInt si(LENGTH);
-  auto b = a.narrow_copy(0, 0, si);
+  auto b = a.narrow_copy_symint(0, 0, si);
   auto c = a.narrow(0, 0, LENGTH);
   ASSERT_TRUE(torch::allclose(b, c));
 }
@@ -1406,23 +1456,80 @@ TEST(TestSymInt, AddSymbolicInt) {
   ASSERT_TRUE((a + b).expect_int() == 8);
 }
 
-TEST(FallbackGraphsTest, Basic) {
-  static const auto nestGraphIntoFallbackGraph =
-      [](const std::shared_ptr<Graph>& graph) {
-        ProfilingRecord::removeProfileCounter(graph->block());
-        auto fallback =
-            replaceBlockWithFallbackGraph(graph->block(), graph->inputs());
-        for (size_t i = 0; i < graph->outputs().size(); i++) {
-          graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
-          fallback->output(i)->copyMetadata(graph->outputs()[i]);
-        }
-        for (auto it = graph->block()->nodes().rbegin();
-             it != fallback->iterator();
-             it++) {
-          it.destroyCurrent();
-        }
-      };
+#ifndef C10_MOBILE
+class TestSymNodeImpl : public c10::SymNodeImpl {
+ public:
+  explicit TestSymNodeImpl(int64_t i) : i_(i) {}
 
+  bool is_int() override {
+    return true;
+  };
+
+  bool is_float() override {
+    return false;
+  };
+
+  bool bool_() override {
+    return static_cast<bool>(i_);
+  };
+
+#define OPDEF3(NAME, OP, RET)                                         \
+  RET NAME(const c10::SymNode& other) override {                      \
+    return make_intrusive<TestSymNodeImpl>(                           \
+        this->i_ OP dynamic_cast<TestSymNodeImpl*>(other.get())->i_); \
+  }
+
+#define OPDEF2(NAME, OP) OPDEF3(NAME, OP, c10::SymNode)
+  OPDEF2(add, +)
+  OPDEF2(sub, -)
+  OPDEF2(mul, *)
+  OPDEF2(floordiv, /)
+  OPDEF2(mod, %)
+
+  OPDEF2(eq, ==)
+  OPDEF2(ne, !=)
+  OPDEF2(lt, <)
+  OPDEF2(le, <=)
+  OPDEF2(gt, >)
+  OPDEF2(ge, >=)
+#undef OPDEF2
+#undef OPDEF3
+
+  int64_t i_;
+};
+
+TEST(TestSymInt, TestSymIntToSymNodeDispatch) {
+  auto get = [](c10::SymInt si) {
+    auto node = si.toSymNodeImpl();
+    return dynamic_cast<TestSymNodeImpl*>(node.get())->i_;
+  };
+
+  std::vector<int64_t> inputs{0, 1, -1, 4, -4, 777, -777};
+  for (auto i : inputs) {
+    for (auto j : inputs) {
+      auto a = c10::SymInt(
+          static_cast<SymNode>(c10::make_intrusive<TestSymNodeImpl>(i)));
+      auto b = c10::SymInt(
+          static_cast<SymNode>(c10::make_intrusive<TestSymNodeImpl>(j)));
+      ASSERT_EQ(get(a + b), i + j);
+      ASSERT_EQ(get(a - b), i - j);
+      ASSERT_EQ(get(a * b), i * j);
+      if (j != 0) {
+        ASSERT_EQ(get(a / b), i / j);
+        ASSERT_EQ(get(a % b), i % j);
+      }
+      ASSERT_EQ(a == b, i == j);
+      ASSERT_EQ(a != b, i != j);
+      ASSERT_EQ(a < b, i < j);
+      ASSERT_EQ(a <= b, i <= j);
+      ASSERT_EQ(a > b, i > j);
+      ASSERT_EQ(a >= b, i >= j);
+    }
+  }
+}
+#endif
+
+TEST(FallbackGraphsTest, Basic) {
   auto x = at::randn({1}, at::kCPU);
   auto y = at::randn({1}, at::kCPU);
   auto stack = createStack({x.clone(), y.clone()});
@@ -2646,11 +2753,13 @@ TEST(RecordDebugHandles, Basic) {
     RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
     float x{5.9999}, y{2.1212};
     float z = x / y;
+    (void)z;
   }
   {
     RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
     float x{5.9999}, y{2.1212};
     float z = x / y;
+    (void)z;
   }
   auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
   const auto& kineto_events = profiler_results_ptr->events();
@@ -2977,18 +3086,9 @@ graph(%x.1 : Tensor):
 }
 
 TEST(TestFunctionExecutor, RunDecompositionTest) {
-  GraphFunction* func;
-  std::once_flag flag1;
+  static auto* func = torch::jit::GetDecompositionExecutor(
+      "aten::var(Tensor self, bool unbiased=True) -> Tensor");
   for (bool unbiased : {true, false}) {
-    std::call_once(flag1, [&]() {
-      // NB: take reference to schema here, `auto schema =` will not work
-      auto& schema = getOperatorForLiteral(
-                         "aten::var(Tensor self, bool unbiased=True) -> Tensor")
-                         ->schema();
-      auto maybe_func = GetDecompositionFunction(schema);
-      TORCH_INTERNAL_ASSERT(maybe_func);
-      func = *maybe_func;
-    });
     auto input = at::rand({4, 4});
     Stack stack = {input, unbiased};
     func->run(stack);
@@ -3000,6 +3100,11 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
 TEST(TestShapeGraphLinting, Basic) {
   auto schemas = RegisteredShapeComputeSchemas();
   for (const auto& schema : schemas) {
+    // arange does not acually support complex, leave as
+    // union[int, float] for now
+    if (schema->name() == "aten::arange") {
+      continue;
+    }
     auto g = shapeComputeGraphForSchema(*schema);
     TORCH_INTERNAL_ASSERT(g);
     LintShapeComputeGraph(schema, *g);
@@ -3010,8 +3115,7 @@ TEST(TestShapeGraphLinting, Basic) {
 // fusion parameters
 class Composed : public ::testing::Test {
  public:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  void SetUp() {
+  void SetUp() override {
     torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
   }
 };
@@ -3078,6 +3182,29 @@ TEST_F(Composed, ComposedOp) {
   ASSERT_TRUE(at::allclose(inp_2, ref1));
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
 #endif
+}
+
+TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+  const auto src = R"IR(
+    graph():
+        %none: NoneType = prim::Constant()
+        %dim: int = prim::Constant[value=3]()
+        %shape: int[] = prim::ListConstruct(%dim, %dim)
+        %weight: Tensor = aten::ones(%shape, %none, %none, %none, %none)
+        %scale: float = prim::Constant[value=1.]()
+        %zero_point: int = prim::Constant[value=0]()
+        %dtype: int = prim::Constant[value=12]()
+        %weight_q: Tensor = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
+        %params: __torch__.torch.classes.quantized.LinearPackedParamsBase = quantized::linear_prepack(%weight_q, %none)
+        return (%params)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  ConstantPropagation(graph);
+
+  testing::FileCheck().check_not("quantized::linear_prepack")->run(*graph);
 }
 
 } // namespace jit

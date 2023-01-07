@@ -36,7 +36,7 @@ What is an FX transform? Essentially, it's a function that looks like this.
         # Step 3: Construct a Module to return
         return torch.fx.GraphModule(m, graph)
 
-Your transform will take in an :class:`torch.nn.Module`, acquire a :class:`Graph`
+Your transform will take in a :class:`torch.nn.Module`, acquire a :class:`Graph`
 from it, do some modifications, and return a new
 :class:`torch.nn.Module`. You should think of the :class:`torch.nn.Module` that your FX
 transform returns as identical to a regular :class:`torch.nn.Module` -- you can pass it to another
@@ -270,7 +270,7 @@ on them and append them to the :class:`Graph`.
         graph : fx.Graph = tracer_class().trace(model)
         new_graph = fx.Graph()
         env = {}
-        tracer = torch.fx.proxy.GraphAppendingTracer(graph)
+        tracer = torch.fx.proxy.GraphAppendingTracer(new_graph)
         for node in graph.nodes:
             if node.op == 'call_function' and node.target in decomposition_rules:
                 # By wrapping the arguments with proxies,
@@ -1039,7 +1039,7 @@ Miscellanea
         traced.eval()
 
         x = torch.randn(5, 3)
-        torch.testing.assert_allclose(traced(x), x)
+        torch.testing.assert_close(traced(x), x)
         """
         AssertionError: Tensor-likes are not close!
 
@@ -1071,7 +1071,7 @@ Miscellanea
         traced.eval()
 
         x = torch.randn(5, 3)
-        torch.testing.assert_allclose(traced(x), x)
+        torch.testing.assert_close(traced(x), x)
 
   - Because of this difference, consider marking modules that interact with the ``training`` flag dynamically as leaf modules.
 
@@ -1115,6 +1115,13 @@ API Reference
 .. Adding it here for coverage but this doesn't add anything to the
 .. rendered doc.
 .. py:module:: torch.fx.passes
+.. py:module:: torch.fx.passes.infra
+.. py:module:: torch.fx.passes.backends
+.. py:module:: torch.fx.passes.utils
+.. py:module:: torch.fx.passes.tests
 .. py:module:: torch.fx.experimental
 .. py:module:: torch.fx.experimental.unification
 .. py:module:: torch.fx.experimental.unification.multipledispatch
+.. py:module:: torch.fx.experimental.migrate_gradual_types
+.. py:module:: torch.fx.passes.dialect
+.. py:module:: torch.fx.passes.dialect.common

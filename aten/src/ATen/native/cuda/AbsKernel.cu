@@ -22,7 +22,7 @@ void abs_kernel_cuda(TensorIteratorBase& iter) {
 #if AT_USE_JITERATOR()
     static const auto abs_string = jiterator_stringify(
         template <typename T> T abs_kernel(T x) { return std::abs(x); });
-    AT_DISPATCH_COMPLEX_TYPES(dtype, "abs_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "abs_cuda", [&]() {
       jitted_gpu_kernel<
           /*name=*/abs_name,
           /*return_dtype=*/scalar_t,
@@ -30,8 +30,9 @@ void abs_kernel_cuda(TensorIteratorBase& iter) {
           /*arity=*/1>(iter, abs_string);
     });
 #else
-    AT_DISPATCH_COMPLEX_TYPES(dtype, "abs_cuda", [&]() {
-      gpu_kernel(iter, AbsFunctor<scalar_t>());
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "abs_cuda", [&]() {
+      using opmath_t = at::opmath_type<scalar_t>;
+      gpu_kernel(iter, AbsFunctor<opmath_t>());
     });
 #endif
   } else {

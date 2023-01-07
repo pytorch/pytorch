@@ -2,7 +2,6 @@ from enum import Enum
 from functools import partial
 
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel
 
 from . import (
     debugging_hooks as debugging,
@@ -12,6 +11,7 @@ from . import (
     optimizer_overlap_hooks as optimizer_overlap,
 )
 
+__all__ = ['DDPCommHookType', 'register_ddp_comm_hook']
 
 def _ddp_comm_hook_wrapper(comm_hook, model, state):
     model.register_comm_hook(state, comm_hook)
@@ -86,7 +86,7 @@ class DDPCommHookType(Enum):
 
 
 def register_ddp_comm_hook(
-    comm_hook_type: DDPCommHookType, model: DistributedDataParallel, state=None
+    comm_hook_type: DDPCommHookType, model, state=None
 ):
     """
     Registers the hooks of ``torch.distributed.algorithms.ddp_comm_hooks``
@@ -96,6 +96,7 @@ def register_ddp_comm_hook(
     Uses Python comm hook implementations.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> register_ddp_comm_hook(DDPCommHookType.FP16_COMPRESS, model, state)
     """
     comm_hook_type.value(model=model, state=state)

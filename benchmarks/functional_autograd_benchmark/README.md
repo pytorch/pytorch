@@ -20,6 +20,10 @@ export OMP_NUM_THREADS=10
 git checkout master
 python setup.py develop
 
+# Install dependencies:
+# Scipy is required by detr
+pip install scipy
+
 # Run the benchmark for the base
 # This will use the GPU if available.
 pushd benchmarks/functional_autograd_benchmark
@@ -46,3 +50,18 @@ popd
 - `compare.py` is the entry point to run the comparison script that generates a markdown table.
 - `torchaudio_models.py` and `torchvision_models.py`  contains code extracted from torchaudio and torchvision to be able to run the models without having a specific version of these libraries installed.
 - `ppl_models.py`, `vision_models.py` and `audio_text_models.py` contain all the getter functions used for the benchmark.
+
+
+### Benchmarking against `functorch`
+
+```bash
+# Install stable functorch:
+pip install functorch
+# or install from source:
+pip install git+https://github.com/pytorch/functorch
+
+# Run the benchmark for the base
+# This will use the GPU if available.
+pushd benchmarks/functional_autograd_benchmark
+python functional_autograd_benchmark.py --output bench-with-functorch.txt
+```

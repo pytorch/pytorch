@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
-import random
 import sys
 import tempfile
 import time
@@ -131,6 +130,35 @@ class FileStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+    def test_init_pg_and_rpc_with_same_file(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        # Init RPC using file
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
+        rpc_backend_options.init_method = f"file://{file.name}"
+        rpc.init_rpc("worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options)
+
+        # Init PG using file
+        dist.init_process_group("gloo", rank=0, world_size=1, init_method=f"file://{file.name}")
+        dist.destroy_process_group()
+        assert os.path.exists(file.name)
+
+        rpc.shutdown()
+        os.remove(file.name)
+
+    def test_refcount(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        store = dist.FileStore(file.name, 1)
+        store2 = dist.FileStore(file.name, 1)
+
+        del store
+        assert os.path.exists(file.name)
+        del store2
+        assert not os.path.exists(file.name)
+
+    @property
+    def num_keys_total(self):
+        return 6
+
 
 @skip_if_win32()
 class HashStoreTest(TestCase, StoreTestBase):
@@ -142,6 +170,19 @@ class HashStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+class PrefixStoreTest(TestCase):
+    def setUp(self):
+        # delete is false as FileStore will automatically clean up the file
+        self.file = tempfile.NamedTemporaryFile(delete=False)
+
+    def test_get_underlying_store(self):
+        tcp_store = dist.TCPStore(host_name=DEFAULT_HOSTNAME, port=0, world_size=1, is_master=True)
+        hash_store = dist.HashStore()
+        file_store = dist.FileStore(self.file.name, world_size=1)
+        for store in [tcp_store, hash_store, file_store]:
+            with self.subTest(f"Testing getting underlying_store for {type(store)}"):
+                prefix_store = dist.PrefixStore("prefix", store)
+                self.assertEqual(prefix_store.underlying_store, store)
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -153,6 +194,10 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
 
     def _create_store(self):
         return dist.PrefixStore(self.prefix, self.filestore)
+
+    @property
+    def num_keys_total(self):
+        return 6
 
 
 class TCPStoreTest(TestCase, StoreTestBase):
@@ -248,7 +293,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self._test_numkeys_delkeys(self._create_store())
 
     def _create_client(self, index, addr, port, world_size):
-        client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
+        client_store = dist.TCPStore(addr, port, world_size=world_size, timeout=timedelta(seconds=10))
         self.assertEqual("value".encode(), client_store.get("key"))
         client_store.set(f"new_key{index}", f"new_value{index}")
         self.assertEqual(f"next_value{index}".encode(),
@@ -259,15 +304,16 @@ class TCPStoreTest(TestCase, StoreTestBase):
         server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
         server_store.set("key", "value")
         port = server_store.port
-        world_size = random.randint(5, 10) if world_size == -1 else world_size
-        for i in range(world_size):
+
+        num_indices = world_size if world_size else 1
+        for i in range(num_indices):
             self._create_client(i, addr, port, world_size)
 
     def test_multi_worker_with_fixed_world_size(self):
         self._multi_worker_helper(5)
 
     def test_multi_worker_with_nonfixed_world_size(self):
-        self._multi_worker_helper(-1)
+        self._multi_worker_helper(None)
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -290,7 +336,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 class MyPythonStore(dist.Store):
     def __init__(self):
         super(MyPythonStore, self).__init__()
-        self.store = dict()
+        self.store = {}
 
     def set(self, key, value):
         if not isinstance(key, string_classes):
@@ -330,6 +376,10 @@ class RendezvousTest(TestCase):
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
             dist.rendezvous("invalid://")
+
+    def test_url_with_node_params(self):
+        with self.assertRaisesRegex(AssertionError, "has node-specific arguments"):
+            dist.rendezvous("file://foo?rank=12&world_size=16", 12, 16)
 
 
 class RendezvousEnvTest(TestCase):

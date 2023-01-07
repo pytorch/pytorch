@@ -12,7 +12,7 @@ import signal
 import unittest
 import uuid
 from typing import Any, Dict
-from unittest.mock import call, patch
+from unittest.mock import call, patch, MagicMock
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic.agent.server.api import (
@@ -159,6 +159,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         monitor_interval=1.0,
         role="test_trainer",
         local_world_size=8,
+        local_addr=None,
     ):
         run_id = str(uuid.uuid4().int)
         port = get_free_port()
@@ -180,6 +181,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
             rdzv_handler=rdzv_handler,
             max_restarts=max_restarts,
             monitor_interval=monitor_interval,
+            local_addr=local_addr,
         )
         return spec
 
@@ -315,6 +317,30 @@ class SimpleElasticAgentTest(unittest.TestCase):
                 local_world_size * group_rank + w.local_rank, w.global_rank
             )
             self.assertSetEqual(set(range(w.world_size)), rank_set)
+
+    def test_rendezvous_default_master_addr(self):
+        spec = self._get_worker_spec(max_restarts=1)
+        agent = TestAgent(spec)
+        worker_group = agent.get_worker_group()
+        agent._rendezvous(worker_group)
+
+        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
+
+        self.assertEqual(_get_fq_hostname(), master_addr)
+        self.assertGreater(master_port, 0)
+
+    def test_rendezvous_master_addr_with_local_addr(self):
+        spec_local_addr = "1.2.3.4"
+        spec = self._get_worker_spec(max_restarts=1, local_addr=spec_local_addr)
+        agent = TestAgent(spec)
+        worker_group = agent.get_worker_group()
+        agent._rendezvous(worker_group)
+
+        master_addr, master_port = agent._get_master_addr_port(worker_group.store)
+
+        self.assertNotEqual(_get_fq_hostname(), master_addr)
+        self.assertEqual(spec_local_addr, master_addr)
+        self.assertGreater(master_port, 0)
 
     def test_initialize_workers(self):
         spec = self._get_worker_spec(max_restarts=1)
@@ -497,8 +523,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         )
         self.assertEqual(expected_role_ranks, [worker.role_rank for worker in workers])
 
-    @patch("torch.distributed.elastic.utils.store.get_all")
-    def test_share_and_gather(self, store_mock):
+    @patch("torch.distributed.elastic.utils.store.synchronize")
+    def test_share_and_gather(self, sync_mock):
         # when the state is unknown we exit immediately; no retries
         spec = self._get_worker_spec(max_restarts=100, monitor_interval=0.1)
         agent = TestAgent(spec)
@@ -508,26 +534,15 @@ class SimpleElasticAgentTest(unittest.TestCase):
             _RoleInstanceInfo("validator", 2, 10),
         ]
 
-        store_mock.return_value = [obj.serialize() for obj in expected_agent_infos]
-
-        class DummyStore:
-            def __init__(self):
-                self.key = None
-                self.value = None
-
-            def set(self, key, value):
-                self.key = key
-                self.value = value
-
-            def set_timeout(self, timeout):
-                pass
-
-        store = DummyStore()
-        agent._share_and_gather(store, 1, 3, spec)
-        self.assertEquals("torchelastic/role_info1", store.key)
-        expected_info = _RoleInstanceInfo(spec.role, 1, spec.local_world_size)
-        self.assertEquals(expected_info.serialize(), store.value)
-        store_mock.assert_called_once()
+        sync_mock.return_value = [obj.serialize() for obj in expected_agent_infos]
+        result = agent._share_and_gather(MagicMock(), 1, 3, spec)
+        sync_mock.assert_called_once()
+        for expected_role_info, actual_role_info in zip(expected_agent_infos, result):
+            self.assertEqual(expected_role_info.role, actual_role_info.role)
+            self.assertEqual(expected_role_info.rank, actual_role_info.rank)
+            self.assertEqual(
+                expected_role_info.local_world_size, actual_role_info.local_world_size
+            )
 
     def test_get_event(self):
         spec = self._get_worker_spec(max_restarts=1)

@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from torch.fx._compatibility import compatibility
 
+__all__ = ['default_matching', 'extract_attrs_for_lowering', 'lift_lowering_attrs_to_nodes']
 
 # Matching method matches the attribute name of current version to the attribute name of `target_version`
 @compatibility(is_backward_compatible=False)

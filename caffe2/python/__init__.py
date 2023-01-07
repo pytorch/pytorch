@@ -1,7 +1,15 @@
-
-from caffe2.proto import caffe2_pb2
 import os
 import sys
+import warnings
+
+
+try:
+    from caffe2.proto import caffe2_pb2
+except ImportError:
+    warnings.warn('Caffe2 support is not enabled in this PyTorch build. '
+                  'Please enable Caffe2 by building PyTorch from source with `BUILD_CAFFE2=1` flag.')
+    raise
+
 # TODO: refactor & remove the following alias
 caffe2_pb2.CPU = caffe2_pb2.PROTO_CPU
 caffe2_pb2.CUDA = caffe2_pb2.PROTO_CUDA

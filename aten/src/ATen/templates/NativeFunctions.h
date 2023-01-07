@@ -30,10 +30,4 @@
 
 ${NativeFunctions_includes}
 
-namespace at {
-namespace native {
-
 ${NativeFunctions_declarations}
-
-} // namespace native
-} // namespace at

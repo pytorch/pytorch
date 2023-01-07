@@ -122,7 +122,7 @@ enum class Activation {
   GELU,
 };
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
 cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
   switch (a) {
     case Activation::None:
@@ -138,6 +138,14 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 }
 #endif
 
+static bool getDisableAddmmCudaLt() {
+    static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
+    if (env_value != nullptr && strcmp(env_value, "1") == 0) {
+      return true;
+    }
+    return false;
+}
+
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
@@ -151,6 +159,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
   bool useLtInterface = false;
+  static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
@@ -159,14 +168,31 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
     // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
     // is to use lt interface only when self is bias.
-    useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
-        result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
-        self.is_contiguous() &&
-        (scalar_type == at::ScalarType::Double ||
-         scalar_type == at::ScalarType::Float ||
-         scalar_type == at::ScalarType::Half ||
-         scalar_type == at::ScalarType::BFloat16) &&
-        mat2_sizes[0] > 1 && mat2_sizes[1] > 1;
+    // for cuda 11.4, cublasLtMatmul is activated
+    // the last two conditions is to skip 16b transA and non-trans-B having
+    // leading dim >> rows when they are sliced from a large tensor
+    // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
+    if (!disable_addmm_cuda_lt) {
+      useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
+          result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
+          self.is_contiguous() &&
+          (scalar_type == at::ScalarType::Double ||
+           scalar_type == at::ScalarType::Float ||
+           scalar_type == at::ScalarType::Half ||
+           scalar_type == at::ScalarType::BFloat16) &&
+          mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
+          mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
+          mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
+          // avoid leaing dim >> rows bugs
+          ((mat1.strides()[0] == 1 && mat1.strides()[1] == mat1_sizes[0]) ||
+           (mat1.strides()[1] == 1 && mat1.strides()[0] == mat1_sizes[1]) ||
+           (scalar_type != at::ScalarType::Half &&
+            scalar_type != at::ScalarType::BFloat16)) &&
+          ((mat2.strides()[0] == 1 && mat2.strides()[1] == mat2_sizes[0]) ||
+           (mat2.strides()[1] == 1 && mat2.strides()[0] == mat2_sizes[1]) ||
+           (scalar_type != at::ScalarType::Half &&
+            scalar_type != at::ScalarType::BFloat16));
+    }
 #endif
     if (!useLtInterface) {
       self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
@@ -235,7 +261,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
   if (useLtInterface) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -594,7 +620,8 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
 
       // Check for contiguity of `vec` and update `vec_stride` accordingly
       const auto vec_contiguous = vec_stride == 0 ? vec.contiguous() : vec;
-      vec_stride = vec_contiguous.stride(0);
+      // A vector can be contiguous and have a stride of zero if it has it is of length 1
+      vec_stride = std::max<int64_t>(vec_contiguous.stride(0), 1LL);
 
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, mat.scalar_type(), "addmv_impl_cuda", [&] {
         auto beta = beta_.to<scalar_t>();

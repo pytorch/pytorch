@@ -11,7 +11,7 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -87,7 +87,7 @@ static void Softmax_WarpReduceReference(benchmark::State& benchmark_state) {
   std::vector<c10::IValue> aten_inputs({aten_input});
 
   // Schedule through magic scheduler:
-  auto runtime_info = SchedulerRuntimeInfo(fusion, aten_inputs, true);
+  SchedulerRuntimeInfo runtime_info(fusion, aten_inputs, true);
   TORCH_INTERNAL_ASSERT(SchedulerEntry::canSchedule(
       ScheduleHeuristic::Persistent, fusion, runtime_info));
   auto scheduler = SchedulerEntry::makeEntry(
@@ -107,7 +107,7 @@ static void Softmax_WarpReduceReference(benchmark::State& benchmark_state) {
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *
@@ -132,7 +132,7 @@ static void Softmax_WarpReduce(benchmark::State& benchmark_state) {
   std::vector<c10::IValue> aten_inputs({aten_input});
 
   // Schedule through magic scheduler:
-  auto runtime_info = SchedulerRuntimeInfo(fusion, aten_inputs, true);
+  SchedulerRuntimeInfo runtime_info(fusion, aten_inputs, true);
   TORCH_INTERNAL_ASSERT(SchedulerEntry::canSchedule(
       ScheduleHeuristic::Persistent, fusion, runtime_info));
   auto scheduler = SchedulerEntry::makeEntry(
@@ -162,7 +162,7 @@ static void Softmax_WarpReduce(benchmark::State& benchmark_state) {
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *
@@ -206,7 +206,7 @@ static void Baseline_Softmax(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *

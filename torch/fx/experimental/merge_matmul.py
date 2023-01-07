@@ -1,83 +1,35 @@
 import torch
 
-from torch.fx.graph import Graph
-from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx._symbolic_trace import symbolic_trace
-
+from torch.fx.passes.tools_common import legalize_graph
 import itertools
 import operator
 
 from typing import Dict, List
 
 
-def get_first_dim(t: torch.Tensor) -> int:
+def split_result_tensors(result: torch.Tensor, inputs: List[torch.Tensor]) -> List[torch.Tensor]:
     """
-    A free function primarily for use in the merge_matmul graph transformation below
-    that returns the first dimension of a Tensor. This is necessary because torch.Tensor.shape
-    is an attribute (and cannot be the target of a call_function node) and also helps save
-    a getitem op in the graph.
+    A free function for use in the merge_matmul graph transformation below that
+    splits the output from a merged matmul into the individual results for each
+    input tensor.
 
     Arguments:
-        t: The tensor to get the first dimension of.
+        result: The merged matmul result tensor.
+        inputs: The list of inputs that were merged into one for the matmul.
 
     Returns:
-        The first dimension of t.
+        List of matmul results for each input tensor.
     """
-    return t.shape[0]
+    # When fx tracer is running, x.shape[0] will be torch.fx.Attribute but we
+    # need an int even when tracing
+    if isinstance(result, torch.fx.Proxy):
+        splits = [0] * len(inputs)
+    else:
+        splits = [x.shape[0] for x in inputs]
 
-
-def legalize_graph(gm: GraphModule):
-    """
-    Replace the graph of the given GraphModule with one that contains the same nodes as the
-    original, but in topologically sorted order.
-
-    This is used by the merge_matmul transformation below, which disturbs the topologically sorted
-    order of its input GraphModule, so that this order is restored before further transformation.
-
-    Arguments:
-        gm: The graph module to topologically sort. It is modified in-place.
-
-    """
-    # Build an adjacency list representation of node dependencies in the graph. This also
-    # serves as a list of nodes that still need to be inserted into the new, topologically
-    # sorted graph.
-    dependencies = {node: node.all_input_nodes.copy() for node in gm.graph.nodes}
-
-    # Construct a new graph that will contain all nodes in topologically sorted order.
-    new_graph = Graph()
-    value_remap: Dict[Node, Node] = {}
-
-    # Copy over all nodes with no dependencies.
-    for node, deps in dependencies.items():
-        if not deps:
-            value_remap[node] = new_graph.node_copy(node, lambda n: value_remap[n])
-
-    # Remove the copied over nodes from the adjacency list.
-    for copied_node in value_remap.keys():
-        del dependencies[copied_node]
-
-    # While there are still nodes to insert into the new graph:
-    while dependencies:
-        copied_this_round = []
-
-        # Copy over all nodes whose dependencies already exist in the new graph.
-        for node, deps in dependencies.items():
-            all_deps_copied = True
-            for dep in deps:
-                if dep not in value_remap:
-                    all_deps_copied = False
-
-            if all_deps_copied:
-                value_remap[node] = new_graph.node_copy(node, lambda n: value_remap[n])
-                copied_this_round.append(node)
-
-        # Delete all nodes copied over in this iteration from dependencies.
-        for copied_node in copied_this_round:
-            del dependencies[copied_node]
-
-    # Replace the old graph with the new, topologically sorted one.
-    gm.graph = new_graph
+    return torch.split(result, splits)
 
 
 def may_depend_on(a: Node, b: Node, search_depth: int = 6):
@@ -195,11 +147,8 @@ def merge_matmul(in_mod: torch.nn.Module):
 
         # Split the result of the merged matmul using the shapes of the LHS operands
         # to ascertain how large each chunk should be.
-        merge_mm_sizes = [
-            gm.graph.call_function(get_first_dim, (l,), {}) for l in lhs
-        ]
         merge_mm_split = gm.graph.call_function(
-            torch.split, (merge_mm, merge_mm_sizes), {}
+            split_result_tensors, (merge_mm, lhs), {}
         )
         merge_mm_res = [
             gm.graph.call_function(operator.getitem, (merge_mm_split, out), {})

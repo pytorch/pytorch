@@ -1,10 +1,19 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/Parallel.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/Pool.h>
 #include <c10/util/irange.h>
 #include <tuple>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/avg_pool3d_backward_native.h>
+#include <ATen/ops/avg_pool3d_native.h>
+#endif
 
 namespace at {
 
@@ -72,10 +81,10 @@ TORCH_META_FUNC(avg_pool3d) (
 
   /* resize output */
   if (input.ndimension() == 4) {
-    set_output(0, {nslices, otime, oheight, owidth}, input.options());
+    set_output_raw_strided(0, {nslices, otime, oheight, owidth}, {}, input.options());
   }
   else {
-    set_output(0, {nbatch, nslices, otime, oheight, owidth}, input.options());
+    set_output_raw_strided(0, {nbatch, nslices, otime, oheight, owidth}, {}, input.options());
   }
 }
 
@@ -137,7 +146,7 @@ TORCH_META_FUNC(avg_pool3d_backward) (
     "avg_pool3d_backward()");
 
   /* resize output */
-  set_output(0, input.sizes(), input.options());
+  set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 
 } // namespace meta

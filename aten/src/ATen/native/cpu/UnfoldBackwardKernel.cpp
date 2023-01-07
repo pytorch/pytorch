@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/UnfoldBackward.h>
@@ -65,8 +66,7 @@ void _unfold_backward_internal_kernel(
   int64_t grad_in_dim_stride,
   int64_t grad_in_last_dim_stride,
   int64_t grad_in_dim_size,
-  int64_t grad_out_dim_stride,
-  bool is_step_ge_size
+  int64_t grad_out_dim_stride
 ) {
   if (iter.numel() == 0) {
     return;
@@ -77,55 +77,32 @@ void _unfold_backward_internal_kernel(
     auto* RESTRICT grad_in_ptr = data[1];
     auto* RESTRICT idx_dim_ptr = data[2];
 
-    if (is_step_ge_size) {
-      auto* RESTRICT idx_last_dim_ptr = data[3];
+    for (const auto elem C10_UNUSED : c10::irange(nelems)) {
+      auto* RESTRICT grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
+      auto* RESTRICT grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
 
-      for (const auto elem : c10::irange(nelems)) {
-        (void)elem; //Suppress unused variable warning
-        auto* RESTRICT grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
-        auto* RESTRICT grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
+      auto idx_dim = *reinterpret_cast<int64_t*>(idx_dim_ptr);
 
-        auto idx_dim = *reinterpret_cast<int64_t*>(idx_dim_ptr);
-        auto idx_last_dim = *reinterpret_cast<int64_t*>(idx_last_dim_ptr);
-
-        auto grad_out_idx_dim = idx_dim * step + idx_last_dim;
-        grad_out_data[grad_out_idx_dim * grad_out_dim_stride] = *grad_in_data;
-
-        grad_out_ptr += strides[0];
-        grad_in_ptr += strides[1];
-        idx_dim_ptr += strides[2];
-        idx_last_dim_ptr += strides[3];
+      // left_fold potentially intersecting with idx_dim
+      // is either (idx_dim - size) / step or the next integer.
+      int64_t left_fold_idx = (idx_dim > size) ? (idx_dim - size) / step : 0;
+      if (!(left_fold_idx * step <= idx_dim && idx_dim < left_fold_idx * step + size)) {
+        ++left_fold_idx;
       }
-    }
-    else {
-      for (const auto elem : c10::irange(nelems)) {
-        (void)elem; //Suppress unused variable warning
-        auto* RESTRICT grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
-        auto* RESTRICT grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
 
-        auto idx_dim = *reinterpret_cast<int64_t*>(idx_dim_ptr);
+      auto right_fold_idx = idx_dim / step;
+      right_fold_idx = (right_fold_idx >= grad_in_dim_size)
+        ? (grad_in_dim_size - 1) : right_fold_idx;
 
-        // left_fold potentially intersecting with idx_dim
-        // is either (idx_dim - size) / step or the next integer.
-        int64_t left_fold_idx = (idx_dim > size) ? (idx_dim - size) / step : 0;
-        if (!(left_fold_idx * step <= idx_dim && idx_dim < left_fold_idx * step + size)) {
-          ++left_fold_idx;
-        }
-
-        auto right_fold_idx = idx_dim / step;
-        right_fold_idx = (right_fold_idx >= grad_in_dim_size)
-          ? (grad_in_dim_size - 1) : right_fold_idx;
-
-        for (auto fold_idx = left_fold_idx; fold_idx <= right_fold_idx; ++fold_idx) {
-          auto idx_last_dim = idx_dim - fold_idx * step;
-          *grad_out_data += grad_in_data[fold_idx * grad_in_dim_stride
-                                      + idx_last_dim * grad_in_last_dim_stride];
-        }
-
-        grad_out_ptr += strides[0];
-        grad_in_ptr += strides[1];
-        idx_dim_ptr += strides[2];
+      for (auto fold_idx = left_fold_idx; fold_idx <= right_fold_idx; ++fold_idx) {
+        auto idx_last_dim = idx_dim - fold_idx * step;
+        *grad_out_data += grad_in_data[fold_idx * grad_in_dim_stride
+                                    + idx_last_dim * grad_in_last_dim_stride];
       }
+
+      grad_out_ptr += strides[0];
+      grad_in_ptr += strides[1];
+      idx_dim_ptr += strides[2];
     }
   };
 
@@ -149,16 +126,8 @@ void unfold_backward_cpu_kernel(
 
   auto grad_out_dim_stride = ensure_nonempty_stride(grad_out, dim);
 
-  auto is_step_ge_size = (step >= size);
-
-  TensorIterator iter =
-    is_step_ge_size ?
-    _make_unfold_backward_iter_over_grad_in(
-      grad_out, grad_in, dim, size, step
-    ) :
-    _make_unfold_backward_iter_over_grad_out(
-      grad_out, grad_in, dim, size, step
-    );
+  TensorIterator iter = _make_unfold_backward_iter_over_grad_out(
+      grad_out, grad_in, dim, size, step);
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
@@ -171,8 +140,7 @@ void unfold_backward_cpu_kernel(
         grad_in_dim_stride,
         grad_in_last_dim_stride,
         grad_in_dim_size,
-        grad_out_dim_stride,
-        is_step_ge_size
+        grad_out_dim_stride
       );
     }
   );

@@ -35,6 +35,8 @@ IS_MACOS = sys.platform == "darwin"
 
 log = logging.getLogger(__name__)
 
+__all__ = ["SignalException", "Std", "to_map", "RunProcsResult", "PContext", "get_std_cm", "MultiprocessContext",
+           "SubprocessHandler", "SubprocessContext"]
 
 class SignalException(Exception):
     """
@@ -47,7 +49,7 @@ class SignalException(Exception):
         self.sigval = sigval
 
 
-def _terminate_process_handler(signum: int, frame: FrameType) -> None:
+def _terminate_process_handler(signum: int, frame: Optional[FrameType]) -> None:
     """Termination handler that raises exceptions on the main process.
 
     When the process receives death signal(SIGTERM, SIGINT), this termination handler will
@@ -535,7 +537,7 @@ class MultiprocessContext(PContext):
         for proc in self._pc.processes:
             if proc.is_alive():
                 log.warning(
-                    f"Unable to shutdown process {proc.pid} via {death_sig}, forcefully exitting via {_get_kill_signal()}"
+                    f"Unable to shutdown process {proc.pid} via {death_sig}, forcefully exiting via {_get_kill_signal()}"
                 )
                 try:
                     os.kill(proc.pid, _get_kill_signal())
@@ -712,7 +714,7 @@ class SubprocessContext(PContext):
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
                 log.warning(
-                    f"Unable to shutdown process {handler.proc.pid} via {death_sig}, forcefully exitting via {_get_kill_signal()}"
+                    f"Unable to shutdown process {handler.proc.pid} via {death_sig}, forcefully exiting via {_get_kill_signal()}"
                 )
                 handler.close(death_sig=_get_kill_signal())
                 handler.proc.wait()

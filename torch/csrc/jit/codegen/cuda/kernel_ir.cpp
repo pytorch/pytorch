@@ -78,11 +78,26 @@ TensorIndex::TensorIndex(
   }
 }
 
+Val* TensorIndex::index(int i) const {
+  TORCH_INTERNAL_ASSERT(
+      nDims() > 0, "Tried to get an index of a 0-dim TensorIndex");
+  if (i < 0)
+    i += nDims();
+  TORCH_INTERNAL_ASSERT(i >= 0 && i < int(nDims()));
+  return indices_[i];
+}
+
 BlockSync::BlockSync(IrBuilderPasskey passkey, bool war_sync)
     : Expr(passkey, ExprType::BlockSync), war_sync_(war_sync) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
+}
+
+Expr* BlockSync::shallowCopy() const {
+  auto result = IrBuilder::create<BlockSync>(war_sync_);
+  result->copyPredicatesFrom(this);
+  return result;
 }
 
 GridSync::GridSync(
@@ -93,6 +108,38 @@ GridSync::GridSync(
       sync_dims_(sync_dims),
       sync_buffer_(sync_buffer) {}
 
+Expr* GridSync::shallowCopy() const {
+  auto result = IrBuilder::create<GridSync>(sync_dims_, sync_buffer_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+CpAsyncWait::CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages)
+    : Expr(passkey, ExprType::CpAsyncWait), keep_stages_(keep_stages) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+Expr* CpAsyncWait::shallowCopy() const {
+  auto result = IrBuilder::create<CpAsyncWait>(keep_stages_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+CpAsyncCommit::CpAsyncCommit(IrBuilderPasskey passkey)
+    : Expr(passkey, ExprType::CpAsyncCommit) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+Expr* CpAsyncCommit::shallowCopy() const {
+  auto result = IrBuilder::create<CpAsyncCommit>();
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 InitMagicZero::InitMagicZero(IrBuilderPasskey passkey)
     : Expr(passkey, ExprType::InitMagicZero) {
   TORCH_INTERNAL_ASSERT(
@@ -100,11 +147,87 @@ InitMagicZero::InitMagicZero(IrBuilderPasskey passkey)
       "IR type only valid for Kernel container.");
 }
 
+Expr* InitMagicZero::shallowCopy() const {
+  auto result = IrBuilder::create<InitMagicZero>();
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 UpdateMagicZero::UpdateMagicZero(IrBuilderPasskey passkey)
     : Expr(passkey, ExprType::UpdateMagicZero) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
+}
+
+Expr* UpdateMagicZero::shallowCopy() const {
+  auto result = IrBuilder::create<UpdateMagicZero>();
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+namespace {
+
+bool isIntegralScalar(const Val* val) {
+  return val->isScalar() && val->getDataType().has_value() &&
+      isIntegralType(val->getDataType().value());
+}
+
+} // namespace
+
+IntPair::IntPair(IrBuilderPasskey passkey)
+    : Val(passkey, ValType::IntPair, DataType::Index) {}
+
+PairSelect::PairSelect(
+    IrBuilderPasskey passkey,
+    Val* out,
+    IntPair* in,
+    PairSelect::Selection selection)
+    : Expr(passkey, ExprType::PairSelect),
+      out_{out},
+      in_{in},
+      selection_(selection) {
+  addOutput(out);
+  addInput(in);
+  TORCH_INTERNAL_ASSERT(isIntegralScalar(out), "Integer only for this op");
+}
+
+Expr* PairSelect::shallowCopy() const {
+  auto result = IrBuilder::create<PairSelect>(out_, in_, selection_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+Swizzle2DInt::Swizzle2DInt(
+    IrBuilderPasskey passkey,
+    IntPair* out,
+    Val* in_x,
+    Val* in_y,
+    Val* extent_x,
+    Val* extent_y,
+    Swizzle2DType swizzle_type)
+    : Expr(passkey, ExprType::Swizzle2DInt),
+      out_{out},
+      in_x_{in_x},
+      in_y_{in_y},
+      extent_x_(extent_x),
+      extent_y_(extent_y),
+      swizzle_type_(swizzle_type) {
+  TORCH_INTERNAL_ASSERT(isIntegralScalar(in_x), "Integer only for this op");
+  TORCH_INTERNAL_ASSERT(isIntegralScalar(in_y), "Integer only for this op");
+
+  addOutput(out);
+  addInput(in_x);
+  addInput(in_y);
+  addInput(extent_x);
+  addInput(extent_y);
+}
+
+Expr* Swizzle2DInt::shallowCopy() const {
+  auto result = IrBuilder::create<Swizzle2DInt>(
+      out_, in_x_, in_y_, extent_x_, extent_y_, swizzle_type_);
+  result->copyPredicatesFrom(this);
+  return result;
 }
 
 void Scope::insert(std::vector<Expr*>::const_iterator pos, Expr* expr) {
@@ -142,7 +265,7 @@ void Scope::insert(size_t pos, Expr* expr) {
 
 void Scope::erase(std::vector<Expr*>::const_iterator pos) {
   // Remove the scope of the expr if this is the scope
-  auto expr = *pos;
+  C10_UNUSED auto expr = *pos;
   exprs_.erase(pos);
 }
 
@@ -176,7 +299,8 @@ ForLoop::ForLoop(
     Val* step,
     bool vectorize,
     Val* vectorize_shift,
-    bool unroll_required)
+    bool unroll_required,
+    DoubleBufferLoopStage double_buffer_loop_stage)
     : Expr(passkey, ExprType::ForLoop),
       iter_domain_{iter_domain},
       index_(index),
@@ -186,7 +310,8 @@ ForLoop::ForLoop(
       vectorize_(vectorize),
       vectorize_shift_(vectorize_shift),
       unroll_required_(unroll_required),
-      body_(this) {
+      body_(this),
+      double_buffer_loop_stage_(double_buffer_loop_stage) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -209,15 +334,15 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, IterDomain* iter_domain)
     : ForLoop(
           passkey,
           iter_domain,
-          iter_domain->isBroadcast() ? FusionGuard::getCurFusion()->zeroVal()
-                                     : IrBuilder::create<Int>(c10::nullopt),
+          GpuLower::current()->caMap()->getIndexVariable(iter_domain),
           nullptr,
           nullptr,
           nullptr,
           !iter_domain->isBroadcast() &&
               isParallelTypeVectorize(iter_domain->getParallelType()),
           nullptr,
-          false) {
+          false,
+          DoubleBufferLoopStage::NotApplicable) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -233,10 +358,27 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, const ForLoop* other)
           other->step(),
           other->vectorize(),
           other->vectorize_shift(),
-          other->isUnrollRequired()) {
+          other->isUnrollRequired(),
+          other->doubleBufferLoopStage()) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
+}
+
+Expr* ForLoop::shallowCopy() const {
+  auto result = IrBuilder::create<ForLoop>(
+      iter_domain_,
+      index_,
+      start_,
+      stop_,
+      step_,
+      vectorize_,
+      vectorize_shift_,
+      unroll_required_,
+      double_buffer_loop_stage_);
+  result->body_ = body_;
+  result->copyPredicatesFrom(this);
+  return result;
 }
 
 bool ForLoop::isUnrollable() const {
@@ -358,13 +500,12 @@ IfThenElse::IfThenElse(IrBuilderPasskey passkey, Predicate* cond)
   addInput(cond);
 }
 
-Val* TensorIndex::index(int i) const {
-  TORCH_INTERNAL_ASSERT(
-      nDims() > 0, "Tried to get an index of a 0-dim TensorIndex");
-  if (i < 0)
-    i += nDims();
-  TORCH_INTERNAL_ASSERT(i >= 0 && i < int(nDims()));
-  return indices_[i];
+Expr* IfThenElse::shallowCopy() const {
+  auto result = IrBuilder::create<IfThenElse>(predicate());
+  result->then_body_ = then_body_;
+  result->else_body_ = else_body_;
+  result->setWritePredicate(writePredicate());
+  return result;
 }
 
 Allocate::Allocate(
@@ -427,18 +568,102 @@ Allocate::Allocate(
       "IR type only valid for Kernel container.");
 }
 
+Expr* Allocate::shallowCopy() const {
+  auto result =
+      IrBuilder::create<Allocate>(buffer_, memory_type_, shape_, zero_init_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 GridReduction::GridReduction(
     IrBuilderPasskey passkey,
-    ReductionOp* reduction_op,
+    BinaryOpType reduction_op_type,
+    Val* init,
+    Val* out,
+    Val* in,
     Allocate* reduction_buffer,
-    Allocate* sync_buffer)
-    : Expr(passkey, ExprType::GridReduction),
-      reduction_op_(reduction_op),
+    Allocate* sync_buffer,
+    Val* entrance_index,
+    Val* entrances,
+    bool is_allreduce)
+    : ReductionOp(
+          passkey,
+          reduction_op_type,
+          init,
+          out,
+          in,
+          is_allreduce,
+          ExprType::GridReduction),
       reduction_buffer_(reduction_buffer),
-      sync_buffer_(sync_buffer) {
+      sync_buffer_(sync_buffer),
+      entrance_index_(entrance_index),
+      entrances_(entrances) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
+}
+
+Expr* GridReduction::shallowCopy() const {
+  auto result = IrBuilder::create<GridReduction>(
+      getReductionOpType(),
+      init(),
+      out(),
+      in(),
+      reduction_buffer_,
+      sync_buffer_,
+      entrance_index_,
+      entrances_,
+      isAllreduce());
+  result->copyPredicatesFrom(this);
+  result->thread_predicate_ = thread_predicate_;
+  return result;
+}
+
+GroupedGridReduction::GroupedGridReduction(
+    IrBuilderPasskey passkey,
+    std::vector<BinaryOpType> reduction_op_types,
+    std::vector<Val*> init_vals,
+    std::vector<Val*> outputs,
+    std::vector<Val*> inputs,
+    std::vector<Allocate*> reduction_buffers,
+    Allocate* sync_buffer,
+    Val* entrance_index,
+    Val* entrances,
+    Val* buffer_stride,
+    bool is_allreduce)
+    : GroupedReductionOp(
+          passkey,
+          std::move(reduction_op_types),
+          std::move(init_vals),
+          std::move(outputs),
+          std::move(inputs),
+          is_allreduce,
+          ExprType::GroupedGridReduction),
+      reduction_buffers_(std::move(reduction_buffers)),
+      sync_buffer_(sync_buffer),
+      entrance_index_(entrance_index),
+      entrances_(entrances),
+      buffer_stride_(buffer_stride) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+Expr* GroupedGridReduction::shallowCopy() const {
+  auto result = IrBuilder::create<GroupedGridReduction>(
+      getReductionOpTypes(),
+      initVals(),
+      outputs(),
+      inputs(),
+      reduction_buffers_,
+      sync_buffer_,
+      entrance_index_,
+      entrances_,
+      buffer_stride_,
+      isAllreduce());
+  result->copyPredicatesFrom(this);
+  result->thread_predicate_ = thread_predicate_;
+  return result;
 }
 
 GridBroadcast::GridBroadcast(
@@ -455,22 +680,91 @@ GridBroadcast::GridBroadcast(
       "IR type only valid for Kernel container.");
 }
 
+Expr* GridBroadcast::shallowCopy() const {
+  auto result = IrBuilder::create<GridBroadcast>(
+      broadcast_op_, broadcast_buffer_, sync_buffer_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 GridWelford::GridWelford(
     IrBuilderPasskey passkey,
     WelfordOp* welford_op,
     Allocate* var_buffer,
     Allocate* avg_buffer,
     Allocate* n_buffer,
-    Allocate* sync_buffer)
+    Allocate* sync_buffer,
+    Val* entrance_index,
+    Val* entrances)
     : Expr(passkey, ExprType::GridWelford),
       welford_op_(welford_op),
       var_buffer_(var_buffer),
       avg_buffer_(avg_buffer),
       n_buffer_(n_buffer),
-      sync_buffer_(sync_buffer) {
+      sync_buffer_(sync_buffer),
+      entrance_index_(entrance_index),
+      entrances_(entrances) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
+}
+
+Expr* GridWelford::shallowCopy() const {
+  auto result = IrBuilder::create<GridWelford>(
+      welford_op_,
+      var_buffer_,
+      avg_buffer_,
+      n_buffer_,
+      sync_buffer_,
+      entrance_index_,
+      entrances_);
+  result->copyPredicatesFrom(this);
+  result->thread_predicate_ = thread_predicate_;
+  return result;
+}
+
+GroupedGridWelford::GroupedGridWelford(
+    IrBuilderPasskey passkey,
+    std::vector<WelfordTriplet> output_vals,
+    std::vector<WelfordTriplet> input_vals,
+    std::vector<WelfordTriplet> init_vals,
+    std::array<std::vector<Allocate*>, 3> reduction_buffers,
+    Allocate* sync_buffer,
+    Val* entrance_index,
+    Val* entrances,
+    Val* buffer_stride,
+    bool is_allreduce)
+    : GroupedWelfordOp(
+          passkey,
+          std::move(output_vals),
+          std::move(input_vals),
+          std::move(init_vals),
+          is_allreduce,
+          ExprType::GroupedGridWelford),
+      reduction_buffers_(std::move(reduction_buffers)),
+      sync_buffer_(sync_buffer),
+      entrance_index_(entrance_index),
+      entrances_(entrances),
+      buffer_stride_(buffer_stride) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+Expr* GroupedGridWelford::shallowCopy() const {
+  auto result = IrBuilder::create<GroupedGridWelford>(
+      outputVals(),
+      inputVals(),
+      initVals(),
+      reduction_buffers_,
+      sync_buffer_,
+      entrance_index_,
+      entrances_,
+      buffer_stride_,
+      isAllreduce());
+  result->copyPredicatesFrom(this);
+  result->thread_predicate_ = thread_predicate_;
+  return result;
 }
 
 AllocateFusedReduction::AllocateFusedReduction(
@@ -493,12 +787,67 @@ AllocateFusedReduction::AllocateFusedReduction(
       "IR type only valid for Kernel container.");
 }
 
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GroupedGridReduction* grouped_grid_reduction)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grouped_grid_reduction) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GroupedGridWelford* grouped_grid_welford)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grouped_grid_welford) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+Expr* AllocateFusedReduction::shallowCopy() const {
+  if (grid_expr_->isA<GridReduction>()) {
+    auto result = IrBuilder::create<AllocateFusedReduction>(
+        grid_expr_->as<GridReduction>());
+    result->setPredicate(predicate());
+    result->setWritePredicate(writePredicate());
+    return result;
+  } else if (grid_expr_->isA<GridWelford>()) {
+    auto result = IrBuilder::create<AllocateFusedReduction>(
+        grid_expr_->as<GridWelford>());
+    result->setPredicate(predicate());
+    result->setWritePredicate(writePredicate());
+    return result;
+  } else if (grid_expr_->isA<GroupedGridReduction>()) {
+    auto result = IrBuilder::create<AllocateFusedReduction>(
+        grid_expr_->as<GroupedGridReduction>());
+    result->setPredicate(predicate());
+    result->setWritePredicate(writePredicate());
+    return result;
+  } else if (grid_expr_->isA<GroupedGridWelford>()) {
+    auto result = IrBuilder::create<AllocateFusedReduction>(
+        grid_expr_->as<GroupedGridWelford>());
+    result->setPredicate(predicate());
+    result->setWritePredicate(writePredicate());
+    return result;
+  }
+  TORCH_INTERNAL_ASSERT(
+      false, "Unknown reduction type in AllocateFusedReduction::shallowCopy");
+}
+
 TensorIndex* AllocateFusedReduction::out() const {
   TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
-  if (auto grid_reduction = dynamic_cast<GridReduction*>(grid_expr_)) {
-    return grid_reduction->reduction_op()->out()->as<kir::TensorIndex>();
+  if (grid_expr_->isA<GridReduction>() ||
+      grid_expr_->isA<GroupedGridReduction>()) {
+    return grid_expr_->outputs().at(0)->as<kir::TensorIndex>();
   } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
     return grid_welford->welford_op()->out()->as<kir::TensorIndex>();
+  } else if (
+      auto grouped_grid_welford =
+          dynamic_cast<GroupedGridWelford*>(grid_expr_)) {
+    return grouped_grid_welford->out(0)->as<kir::TensorIndex>();
   } else {
     TORCH_INTERNAL_ASSERT(
         false, "Invalid grid expression: ", grid_expr_->toString());
@@ -511,6 +860,14 @@ const ParallelTypeBitmap& AllocateFusedReduction::threadPredicate() const {
     return grid_reduction->threadPredicate();
   } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
     return grid_welford->threadPredicate();
+  } else if (
+      auto grouped_grid_reduction =
+          dynamic_cast<GroupedGridReduction*>(grid_expr_)) {
+    return grouped_grid_reduction->threadPredicate();
+  } else if (
+      auto grouped_grid_welford =
+          dynamic_cast<GroupedGridWelford*>(grid_expr_)) {
+    return grouped_grid_welford->threadPredicate();
   } else {
     TORCH_INTERNAL_ASSERT(
         false, "Invalid grid expression: ", grid_expr_->toString());

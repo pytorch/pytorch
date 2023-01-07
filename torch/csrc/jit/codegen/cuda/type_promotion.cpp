@@ -194,7 +194,7 @@ Val* optionalCast(DataType dtype, Val* v) {
   TORCH_INTERNAL_ASSERT(v->getDataType().has_value());
   // Avoid casting Float/Int/ComplexDouble scalar to any corresponding
   // FloatingPoint/Integral/Double type in fusion. Instead, we cast them
-  // directly. The exception is Bool, which is always casted to the desired
+  // directly. The exception is Bool, which is always cast to the desired
   // type.
   const bool kSameDtype = v->getDataType().value() == dtype;
   const bool kIsScalarFloat =
@@ -209,6 +209,12 @@ Val* optionalCast(DataType dtype, Val* v) {
   } else {
     return castOp(dtype, v);
   }
+}
+
+Val* optionalCastStrict(DataType dtype, Val* v) {
+  TORCH_INTERNAL_ASSERT(v->getDataType().has_value());
+  const bool kSameDtype = v->getDataType().value() == dtype;
+  return (kSameDtype) ? v : castOp(dtype, v);
 }
 
 } // namespace cuda

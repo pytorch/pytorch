@@ -45,16 +45,19 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     else:
         devices = [None] * len(modules)
     devices = [_get_device_index(x, True) for x in devices]
+    streams = [torch.cuda.current_stream(x) for x in devices]
     lock = threading.Lock()
     results = {}
     grad_enabled, autocast_enabled = torch.is_grad_enabled(), torch.is_autocast_enabled()
 
-    def _worker(i, module, input, kwargs, device=None):
+    def _worker(i, module, input, kwargs, device=None, stream=None):
         torch.set_grad_enabled(grad_enabled)
         if device is None:
             device = get_a_var(input).get_device()
+        if stream is None:
+            stream = torch.cuda.current_stream(device)
         try:
-            with torch.cuda.device(device), autocast(enabled=autocast_enabled):
+            with torch.cuda.device(device), torch.cuda.stream(stream), autocast(enabled=autocast_enabled):
                 # this also avoids accidental slicing of `input` if it is a Tensor
                 if not isinstance(input, (list, tuple)):
                     input = (input,)
@@ -68,16 +71,16 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
 
     if len(modules) > 1:
         threads = [threading.Thread(target=_worker,
-                                    args=(i, module, input, kwargs, device))
-                   for i, (module, input, kwargs, device) in
-                   enumerate(zip(modules, inputs, kwargs_tup, devices))]
+                                    args=(i, module, input, kwargs, device, stream))
+                   for i, (module, input, kwargs, device, stream) in
+                   enumerate(zip(modules, inputs, kwargs_tup, devices, streams))]
 
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
     else:
-        _worker(0, modules[0], inputs[0], kwargs_tup[0], devices[0])
+        _worker(0, modules[0], inputs[0], kwargs_tup[0], devices[0], streams[0])
 
     outputs = []
     for i in range(len(inputs)):

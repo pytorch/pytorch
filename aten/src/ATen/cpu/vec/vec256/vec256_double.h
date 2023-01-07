@@ -412,6 +412,11 @@ template <>
 Vectorized<double> inline fmadd(const Vectorized<double>& a, const Vectorized<double>& b, const Vectorized<double>& c) {
   return _mm256_fmadd_pd(a, b, c);
 }
+
+template <>
+Vectorized<double> inline fmsub(const Vectorized<double>& a, const Vectorized<double>& b, const Vectorized<double>& c) {
+  return _mm256_fmsub_pd(a, b, c);
+}
 #endif
 
 #endif

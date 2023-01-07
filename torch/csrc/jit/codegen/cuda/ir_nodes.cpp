@@ -182,7 +182,173 @@ bool ComplexDouble::sameAs(const Statement* other) const {
   return false;
 }
 
-UnaryOp::UnaryOp(IrBuilderPasskey passkey, UnaryOpType type, Val* out, Val* in)
+FullOp::FullOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* fill_value,
+    DataType dtype)
+    : Expr(passkey, ExprType::FullOp), dtype_(dtype), fill_value_(fill_value) {
+  if (out->isA<TensorView>()) {
+    addInput(out->as<TensorView>()->getRootDomain()[0]->extent());
+  }
+  addInput(fill_value);
+  addOutput(out);
+}
+
+FullOp::FullOp(const FullOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      dtype_(src->dtype()),
+      fill_value_(ir_cloner->clone(src->fill_value_)) {}
+
+Expr* FullOp::shallowCopy() const {
+  auto result = IrBuilder::create<FullOp>(output(0), fill_value_, dtype_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool FullOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<FullOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<FullOp>();
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
+ARangeOp::ARangeOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* start,
+    Val* end,
+    Val* step,
+    DataType dtype,
+    Val* linear_index)
+    : Expr(passkey, ExprType::ARangeOp),
+      dtype_(dtype),
+      start_(start),
+      end_(end),
+      step_(step),
+      linear_index_(linear_index) {
+  addInput(start);
+  addInput(end);
+  addInput(step);
+  addOutput(out);
+}
+
+ARangeOp::ARangeOp(const ARangeOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      dtype_(src->dtype()),
+      start_(ir_cloner->clone(src->start_)),
+      end_(ir_cloner->clone(src->end_)),
+      step_(ir_cloner->clone(src->step_)),
+      linear_index_(ir_cloner->clone(src->linear_index_)) {}
+
+Expr* ARangeOp::shallowCopy() const {
+  auto result = IrBuilder::create<ARangeOp>(
+      output(0), start_, end_, step_, dtype_, linear_index_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool ARangeOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<ARangeOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<ARangeOp>();
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
+  if (!start_->sameAs(other_op->start_)) {
+    return false;
+  }
+  if (!end_->sameAs(other_op->end_)) {
+    return false;
+  }
+  if (!step_->sameAs(other_op->step_)) {
+    return false;
+  }
+  if ((linear_index_ == nullptr) != (other_op->linear_index_ == nullptr)) {
+    return false;
+  }
+  if ((linear_index_ != nullptr) &&
+      !linear_index_->sameAs(other_op->linear_index_)) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
+EyeOp::EyeOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    DataType dtype,
+    Val* index1,
+    Val* index2)
+    : Expr(passkey, ExprType::EyeOp),
+      dtype_(dtype),
+      index1_(index1),
+      index2_(index2) {
+  if (out->isA<TensorView>()) {
+    addInput(out->as<TensorView>()->getRootDomain()[0]->extent());
+    if (out->as<TensorView>()->getRootDomain()[1] !=
+        out->as<TensorView>()->getRootDomain()[0]) {
+      addInput(out->as<TensorView>()->getRootDomain()[1]->extent());
+    }
+  }
+  addOutput(out);
+}
+
+EyeOp::EyeOp(const EyeOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      dtype_(src->dtype_),
+      index1_(ir_cloner->clone(src->index1_)),
+      index2_(ir_cloner->clone(src->index2_)) {}
+
+Expr* EyeOp::shallowCopy() const {
+  auto result = IrBuilder::create<EyeOp>(output(0), dtype_, index1_, index2_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool EyeOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<EyeOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<EyeOp>();
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
+  if ((index1_ == nullptr) != (other_op->index1_ == nullptr)) {
+    return false;
+  }
+  if ((index2_ == nullptr) != (other_op->index2_ == nullptr)) {
+    return false;
+  }
+  if ((index1_ != nullptr) && !index1_->sameAs(other_op->index1_)) {
+    return false;
+  }
+  if ((index2_ != nullptr) && !index2_->sameAs(other_op->index2_)) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
+UnaryOp::UnaryOp(
+    IrBuilderPasskey passkey,
+    UnaryOpType type,
+    Val* out,
+    Val* in,
+    int rng_offset)
     : Expr(passkey, ExprType::UnaryOp),
       unary_op_type_{type},
       out_{out},
@@ -197,6 +363,12 @@ UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
 
+Expr* UnaryOp::shallowCopy() const {
+  auto result = IrBuilder::create<UnaryOp>(unary_op_type_, out_, in_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool UnaryOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -205,8 +377,9 @@ bool UnaryOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<UnaryOp>();
-  if (getUnaryOpType() != other_op->getUnaryOpType())
+  if (getUnaryOpType() != other_op->getUnaryOpType()) {
     return false;
+  }
   return Expr::sameAs(other);
 }
 
@@ -233,6 +406,12 @@ BinaryOp::BinaryOp(const BinaryOp* src, IrCloner* ir_cloner)
       lhs_(ir_cloner->clone(src->lhs_)),
       rhs_(ir_cloner->clone(src->rhs_)) {}
 
+Expr* BinaryOp::shallowCopy() const {
+  auto result = IrBuilder::create<BinaryOp>(binary_op_type_, out_, lhs_, rhs_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool BinaryOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -241,8 +420,9 @@ bool BinaryOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<BinaryOp>();
-  if (getBinaryOpType() != other_op->getBinaryOpType())
+  if (getBinaryOpType() != other_op->getBinaryOpType()) {
     return false;
+  }
   return Expr::sameAs(other);
 }
 
@@ -273,6 +453,13 @@ TernaryOp::TernaryOp(const TernaryOp* src, IrCloner* ir_cloner)
       in2_(ir_cloner->clone(src->in2_)),
       in3_(ir_cloner->clone(src->in3_)) {}
 
+Expr* TernaryOp::shallowCopy() const {
+  auto result =
+      IrBuilder::create<TernaryOp>(ternary_op_type_, out_, in1_, in2_, in3_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool TernaryOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -281,8 +468,87 @@ bool TernaryOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<TernaryOp>();
-  if (getTernaryOpType() != other_op->getTernaryOpType())
+  if (getTernaryOpType() != other_op->getTernaryOpType()) {
     return false;
+  }
+  return Expr::sameAs(other);
+}
+
+RNGOp::RNGOp(
+    IrBuilderPasskey passkey,
+    RNGOpType type,
+    Val* out,
+    DataType dtype,
+    std::vector<Val*> parameters,
+    int rng_offset,
+    Val* philox_index)
+    : Expr(passkey, ExprType::RNGOp),
+      rng_op_type_(type),
+      dtype_(dtype),
+      parameters_(std::move(parameters)),
+      rng_offset_(rng_offset),
+      philox_index_(philox_index) {
+  if (out->isA<TensorView>()) {
+    for (auto id : out->as<TensorView>()->getRootDomain()) {
+      shape_.emplace_back(id->extent());
+    }
+  }
+  for (auto v : shape_) {
+    addInput(v);
+  }
+  for (auto v : parameters_) {
+    addInput(v);
+  }
+  addOutput(out);
+}
+
+RNGOp::RNGOp(const RNGOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      rng_op_type_(src->rng_op_type_),
+      dtype_(src->dtype()),
+      parameters_(ir_cloner->clone(src->parameters_)),
+      rng_offset_(src->rng_offset_),
+      philox_index_(ir_cloner->clone(src->philox_index_)) {}
+
+Expr* RNGOp::shallowCopy() const {
+  auto result = IrBuilder::create<RNGOp>(
+      rng_op_type_, output(0), dtype_, parameters_, rng_offset_, philox_index_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool RNGOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<RNGOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<RNGOp>();
+  if (getRNGOpType() != other_op->getRNGOpType()) {
+    return false;
+  }
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
+  if (parameters_.size() != other_op->parameters_.size()) {
+    return false;
+  }
+  for (auto i : c10::irange(parameters_.size())) {
+    if (!parameters_[i]->sameAs(other_op->parameters_[i])) {
+      return false;
+    }
+  }
+  if (getRNGOffset() != other_op->getRNGOffset()) {
+    return false;
+  }
+  if ((philox_index_ == nullptr) != (other_op->philox_index_ == nullptr)) {
+    return false;
+  }
+  if ((philox_index_ != nullptr) &&
+      !philox_index_->sameAs(other_op->philox_index_)) {
+    return false;
+  }
   return Expr::sameAs(other);
 }
 
@@ -334,7 +600,7 @@ BroadcastOp::BroadcastOp(
           id->isReduction() || id->isStride(),
           "Invalid broadcast op: ",
           id,
-          ". Non-reduction input dim does't match to output.");
+          ". Non-reduction input dim doesn't match to output.");
     }
   }
 
@@ -362,6 +628,12 @@ BroadcastOp::BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       is_broadcast_dims_(src->is_broadcast_dims_) {}
 
+Expr* BroadcastOp::shallowCopy() const {
+  auto result = IrBuilder::create<BroadcastOp>(out_, in_, is_broadcast_dims_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool BroadcastOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -382,13 +654,14 @@ ReductionOp::ReductionOp(
     Val* init,
     Val* out,
     Val* in,
-    bool is_fused)
-    : Expr(passkey, ExprType::ReductionOp),
+    bool is_allreduce,
+    ExprType expr_type)
+    : Expr(passkey, expr_type),
       reduction_op_type_(reduction_op_type),
       init_(init),
       out_(out),
       in_(in),
-      is_fused_(is_fused) {
+      is_allreduce_(is_allreduce) {
   TORCH_CHECK(
       out->getValType().value() == ValType::TensorView ||
       out->getValType().value() == ValType::TensorIndex);
@@ -415,119 +688,456 @@ ReductionOp::ReductionOp(
   addInput(in);
 }
 
+ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      reduction_op_type_(src->reduction_op_type_),
+      init_(ir_cloner->clone(src->init_)),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)),
+      is_allreduce_(src->is_allreduce_) {}
+
+Expr* ReductionOp::shallowCopy() const {
+  auto result = IrBuilder::create<ReductionOp>(
+      reduction_op_type_, init_, out_, in_, is_allreduce_, etype());
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool ReductionOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<ReductionOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<ReductionOp>();
+  // Note that init is not part of input vals, so it must be checked separately.
+  return (
+      Expr::sameAs(other) &&
+      getReductionOpType() == other_op->getReductionOpType() &&
+      init()->sameAs(other_op->init()));
+}
+
+GroupedReductionOp::GroupedReductionOp(
+    IrBuilderPasskey passkey,
+    std::vector<BinaryOpType> reduction_op_types,
+    std::vector<Val*> init_vals,
+    std::vector<Val*> outputs,
+    std::vector<Val*> inputs,
+    bool is_fused,
+    ExprType expr_type)
+    : Expr(passkey, expr_type),
+      reduction_op_types_(std::move(reduction_op_types)),
+      init_vals_(std::move(init_vals)),
+      is_allreduce_(is_fused) {
+  for (auto out : outputs) {
+    addOutput(out);
+  }
+
+  for (auto in : inputs) {
+    addInput(in);
+  }
+}
+
+GroupedReductionOp::GroupedReductionOp(
+    const GroupedReductionOp* src,
+    IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      reduction_op_types_(src->reduction_op_types_),
+      init_vals_(ir_cloner->clone(src->init_vals_)),
+      is_allreduce_(src->is_allreduce_) {}
+
+Expr* GroupedReductionOp::shallowCopy() const {
+  auto result = IrBuilder::create<GroupedReductionOp>(
+      reduction_op_types_,
+      init_vals_,
+      outputs(),
+      inputs(),
+      is_allreduce_,
+      etype());
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+int GroupedReductionOp::getExprIndexOfOutput(Val* output_val) const {
+  auto it = std::find(outputs().begin(), outputs().end(), output_val);
+  if (it != outputs().end()) {
+    return std::distance(outputs().begin(), it);
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      false, "Not an output, ", output_val->toString(), ", of ", toString());
+}
+
+bool GroupedReductionOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+
+  auto grouped_rop = dynamic_cast<const GroupedReductionOp*>(other);
+  if (grouped_rop == nullptr) {
+    return false;
+  }
+
+  if (!Expr::sameAs(other) ||
+      getReductionOpTypes() != grouped_rop->getReductionOpTypes()) {
+    return false;
+  }
+
+  for (const auto i : c10::irange(numExprs())) {
+    if (!initVal(i)->sameAs(grouped_rop->initVal(i))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+WelfordOp::WelfordOp(
+    IrBuilderPasskey passkey,
+    const WelfordTriplet& output,
+    const WelfordTriplet& input,
+    const WelfordTriplet& init,
+    bool is_fused)
+    : Expr(passkey, ExprType::WelfordOp),
+      output_(output),
+      input_(input),
+      init_(init),
+      is_allreduce_(is_fused) {
+  // Previously, nullptr was accepted and implicitly replaced by
+  // default values. Looks like we always pass some non-null values,
+  // so removed the implicit default behavior for code simplicity.
+  TORCH_INTERNAL_ASSERT(output.avg() != nullptr);
+  TORCH_INTERNAL_ASSERT(output.var() != nullptr);
+  TORCH_INTERNAL_ASSERT(output.N() != nullptr);
+  TORCH_INTERNAL_ASSERT(init.avg() != nullptr);
+  TORCH_INTERNAL_ASSERT(init.var() != nullptr);
+  TORCH_INTERNAL_ASSERT(init.N() != nullptr);
+  TORCH_INTERNAL_ASSERT(input.avg() != nullptr);
+  TORCH_INTERNAL_ASSERT(input.var() != nullptr);
+  TORCH_INTERNAL_ASSERT(input.N() != nullptr);
+
+  // Check output type
+  TORCH_INTERNAL_ASSERT(
+      output.avg()->getValType().value() == ValType::TensorView ||
+      output.avg()->getValType().value() == ValType::TensorIndex);
+  TORCH_INTERNAL_ASSERT(
+      output.var()->getValType().value() == ValType::TensorView ||
+      output.var()->getValType().value() == ValType::TensorIndex);
+  TORCH_INTERNAL_ASSERT(
+      output.N()->getValType().value() == ValType::TensorView ||
+      output.N()->getValType().value() == ValType::TensorIndex);
+  TORCH_INTERNAL_ASSERT(isIntegralType(output.N()->dtype()));
+
+  // check initial value
+  TORCH_INTERNAL_ASSERT(init.N()->getValType().value() == ValType::Scalar);
+  TORCH_INTERNAL_ASSERT(isIntegralType(init.N()->dtype()));
+  if (!init.N()->isZeroInt()) {
+    // when initial count is zero, no initial variance or average is needed
+    // initial value with a count of 1 is un-common enough that I'll push
+    // the responsibility of creating all-zero var tensors to the user
+    TORCH_INTERNAL_ASSERT(
+        init_.avg()->getValType().value() == ValType::TensorView ||
+        init_.avg()->getValType().value() == ValType::TensorIndex);
+    TORCH_INTERNAL_ASSERT(
+        init_.var()->getValType().value() == ValType::TensorView ||
+            init_.var()->getValType().value() == ValType::TensorIndex,
+        "Invalid initial var: ",
+        init_.var()->toString());
+  }
+
+  // check input
+  TORCH_INTERNAL_ASSERT(
+      input_.avg()->getValType().value() == ValType::TensorView ||
+          input_.avg()->getValType().value() == ValType::TensorIndex,
+      input_.avg()->getValType().value());
+  TORCH_INTERNAL_ASSERT(
+      input_.N()->getValType().value() == ValType::Scalar ||
+      input_.N()->getValType().value() == ValType::TensorView ||
+      input_.N()->getValType().value() == ValType::TensorIndex);
+  TORCH_INTERNAL_ASSERT(isIntegralType(input_.N()->dtype()));
+  if (!input_.N()->isOneInt()) {
+    // when input is only one value, only the value is required through avg
+    // input the var part is implicitly 0 and codegen will handle that.
+    TORCH_INTERNAL_ASSERT(
+        input_.var()->getValType().value() == ValType::TensorView ||
+        input_.var()->getValType().value() == ValType::TensorIndex);
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        input_.var() == nullptr || input_.var()->isZeroInt(),
+        "Invalid var input, which must be either nullptr or scalar zero when the N input is one.");
+  }
+
+  addOutput(output_.avg());
+  addOutput(output_.var());
+  addOutput(output_.N());
+
+  addInput(input_.avg());
+  addInput(input_.var());
+  addInput(input_.N());
+}
+
+c10::optional<WelfordTriplet::ValName> WelfordTriplet::getNameOf(
+    Val* val) const {
+  auto it = std::find(begin(), end(), val);
+  if (it != end()) {
+    return indexToValName(std::distance(begin(), it));
+  }
+
+  return c10::optional<WelfordTriplet::ValName>();
+}
+
+bool WelfordTriplet::sameAs(const WelfordTriplet& other) const {
+  return this == &other ||
+      (avg()->sameAs(other.avg()) && var()->sameAs(other.var()) &&
+       N()->sameAs(other.N()));
+}
+
+WelfordTriplet WelfordTriplet::clone(IrCloner* ir_cloner) const {
+  return transform([&](const Val* val) { return ir_cloner->clone<Val>(val); });
+}
+
+std::vector<WelfordTriplet> WelfordTriplet::clone(
+    const std::vector<WelfordTriplet>& src,
+    IrCloner* ir_cloner) {
+  std::vector<WelfordTriplet> cloned;
+  for (const auto& triplet : src) {
+    cloned.emplace_back(triplet.clone(ir_cloner));
+  }
+  return cloned;
+}
+
 WelfordOp::WelfordOp(
     IrBuilderPasskey passkey,
     Val* out_avg,
     Val* out_var,
     Val* out_N,
-    Val* init_avg,
-    Val* init_var,
-    Val* init_N,
     Val* in_avg,
     Val* in_var,
     Val* in_N,
+    Val* init_avg,
+    Val* init_var,
+    Val* init_N,
     bool is_fused)
-    : Expr(passkey, ExprType::WelfordOp),
-      out_avg_(out_avg),
-      out_var_(out_var),
-      out_N_(out_N),
-      init_avg_(init_avg),
-      init_var_(init_var),
-      init_N_(init_N),
-      in_avg_(in_avg),
-      in_var_(in_var),
-      in_N_(in_N),
-      is_fused_(is_fused) {
-  // Check output type
-  TORCH_INTERNAL_ASSERT(
-      out_avg->getValType().value() == ValType::TensorView ||
-      out_avg->getValType().value() == ValType::TensorIndex);
-  TORCH_INTERNAL_ASSERT(
-      out_var->getValType().value() == ValType::TensorView ||
-      out_var->getValType().value() == ValType::TensorIndex);
-  TORCH_INTERNAL_ASSERT(
-      out_N->getValType().value() == ValType::TensorView ||
-      out_N->getValType().value() == ValType::TensorIndex);
-
-  // check initial value
-  TORCH_INTERNAL_ASSERT(init_N->getValType().value() == ValType::Scalar);
-  if (!init_N->isZeroInt()) {
-    // when initial count is zero, no initial variance or average is needed
-    // initial value with a count of 1 is un-common enough that I'll push
-    // the responsibility of creating all-zero var tensors to the user
-    TORCH_INTERNAL_ASSERT(
-        init_avg &&
-        (init_avg->getValType().value() == ValType::TensorView ||
-         init_avg->getValType().value() == ValType::TensorIndex));
-    TORCH_INTERNAL_ASSERT(
-        init_var &&
-        (init_var->getValType().value() == ValType::TensorView ||
-         init_var->getValType().value() == ValType::TensorIndex));
-  }
-
-  TORCH_INTERNAL_ASSERT(
-      in_avg &&
-          (in_avg->getValType().value() == ValType::TensorView ||
-           in_avg->getValType().value() == ValType::TensorIndex),
-      in_avg->getValType().value());
-  // check input
-  TORCH_INTERNAL_ASSERT(
-      in_N->getValType().value() == ValType::Scalar ||
-      in_N->getValType().value() == ValType::TensorView ||
-      in_N->getValType().value() == ValType::TensorIndex);
-  if (!in_N->isOneInt()) {
-    // when input is only one value, only the value is required through avg
-    // input the var part is implicitly 0 and codegen will handle that.
-    TORCH_INTERNAL_ASSERT(
-        in_var &&
-        (in_var->getValType().value() == ValType::TensorView ||
-         in_var->getValType().value() == ValType::TensorIndex));
-  }
-
-  addOutput(out_avg);
-  addOutput(out_var);
-  addOutput(out_N);
-
-  addInput(in_avg);
-  // Conditionally adding this input?
-  if (!in_N->isOneInt()) {
-    addInput(in_var);
-  }
-  addInput(in_N);
-}
+    : WelfordOp(
+          passkey,
+          WelfordTriplet(out_avg, out_var, out_N),
+          WelfordTriplet(in_avg, in_var, in_N),
+          WelfordTriplet(init_avg, init_var, init_N),
+          is_fused) {}
 
 WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
-      out_avg_(ir_cloner->clone(src->out_avg_)),
-      out_var_(ir_cloner->clone(src->out_var_)),
-      out_N_(ir_cloner->clone(src->out_N_)),
-      init_avg_(src->init_avg_ ? ir_cloner->clone(src->init_avg_) : nullptr),
-      init_var_(src->init_var_ ? ir_cloner->clone(src->init_var_) : nullptr),
-      init_N_(ir_cloner->clone(src->init_N_)),
-      in_avg_(ir_cloner->clone(src->in_avg_)),
-      in_var_(src->in_var_ ? ir_cloner->clone(src->in_var_) : nullptr),
-      in_N_(ir_cloner->clone(src->in_N_)),
-      is_fused_(src->is_fused_) {}
+      output_(src->output_.clone(ir_cloner)),
+      input_(src->input_.clone(ir_cloner)),
+      init_(src->init_.clone(ir_cloner)),
+      is_allreduce_(src->is_allreduce_) {}
 
-namespace {
-inline bool sameOptionalVal(Val* a, Val* b) {
-  return ((a == nullptr && b == nullptr)) || ((a && b) && (a->sameAs(b)));
+Expr* WelfordOp::shallowCopy() const {
+  auto result =
+      IrBuilder::create<WelfordOp>(output_, input_, init_, is_allreduce_);
+  result->copyPredicatesFrom(this);
+  return result;
 }
-} // namespace
+
+Val* WelfordOp::getInitValOfOutput(Val* output_val) const {
+  auto val_name = output().getNameOf(output_val);
+
+  TORCH_INTERNAL_ASSERT(
+      val_name.has_value(),
+      "Not an output val ",
+      output_val->toString(),
+      " of ",
+      toString());
+
+  return init().get(*val_name);
+}
 
 bool WelfordOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
   }
   if (auto other_wop = dynamic_cast<const WelfordOp*>(other)) {
-    return in_avg_->sameAs(other_wop->in_avg_) &&
-        sameOptionalVal(in_var_, other_wop->in_var_) &&
-        in_N_->sameAs(other_wop->in_N_) &&
-        sameOptionalVal(init_avg_, other_wop->init_avg_) &&
-        sameOptionalVal(init_var_, other_wop->init_var_) &&
-        init_N_->sameAs(other_wop->init_N_);
+    return input_.sameAs(other_wop->input_) && init_.sameAs(other_wop->init_);
   }
   return false;
+}
+
+std::vector<Val*> WelfordOp::getInitVals() const {
+  std::vector<Val*> init_vals({init_.avg(), init_.var(), init_.N()});
+  return init_vals;
+}
+
+GroupedWelfordOp::GroupedWelfordOp(
+    IrBuilderPasskey passkey,
+    std::vector<WelfordTriplet> output_vals,
+    std::vector<WelfordTriplet> input_vals,
+    std::vector<WelfordTriplet> init_vals,
+    bool is_allreduce,
+    ExprType expr_type)
+    : Expr(passkey, expr_type),
+      output_vals_(std::move(output_vals)),
+      input_vals_(std::move(input_vals)),
+      init_vals_(std::move(init_vals)),
+      is_allreduce_(is_allreduce) {
+  const auto num_grouped_ops = output_vals_.size();
+
+  TORCH_INTERNAL_ASSERT(
+      input_vals_.size() == num_grouped_ops,
+      "Invalid number of input arguments. Expected: ",
+      num_grouped_ops,
+      ", Given: ",
+      input_vals_.size());
+  TORCH_INTERNAL_ASSERT(
+      init_vals_.size() == num_grouped_ops,
+      "Invalid number of N arguments. Expected: ",
+      num_grouped_ops,
+      ", Given: ",
+      init_vals_.size());
+
+  for (const auto i : c10::irange(num_grouped_ops)) {
+    // Check output type
+    TORCH_INTERNAL_ASSERT(
+        output_vals_[i].avg()->getValType().value() == ValType::TensorView ||
+        output_vals_[i].avg()->getValType().value() == ValType::TensorIndex);
+    TORCH_INTERNAL_ASSERT(
+        output_vals_[i].var()->getValType().value() == ValType::TensorView ||
+        output_vals_[i].var()->getValType().value() == ValType::TensorIndex);
+    TORCH_INTERNAL_ASSERT(
+        output_vals_[i].N()->getValType().value() == ValType::TensorView ||
+        output_vals_[i].N()->getValType().value() == ValType::TensorIndex);
+    TORCH_INTERNAL_ASSERT(isIntegralType(output_vals_[i].N()->dtype()));
+
+    // check initial value
+    auto init_avg = init_vals_[i].avg();
+    auto init_var = init_vals_[i].var();
+    auto init_N = init_vals_[i].N();
+    TORCH_INTERNAL_ASSERT(
+        init_avg != nullptr && init_var != nullptr && init_N != nullptr,
+        "nullptr init vals are not allowed");
+    TORCH_INTERNAL_ASSERT(init_N->getValType().value() == ValType::Scalar);
+    TORCH_INTERNAL_ASSERT(isIntegralType(init_N->dtype()));
+    TORCH_INTERNAL_ASSERT(
+        init_avg->getValType().value() == ValType::TensorView ||
+            init_avg->getValType().value() == ValType::TensorIndex ||
+            (init_N->isZeroInt() &&
+             init_avg->getValType().value() == ValType::Scalar),
+        "Initial avg must be a tensor or, can be a scalar if initial N is zero.",
+        " Initial avg: ",
+        init_avg->toString(),
+        ". Initial N: ",
+        init_N->toString());
+    TORCH_INTERNAL_ASSERT(
+        init_var->getValType().value() == ValType::TensorView ||
+            init_var->getValType().value() == ValType::TensorIndex ||
+            (init_N->isZeroInt() &&
+             init_var->getValType().value() == ValType::Scalar),
+        "Initial var must be a tensor or, can be a scalar if initial N is zero: ",
+        init_var->toString());
+
+    // check input
+    auto in_avg = input_vals_[i].avg();
+    auto in_var = input_vals_[i].var();
+    auto in_N = input_vals_[i].N();
+    TORCH_INTERNAL_ASSERT(
+        in_avg != nullptr && in_var != nullptr && in_N != nullptr,
+        "nullptr input vals are not allowed");
+    TORCH_INTERNAL_ASSERT(
+        in_N->getValType().value() == ValType::Scalar ||
+        in_N->getValType().value() == ValType::TensorView ||
+        in_N->getValType().value() == ValType::TensorIndex);
+    TORCH_INTERNAL_ASSERT(isIntegralType(in_N->dtype()));
+    TORCH_INTERNAL_ASSERT(
+        in_avg->getValType().value() == ValType::TensorView ||
+            in_avg->getValType().value() == ValType::TensorIndex,
+        "Invalid input avg argument type: ",
+        in_avg->getValType().value());
+
+    if (in_N->isOneInt()) {
+      // when input is only one value, only the value is required through avg
+      // input the var part must be implicitly 0
+      TORCH_INTERNAL_ASSERT(
+          in_var->isZeroInt(),
+          "Invalid var input, which must be scalar zero when the N input is one: ",
+          in_var->toString());
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          in_var->getValType().value() == ValType::TensorView ||
+              in_var->getValType().value() == ValType::TensorIndex,
+          in_var->getValType().value(),
+          ", ",
+          in_N->toString());
+    }
+  }
+
+  for (const auto i : c10::irange(num_grouped_ops)) {
+    addOutput(output_vals_[i].avg());
+    addOutput(output_vals_[i].var());
+    addOutput(output_vals_[i].N());
+    addInput(input_vals_[i].avg());
+    addInput(input_vals_[i].var());
+    addInput(input_vals_[i].N());
+  }
+}
+
+GroupedWelfordOp::GroupedWelfordOp(
+    const GroupedWelfordOp* src,
+    IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      output_vals_(WelfordTriplet::clone(src->output_vals_, ir_cloner)),
+      input_vals_(WelfordTriplet::clone(src->input_vals_, ir_cloner)),
+      init_vals_(WelfordTriplet::clone(src->init_vals_, ir_cloner)),
+      is_allreduce_(src->is_allreduce_) {}
+
+Expr* GroupedWelfordOp::shallowCopy() const {
+  auto result = IrBuilder::create<GroupedWelfordOp>(
+      output_vals_, input_vals_, init_vals_, is_allreduce_, etype());
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool GroupedWelfordOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+
+  auto grouped_op = dynamic_cast<const GroupedWelfordOp*>(other);
+  if (grouped_op == nullptr) {
+    return false;
+  }
+
+  if (!Expr::sameAs(other)) {
+    return false;
+  }
+
+  for (const auto i : c10::irange(numExprs())) {
+    if (!initAvg(i)->sameAs(grouped_op->initAvg(i)) ||
+        !initVar(i)->sameAs(grouped_op->initVar(i)) ||
+        !initN(i)->sameAs(grouped_op->initN(i))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+int GroupedWelfordOp::getExprIndexOfOutput(Val* output_val) const {
+  for (const auto expr_idx : c10::irange(numExprs())) {
+    if (outputVals().at(expr_idx).getNameOf(output_val).has_value()) {
+      return expr_idx;
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      false, "Not an output, ", output_val->toString(), ", of ", toString());
+}
+
+Val* GroupedWelfordOp::getInitValOfOutput(Val* output_val) const {
+  auto expr_index = getExprIndexOfOutput(output_val);
+
+  auto val_name = outputVals().at(expr_index).getNameOf(output_val).value();
+
+  return initVals().at(expr_index).get(val_name);
 }
 
 MmaOp::MmaOp(
@@ -567,7 +1177,7 @@ MmaOp::MmaOp(
     Val* in_a,
     Val* in_b,
     Val* init,
-    MmaOptions options)
+    OptionsInMma options)
     : MmaOp(passkey, out, in_a, in_b, init) {
   options_ = options;
 }
@@ -579,6 +1189,13 @@ MmaOp::MmaOp(const MmaOp* src, IrCloner* ir_cloner)
       in_b_(ir_cloner->clone(src->in_b_)),
       init_(ir_cloner->clone(src->init_)),
       options_(src->options_) {}
+
+Expr* MmaOp::shallowCopy() const {
+  auto result = IrBuilder::create<MmaOp>(out_, in_a_, in_b_, init_);
+  result->options_ = options_;
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 bool MmaOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -592,34 +1209,11 @@ bool MmaOp::sameAs(const Statement* other) const {
   return false;
 }
 
-ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      reduction_op_type_(src->reduction_op_type_),
-      init_(ir_cloner->clone(src->init_)),
-      out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)),
-      is_fused_(src->is_fused_) {}
-
-bool ReductionOp::sameAs(const Statement* other) const {
-  if (this == other) {
-    return true;
-  }
-  if (!other->isA<ReductionOp>()) {
-    return false;
-  }
-  const auto other_op = other->as<ReductionOp>();
-  // Note that init is not part of input vals, so it must be checked separately.
-  return (
-      Expr::sameAs(other) &&
-      getReductionOpType() == other_op->getReductionOpType() &&
-      init()->sameAs(other_op->init()));
-}
-
 TransposeOp::TransposeOp(
     IrBuilderPasskey passkey,
     TensorView* out,
     TensorView* in,
-    std::vector<int> new2old)
+    std::vector<int64_t> new2old)
     : Expr(passkey, ExprType::TransposeOp),
       out_(out),
       in_(in),
@@ -628,17 +1222,14 @@ TransposeOp::TransposeOp(
   // should be checked at function transpose.
 
   TORCH_INTERNAL_ASSERT(
-      !in->hasRFactor(), "Transposing rFactor tensors is not supported.");
+      TensorDomain::noReductions(in->getMaybeRFactorDomain()).size() ==
+      out->getMaybeRFactorDomain().size());
 
-  TORCH_INTERNAL_ASSERT(
-      TensorDomain::noReductions(in->getRootDomain()).size() ==
-      out->getRootDomain().size());
-
-  TORCH_INTERNAL_ASSERT(new2old_.size() == out->getRootDomain().size());
+  TORCH_INTERNAL_ASSERT(new2old_.size() == out->getMaybeRFactorDomain().size());
 
   // Make sure the entries of new2old are unique and range from 0 to
   // N-1, where N == new2old.size().
-  std::set<int> old_positions(new2old_.begin(), new2old_.end());
+  std::set<int64_t> old_positions(new2old_.begin(), new2old_.end());
   TORCH_INTERNAL_ASSERT(old_positions.size() == new2old_.size());
   // old_positions is sorted, so the first entry must be 0.
   TORCH_INTERNAL_ASSERT(
@@ -661,6 +1252,57 @@ TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
       new2old_(src->new2old_) {}
+
+Expr* TransposeOp::shallowCopy() const {
+  auto result = IrBuilder::create<TransposeOp>(out_, in_, new2old_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+std::vector<int64_t> TransposeOp::old2new() const {
+  std::vector<int64_t> old2new(new2old_.size());
+  for (auto new_axis : c10::irange(new2old_.size())) {
+    auto old_axis = new2old_.at(new_axis);
+    old2new[old_axis] = new_axis;
+  }
+  return old2new;
+}
+
+ExpandOp::ExpandOp(
+    IrBuilderPasskey passkey,
+    TensorView* out,
+    TensorView* in,
+    std::vector<Val*> _expanded_extents)
+    : Expr(passkey, ExprType::ExpandOp),
+      out_(out),
+      in_(in),
+      expanded_extents_(std::move(_expanded_extents)) {
+  addOutput(out);
+  addInput(in);
+  for (auto expanded_extent : expanded_extents_) {
+    TORCH_INTERNAL_ASSERT(expanded_extent != nullptr);
+    TORCH_INTERNAL_ASSERT(
+        expanded_extent->dtype() == DataType::Int,
+        "Expanded extents must be of Int type.");
+    addInput(expanded_extent);
+  }
+}
+
+ExpandOp::ExpandOp(const ExpandOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {
+  expanded_extents_.reserve(src->expanded_extents_.size());
+  for (const auto expanded_extent : src->expanded_extents_) {
+    expanded_extents_.push_back(ir_cloner->clone(expanded_extent));
+  }
+}
+
+Expr* ExpandOp::shallowCopy() const {
+  auto result = IrBuilder::create<ExpandOp>(out_, in_, expanded_extents_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 ShiftOp::ShiftOp(
     IrBuilderPasskey passkey,
@@ -708,6 +1350,12 @@ ShiftOp::ShiftOp(const ShiftOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       offsets_(src->offsets_),
       pad_width_(src->pad_width_) {}
+
+Expr* ShiftOp::shallowCopy() const {
+  auto result = IrBuilder::create<ShiftOp>(out_, in_, offsets_, pad_width_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 bool ShiftOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -771,6 +1419,13 @@ GatherOp::GatherOp(const GatherOp* src, IrCloner* ir_cloner)
       window_shape_(src->window_shape_),
       pad_width_(src->pad_width_) {}
 
+Expr* GatherOp::shallowCopy() const {
+  auto result =
+      IrBuilder::create<GatherOp>(out_, in_, window_shape_, pad_width_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool GatherOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -795,21 +1450,33 @@ int GatherOp::gatherAxis(int axis) const {
   return int(windowShape().size()) + axis;
 }
 
-ViewDtypeOp::ViewDtypeOp(
+ViewAsScalar::ViewAsScalar(
     IrBuilderPasskey passkey,
-    TensorView* out,
-    TensorView* in,
-    DataType dtype)
-    : Expr(passkey, ExprType::ViewDtypeOp), out_(out), in_(in), dtype_(dtype) {
+    Val* out,
+    Val* in,
+    IterDomain* vector_id,
+    Val* index)
+    : Expr(passkey, ExprType::ViewAsScalar),
+      out_(out),
+      in_(in),
+      vector_id_(vector_id),
+      index_(index) {
   addOutput(out);
   addInput(in);
 }
 
-ViewDtypeOp::ViewDtypeOp(const ViewDtypeOp* src, IrCloner* ir_cloner)
+ViewAsScalar::ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
-      dtype_(src->dtype()) {}
+      vector_id_(ir_cloner->clone(src->vector_id_)),
+      index_(ir_cloner->clone(src->index_)) {}
+
+Expr* ViewAsScalar::shallowCopy() const {
+  auto result = IrBuilder::create<ViewAsScalar>(out_, in_, vector_id_, index_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 ViewOp::ViewOp(IrBuilderPasskey passkey, TensorView* out, TensorView* in)
     : Expr(passkey, ExprType::ViewOp), out_(out), in_(in) {
@@ -822,39 +1489,156 @@ ViewOp::ViewOp(const ViewOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
 
-IterDomain::IterDomain(
+Expr* ViewOp::shallowCopy() const {
+  auto result = IrBuilder::create<ViewOp>(out_, in_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+LoadStoreOp::LoadStoreOp(
     IrBuilderPasskey passkey,
-    Val* start,
-    Val* extent,
-    ParallelType parallel_type,
-    IterType iter_type,
-    bool is_rfactor_domain)
-    : IterDomain(
-          passkey,
-          start,
-          extent,
-          nullptr,
-          parallel_type,
-          iter_type,
-          is_rfactor_domain) {}
+    LoadStoreOpType op_type,
+    Val* out,
+    Val* in)
+    : Expr(passkey, ExprType::LoadStoreOp),
+      load_store_type_(op_type),
+      out_(out),
+      in_(in) {
+  addOutput(out);
+  addInput(in);
+}
+
+LoadStoreOp::LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      load_store_type_(src->load_store_type_),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {}
+
+Expr* LoadStoreOp::shallowCopy() const {
+  auto result = IrBuilder::create<LoadStoreOp>(load_store_type_, out_, in_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+IterDomainBuilder::IterDomainBuilder(Val* _start, Val* _extent)
+    : start_(_start), extent_(_extent) {
+  TORCH_INTERNAL_ASSERT(
+      start_ != nullptr && extent_ != nullptr,
+      "Start and extent are required to build an iter domain.");
+}
+
+IterDomainBuilder::IterDomainBuilder(const IterDomain* id)
+    : start_(id->start()),
+      extent_(id->extent()),
+      expanded_extent_(
+          id->hasExpandedExtent() ? id->expandedExtent() : nullptr),
+      stop_offset_(id->stopOffset()),
+      parallel_type_(id->getParallelType()),
+      iter_type_(id->getIterType()),
+      is_rfactor_domain_(id->isRFactorProduct()),
+      is_padded_dimension_(id->hasPaddingToMultipleOfWarp()),
+      padded_to_size_(id->getMaybeSizeAfterPadding()),
+      is_mma_swizzled_(id->isMmaSwizzled()) {}
+
+IterDomainBuilder& IterDomainBuilder::resetSchedulingParams() {
+  parallel_type_ = ParallelType::Serial;
+  is_rfactor_domain_ = false;
+  is_padded_dimension_ = false;
+  padded_to_size_ = c10::nullopt;
+  is_mma_swizzled_ = false;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::resetRfactor() {
+  return is_rfactor_domain(false);
+}
+
+IterDomainBuilder& IterDomainBuilder::start(Val* _start) {
+  start_ = _start;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::extent(Val* _extent) {
+  extent_ = _extent;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::expanded_extent(Val* _expanded_extent) {
+  expanded_extent_ = _expanded_extent;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::stop_offset(Val* _stop_offset) {
+  stop_offset_ = _stop_offset;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::parallel_type(
+    ParallelType _parallel_type) {
+  parallel_type_ = _parallel_type;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::iter_type(IterType _iter_type) {
+  iter_type_ = _iter_type;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_rfactor_domain(
+    bool _is_rfactor_domain) {
+  is_rfactor_domain_ = _is_rfactor_domain;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_padded_dimension(
+    bool _is_padded_dimension) {
+  is_padded_dimension_ = _is_padded_dimension;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::padded_to_size(
+    c10::optional<int64_t> _padded_to_size) {
+  padded_to_size_ = _padded_to_size;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_mma_swizzled(bool _is_mma_swizzled) {
+  is_mma_swizzled_ = _is_mma_swizzled;
+  return *this;
+}
+
+IterDomain* IterDomainBuilder::build() const {
+  TORCH_INTERNAL_ASSERT(
+      start_ != nullptr && extent_ != nullptr,
+      "Start and extent are required to build an iter domain.");
+  return IrBuilder::create<IterDomain>(start_->container(), *this);
+}
 
 IterDomain::IterDomain(
     IrBuilderPasskey passkey,
     Val* start,
     Val* extent,
+    Val* expanded_extent,
     Val* stop_offset,
     ParallelType parallel_type,
     IterType iter_type,
-    bool is_rfactor_domain)
+    bool is_rfactor_domain,
+    bool is_padded_dimension,
+    c10::optional<int64_t> padded_to_size,
+    bool is_mma_swizzled)
     : Val(passkey, ValType::IterDomain, DataType::Int),
       start_(start),
       extent_(extent),
+      expanded_extent_(expanded_extent),
       stop_offset_(
           stop_offset == nullptr ? passkey.ir_container_->zeroVal()
                                  : stop_offset),
       parallel_type_(parallel_type),
       iter_type_(iter_type),
-      is_rfactor_domain_(is_rfactor_domain) {
+      is_rfactor_domain_(is_rfactor_domain),
+      is_padded_dimension_(is_padded_dimension),
+      padded_to_size_(padded_to_size),
+      is_mma_swizzled_(is_mma_swizzled) {
   TORCH_CHECK(
       !(isRFactorProduct() && isBroadcast()),
       "IterDomain cannot be both a broadcast and rfactor domain.");
@@ -872,10 +1656,28 @@ IterDomain::IterDomain(
       " .");
 }
 
+IterDomain::IterDomain(IrBuilderPasskey passkey, const IterDomainBuilder& args)
+
+    : IterDomain(
+          passkey,
+          args.start_,
+          args.extent_,
+          args.expanded_extent_,
+          args.stop_offset_,
+          args.parallel_type_,
+          args.iter_type_,
+          args.is_rfactor_domain_,
+          args.is_padded_dimension_,
+          args.padded_to_size_,
+          args.is_mma_swizzled_) {}
+
 IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       start_(ir_cloner->clone(src->start_)),
       extent_(ir_cloner->clone(src->extent_)),
+      expanded_extent_(
+          src->hasExpandedExtent() ? ir_cloner->clone(src->expandedExtent())
+                                   : nullptr),
       stop_offset_(ir_cloner->clone(src->stop_offset_)),
       parallel_type_(src->parallel_type_),
       iter_type_(src->iter_type_),
@@ -896,29 +1698,57 @@ bool IterDomain::sameAs(const Statement* other) const {
   const IterDomain* other_id = other->as<IterDomain>();
 
   bool is_same = isReduction() == other_id->isReduction() &&
-      getParallelType() == other_id->getParallelType();
+      getParallelType() == other_id->getParallelType() &&
+      isVectorComponent() == other_id->isVectorComponent();
   is_same = is_same && ScalarCheck::sameAs(extent(), other_id->extent());
   is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
   is_same =
       is_same && ScalarCheck::sameAs(stopOffset(), other_id->stopOffset());
+  is_same = is_same && (hasExpandedExtent() == other_id->hasExpandedExtent());
+  if (is_same && hasExpandedExtent()) {
+    is_same = ScalarCheck::sameAs(expandedExtent(), other_id->expandedExtent());
+  }
 
   return is_same;
 }
 
-// Returns a new IterDomain matching properties of this
-IterDomain* IterDomain::clone() const {
-  auto cloned = IrBuilder::create<IterDomain>(
-      ir_container_,
-      start(),
-      extent(),
-      stopOffset(),
-      getParallelType(),
-      getIterType(),
-      isRFactorProduct());
+// Returns a new IterDomain matching properties of this except for
+// is_rfactor_domain_
+IterDomain* IterDomain::cloneWithoutRFactor() const {
+  auto cloned = IterDomainBuilder(this).resetRfactor().build();
 
-  cloned->is_padded_dimension_ = is_padded_dimension_;
-  cloned->padded_to_size_ = padded_to_size_;
   return cloned;
+}
+
+bool IterDomain::isTrivialReduction() const {
+  if (!isReduction()) {
+    return false;
+  }
+
+  if (extent()->isOneInt()) {
+    return true;
+  }
+
+  // If this domain is an output of an expression, i.e., not a root
+  // domain, check if all root domains are trivial reductions. This is
+  // almost the same as the analysis done in TrivialReductionInfo, but
+  // is limited within a single tensor, whereas TrivialReductionInfo
+  // does more expensive analysis potentially traversing through
+  // rfactor domains
+  if (definition()) {
+    // Note: There's no const version of IterVisitor.
+    auto id_inputs = InputsOf::output(fusion(), const_cast<IterDomain*>(this));
+    if (std::all_of(
+            ir_utils::filterByType<IterDomain>(id_inputs).begin(),
+            ir_utils::filterByType<IterDomain>(id_inputs).end(),
+            [](IterDomain* root_id) {
+              return root_id->isReduction() && root_id->extent()->isOneInt();
+            })) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 std::vector<IterDomain*> IterDomain::clone(
@@ -928,7 +1758,7 @@ std::vector<IterDomain*> IterDomain::clone(
       domains.begin(),
       domains.end(),
       std::back_inserter(cloned_domains),
-      [](auto id) { return id->clone(); });
+      [](auto id) { return id->cloneWithoutRFactor(); });
   return cloned_domains;
 }
 
@@ -943,43 +1773,77 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       "Merging IterDomains with ending values that are 0 is not supported at this time.");
   TORCH_CHECK(
       outer->isReduction() == inner->isReduction() ||
-          (!outer->isReduction() && inner->extent()->isOneInt()) ||
-          (outer->extent()->isOneInt() && !inner->isReduction()),
-      "Merging IterDomains requires that their iteration types match.");
+          (!outer->isReduction() && inner->isTrivialReduction()) ||
+          (outer->isTrivialReduction() && !inner->isReduction()),
+      "Merging IterDomains requires that their iteration types match. ",
+      "Outer: ",
+      outer->toString(),
+      ", Inner: ",
+      inner->toString());
   TORCH_CHECK(
       (outer->isGather() && inner->isGather()) ||
           (!outer->isGather() && !inner->isGather()),
       "Merging gather and non-gather domains is not supported.");
+
+  TORCH_CHECK(
+      !outer->isStride() && !inner->isStride(),
+      "No support for merging stride domains");
 
   Val* merged_id_size = mul(outer->extent(), inner->extent());
 
   IterType itype = outer->getIterType();
 
   if (outer->isBroadcast() && inner->isBroadcast()) {
-    if (outer->getIterType() == IterType::BroadcastWithStride ||
-        inner->getIterType() == IterType::BroadcastWithStride) {
-      itype = IterType::BroadcastWithStride;
-    } else {
-      itype = IterType::BroadcastWithoutStride;
-    }
-  } else if (outer->isBroadcast() || inner->isBroadcast()) {
+    itype = IterType::Broadcast;
+  }
+
+  if ((outer->isBroadcast() || inner->isBroadcast()) &&
+      (outer->getIterType() == IterType::Iteration ||
+       inner->getIterType() == IterType::Iteration)) {
     itype = IterType::Iteration;
   }
 
   // Merging trivial reduction with iter domain, that's fine, just make it an
   // iter domain.
-  if ((outer->isReduction() || inner->isReduction()) &&
-      (!outer->isReduction() || !inner->isReduction())) {
+  if ((outer->isTrivialReduction() || inner->isTrivialReduction()) &&
+      (outer->getIterType() == IterType::Iteration ||
+       inner->getIterType() == IterType::Iteration)) {
     itype = IterType::Iteration;
   }
 
-  IterDomain* merged_id = IrBuilder::create<IterDomain>(
-      outer->container(),
-      outer->container()->zeroVal(),
-      merged_id_size->as<Int>(),
-      outer->getParallelType(),
-      itype,
-      outer->isRFactorProduct() || inner->isRFactorProduct());
+  // Merging trivial reduction with broadcasting, that's fine, just make it a
+  // broadcasting.
+  if ((outer->isTrivialReduction() || inner->isTrivialReduction()) &&
+      (outer->isBroadcast() || inner->isBroadcast())) {
+    itype = IterType::Broadcast;
+  }
+
+  Val* expanded_extent = nullptr;
+  if (outer->hasExpandedExtent() || inner->hasExpandedExtent()) {
+    if (outer->hasExpandedExtent() && inner->hasExpandedExtent()) {
+      expanded_extent = mul(outer->expandedExtent(), inner->expandedExtent());
+    } else if (outer->hasExpandedExtent() && !inner->hasExpandedExtent()) {
+      if (inner->isBroadcast()) {
+        expanded_extent = outer->expandedExtent();
+      } else {
+        expanded_extent = mul(outer->expandedExtent(), inner->extent());
+      }
+    } else if (outer->hasExpandedExtent() && inner->hasExpandedExtent()) {
+      if (outer->isBroadcast()) {
+        expanded_extent = inner->expandedExtent();
+      } else {
+        expanded_extent = mul(outer->extent(), inner->expandedExtent());
+      }
+    }
+  }
+
+  IterDomain* merged_id =
+      IterDomainBuilder(
+          outer->container()->zeroVal(), merged_id_size->as<Int>())
+          .parallel_type(outer->getParallelType())
+          .expanded_extent(expanded_extent)
+          .iter_type(itype)
+          .build();
 
   IrBuilder::create<Merge>(outer->container(), merged_id, outer, inner);
 
@@ -1019,6 +1883,11 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   // outer loop size
   Val* remainder =
       ceilDiv(Split::extent(in->extent(), start_offset, stop_offset), factor);
+  Val* expanded_remainder = nullptr;
+  if (in->hasExpandedExtent()) {
+    expanded_remainder = ceilDiv(
+        Split::extent(in->expandedExtent(), start_offset, stop_offset), factor);
+  }
 
   if ((start_offset != nullptr && !start_offset->isZeroInt()) ||
       (stop_offset != nullptr && !stop_offset->isZeroInt())) {
@@ -1027,22 +1896,28 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
         "Partial split is only allowed with root domains");
   }
   // outer loop IterDomain
-  IterDomain* ido = IrBuilder::create<IterDomain>(
-      in->container(),
-      in->container()->zeroVal(),
-      inner_split ? remainder->as<Int>() : factor,
-      in->getParallelType(),
-      in->getIterType(),
-      in->isRFactorProduct());
+  IterDomain* ido =
+      IterDomainBuilder(
+          in->container()->zeroVal(),
+          inner_split ? remainder->as<Int>() : factor)
+          .expanded_extent(
+              in->hasExpandedExtent() && inner_split ? expanded_remainder
+                                                     : nullptr)
+          .parallel_type(in->getParallelType())
+          .iter_type(in->getIterType())
+          .build();
 
   // inner loop IterDomain
-  IterDomain* idi = IrBuilder::create<IterDomain>(
-      in->container(),
-      in->container()->zeroVal(),
-      inner_split ? factor : remainder->as<Int>(),
-      in->getParallelType(),
-      in->getIterType(),
-      in->isRFactorProduct());
+  IterDomain* idi =
+      IterDomainBuilder(
+          in->container()->zeroVal(),
+          inner_split ? factor : remainder->as<Int>())
+          .expanded_extent(
+              in->hasExpandedExtent() && !inner_split ? expanded_remainder
+                                                      : nullptr)
+          .parallel_type(in->getParallelType())
+          .iter_type(in->getIterType())
+          .build();
 
   IrBuilder::create<Split>(
       in->container(),
@@ -1077,16 +1952,56 @@ std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
   return split_out;
 }
 
+std::pair<IterDomain*, IterDomain*> IterDomain::swizzle(
+    Swizzle2DType swizzle_type,
+    IterDomain* in_x,
+    IterDomain* in_y,
+    SwizzleMode swizzle_mode) {
+  TORCH_CHECK(
+      !in_x->extent()->isZeroInt() && !in_y->extent()->isZeroInt(),
+      "Invalid swizzling of a empty dimension.");
+
+  // TODO: reduction check on swizzle:
+  TORCH_CHECK(
+      !in_x->isReduction() && !in_y->isReduction(),
+      "swizzled reduction not yet supported");
+
+  for (auto input : InputsOf::outputs(in_x->fusion(), {in_x, in_y})) {
+    TORCH_CHECK(
+        !input->as<IterDomain>()->isBroadcast(),
+        "swizzling broadcast axes not yet supported");
+  }
+
+  // TODO: gather and shift check on swizzle
+  TORCH_INTERNAL_ASSERT(
+      !in_x->isGather() && !in_y->isGather(),
+      "Swizzled gather not yet supported");
+
+  IterDomain* out_x = IterDomainBuilder(in_x).build();
+
+  IterDomain* out_y = IterDomainBuilder(in_y).build();
+
+  IrBuilder::create<Swizzle2D>(
+      in_x->container(), out_x, out_y, in_x, in_y, swizzle_type, swizzle_mode);
+
+  return std::make_pair(out_x, out_y);
+}
+
 // TODO: We should change parallelize interface to be on tensorview or at least
 // vectorize should be done on tensorview. This would let us check that we don't
 // vectorize to the left of the computeAt domain, and could allow us to do some
 // simple validation of vectorize as it's inputs are right most and contiguous.
 void IterDomain::parallelize(ParallelType t) {
-  parallel_type_ = t;
-  if (t == ParallelType::Unroll || isParallelTypeVectorize(t)) {
+  if (parallel_type_ == t) {
+    // No op, don't do any more checks, it was already set to this value.
+    return;
+  }
+
+  if (t == ParallelType::Unroll || isParallelTypeVectorize(t) ||
+      t == ParallelType::Group) {
     TORCH_CHECK(
         start()->isZeroInt() && extent()->isConstScalar(),
-        "Vectorization, unrolling, and unswitching are only supported with start = 0 and extent as a const int, but got ",
+        "Vectorization, unrolling, unswitching and grouping are only supported with start = 0 and extent as a const int, but got ",
         "a start of ",
         start(),
         " and extent ",
@@ -1094,11 +2009,28 @@ void IterDomain::parallelize(ParallelType t) {
         " .");
   }
 
-  if (isMmaSwizzled()) {
+  if (t == ParallelType::Group) {
     TORCH_CHECK(
-        t == ParallelType::Vectorize,
-        "Parallel type other than vectorize not allowed for warp mapped ids");
+        getIterType() == IterType::Iteration,
+        "Grouping IterDomain of non Iteration type is not allowed. ",
+        getIterType());
   }
+
+  if (isMmaSwizzled()) {
+    // Mma swizzled axes represent data representation within a warp
+    //  so only allow updates that keep the parallelization within
+    //  a warp.
+    // Note && TODO: this check is actually used to allow indexing path
+    //  to make copies of the iterdomains. We might eventually just want
+    //  to lock these parallel types and not allowing any changes once
+    //  they are swizzled.
+    TORCH_CHECK(
+        t == ParallelType::Vectorize || t == ParallelType::TIDx ||
+            t == ParallelType::Serial,
+        "Parallel type other than serial, tidx, vectorize not allowed for mma swizzled ids");
+  }
+
+  parallel_type_ = t;
 }
 
 bool IterDomain::maybePartial() const {
@@ -1128,7 +2060,7 @@ TensorDomain::TensorDomain(
                              : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == getMaybeRFactorDomain().size(),
-      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      "Invalid contiguity information provided, incorrect size. Received vector of size ",
       contiguity_.size(),
       " but needed one of size ",
       root_domain_.size());
@@ -1152,7 +2084,7 @@ TensorDomain::TensorDomain(
                              : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == getMaybeRFactorDomain().size(),
-      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      "Invalid contiguity information provided, incorrect size. Received vector of size ",
       contiguity_.size(),
       " but needed one of size ",
       root_domain_.size());
@@ -1192,7 +2124,7 @@ TensorDomain::TensorDomain(
                              : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == getMaybeRFactorDomain().size(),
-      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      "Invalid contiguity information provided, incorrect size. Received vector of size ",
       contiguity_.size(),
       " but needed one of size ",
       getMaybeRFactorDomain().size());
@@ -1236,18 +2168,6 @@ TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
       rfactor_domain_(ir_cloner->clone(src->rfactor_domain_)),
       contiguity_(src->contiguity()),
       has_nontrivial_reduction_(src->has_nontrivial_reduction_) {}
-
-namespace {
-std::vector<IterDomain*> lowerIterDomains(
-    const std::vector<fuser::cuda::IterDomain*>& domains) {
-  std::vector<IterDomain*> lowered_domains;
-  lowered_domains.reserve(domains.size());
-  for (const auto iter_domain : domains) {
-    lowered_domains.push_back(iter_domain);
-  }
-  return lowered_domains;
-};
-} // namespace
 
 bool TensorDomain::hasBlockBroadcast() const {
   return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
@@ -1358,6 +2278,22 @@ bool TensorDomain::hasRFactor() const {
   return !rfactor_domain_.empty();
 }
 
+bool TensorDomain::hasViewLikeRFactor() const {
+  if (!hasRFactor()) {
+    // Can't have view like rfactor if there is no rfactor domain
+    return false;
+  }
+
+  // If there's an rfactor domain and no rfactor product is a reduction, this is
+  // a view like rfactor
+  return std::none_of(
+      getMaybeRFactorDomain().begin(),
+      getMaybeRFactorDomain().end(),
+      [](IterDomain* id) {
+        return id->isReduction() && id->isRFactorProduct();
+      });
+}
+
 bool TensorDomain::hasVectorize() const {
   return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
     return id->getParallelType() == ParallelType::Vectorize ||
@@ -1447,7 +2383,7 @@ void TensorDomain::split(
   resetDomains();
 }
 
-// Merge "axis" and "axis+1" into 1 dimension
+// Merge "axis_o" and "axis_i" into 1 dimension
 void TensorDomain::merge(int axis_o, int axis_i) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim domain");
   if (axis_o < 0)
@@ -1517,6 +2453,39 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
   return reordered_domain;
 }
 
+void TensorDomain::swizzle(
+    Swizzle2DType swizzle_type,
+    int x,
+    int y,
+    SwizzleMode swizzle_mode) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim domain");
+
+  TORCH_CHECK(
+      x >= 0 && (unsigned int)x < nDims(),
+      "Invalid swizzle detected, either one or both axes are outside of TensorView's range.");
+
+  TORCH_CHECK(
+      y >= 0 && (unsigned int)y < nDims(),
+      "Invalid swizzle detected, either one or both axes are outside of TensorView's range.");
+
+  IterDomain* axis_x = axis(x);
+  IterDomain* axis_y = axis(y);
+
+  IterDomain* axis_out_x = nullptr;
+  IterDomain* axis_out_y = nullptr;
+
+  std::tie(axis_out_x, axis_out_y) =
+      IterDomain::swizzle(swizzle_type, axis_x, axis_y, swizzle_mode);
+
+  domain_.erase(domain_.begin() + x);
+  domain_.insert(domain_.begin() + x, axis_out_x);
+
+  domain_.erase(domain_.begin() + y);
+  domain_.insert(domain_.begin() + y, axis_out_y);
+
+  resetDomains();
+}
+
 std::vector<IterDomain*> TensorDomain::noReductions(
     const std::vector<IterDomain*>& td) {
   size_t size_out = 0;
@@ -1576,10 +2545,75 @@ bool TensorDomain::hasNontrivialReduction(const std::vector<IterDomain*>& td) {
   return false;
 }
 
-TensorDomain* TensorDomain::view(
-    const std::vector<std::shared_ptr<ViewTransform>>& transforms) {
+TensorDomain* TensorDomain::view(const AnalyzeViewResult& view_analysis) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to view transform a 0-dim domain");
-  return transformView(this, transforms);
+  return transformView(this, view_analysis);
+}
+
+TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
+  auto inp_domain = noReductions(getMaybeRFactorDomain());
+
+  if (start_dim < 0) {
+    start_dim += inp_domain.size();
+  }
+  if (end_dim < 0) {
+    end_dim += inp_domain.size();
+  }
+  TORCH_CHECK(
+      start_dim >= 0 && start_dim < inp_domain.size(),
+      "Invalid start_dim ",
+      start_dim);
+  TORCH_CHECK(
+      end_dim >= 0 && end_dim < inp_domain.size(), "Invalid end_dim ", end_dim);
+  TORCH_CHECK(start_dim <= end_dim, "start_dim must be <= end_dim");
+
+  std::vector<IterDomain*> new_root_domain;
+  new_root_domain.reserve(inp_domain.size());
+  for (auto i : c10::irange(inp_domain.size())) {
+    bool is_rfactor_dim = i >= start_dim && i <= end_dim;
+    auto inp_id = inp_domain[i];
+    auto out_id = IterDomainBuilder(inp_id)
+                      .is_rfactor_domain(is_rfactor_dim)
+                      .extent(
+                          (is_rfactor_dim && inp_id->hasExpandedExtent())
+                              ? inp_id->expandedExtent()
+                              : inp_id->extent())
+                      .iter_type(
+                          (is_rfactor_dim && inp_id->isBroadcast())
+                              ? IterType::Iteration
+                              : inp_id->getIterType())
+                      .build();
+    new_root_domain.push_back(out_id);
+  }
+
+  std::vector<IterDomain*> rfactor_domain;
+  rfactor_domain.reserve(new_root_domain.size() - (end_dim - start_dim));
+  for (auto i : c10::irange(start_dim)) {
+    rfactor_domain.push_back(new_root_domain[i]);
+  }
+
+  IterDomain* merged_id = new_root_domain[start_dim];
+  for (auto i : c10::irange(start_dim + 1, end_dim + 1)) {
+    IterDomain* new_merged_id =
+        IterDomainBuilder(
+            merged_id->container()->zeroVal(),
+            mul(merged_id->extent(), new_root_domain[i]->extent()))
+            .is_rfactor_domain(true)
+            .build();
+    IrBuilder::create<Merge>(new_merged_id, merged_id, new_root_domain[i]);
+    merged_id = new_merged_id;
+  }
+  rfactor_domain.push_back(merged_id);
+
+  for (auto i : c10::irange(end_dim + 1, inp_domain.size())) {
+    rfactor_domain.push_back(new_root_domain[i]);
+  }
+
+  return IrBuilder::create<TensorDomain>(
+      new_root_domain,
+      rfactor_domain,
+      rfactor_domain,
+      std::vector<bool>(rfactor_domain.size(), true));
 }
 
 // TODO: Rfactor a Welford
@@ -1587,48 +2621,7 @@ TensorDomain* TensorDomain::view(
 // pair is in order where second is the consumer of first
 std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
     const std::vector<int>& axes_) {
-  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim domain");
-
-  std::vector<int> axes(axes_.size());
-
-  auto ndims = nDims();
-  std::transform(axes_.begin(), axes_.end(), axes.begin(), [ndims](int i) {
-    return i < 0 ? i + ndims : i;
-  });
-
-  TORCH_CHECK(
-      std::none_of(
-          axes.begin(),
-          axes.end(),
-          [ndims](int i) { return i < 0 || (unsigned int)i >= ndims; }),
-      "RFactor axes less than 0 or >= ndims.");
-
-  // We might be able to lift this constraint in some instances, but needs more
-  // investigation.
-  TORCH_CHECK(
-      !hasRFactor(), "Cannot call rfactor on the same tensor domain twice.");
-
-  std::unordered_set<int> axes_set(axes.begin(), axes.end());
-
-  bool rfactor_found = false;
-  bool reduction_found = false;
-  for (decltype(nDims()) i{0}; i < nDims(); i++) {
-    if (axis(i)->isReduction()) {
-      if (axes_set.find(i) != axes_set.end()) {
-        rfactor_found = true;
-      } else {
-        reduction_found = true;
-      }
-    }
-  }
-
-  TORCH_CHECK(
-      rfactor_found && reduction_found,
-      "Invalid rfactor found, rfactor must be provided at least one reduction axis, but not all reduction axes.");
-
-  return std::pair<TensorDomain*, TensorDomain*>{
-      TransformRFactor::runReplay(this, axes),
-      TransformRFactor::runReplay2(this, axes)};
+  return TransformRFactor::runReplay(this, axes_);
 }
 
 Split::Split(
@@ -1671,6 +2664,13 @@ Split::Split(const Split* src, IrCloner* ir_cloner)
       inner_split_(src->inner_split_),
       start_offset_(ir_cloner->clone(src->start_offset_)),
       stop_offset_(ir_cloner->clone(src->stop_offset_)) {}
+
+Expr* Split::shallowCopy() const {
+  auto result = IrBuilder::create<Split>(
+      outer_, inner_, in_, factor_, inner_split_, start_offset_, stop_offset_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 Val* Split::extent(Val* in_extent, Val* start_offset, Val* stop_offset) {
   TORCH_INTERNAL_ASSERT(in_extent != nullptr);
@@ -1717,6 +2717,12 @@ Merge::Merge(const Merge* src, IrCloner* ir_cloner)
       outer_(ir_cloner->clone(src->outer_)),
       inner_(ir_cloner->clone(src->inner_)) {}
 
+Expr* Merge::shallowCopy() const {
+  auto result = IrBuilder::create<Merge>(out_, outer_, inner_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool Merge::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -1726,6 +2732,56 @@ bool Merge::sameAs(const Statement* other) const {
   }
   return Expr::sameAs(other);
 }
+
+Swizzle2D::Swizzle2D(
+    IrBuilderPasskey passkey,
+    IterDomain* out_x,
+    IterDomain* out_y,
+    IterDomain* in_x,
+    IterDomain* in_y,
+    Swizzle2DType swizzle_type,
+    SwizzleMode swizzle_mode)
+    : Expr(passkey, ExprType::Swizzle2D),
+      out_x_{out_x},
+      out_y_{out_y},
+      in_x_{in_x},
+      in_y_{in_y},
+      swizzle_type_(swizzle_type),
+      swizzle_mode_(swizzle_mode) {
+  addOutput(out_x);
+  addOutput(out_y);
+  addInput(in_x);
+  addInput(in_y);
+}
+
+Expr* Swizzle2D::shallowCopy() const {
+  auto result = IrBuilder::create<Swizzle2D>(
+      out_x_, out_y_, in_x_, in_y_, swizzle_type_, swizzle_mode_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool Swizzle2D::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Swizzle2D>()) {
+    return false;
+  }
+  if (!(swizzle_type_ == other->as<Swizzle2D>()->swizzle_type_)) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
+Swizzle2D::Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_x_(ir_cloner->clone(src->out_x_)),
+      out_y_(ir_cloner->clone(src->out_y_)),
+      in_x_(ir_cloner->clone(src->in_x_)),
+      in_y_(ir_cloner->clone(src->in_y_)),
+      swizzle_type_(src->swizzle_type_),
+      swizzle_mode_(src->swizzle_mode_) {}
 
 NamedScalar::NamedScalar(
     IrBuilderPasskey passkey,

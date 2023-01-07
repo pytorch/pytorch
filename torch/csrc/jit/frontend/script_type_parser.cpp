@@ -227,7 +227,7 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   // expression and base type names.
   if (resolver_) {
     if (auto typePtr =
-            resolver_->resolveType(expr.range().text(), expr.range())) {
+            resolver_->resolveType(expr.range().text().str(), expr.range())) {
       return typePtr;
     }
   }
@@ -316,7 +316,7 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   // We then run constant prop on this graph and check the results are
   // constant. This approach avoids having to have separate handling of
   // default arguments from standard expressions by piecing together existing
-  // machinery for graph generation, constant propgation, and constant
+  // machinery for graph generation, constant propagation, and constant
   // extraction.
   auto tuple_type = Subscript::create(
       r,

@@ -13,6 +13,9 @@ from typing import Any, Dict, List, Set, Tuple
 
 from .api import RequestQueue, TimerClient, TimerRequest, TimerServer
 
+__all__ = ['LocalTimerClient', 'MultiprocessingRequestQueue', 'LocalTimerServer']
+
+log = logging.getLogger(__name__)
 
 class LocalTimerClient(TimerClient):
     """
@@ -115,8 +118,8 @@ class LocalTimerServer(TimerServer):
             os.kill(worker_id, signal.SIGKILL)
             return True
         except ProcessLookupError:
-            logging.info(f"Process with pid={worker_id} does not exist. Skipping")
+            log.info(f"Process with pid={worker_id} does not exist. Skipping")
             return True
         except Exception as e:
-            logging.error(f"Error terminating pid={worker_id}", exc_info=e)
+            log.error(f"Error terminating pid={worker_id}", exc_info=e)
         return False

@@ -38,7 +38,7 @@ void processRemoteProfiledEvents(
   TORCH_CHECK(
       enabled,
       "Profiler was expected to be enabled. This can happen in callback "
-      " continutations that run in different threads, and the TLS of the "
+      " continuations that run in different threads, and the TLS of the "
       " profiler was not propagated.");
   std::vector<LegacyEvent> events = rpcWithProfilingResp.getProfiledEvents();
   const auto& profilingId = rpcWithProfilingResp.getProfilingId();
@@ -298,7 +298,7 @@ parseWireSections(const void* data, size_t data_size) {
       break;
     }
     size_t sz = c10::stoll(std::string(sizePtr, ptr - sizePtr));
-    headerEnts.emplace_back(std::make_pair(name, sz));
+    headerEnts.emplace_back(name, sz);
     ++ptr; // past the '\n'
   }
   if (!ok) {
@@ -492,8 +492,8 @@ std::vector<at::IValue> readWrappedPayload(
   // Read the additional payload remove it from the payload.
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t additionalPayloadSize;
+  TORCH_INTERNAL_ASSERT(payload.size() >= sizeof(int64_t));
   size_t indexToRead = payload.size() - sizeof(int64_t);
-  TORCH_INTERNAL_ASSERT(indexToRead >= 0);
   torch::utils::THP_decodeInt64Buffer(
       &additionalPayloadSize,
       reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,

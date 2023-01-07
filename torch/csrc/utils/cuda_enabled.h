@@ -11,5 +11,5 @@ static inline bool cuda_enabled() {
 #endif
 }
 
-}
-}
+} // namespace utils
+} // namespace torch

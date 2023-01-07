@@ -29,7 +29,8 @@ void KLDivLossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor KLDivLossImpl::forward(const Tensor& input, const Tensor& target) {
-  return F::detail::kl_div(input, target, options.reduction(), options.log_target());
+  return F::detail::kl_div(
+      input, target, options.reduction(), options.log_target());
 }
 
 // ============================================================================
@@ -48,7 +49,8 @@ Tensor MSELossImpl::forward(const Tensor& input, const Tensor& target) {
 
 // ============================================================================
 
-BCELossImpl::BCELossImpl(const BCELossOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
+BCELossImpl::BCELossImpl(const BCELossOptions& options_)
+    : options(options_) { // NOLINT(modernize-pass-by-value)
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -62,7 +64,8 @@ void BCELossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor BCELossImpl::forward(const Tensor& input, const Tensor& target) {
-  return F::detail::binary_cross_entropy(input, target, options.weight(), options.reduction());
+  return F::detail::binary_cross_entropy(
+      input, target, options.weight(), options.reduction());
 }
 
 // ============================================================================
@@ -80,7 +83,8 @@ void HingeEmbeddingLossImpl::pretty_print(std::ostream& stream) const {
 Tensor HingeEmbeddingLossImpl::forward(
     const Tensor& input,
     const Tensor& target) {
-  return F::detail::hinge_embedding_loss(input, target, options.margin(), options.reduction());
+  return F::detail::hinge_embedding_loss(
+      input, target, options.margin(), options.reduction());
 }
 
 // ============================================================================
@@ -104,11 +108,18 @@ void MultiMarginLossImpl::reset() {
 void MultiMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::MultiMarginLoss(p=" << options.p()
          << ", margin=" << options.margin() << ", weight=" << options.weight()
-         << ", reduction=" << enumtype::get_enum_name(options.reduction()) << ")";
+         << ", reduction=" << enumtype::get_enum_name(options.reduction())
+         << ")";
 }
 
 Tensor MultiMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
-  return F::detail::multi_margin_loss(input, target, options.p(), options.margin(), options.weight(), options.reduction());
+  return F::detail::multi_margin_loss(
+      input,
+      target,
+      options.p(),
+      options.margin(),
+      options.weight(),
+      options.reduction());
 }
 
 // ============================================================================
@@ -127,12 +138,14 @@ Tensor CosineEmbeddingLossImpl::forward(
     const Tensor& input1,
     const Tensor& input2,
     const Tensor& target) {
-  return F::detail::cosine_embedding_loss(input1, input2, target, options.margin(), options.reduction());
+  return F::detail::cosine_embedding_loss(
+      input1, input2, target, options.margin(), options.reduction());
 }
 // ============================================================================
 
 MultiLabelSoftMarginLossImpl::MultiLabelSoftMarginLossImpl(
-    const torch::nn::MultiLabelSoftMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
+    const torch::nn::MultiLabelSoftMarginLossOptions&
+        options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
@@ -149,7 +162,8 @@ void MultiLabelSoftMarginLossImpl::reset() {
 Tensor MultiLabelSoftMarginLossImpl::forward(
     const Tensor& input,
     const Tensor& target) {
-  return F::detail::multilabel_soft_margin_loss(input, target, options.weight(), options.reduction());
+  return F::detail::multilabel_soft_margin_loss(
+      input, target, options.weight(), options.reduction());
 }
 
 // ============================================================================
@@ -171,14 +185,14 @@ Tensor TripletMarginLossImpl::forward(
     const Tensor& positive,
     const Tensor& negative) {
   return F::detail::triplet_margin_loss(
-    anchor,
-    positive,
-    negative,
-    options.margin(),
-    options.p(),
-    options.eps(),
-    options.swap(),
-    options.reduction());
+      anchor,
+      positive,
+      negative,
+      options.margin(),
+      options.p(),
+      options.eps(),
+      options.swap(),
+      options.reduction());
 }
 
 // ============================================================================
@@ -189,9 +203,11 @@ TripletMarginWithDistanceLossImpl::TripletMarginWithDistanceLossImpl(
 
 void TripletMarginWithDistanceLossImpl::reset() {}
 
-void TripletMarginWithDistanceLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::TripletMarginWithDistanceLoss(margin=" << options.margin()
-         << std::boolalpha << ", swap=" << options.swap() << ")";
+void TripletMarginWithDistanceLossImpl::pretty_print(
+    std::ostream& stream) const {
+  stream << "torch::nn::TripletMarginWithDistanceLoss(margin="
+         << options.margin() << std::boolalpha << ", swap=" << options.swap()
+         << ")";
 }
 
 Tensor TripletMarginWithDistanceLossImpl::forward(
@@ -199,13 +215,13 @@ Tensor TripletMarginWithDistanceLossImpl::forward(
     const Tensor& positive,
     const Tensor& negative) {
   return F::detail::triplet_margin_with_distance_loss(
-    anchor,
-    positive,
-    negative,
-    options.distance_function(),
-    options.margin(),
-    options.swap(),
-    options.reduction());
+      anchor,
+      positive,
+      negative,
+      options.distance_function(),
+      options.margin(),
+      options.swap(),
+      options.reduction());
 }
 
 // ============================================================================
@@ -220,14 +236,17 @@ void MultiLabelMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::MultiLabelMarginLoss()";
 }
 
-Tensor MultiLabelMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
+Tensor MultiLabelMarginLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
   return F::detail::multilabel_margin_loss(input, target, options.reduction());
 }
 
 // ============================================================================
 
 SoftMarginLossImpl::SoftMarginLossImpl(
-    const torch::nn::SoftMarginLossOptions& options_) : options(options_) {}
+    const torch::nn::SoftMarginLossOptions& options_)
+    : options(options_) {}
 
 void SoftMarginLossImpl::reset() {}
 
@@ -242,7 +261,8 @@ Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
 // ============================================================================
 
 SmoothL1LossImpl::SmoothL1LossImpl(
-    const torch::nn::SmoothL1LossOptions& options_) : options(options_) {}
+    const torch::nn::SmoothL1LossOptions& options_)
+    : options(options_) {}
 
 void SmoothL1LossImpl::reset() {}
 
@@ -251,13 +271,14 @@ void SmoothL1LossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor SmoothL1LossImpl::forward(const Tensor& input, const Tensor& target) {
-  return F::detail::smooth_l1_loss(input, target, options.reduction(), options.beta());
+  return F::detail::smooth_l1_loss(
+      input, target, options.reduction(), options.beta());
 }
 
 // ============================================================================
 
-HuberLossImpl::HuberLossImpl(
-    const torch::nn::HuberLossOptions& options_) : options(options_) {}
+HuberLossImpl::HuberLossImpl(const torch::nn::HuberLossOptions& options_)
+    : options(options_) {}
 
 void HuberLossImpl::reset() {}
 
@@ -266,7 +287,8 @@ void HuberLossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor HuberLossImpl::forward(const Tensor& input, const Tensor& target) {
-  return F::detail::huber_loss(input, target, options.reduction(), options.delta());
+  return F::detail::huber_loss(
+      input, target, options.reduction(), options.delta());
 }
 
 // ============================================================================
@@ -279,22 +301,25 @@ void CTCLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::CTCLoss()";
 }
 
-Tensor CTCLossImpl::forward(const Tensor& log_probs, const Tensor& targets,
-                 const Tensor& input_lengths, const Tensor& target_lengths) {
+Tensor CTCLossImpl::forward(
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths) {
   return F::detail::ctc_loss(
-    log_probs,
-    targets,
-    input_lengths,
-    target_lengths,
-    options.blank(),
-    options.reduction(),
-    options.zero_infinity());
+      log_probs,
+      targets,
+      input_lengths,
+      target_lengths,
+      options.blank(),
+      options.reduction(),
+      options.zero_infinity());
 }
 
 // ============================================================================
 
 PoissonNLLLossImpl::PoissonNLLLossImpl(const PoissonNLLLossOptions& options_)
-  : options(options_) {}
+    : options(options_) {}
 
 void PoissonNLLLossImpl::reset() {}
 
@@ -303,16 +328,22 @@ void PoissonNLLLossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor PoissonNLLLossImpl::forward(
-  const Tensor& log_input, const Tensor& target) {
+    const Tensor& log_input,
+    const Tensor& target) {
   return F::detail::poisson_nll_loss(
-    log_input, target,
-    options.log_input(), options.full(), options.eps(), options.reduction());
+      log_input,
+      target,
+      options.log_input(),
+      options.full(),
+      options.eps(),
+      options.reduction());
 }
 
 // ============================================================================
 
 MarginRankingLossImpl::MarginRankingLossImpl(
-  const MarginRankingLossOptions& options_) : options(options_) {}
+    const MarginRankingLossOptions& options_)
+    : options(options_) {}
 
 void MarginRankingLossImpl::reset() {}
 
@@ -320,9 +351,12 @@ void MarginRankingLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::MarginRankingLoss()";
 }
 
-Tensor MarginRankingLossImpl::forward(const Tensor& input1,
-    const Tensor& input2, const Tensor& target) {
-  return F::detail::margin_ranking_loss(input1, input2, target, options.margin(), options.reduction());
+Tensor MarginRankingLossImpl::forward(
+    const Tensor& input1,
+    const Tensor& input2,
+    const Tensor& target) {
+  return F::detail::margin_ranking_loss(
+      input1, input2, target, options.margin(), options.reduction());
 }
 
 // ============================================================================
@@ -342,15 +376,9 @@ void NLLLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::NLLLoss()";
 }
 
-Tensor NLLLossImpl::forward(
-    const Tensor& input,
-    const Tensor& target) {
+Tensor NLLLossImpl::forward(const Tensor& input, const Tensor& target) {
   return F::detail::nll_loss(
-    input,
-    target,
-    weight,
-    options.ignore_index(),
-    options.reduction());
+      input, target, weight, options.ignore_index(), options.reduction());
 }
 
 // ============================================================================
@@ -374,19 +402,20 @@ Tensor CrossEntropyLossImpl::forward(
     const Tensor& input,
     const Tensor& target) {
   return F::detail::cross_entropy(
-    input,
-    target,
-    weight,
-    options.ignore_index(),
-    options.reduction(),
-    options.label_smoothing());
+      input,
+      target,
+      weight,
+      options.ignore_index(),
+      options.reduction(),
+      options.label_smoothing());
 }
 
 // ============================================================================
 
 BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  const BCEWithLogitsLossOptions& options_) : options(options_) {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
+    const BCEWithLogitsLossOptions& options_)
+    : options(options_) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -401,9 +430,14 @@ void BCEWithLogitsLossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor BCEWithLogitsLossImpl::forward(
-  const Tensor& input, const Tensor& target) {
-  return F::detail::binary_cross_entropy_with_logits(input, target,
-    options.weight(), options.reduction(), options.pos_weight());
+    const Tensor& input,
+    const Tensor& target) {
+  return F::detail::binary_cross_entropy_with_logits(
+      input,
+      target,
+      options.weight(),
+      options.reduction(),
+      options.pos_weight());
 }
 
 } // namespace nn

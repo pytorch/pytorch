@@ -401,7 +401,6 @@ TEST(IValueTest, FutureSetError) {
   }
 }
 
-
 TEST(IValueTest, ValueEquality) {
   EXPECT_EQ(IValue("asdf"), IValue("asdf"));
   EXPECT_NE(IValue("asdf"), IValue("ASDF"));
@@ -802,6 +801,23 @@ TEST(IValueTest, ToWeakAndBack) {
     WeakIValue weak(sample);
     EXPECT_IVALUE_EQ(sample, weak.lock());
   }
+}
+
+// Storage and Generator did not set is_intrusive_ptr if they were
+// undefined, which led use_count to return 1 instead of 0 for these
+// cases.
+TEST(IValueTest, UseCountCornerCases) {
+  at::Storage undefinedStorage;
+  at::Generator undefinedGenerator;
+  at::Tensor undefinedTensor;
+
+  IValue ivEmptyStorage(undefinedStorage);
+  IValue ivEmptyGenerator(undefinedGenerator);
+  IValue ivEmptyTensor(undefinedTensor);
+
+  ASSERT_EQ(1, ivEmptyStorage.use_count());
+  ASSERT_EQ(1, ivEmptyGenerator.use_count());
+  ASSERT_EQ(0, ivEmptyTensor.use_count());
 }
 
 // TODO(gmagogsfm): Add type conversion test?

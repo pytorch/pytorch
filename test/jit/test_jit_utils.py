@@ -94,3 +94,15 @@ class TestJitUtils(JitTestCase):
         """)
 
         self.checkScriptRaisesRegex(s, (), Exception, "range", name="fn")
+
+    def test_no_tracer_warn_context_manager(self):
+        torch._C._jit_set_tracer_state_warn(True)
+        with jit_utils.NoTracerWarnContextManager() as no_warn:
+            self.assertEqual(
+                False,
+                torch._C._jit_get_tracer_state_warn()
+            )
+        self.assertEqual(
+            True,
+            torch._C._jit_get_tracer_state_warn()
+        )

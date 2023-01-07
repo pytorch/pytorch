@@ -8,17 +8,14 @@ import torch.optim as optim
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
-    FSDPTest,
-)
+from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.utils.checkpoint import checkpoint
-
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -34,6 +31,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 def get_cur_mem(rank, result, prefix):
     """Collect memory allocated values in a result dict in MB"""
+    torch._C._cuda_clearCublasWorkspaces()
     result[prefix] = round(torch.cuda.memory_allocated() / 1024 / 1024)
 
 
