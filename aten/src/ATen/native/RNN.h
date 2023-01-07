@@ -45,8 +45,8 @@ inline void check_attributes(const Tensor& input, const TensorList& params, cons
     }
   };
 
-  for (auto h : hiddens) check_tensors("hidden", h);
-  for (auto p : params) check_tensors("parameter", p);
+  for (const auto& h : hiddens) check_tensors("hidden", h);
+  for (const auto& p : params) check_tensors("parameter", p);
 }
 
 }} // namespace at::native

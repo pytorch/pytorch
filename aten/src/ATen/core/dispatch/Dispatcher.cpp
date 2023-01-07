@@ -169,7 +169,6 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
 // Windows build doesn't produce the destructor symbol in PyTorch libs
 // causing a linker failure in downstream projects.
 // x-ref https://github.com/pytorch/pytorch/issues/70032
-// NOLINTNEXTLINE(performance-trivially-destructible)
 OperatorHandle::~OperatorHandle() = default;
 
 RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {

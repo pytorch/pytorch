@@ -8,6 +8,8 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
+#include <utility>
+
 namespace c10 {
 
 using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
@@ -378,7 +380,7 @@ namespace impl {
         std::vector<c10::SymInt> r;
         auto src = v.toIntList();
         std::transform(src.begin(), src.end(), std::back_inserter(r), [](int64_t i) { return c10::SymInt(i); });
-        return OptionalArray<c10::SymInt>(r);
+        return OptionalArray<c10::SymInt>(std::move(r));
       } else {
         return std::move(v).to<OptionalArray<c10::SymInt>>();
       }
