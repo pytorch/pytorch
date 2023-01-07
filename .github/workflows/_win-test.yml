@@ -164,7 +164,7 @@ jobs:
 
           .jenkins/pytorch/win-test.sh
 
-      - name: Print undeleted logs
+      - name: Print remaining test logs
         shell: bash
         if: always()
         run: |

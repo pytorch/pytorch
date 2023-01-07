@@ -150,7 +150,7 @@ jobs:
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
           ${CONDA_RUN} .jenkins/pytorch/macos-test.sh
 
-      - name: Print undeleted logs
+      - name: Print remaining test logs
         shell: bash
         if: always()
         run: |

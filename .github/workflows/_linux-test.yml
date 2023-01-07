@@ -206,7 +206,7 @@ jobs:
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
           docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
-      - name: Print undeleted logs
+      - name: Print remaining test logs
         shell: bash
         if: always()
         run: |
