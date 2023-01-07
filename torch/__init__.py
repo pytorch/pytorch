@@ -49,10 +49,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'sym_int', 'sym_float', 'compile', 'vmap',
-    'enable_check_sparse_tensor_invariants',
-    'is_check_sparse_tensor_invariants_enabled'
-]
+    'sym_int', 'sym_float', 'compile', 'vmap']
 
 ################################################################################
 # Load the extension module
@@ -376,7 +373,7 @@ for name in dir(_C):
         if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
             if (obj.__module__ != 'torch'):
                 # TODO: fix their module from C++ side
-                if name not in ['DisableTorchFunction', 'Generator']:
+                if name not in ['DisableTorchFunctionSubclass', 'Generator']:
                     obj.__module__ = 'torch'
 
 if not TYPE_CHECKING:
@@ -781,36 +778,6 @@ def is_warn_always_enabled():
     :func:`torch.set_warn_always` documentation for more details.
     """
     return _C._get_warnAlways()
-
-def enable_check_sparse_tensor_invariants(enable: builtins.bool = True):
-    r"""Enable or disable sparse tensor invariants check in
-    sparse tensor constructors.
-
-    .. note::
-
-      By default, the sparse tensor invariants check flag is
-      disabled. Use :func:`is_check_sparse_tensor_invariants_enabled`
-      to get the current state of the flag.
-
-    .. note::
-
-      The sparse tensor invariants check flag has global effect in the
-      sense that it is effective to all sparse tensor constructors,
-      both in Python and ATen.
-
-      The flag can be locally overridden by the ``check_invariants``
-      optional argument of the sparse tensor constructor functions.
-
-    Args:
-        enable (:class:`bool`): If True, enable invariants checks,
-                                otherwise, disable the checks.
-    """
-    torch._C._set_check_sparse_tensor_invariants(enable)
-
-def is_check_sparse_tensor_invariants_enabled() -> builtins.bool:
-    r"""Returns True if the sparse tensor invariants check is enabled.
-    """
-    return torch._C._check_sparse_tensor_invariants()
 
 ################################################################################
 # Define numeric constants
@@ -1315,3 +1282,14 @@ import torch.fx.experimental.symbolic_shapes
 
 from torch import func as func
 from torch.func import vmap
+
+# The function _sparse_coo_tensor_unsafe is removed from PyTorch
+# Python API (v. 1.13), here we temporarily provide its replacement
+# with a deprecation warning.
+# TODO: remove the function for PyTorch v 1.15.
+def _sparse_coo_tensor_unsafe(*args, **kwargs):
+    import warnings
+    warnings.warn('torch._sparse_coo_tensor_unsafe is deprecated, '
+                  'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
+    kwargs['check_invariants'] = False
+    return torch.sparse_coo_tensor(*args, **kwargs)

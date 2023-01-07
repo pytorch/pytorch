@@ -243,8 +243,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.vmap,
         torch.frombuffer,
         torch.asarray,
-        torch.enable_check_sparse_tensor_invariants,
-        torch.is_check_sparse_tensor_invariants_enabled,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,

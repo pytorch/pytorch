@@ -22,6 +22,7 @@
 #include <ATen/ops/tensor.h>
 #endif
 
+#include <utility>
 #include <vector>
 
 namespace at {
@@ -201,7 +202,7 @@ struct NestedNode {
   // NestedNode(NestedNode&) = delete;
   // NestedNode(const NestedNode&) = delete;
   // NestedNode& operator=(NestedNode) = delete;
-  explicit NestedNode(T payload) : _is_leaf(true), _payload(payload) {}
+  explicit NestedNode(T payload) : _is_leaf(true), _payload(std::move(payload)) {}
   inline bool is_leaf() const {
     return _is_leaf;
   }
