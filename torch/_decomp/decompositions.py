@@ -84,9 +84,6 @@ compute_only_pw_cast_for_opmath = partial(
 pw_cast_for_opmath = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
 )
-reduction_complex_to_real = partial(
-    type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
-)
 pw_cast_for_int_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
@@ -175,7 +172,6 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
 
 
 @register_decomposition(aten.hardtanh_backward)
-@pw_cast_for_opmath
 def hardtanh_backward(
     grad_output: Tensor, self: Tensor, min_val: float, max_val: float
 ):
@@ -183,7 +179,6 @@ def hardtanh_backward(
 
 
 @register_decomposition(aten.hardshrink_backward)
-@pw_cast_for_opmath
 def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
     return torch.where((self >= -lambd) & (self <= lambd), 0.0, grad_out)
 
@@ -205,7 +200,6 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 
 
 @register_decomposition(aten.threshold_backward)
-@pw_cast_for_opmath
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, 0.0, grad_output)
 
@@ -1558,30 +1552,6 @@ def _to_copy(
     return x
 
 
-@pw_cast_for_int_to_real
-def xlogy(self: Tensor, other: Tensor) -> Tensor:
-    return aten.where(
-        aten.isnan(self),
-        self,
-        aten.where(
-            self == aten.new_zeros(self, ()),
-            aten.new_zeros(self, ()),
-            self * aten.log(other),
-        ),
-    )
-
-
-@register_decomposition(aten.std.correction)
-@reduction_complex_to_real
-def std_decomposition(
-    x: Tensor,
-    dim: Optional[List[int]] = None,
-    correction: Optional[int] = None,
-    keepdim: bool = False,
-):
-    return torch.sqrt(torch.var(x, dim, correction=correction, keepdim=keepdim))
-
-
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
@@ -1925,27 +1895,6 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     else:
         buffer = z
     return min - torch.log1p(z), buffer
-
-
-@register_decomposition(aten.norm)
-@out_wrapper()
-def norm(
-    self: Tensor,
-    p: Optional[float] = None,
-    dim: List[int] = None,
-    keepdim: bool = False,
-    dtype: Optional[torch.dtype] = None,
-):
-    p = p if p is not None else 2.0
-    if dtype:
-        return torch.linalg.vector_norm(self.to(dtype), p, dim, keepdim, dtype=dtype)
-
-    computation_dtype, result_dtype = utils.elementwise_dtypes(
-        self, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
-    )
-    return torch.linalg.vector_norm(
-        self.to(computation_dtype), p, dim, keepdim, dtype=dtype
-    ).to(result_dtype)
 
 
 @register_decomposition(aten.uniform)
