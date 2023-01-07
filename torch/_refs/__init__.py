@@ -13,6 +13,7 @@ import torch
 
 import torch._prims as prims
 import torch._prims_common as utils
+from torch import sym_float, sym_int
 from torch._prims_common import (
     check,
     DeviceLikeType,
@@ -42,7 +43,6 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -4328,20 +4328,28 @@ def linspace(
     if start == end:
         return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
-    # arange returns values in the interval [start, end) so we add an an eps to make it [start, end]
-    # The eps is small enough as to always add just the element end
-    step_size = 1 / (steps - 1)
-    eps = step_size / 2
-    # arange returns a tensor of size divup(end - start, step) and thus, for the arguemnts below
-    # ceil(div(1 + step_size/2,  1/(steps - 1)) = steps - 1  + ceil(1 / 2) = steps
-    # torch.arange is an scan algorithm, so we need a high-precision dtype
-    rg = torch.arange(
-        0, 1 + eps, step_size, dtype=torch.float64, **factory_kwargs  # type: ignore[arg-type]
+    # Perform in arange in int because some backends like ATen or Triton do not support all the dtypes
+    rg = torch.arange(0, steps, **factory_kwargs)  # type: ignore[arg-type]
+
+    # Small types need to be computed in higher precision as this is, at heart, an associative scan
+    dtype_red = (
+        torch.int64
+        if (utils.is_boolean_dtype(dtype) or utils.is_integer_dtype(dtype))
+        else dtype
     )
-    double_dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
-    rg = _maybe_convert_to_dtype(rg, double_dtype)  # type: ignore[assignment]
-    cast = partial(torch.full, (1,), dtype=double_dtype, **factory_kwargs)
-    out = torch.lerp(cast(start), cast(end), rg)
+    computation_dtype, _ = utils.reduction_dtypes(
+        rg, REDUCTION_OUTPUT_TYPE_KIND.SAME, dtype_red
+    )
+    cast_rg = partial(_maybe_convert_to_dtype, dtype=computation_dtype)
+
+    # We implement torch.lerp without performing rg / (steps - 1) explicitly
+    # With this we get out[0] == start, out[-1] == end
+    step = (end - start) / (steps - 1)
+    out = torch.where(
+        rg < steps / 2,
+        start + step * cast_rg(rg),  # type: ignore[arg-type,operator]
+        end - step * cast_rg((steps - 1) - rg),  # type: ignore[arg-type,operator]
+    )
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
@@ -4481,8 +4489,8 @@ def movedim(
         len(source) == len(destination),  # type: ignore[arg-type]
         lambda: (
             "movedim: Invalid source or destination dims: source "  # type: ignore[arg-type]
-            f"({list(source)} dims) should contain the same number of dims as "
-            f"destination ({list(destination)} dims)"
+            f"({list(source)} dims) should contain the same number "  # type: ignore[arg-type]
+            f"of dims as destination ({list(destination)} dims)"  # type: ignore[arg-type]
         ),
     )
 
