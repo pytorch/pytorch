@@ -238,7 +238,8 @@ def benchmark(
             except Exception as e:
                 print(f"error {operator}")
                 print(e)
-                raise e
+                # comment out this line to avoid blocking other tests
+                # raise e
 
         if not timings:
             continue
