@@ -1159,16 +1159,25 @@ class CppVecKernelChecker(CppVecKernel):
             def index_expr(expr, dtype):
                 current_node: torch.fx.Node = V.interpreter.current_node
 
-                loop_range = {}
                 assert len(self.ranges) == len(self.itervars)
+                max_expr = expr
+                min_expr = expr
                 for idx in range(len(self.ranges)):
-                    loop_range[self.itervars[idx]] = self.ranges[idx]
-                expr_val = sympy.simplify(sympy_subs(expr, loop_range))
+                    max_expr = sympy.maximum(
+                        max_expr,
+                        self.itervars[idx],
+                        sympy.Interval(0, self.ranges[idx]),
+                    )
+                    min_expr = sympy.minimum(
+                        min_expr,
+                        self.itervars[idx],
+                        sympy.Interval(0, self.ranges[idx]),
+                    )
                 i32_iinfo = numpy.iinfo(numpy.int32)
                 if (
                     dtype == torch.int64
-                    and expr_val <= i32_iinfo.max
-                    and expr_val >= i32_iinfo.min
+                    and max_expr <= i32_iinfo.max
+                    and min_expr >= i32_iinfo.min
                 ):
                     current_node.meta["dtype"] = torch.int32
                 else:

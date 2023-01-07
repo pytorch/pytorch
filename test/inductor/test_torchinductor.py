@@ -22,6 +22,10 @@ import torch
 import torch._dynamo
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
+from torch._inductor.codegen.cpp import CppVecKernelChecker
+from torch._inductor.graph import GraphLowering
+from torch._inductor.ir import InterpreterShim
+from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
@@ -5432,6 +5436,174 @@ if HAS_CPU:
                     metrics.generated_kernel_count
                     - metrics.generated_cpp_vec_kernel_count
                 ) == 0
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_cpp_vec_constant_checker(self):
+            _graph: torch.fx.Graph = torch.fx.Graph()
+            a: torch.fx.Node = _graph.create_node("placeholder", "ops")
+            iv: torch.fx.Node = _graph.create_node("placeholder", "iv")
+            fv: torch.fx.Node = _graph.create_node("placeholder", "fv")
+            b: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "constant",
+                args=(
+                    a,
+                    iv,
+                    torch.int64,
+                ),
+            )
+            c: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "constant",
+                args=(
+                    a,
+                    fv,
+                    torch.double,
+                ),
+            )
+            _graph.output((b, c))
+
+            def get_index():
+                return ""
+
+            submodules = {"get_index": get_index}
+
+            graph_lowering = GraphLowering(
+                torch.fx.GraphModule(submodules, _graph),
+                shape_env=None,
+                num_static_inputs=0,
+            )
+            with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
+                graph_lowering
+            ):
+                # The moset inner loop variable is used in the index_expr
+                with CppVecKernelChecker(args=None, num_threads=1) as vec_checker:
+                    i32_iinfo = np.iinfo(np.int32)
+                    f32_iinfo = np.finfo(np.float32)
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max
+                    )
+                    self.assertTrue(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min
+                    )
+                    self.assertTrue(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
+                    )
+                    self.assertFalse(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.max + 1, f32_iinfo.max
+                    )
+                    self.assertFalse(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min * (1 + 1e-5)
+                    )
+                    self.assertFalse(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max * (1 + 1e-5)
+                    )
+                    self.assertFalse(vec_checker.simd_vec)
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_cpp_vec_index_expr_checker(self):
+            _graph: torch.fx.Graph = torch.fx.Graph()
+            a: torch.fx.Node = _graph.create_node("placeholder", "ops")
+            b: torch.fx.Node = _graph.create_node("call_module", "get_index", args=())
+            c: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "index_expr",
+                args=(
+                    a,
+                    b,
+                    torch.int64,
+                ),
+            )
+            _graph.output(c)
+
+            def get_index():
+                return ""
+
+            submodules = {"get_index": get_index}
+            graph_lowering = GraphLowering(
+                torch.fx.GraphModule(submodules, _graph),
+                shape_env=None,
+                num_static_inputs=0,
+            )
+            with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
+                graph_lowering
+            ):
+                itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
+                # The moset inner loop variable is used in the index_expr
+                with CppVecKernelChecker(args=None, num_threads=1) as vec_checker:
+
+                    def get_index():
+                        return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
+
+                    ranges = [0, 100, 200]
+                    vec_checker.itervars = itervars[:2]
+                    vec_checker.ranges = ranges[:2]
+                    submodules = {"get_index": get_index}
+                    InterpreterShim(_graph, submodules).run(V.get_ops_handler())
+                    self.assertFalse(vec_checker.simd_vec)
+
+                # Most inner loop variable irrevalant
+                with CppVecKernelChecker(args=None, num_threads=1) as vec_checker:
+
+                    def get_index():
+                        return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
+
+                    ranges = [0, 100, 200]
+                    vec_checker.itervars = itervars
+                    vec_checker.ranges = ranges
+                    submodules = {"get_index": get_index}
+                    InterpreterShim(_graph, submodules).run(V.get_ops_handler())
+                    self.assertTrue(vec_checker.simd_vec)
+
+                i32_iinfo = np.iinfo(np.int32)
+                _max_value = i32_iinfo.max + 1
+                ranges = [_max_value, _max_value, _max_value]
+                # Most inner loop variable irrevalant but max value is greater than
+                # the max value of INT32
+                with CppVecKernelChecker(args=None, num_threads=1) as vec_checker:
+
+                    def get_index():
+                        return itervars[0]
+
+                    submodules = {"get_index": get_index}
+                    vec_checker.itervars = itervars
+                    vec_checker.ranges = ranges
+                    InterpreterShim(_graph, submodules).run(V.get_ops_handler())
+                    self.assertFalse(vec_checker.simd_vec)
+
+                # Most inner loop variable irrevalant but min value is greater than
+                # the min value of INT32
+                with CppVecKernelChecker(args=None, num_threads=1) as vec_checker:
+
+                    def get_index():
+                        return -itervars[0] - 2
+
+                    submodules = {"get_index": get_index}
+                    vec_checker.itervars = itervars
+                    vec_checker.ranges = ranges
+                    InterpreterShim(_graph, submodules).run(V.get_ops_handler())
+                    self.assertFalse(vec_checker.simd_vec)
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
