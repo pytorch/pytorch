@@ -1468,7 +1468,6 @@ class TestFSDPOptimState(FSDPTest):
                 models[-1].named_parameters(),
                 torch.optim.Adam,
                 [{"params": models[-1].parameters()}],
-                models[-1],
                 lr=1e-2,
             )
         )
@@ -1479,7 +1478,12 @@ class TestFSDPOptimState(FSDPTest):
             loss = model(batch).sum()
             loss.backward()
             optim.step()
-            state_dicts.append(FSDP._optim_state_dict(model, optim))
+            if isinstance(optim, _NamedOptimizer):
+                state_dict = optim.state_dict()
+                state_dict = FSDP._optim_state_dict_post_hook(model, optim, state_dict)
+                state_dicts.append(state_dict)
+            else:
+                state_dicts.append(FSDP._optim_state_dict(model, optim))
 
         self._check_same_param_groups(
             state_dicts[0], state_dicts[1], check_same_param_keys=False
@@ -1496,7 +1500,9 @@ class TestFSDPOptimState(FSDPTest):
             optims[1].step()
 
         # Load the state back to see if load_optim_state_dict works.
-        optims[1].load_state_dict(state_dicts[1])
+        optims[1].load_state_dict(
+            FSDP._load_optim_state_dict_pre_hook(models[1], optims[1], state_dicts[1])
+        )
         state_dicts[1] = FSDP._optim_state_dict(models[1], optims[1])
 
         self._check_same_param_groups(

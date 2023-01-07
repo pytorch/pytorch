@@ -1,14 +1,12 @@
 import traceback
 from contextlib import contextmanager
-from typing import Optional, List, Any, Dict
+from typing import Optional, List
 from ._compatibility import compatibility
 
-__all__ = ['override_stack_trace', 'set_stack_trace', 'append_stack_trace', 'format_stack',
-           'is_stack_trace_overridden', 'get_current_meta', 'set_current_meta']
+__all__ = ['override_stack_trace', 'set_stack_trace', 'append_stack_trace', 'format_stack', 'is_stack_trace_overridden']
 
 
 current_stack: List[str] = []
-current_meta: Dict[str, Any] = {}
 is_overridden = False
 
 
@@ -23,6 +21,7 @@ def override_stack_trace():
         yield
     finally:
         is_overridden = saved_is_overridden
+
 
 @compatibility(is_backward_compatible=False)
 def set_stack_trace(stack : List[str]):
@@ -61,24 +60,3 @@ def format_stack() -> List[str]:
 @compatibility(is_backward_compatible=False)
 def is_stack_trace_overridden() -> bool:
     return is_overridden
-
-
-@compatibility(is_backward_compatible=False)
-@contextmanager
-def set_current_meta(meta : Dict[str, Any]):
-    global current_meta
-
-    old_meta = current_meta
-    if is_overridden and meta:
-        try:
-            current_meta = meta
-            yield
-        finally:
-            current_meta = old_meta
-    else:
-        yield
-
-
-@compatibility(is_backward_compatible=False)
-def get_current_meta() -> Dict[str, Any]:
-    return current_meta.copy()
