@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -10,6 +10,7 @@ __all__ = [
     "to_padded_tensor",
     "as_nested_tensor",
     "nested_tensor",
+    "empty_nested",
 ]
 
 # Nested Tensor constructor functions
@@ -147,3 +148,80 @@ Example::
     True
     """,
 )
+
+class NestedSize():
+    """Thin wrapper to abstract the internal representation of nested sizes from the user.
+
+    This class is used to represent the sizes of a NestedTensor. It is a list of tuples where
+    each tuple represents the size of a tensor_component in the NestedTensor. This is used when
+    creating nested_tensors from size information alone.
+
+    """
+    def __init__(self, sizes: List[Tuple[int]]):
+        self.validate_input(sizes)
+        self.sizes_ = sizes
+
+    def convert_list_to_nested_size(self) -> Tensor:
+        r"""Converts a list of tuples to a 2d tensor on cpu.
+            This is the current datastructure used to represent nested sizes in C++. However
+            this may change in the future.
+        """
+        return torch.Tensor(self.sizes_, device='cpu').to(torch.int64)
+
+    @staticmethod
+    def validate_input(sizes: List[Tuple[int]]) -> None:
+        r"""Validates the input sizes to class constructor.
+        """
+        if not isinstance(sizes, list):
+            raise TypeError("sizes must be a list of tuples")
+
+        if len(sizes) == 0:
+            raise ValueError("sizes must be non-empty")
+
+        # Check first element is a tuple
+        if not isinstance(sizes[0], tuple):
+            raise ValueError("sizes must be a list of tuples")
+
+        tuple_size = len(sizes[0])
+        for size in sizes[1:]:
+            if not isinstance(size, tuple):
+                raise ValueError("sizes must be a list of tuples")
+            if len(size) != tuple_size:
+                raise ValueError("All tuples in sizes must have the same length")
+
+
+def empty(nested_size: Union[NestedSize, Tensor], dtype=None, device=None, pin_memory=False) -> Tensor:
+    r"""Constructs a contiguous NestedTensor with the shape specified by nested_size.
+
+    Args:
+        nested_size (NestedSize): a NestedSize object that specifies the shape of the NestedTensor
+            For Jedis: nested_size is also allowed to be a 2d tensor on cpu. But this may not always be true
+
+    Keyword Arguments:
+        dtype (:class:`torch.dtype`, optional): the desired type of returned NestedTensor.
+            Default: if None: :class:`torch.float32`.
+        device (:class:`torch.device`, optional): the desired device of returned nested tensor.
+            Default: if None: :class:`cpu`
+        pin_memory (bool, optional): If set, returned nested tensor would be allocated in
+            the pinned memory. Works only for CPU tensors. Default: ``False``.
+
+    Example::
+
+        >>> nt_size = torch.nested.NestedSize([(2,4), (3,5)])
+        >>> nt = torch.nested.empty(nt_size, device='cuda', dtype=torch.float16)
+        """
+    if isinstance(nested_size, NestedSize):
+        nested_size = nested_size.convert_list_to_nested_size()
+    elif isinstance(nested_size, Tensor):
+        if nested_size.device != torch.device('cpu'):
+            raise ValueError("nested_size must be a cpu tensor")
+        if nested_size.dim() != 2:
+            raise ValueError("nested_size must be a 2d tensor")
+        if nested_size.dtype != torch.int64:
+            raise ValueError("nested_size must be a int64 tensor")
+    else:
+        raise ValueError("nested_size must be a NestedSize object or a 2d cpu int64 tensor")
+    return _nested.empty_nested(nested_size,
+                                dtype=dtype, layout=None,
+                                device=device,
+                                pin_memory=pin_memory)  # type: ignore[attr-defined]

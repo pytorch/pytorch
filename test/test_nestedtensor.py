@@ -1999,6 +1999,34 @@ class TestNestedTensorDeviceType(TestCase):
             torch.nn.functional.scaled_dot_product_attention(
                 query, key, value, dropout_p=dropout_p, is_causal=True)
 
+    @dtypes(torch.float, torch.float16, torch.double, torch.long)
+    def test_empty(self, device, dtype):
+        if torch.cuda.is_available():
+            with self.assertRaisesRegex(ValueError, "nested_size must be a cpu tensor"):
+                nt_size_tensor = torch.ones([2, 3], device="cuda", dtype=torch.int64)
+                torch.nested.empty(nt_size_tensor, device=device, dtype=dtype)
+
+            # Check that pin_memory=True fails when trying to allocate on GPU
+            with self.assertRaisesRegex(RuntimeError, "Only CPU tensors support pinned memory"):
+                nt_size_tensor = torch.ones([2, 3], device="cpu", dtype=torch.int64)
+                torch.nested.empty(nt_size_tensor, device="cuda", dtype=dtype, pin_memory=True)
+
+        with self.assertRaisesRegex(ValueError, "nested_size must be a 2d tensor"):
+            nt_size_tensor = torch.ones([2, 3, 4], device="cpu", dtype=torch.int64)
+            torch.nested.empty(nt_size_tensor, device=device, dtype=dtype)
+
+        with self.assertRaisesRegex(ValueError, "nested_size must be a int64 tensor"):
+            nt_size_tensor = torch.ones([2, 3], device="cpu", dtype=torch.float32)
+            torch.nested.empty(nt_size_tensor, device=device, dtype=dtype)
+
+        # Check that the constructed types match the input types
+        nt_size_tensor = torch.ones([2, 3], device="cpu", dtype=torch.int64)
+        nt = torch.nested.empty(nt_size_tensor, device=device, dtype=dtype)
+        self.assertEqual(nt.dtype, dtype)
+        self.assertEqual(nt.device, torch.device(device))
+        self.assertEqual(nt.layout, torch.strided)
+        self.assertTrue(nt.is_contiguous())
+
     @dtypes(torch.float, torch.float16, torch.double)
     def test_empty_like(self, device, dtype):
         ntensors = 4

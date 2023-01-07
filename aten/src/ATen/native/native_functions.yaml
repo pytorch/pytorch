@@ -13527,6 +13527,12 @@
   python_module: nested
   variants: function
 
+- func: empty_nested(Tensor nested_tensor_size, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  variants: function
+  python_module: nested
+  dispatch:
+    CPU: empty_nested
+
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
