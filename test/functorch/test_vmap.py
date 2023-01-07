@@ -3729,7 +3729,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
-                                  postprocess_fn=compute_A, noncontiguous=noncontiguous)
+                                  postprocess_fn=compute_A)
 
     @parametrize('noncontiguous', (False, True))
     def test_linalg_eigh(self, device, noncontiguous):
