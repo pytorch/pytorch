@@ -13,6 +13,8 @@ from ..source import AttrSource
 from ..utils import (
     get_fake_value,
     get_real_value,
+    HAS_NUMPY,
+    np,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
@@ -20,6 +22,7 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
+
 
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
@@ -214,7 +217,7 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, TupleVariable
+        from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
 
         kwargs = dict(kwargs)
@@ -363,6 +366,24 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif (
+            name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
+        ):
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, args + [kwargs["alpha"]], {}
+            )
+            return self.call_method(tx, "add_", [result], {})
+        elif (
+            name == "addcdiv_"
+            and len(args) == 2
+            and len(kwargs) == 1
+            and "value" in kwargs
+        ):
+            result = TorchVariable(torch.div, **options).call_function(tx, args, {})
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, [result, kwargs["value"]], {}
+            )
+            return self.call_method(tx, "add_", [result], {})
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
@@ -554,37 +575,8 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         # Disable __torch_function__ here to prevent the clone of the
         # example tensor from going into the override.
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
-
-
-class UnspecializedNumpyVariable(TensorVariable):
-    """
-    This is a 1-element tensor represents unspecialized numpy float/int.
-    """
-
-    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
-        raw_value = kwargs.pop("raw_value", None)
-        super(UnspecializedNumpyVariable, self).__init__(proxy, **kwargs)
-        self.raw_value = raw_value
-
-    @classmethod
-    def from_tensor_variable(cls, tensor_variable, raw_value):
-        # Convert a `TensorVariable` instance into an `UnspecializedNumpyVariable` instance.
-        return UnspecializedNumpyVariable(
-            **dict(tensor_variable.__dict__), raw_value=raw_value
-        )
-
-    def as_specialized(self, tx):
-        for graph_arg in tx.output.graphargs:
-            if graph_arg.source is self.source:
-                graph_arg.erase()
-
-        for g in self.guards:
-            if g.is_volatile:
-                g.create_fn = GuardBuilder.CONSTANT_MATCH
-
-        return ConstantVariable(value=self.raw_value, guards=self.guards)
 
 
 class UnspecializedPythonVariable(TensorVariable):
@@ -594,6 +586,8 @@ class UnspecializedPythonVariable(TensorVariable):
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         raw_value = kwargs.pop("raw_value", None)
+        if HAS_NUMPY and isinstance(raw_value, np.number):
+            raw_values = raw_value.item()
         need_unwrap = kwargs.pop("need_unwrap", True)
         super(UnspecializedPythonVariable, self).__init__(proxy, **kwargs)
         self.raw_value = raw_value

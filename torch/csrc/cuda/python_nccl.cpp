@@ -292,8 +292,11 @@ static inline std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   if (!seq)
     throw python_error();
 
+  const Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
   std::vector<at::Tensor> list;
-  Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
+  if (length >= 0) {
+    list.reserve(length);
+  }
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject* item = PySequence_Fast_GET_ITEM(seq.get(), i);
     if (!THPVariable_Check(item)) {

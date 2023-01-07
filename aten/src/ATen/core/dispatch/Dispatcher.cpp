@@ -1,7 +1,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <chrono>
 #include <list>
 #include <sstream>
-#include <chrono>
+#include <utility>
 
 namespace c10 {
 
@@ -168,6 +169,7 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
 // Windows build doesn't produce the destructor symbol in PyTorch libs
 // causing a linker failure in downstream projects.
 // x-ref https://github.com/pytorch/pytorch/issues/70032
+// NOLINTNEXTLINE(performance-trivially-destructible)
 OperatorHandle::~OperatorHandle() = default;
 
 RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {
@@ -206,7 +208,7 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
   TORCH_CHECK(op.operatorDef_->def_count == 0, "Tried to register an operator (", schema, ") with the same name and overload name multiple times.",
                                                     " Each overload's schema should only be registered with a single call to def().",
                                                     " Duplicate registration: ", debug, ". Original registration: ", op.operatorDef_->op.debug());
-  op.operatorDef_->op.registerSchema(std::move(schema), std::move(debug), tags);
+  op.operatorDef_->op.registerSchema(std::move(schema), std::move(debug), std::move(tags));
   listeners_->callOnOperatorRegistered(op);
 
   // NB: do not increment the counts until AFTER error checking

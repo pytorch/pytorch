@@ -6747,8 +6747,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.tensor(2)
         self.run_test(FullLikeModel(), (x, y))
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_l1_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6757,8 +6755,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_l2_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6767,8 +6763,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_frobenius_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6777,8 +6771,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_frobenius_norm_keepdim(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -9960,7 +9952,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_sess = verification._ort_session(model_onnx)
-        ort_outs = verification._run_ort(ort_sess, (x,))
+        ort_outs = verification._run_onnx(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
         script_model = torch.jit.script(model)
@@ -9974,7 +9966,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             do_constant_folding=False,
             training=torch.onnx.TrainingMode.TRAINING,
         )
-        ort_outs = verification._run_ort(ort_sess, (x,))
+        ort_outs = verification._run_onnx(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -10008,7 +10000,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_sess = verification._ort_session(model_onnx)
-        ort_outs = verification._run_ort(ort_sess, (x,))
+        ort_outs = verification._run_onnx(ort_sess, (x,))
 
         y = model(input)
         output = y.cpu().numpy()
@@ -10033,7 +10025,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             training=torch.onnx.TrainingMode.TRAINING,
         )
         ort_sess = verification._ort_session(model_onnx)
-        ort_outs = verification._run_ort(ort_sess, (x,))
+        ort_outs = verification._run_onnx(ort_sess, (x,))
         ort_mask = np.where(ort_outs[0] != 0, 1, 0)
         pyt_mask = np.where(output != 0, 1, 0)
 
@@ -11774,7 +11766,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             model_export, dummy_input, model_onnx, opset_version=self.opset_version
         )
         ort_sess = verification._ort_session(model_onnx)
-        ort_out = verification._run_ort(ort_sess, inputs=dummy_input)
+        ort_out = verification._run_onnx(ort_sess, inputs=dummy_input)
 
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
@@ -11805,7 +11797,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             model_export, test_inputs, model_onnx, opset_version=self.opset_version
         )
         ort_sess = verification._ort_session(model_onnx)
-        ort_out = verification._run_ort(ort_sess, inputs=test_inputs)
+        ort_out = verification._run_onnx(ort_sess, inputs=test_inputs)
 
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
@@ -11849,7 +11841,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         ort_sess = verification._ort_session(model_onnx)
 
-        ort_out = verification._run_ort(ort_sess, inputs=dummy_input)
+        ort_out = verification._run_onnx(ort_sess, inputs=dummy_input)
         actual_min = np.min(ort_out)
         actual_max = np.max(ort_out)
         actual_mean = np.mean(ort_out)

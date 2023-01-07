@@ -226,7 +226,7 @@ Tensor& copy_(
 const Tensor& resize_(
     c10::DispatchKeySet ks,
     const Tensor& self,
-    IntArrayRef size,
+    SymIntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   if (self.requires_grad()) {
@@ -234,7 +234,7 @@ const Tensor& resize_(
   }
   {
     at::AutoDispatchBelowAutograd mode;
-    at::redispatch::resize_(
+    at::redispatch::resize__symint(
         ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
