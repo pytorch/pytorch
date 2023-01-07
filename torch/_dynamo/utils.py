@@ -1059,6 +1059,9 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             return nnmodule(*args, **kwargs)
         elif op == "get_attr":
             return output_graph.get_submodule(node.target)
+        elif op == "placeholder":
+            assert "example_value" in node.meta
+            return node.meta["example_value"]
     except Exception as e:
         raise RuntimeError(
             f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
