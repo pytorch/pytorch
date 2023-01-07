@@ -192,6 +192,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
         super(TorchBenchmarkRunner, self).__init__()
         self.suite_name = "torchbench"
+        self.optimizer = None
 
     @property
     def skip_models(self):
@@ -280,12 +281,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
-        if dynamic_shapes:
-            if not hasattr(benchmark, "get_dynamic_shapes_module"):
-                raise NotImplementedError("Dynamic Shapes not supported")
-            model, example_inputs = benchmark.get_dynamic_shapes_module()
-        else:
-            model, example_inputs = benchmark.get_module()
+        model, example_inputs = benchmark.get_module()
 
         # Models that must be in train mode while training
         if is_training and (not use_eval_mode or model_name in ONLY_TRAINING_MODE):
@@ -295,8 +291,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         gc.collect()
         batch_size = benchmark.batch_size
 
-        self.init_optimizer(device, model.parameters())
-
         # Torchbench has quite different setup for yolov3, so directly passing
         # the right example_inputs
         if model_name == "yolov3":
@@ -304,6 +298,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
+
+        if self.args.trace_on_xla:
+            # work around for: https://github.com/pytorch/xla/issues/4174
+            import torch_xla  # noqa: F401
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 
