@@ -44,17 +44,12 @@ Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
   return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
 }
 
-static Tensor base_lift(const Tensor& tensor, int64_t level) {
-  auto tensor_ = unwrapIfDead(tensor);
-  return materializeGradWrappers(tensor_, level);
-}
-
 Tensor GradInterpreterPtr::lift(const Tensor& tensor) const {
-  return base_lift(tensor, level());
+  return materializeGradWrappers(tensor, level());
 }
 
 Tensor JvpInterpreterPtr::lift(const Tensor& tensor) const {
-  return base_lift(tensor, level());
+  return materializeGradWrappers(tensor, level());
 }
 
 static void autogradBasedTransformProcess(
@@ -82,11 +77,12 @@ static void autogradBasedTransformProcess(
 static void autogradBasedTransformSendToNext(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    int64_t current_level,
+    const Interpreter& interpreter,
     TransformType transform_type,
     optional<bool> prev_grad_mode,
     optional<bool> prev_fwd_grad_mode,
     bool grad_special_case) {
+  auto current_level = interpreter.level();
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
   }
@@ -115,7 +111,7 @@ static void autogradBasedTransformSendToNext(
     // if (c10::show_dispatch_trace_enabled()) {
     //   std::cout << "wrap " << current_level << std::endl;
     // }
-    return makeTensorWrapper(tensor, current_level, is_immutable);
+    return makeTensorWrapper(tensor, interpreter, is_immutable);
   };
 
   // TODO: we only need to do the following (marked with !) on in-place functions
@@ -213,8 +209,11 @@ void GradInterpreterPtr::sendToNextInterpreterImpl(
     torch::jit::Stack* stack,
     bool grad_special_case) {
   autogradBasedTransformSendToNext(
-      op, stack, level(),
-      TransformType::Grad, prevGradMode(), nullopt, grad_special_case);
+      op, stack, *base_,
+      TransformType::Grad,
+      prevGradMode(),
+      nullopt,
+      grad_special_case);
 }
 
 void JvpInterpreterPtr::processImpl(
@@ -228,8 +227,11 @@ void JvpInterpreterPtr::sendToNextInterpreterImpl(
     torch::jit::Stack* stack,
     bool grad_special_case) {
   autogradBasedTransformSendToNext(
-      op, stack, level(),
-      TransformType::Jvp, nullopt, prevFwdGradMode(), grad_special_case);
+      op, stack, *base_,
+      TransformType::Jvp,
+      nullopt,
+      prevFwdGradMode(),
+      grad_special_case);
 }
 
 }} // namespace at::functorch

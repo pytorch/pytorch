@@ -929,7 +929,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
       if (n->kind() == prim::CallMethod) {
         auto m_opt = getInvokedModuleOpt(module, n, graph->inputs()[0]);
         if (m_opt.has_value()) {
-          invoked_methods.push_back(std::make_pair(*m_opt, n->s(attr::name)));
+          invoked_methods.emplace_back(*m_opt, n->s(attr::name));
         }
       }
 
@@ -956,7 +956,7 @@ void InsertObserversHelper::insertObserverFor(
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
-  observer_name_and_modules.push_back(std::make_pair(observer_name, observer));
+  observer_name_and_modules.emplace_back(observer_name, observer);
 
   auto* g = v->owningGraph();
   // Get handle of observer module

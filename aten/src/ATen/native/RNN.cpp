@@ -1441,7 +1441,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   }
 #endif
   // if cells are of different size, that means projections are used
-  bool has_projections = (hx[0].size(2) != hx[1].size(2));
+  bool has_projections = (hx[0].sym_size(2) != hx[1].sym_size(2));
   if (use_miopen(_input, dropout_p)) {
     if (!has_projections) {
       Tensor output, hy, cy;

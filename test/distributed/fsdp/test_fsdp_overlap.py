@@ -93,9 +93,9 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
     def _dist_train(self):
         rank = self.rank
         world_size = self.world_size
-        # Save the original torch.distributed._all_gather_base function since we will
+        # Save the original torch.distributed.all_gather_into_tensor function since we will
         # patch it to include an artificial delay.
-        orig_all_gather = torch.distributed._all_gather_base
+        orig_all_gather = torch.distributed.all_gather_into_tensor
 
         def run(compute_cycles, all_gather_cycles):
             has_params = all_gather_cycles > 0
@@ -139,7 +139,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
                 # Even though both e1 & e2 are on the compute stream, since
                 # compute depends on all_gather, e2-e1 includes all_gather time.
                 e1.record()
-                with patch("torch.distributed._all_gather_base", _delayed_all_gather):
+                with patch("torch.distributed.all_gather_into_tensor", _delayed_all_gather):
                     out = model(batch)
                     if has_params and world_size > 1:
                         self.assertTrue(all_gather_called)
