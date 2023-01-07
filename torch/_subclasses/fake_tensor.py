@@ -1061,6 +1061,8 @@ class FakeTensorMode(TorchDispatchMode):
         ignore_subclass=False,
         source: Optional[Source] = None,
     ):
+        if tensor is None:
+            return None
         if static_shapes:
             return self.fake_tensor_converter(
                 self, tensor, ignore_subclass=ignore_subclass, source=source
