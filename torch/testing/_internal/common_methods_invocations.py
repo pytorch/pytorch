@@ -16582,8 +16582,6 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.float16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=(torch.float16,)),
-            # TODO: Meta not implemented for out overloads
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
         ),
     ),
     ReductionOpInfo(
