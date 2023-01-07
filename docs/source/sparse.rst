@@ -646,9 +646,9 @@ argument is optional and will be deduced from the ``crow_indices`` and
     >>> csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=torch.float64)
     >>> csr
     tensor(crow_indices=tensor([0, 2, 4]),
-          col_indices=tensor([0, 1, 0, 1]),
-          values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
-          dtype=torch.float64)
+           col_indices=tensor([0, 1, 0, 1]),
+           values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+           dtype=torch.float64)
     >>> csr.to_dense()
     tensor([[1., 2.],
             [3., 4.]], dtype=torch.float64)
@@ -660,6 +660,18 @@ argument is optional and will be deduced from the ``crow_indices`` and
    ``col_indices``. If the number of columns needs to be larger than
    in the deduced ``size`` then the ``size`` argument must be
    specified explicitly.
+
+.. note::
+
+   The indices tensors ``crow_indices`` and ``col_indices`` must
+   comply so-called sparse compressed tensor invariants that relate
+   the sizes of the indices and values tensors as well as the content
+   of indices. To be sure that a constructed sparse tensor has
+   consistent indices, values, and size, the invariant checks can be
+   enabled per tensor creation via ``check_invariants=True`` keyword
+   argument, or globally using
+   :func:`torch.sparse.check_sparse_tensor_invariants`
+   context manager instance.
 
 The simplest way of constructing a 2-D sparse CSR tensor from a
 strided or sparse COO tensor is to use
@@ -1159,6 +1171,13 @@ The following :mod:`torch` functions support sparse tensors:
 :func:`~torch.vstack`
 :func:`~torch.zeros`
 :func:`~torch.zeros_like`
+
+To manage checking sparse tensor invariants, the following tools are provided:
+
+:func:`torch.sparse.check_sparse_tensor_invariants`
+:func:`torch.sparse.check_sparse_tensor_invariants.is_enabled`
+:func:`torch.sparse.check_sparse_tensor_invariants.enable`
+:func:`torch.sparse.check_sparse_tensor_invariants.disable`
 
 Unary functions
 ---------------
