@@ -2,8 +2,8 @@
 #include <gtest/gtest.h>
 
 #include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <c10/util/Optional.h>
 #include <arith.h>
+#include <c10/util/Optional.h>
 #include <fusion.h>
 #include <ir_all_nodes.h>
 #include <kernel_cache.h>

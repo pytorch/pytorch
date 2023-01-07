@@ -25,6 +25,7 @@
 #include <lower_magic_zero.h>
 #include <mutator.h>
 #include <ops/all_ops.h>
+#include <register_interface.h>
 #include <root_domain_map.h>
 #include <scheduler/all_schedulers.h>
 #include <scheduler/reduction_utils.h>
@@ -33,14 +34,13 @@
 #include <test/test_utils.h>
 #include <transform_replay.h>
 #include <transform_rfactor.h>
-#include <register_interface.h>
 
+#include <parser.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/api/function_impl.h>
-#include <parser.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/torch.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>

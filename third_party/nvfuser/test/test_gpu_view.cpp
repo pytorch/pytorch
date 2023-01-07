@@ -24,6 +24,7 @@
 #include <lower_divisible_split.h>
 #include <mutator.h>
 #include <ops/all_ops.h>
+#include <register_interface.h>
 #include <root_domain_map.h>
 #include <scheduler/all_schedulers.h>
 #include <scheduler/reduction_utils.h>
@@ -32,7 +33,6 @@
 #include <test/test_utils.h>
 #include <transform_replay.h>
 #include <transform_rfactor.h>
-#include <register_interface.h>
 #include <transform_view.h>
 
 // fuser and IR parser

@@ -1,8 +1,8 @@
 #include <lower_utils.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/util/irange.h>
 #include <arith.h>
+#include <c10/util/irange.h>
 #include <ir_iostream.h>
 #include <ir_utils.h>
 #include <iter_visitor.h>

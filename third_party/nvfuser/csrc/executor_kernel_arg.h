@@ -3,8 +3,8 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/util/Exception.h>
-#include <type.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <type.h>
 #include <array>
 
 namespace torch {

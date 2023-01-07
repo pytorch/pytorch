@@ -1442,7 +1442,8 @@ TensorView* maybeFullInsteadOfReduction(
       new_root.reserve(keep_dim ? ndims : ndims - axes.size());
       int cur_pos = 0;
       for (auto j : c10::irange(ndims)) {
-        bool is_reduction = cur_pos < (int)axes.size() && (int)axes.at(cur_pos) == j;
+        bool is_reduction =
+            cur_pos < (int)axes.size() && (int)axes.at(cur_pos) == j;
         if (is_reduction) {
           cur_pos++;
           if (keep_dim) {

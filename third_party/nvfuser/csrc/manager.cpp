@@ -6,8 +6,6 @@
 #include <manager.h>
 #include <parser.h>
 #include <scheduler/all_schedulers.h>
-#include <type_inference.h>
-#include <utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
@@ -15,6 +13,8 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <type_inference.h>
+#include <utils.h>
 
 #include <ATen/DimVector.h>
 #include <c10/core/DeviceType.h>

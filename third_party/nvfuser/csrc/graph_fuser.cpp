@@ -5,8 +5,6 @@
 #include <instrumentation.h>
 #include <parser.h>
 #include <partition.h>
-#include <transform_view.h>
-#include <utils.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -21,6 +19,8 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <transform_view.h>
+#include <utils.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>

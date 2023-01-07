@@ -79,10 +79,19 @@ template class Scalar<int64_t>;
 template class Scalar<double>;
 template class Scalar<std::complex<double>>;
 
-template Scalar<bool>* IrBuilder::clone<Scalar<bool>>(const Scalar<bool>*, IrCloner*);
-template Scalar<int64_t>* IrBuilder::clone<Scalar<int64_t>>(const Scalar<int64_t>*, IrCloner*);
-template Scalar<double>* IrBuilder::clone<Scalar<double>>(const Scalar<double>*, IrCloner*);
-template Scalar<std::complex<double>>* IrBuilder::clone<Scalar<std::complex<double>>>(const Scalar<std::complex<double>>*, IrCloner*);
+template Scalar<bool>* IrBuilder::clone<Scalar<bool>>(
+    const Scalar<bool>*,
+    IrCloner*);
+template Scalar<int64_t>* IrBuilder::clone<Scalar<int64_t>>(
+    const Scalar<int64_t>*,
+    IrCloner*);
+template Scalar<double>* IrBuilder::clone<Scalar<double>>(
+    const Scalar<double>*,
+    IrCloner*);
+template Scalar<std::complex<double>>* IrBuilder::clone<
+    Scalar<std::complex<double>>>(
+    const Scalar<std::complex<double>>*,
+    IrCloner*);
 
 FullOp::FullOp(IrBuilderPasskey passkey, Val* out, Val* fill_value)
     : Expr(passkey) {

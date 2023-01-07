@@ -5,8 +5,8 @@
 #include <c10/util/irange.h>
 #include <instrumentation.h>
 #include <parser.h>
-#include <utils.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <utils.h>
 
 namespace torch {
 namespace jit {
