@@ -451,7 +451,7 @@ struct ConvParams {
                              weight.scalar_type() == kHalf) ||
                          (input.scalar_type() == kBFloat16 &&
                              weight.scalar_type() == kBFloat16 &&
-                             at::cuda::getCurrentDeviceProperties()->major >= 8);
+                             detail::getCUDAHooks().supportsBFloat16ConvolutionWithCuDNNv8());
         bool kernel_cond =  (use_cudnn(input, weight) &&
                              type_cond &&
                              is_depthwise(input, weight) &&
