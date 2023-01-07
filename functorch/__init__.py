@@ -17,7 +17,7 @@ from torch._functorch.vmap import vmap
 from torch._functorch.eager_transforms import (
     grad, grad_and_value, vjp, jacrev, jvp, jacfwd, hessian, functionalize
 )
-from torch._functorch.python_key import make_fx
+from torch._functorch.python_key import make_fx, make_fx_allow_non_fake_inputs
 
 # utilities. Maybe these should go in their own namespace in the future?
 from torch._functorch.make_functional import (

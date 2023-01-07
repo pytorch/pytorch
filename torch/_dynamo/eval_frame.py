@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx, make_fx_allow_non_fake_inputs
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 
@@ -670,12 +670,12 @@ def export(
             with torch.fx.traceback.override_stack_trace():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(
-            graph_with_interpreter,
-            decomposition_table=decomposition_table,
-            tracing_mode=tracing_mode,
-            _allow_non_fake_inputs=True,
-        )(*graph_captured_input)
+        with make_fx_allow_non_fake_inputs():
+            graph = make_fx(
+                graph_with_interpreter,
+                decomposition_table=decomposition_table,
+                tracing_mode=tracing_mode,
+            )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
         graph,

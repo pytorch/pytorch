@@ -26,7 +26,15 @@ from torch.fx import Proxy
 from torch import SymInt, SymFloat
 from torch.utils.weak import WeakTensorKeyDictionary
 
-__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
+__all__ = [
+    "PythonKeyTracer",
+    "dispatch_trace",
+    "make_fx",
+    "make_fx_allow_non_fake_inputs",
+    "DecompositionInterpreter",
+    "py_sym_types",
+    "get_innermost_proxy_mode"
+]
 aten = torch.ops.aten
 prim = torch.ops.prim
 
@@ -621,7 +629,20 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False):
+_ALLOW_NON_FAKE_INPUTS = False
+
+@contextmanager
+def make_fx_allow_non_fake_inputs():
+    global _ALLOW_NON_FAKE_INPUTS
+
+    prev = _ALLOW_NON_FAKE_INPUTS
+    _ALLOW_NON_FAKE_INPUTS = True
+    try:
+        yield
+    finally:
+        _ALLOW_NON_FAKE_INPUTS = prev
+
+def make_fx(f, decomposition_table=None, tracing_mode="real"):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -637,12 +658,12 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         elif tracing_mode == "fake":
             fake_tensor_mode = FakeTensorMode(
                 allow_fallback_kernels=True,
-                allow_non_fake_inputs=_allow_non_fake_inputs)
+                allow_non_fake_inputs=_ALLOW_NON_FAKE_INPUTS)
         elif tracing_mode == "symbolic":
             shape_env = ShapeEnv()
             fake_tensor_mode = FakeTensorMode(
                 allow_fallback_kernels=False,
-                allow_non_fake_inputs=_allow_non_fake_inputs,
+                allow_non_fake_inputs=_ALLOW_NON_FAKE_INPUTS,
                 shape_env=shape_env)
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")

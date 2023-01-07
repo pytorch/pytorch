@@ -1,10 +1,8 @@
 # Owner(s): ["module: functorch"]
 import torch
-from functorch.experimental import control_flow
-from functorch.experimental.control_flow import cond
-from functorch.experimental.control_flow import UnsupportedAliasMutationException
-from functorch.experimental import functionalize
-from torch.fx.experimental.proxy_tensor import make_fx
+from functorch.experimental import control_flow, functionalize
+from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from torch.fx.experimental.proxy_tensor import make_fx, make_fx_allow_non_fake_inputs
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -539,6 +537,23 @@ class TestControlFlowTraced(TestCase):
         gm = make_fx(g, tracing_mode="real")(torch.ones(3, 2, 2), torch.ones(2))
         x = torch.randn(3, 2, 2)
         y = torch.randn(2)
+        res = gm(x, y)
+        self.assertEqual(res, g(x, y))
+        self.check_map_graph(gm, "tensor_meta")
+
+    def test_map_symbolic_with_constant(self):
+        a = torch.ones(4)
+
+        def f(x, y):
+            return x + y + a
+
+        def g(xs, y):
+            return control_flow.map(f, xs, y)
+
+        with make_fx_allow_non_fake_inputs():
+            gm = make_fx(g, tracing_mode="symbolic")(torch.ones(3, 2, 4), torch.ones(4))
+        x = torch.randn(3, 2, 4)
+        y = torch.randn(4)
         res = gm(x, y)
         self.assertEqual(res, g(x, y))
         self.check_map_graph(gm, "tensor_meta")

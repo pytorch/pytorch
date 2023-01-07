@@ -29,7 +29,8 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch.testing._internal.common_modules import module_db, modules
 from functorch import (
     grad, vjp, vmap, jacrev,
-    make_fx
+    make_fx,
+    make_fx_allow_non_fake_inputs,
 )
 from torch._functorch.aot_autograd import aot_module_simplified
 from functorch.compile import (
@@ -1366,10 +1367,12 @@ def forward(self, primals_1, primals_2):
 
         inp = torch.randn(2, 5)
 
-        gm = make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
+        with make_fx_allow_non_fake_inputs():
+            gm = make_fx(m, tracing_mode="symbolic")(inp)
         self.assertEqual(gm(torch.ones(2, 5)), m(torch.ones(2, 5)))
 
-        gm_functionalized = make_fx(functionalize(gm,), tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
+        with make_fx_allow_non_fake_inputs():
+            gm_functionalized = make_fx(functionalize(gm,), tracing_mode="symbolic")(inp)
         self.assertEqual(gm_functionalized(torch.ones(2, 5)), m(torch.ones(2, 5)))
 
         inp_count = 0
@@ -1389,7 +1392,7 @@ def forward(self, primals_1, primals_2):
         self.assertEqual(inp_count, 1)
 
         with self.assertRaisesRegex(Exception, "Please convert all Tensors to FakeTensors"):
-            make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=False)(torch.randn(2, 5))
+            make_fx(m, tracing_mode="symbolic")(torch.randn(2, 5))
 
     def test_real_weights_in_symbolic_mode_with_inplace_ops(self):
 
@@ -1408,7 +1411,8 @@ def forward(self, primals_1, primals_2):
         inp = torch.randn(2, 5)
         # inplace mutation on attr is not allowed
         with self.assertRaisesRegex(Exception, "Can't call metadata"):
-            make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
+            with make_fx_allow_non_fake_inputs():
+                make_fx(m, tracing_mode="symbolic")(inp)
 
 
 def extract_graph(fx_g, _, graph_cell):
