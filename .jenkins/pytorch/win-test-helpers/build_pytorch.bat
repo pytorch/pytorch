@@ -80,6 +80,11 @@ set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 set DISTUTILS_USE_SDK=1
 set PATH=%TMP_DIR_WIN%\bin;%PATH%
 
+:: TODO: G5 runner uses AMD instead of Intel CPU, so Windows CI would need to
+:: build on Intel CPU but test on AMD CPU similar to ROCm. This would need to
+:: be investigated further
+set USE_MKLDNN=0
+
 :: Target only our CI GPU machine's CUDA arch to speed up the build, we can overwrite with env var
 :: default on circleci is Tesla T4 which has capability of 7.5, ref: https://developer.nvidia.com/cuda-gpus
 :: jenkins has M40, which is 5.2
