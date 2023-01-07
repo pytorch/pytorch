@@ -264,7 +264,7 @@ std::vector<VarHandle> VarVectorToVarHandleVector(
   return result;
 }
 
-bool immediateIsNegative(const ExprPtr& e) {
+bool immediateIsNegative(ExprPtr e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() < 0;                 \
@@ -274,7 +274,7 @@ bool immediateIsNegative(const ExprPtr& e) {
   return false;
 }
 
-bool immediateIsPositive(const ExprPtr& e) {
+bool immediateIsPositive(ExprPtr e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() > 0;                 \
@@ -284,7 +284,7 @@ bool immediateIsPositive(const ExprPtr& e) {
   return false;
 }
 
-bool immediateIsZero(const ExprPtr& e) {
+bool immediateIsZero(ExprPtr e) {
 #define TYPE_CASE(Type, Name)                \
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() == 0;                \

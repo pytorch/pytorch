@@ -10632,14 +10632,14 @@ add_docstr(
     r"""
 squeeze(input, dim=None) -> Tensor
 
-Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
+Returns a tensor with all specified dimensions of :attr:`input` of size `1` removed.
 
 For example, if `input` is of shape:
-:math:`(A \times 1 \times B \times C \times 1 \times D)` then the `out` tensor
+:math:`(A \times 1 \times B \times C \times 1 \times D)` then the `input.squeeze()`
 will be of shape: :math:`(A \times B \times C \times D)`.
 
 When :attr:`dim` is given, a squeeze operation is done only in the given
-dimension. If `input` is of shape: :math:`(A \times 1 \times B)`,
+dimension(s). If `input` is of shape: :math:`(A \times 1 \times B)`,
 ``squeeze(input, 0)`` leaves the tensor unchanged, but ``squeeze(input, 1)``
 will squeeze the tensor to the shape :math:`(A \times B)`.
 
@@ -10648,12 +10648,15 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 
 .. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)`
           will also remove the batch dimension, which can lead to unexpected
-          errors.
+          errors. Consider specifying only the dims you wish to be squeezed.
 
 Args:
     {input}
-    dim (int, optional): if given, the input will be squeezed only in
-           this dimension
+    dim (int or tuple of ints, optional): if given, the input will be squeezed
+           only in the specified dimensions.
+
+        .. versionchanged:: 1.14
+           :attr:`dim` now accepts tuples of dimensions.
 
 Example::
 
@@ -10669,6 +10672,8 @@ Example::
     >>> y = torch.squeeze(x, 1)
     >>> y.size()
     torch.Size([2, 2, 1, 2])
+    >>> y = torch.squeeze(x, (1, 2, 3))
+    torch.Size([2, 2, 2])
 """.format(
         **common_args
     ),
@@ -10701,12 +10706,11 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-        Defaults to `Bessel's correction`_, ``correction=1``.
+                      Defaults to `Bessel's correction`_, ``correction=1``.
+    .. versionchanged:: 1.14
+        Previously this argument was called ``unbiased`` and was a boolean with
+        ``True`` corresponding to ``correction=1`` and ``False`` being ``correction=0``.
 
-        .. versionchanged:: 2.0
-            Previously this argument was called ``unbiased`` and was a boolean
-            with ``True`` corresponding to ``correction=1`` and ``False`` being
-            ``correction=0``.
     {keepdim}
     {out}
 
@@ -10758,12 +10762,10 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-        Defaults to `Bessel's correction`_, ``correction=1``.
-
-        .. versionchanged:: 2.0
-            Previously this argument was called ``unbiased`` and was a boolean
-            with ``True`` corresponding to ``correction=1`` and ``False`` being
-            ``correction=0``.
+                      Defaults to `Bessel's correction`_, ``correction=1``.
+    .. versionchanged:: 1.14
+        Previously this argument was called ``unbiased`` and was a boolean with
+        ``True`` corresponding to ``correction=1`` and ``False`` being ``correction=0``.
     {keepdim}
     {out}
 
@@ -12178,12 +12180,10 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-        Defaults to `Bessel's correction`_, ``correction=1``.
-
-        .. versionchanged:: 2.0
-            Previously this argument was called ``unbiased`` and was a boolean
-            with ``True`` corresponding to ``correction=1`` and ``False`` being
-            ``correction=0``.
+                      Defaults to `Bessel's correction`_, ``correction=1``.
+    .. versionchanged:: 1.14
+        Previously this argument was called ``unbiased`` and was a boolean with
+        ``True`` corresponding to ``correction=1`` and ``False`` being ``correction=0``.
     {keepdim}
     {out}
 
@@ -12234,12 +12234,10 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-        Defaults to `Bessel's correction`_, ``correction=1``.
-
-        .. versionchanged:: 2.0
-            Previously this argument was called ``unbiased`` and was a boolean
-            with ``True`` corresponding to ``correction=1`` and ``False`` being
-            ``correction=0``.
+                      Defaults to `Bessel's correction`_, ``correction=1``.
+    .. versionchanged:: 1.14
+        Previously this argument was called ``unbiased`` and was a boolean with
+        ``True`` corresponding to ``correction=1`` and ``False`` being ``correction=0``.
     {keepdim}
     {out}
 

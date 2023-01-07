@@ -40,7 +40,7 @@ Tensor softmax_internal(
   vTensor v_output{
       context,
       output_sizes,
-      input_arg.scalar_type(),
+      v_input.options(),
   };
 
   const api::utils::uvec3 global_work_group_size = {

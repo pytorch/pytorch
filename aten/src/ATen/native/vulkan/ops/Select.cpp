@@ -19,7 +19,7 @@ Tensor select_depth(const Tensor& input_arg, uint32_t index) {
   vTensor v_output{
       context,
       {v_input_sizes[1], v_input_sizes[2]},
-      input_arg.scalar_type(),
+      v_input.options(),
   };
 
   const struct Block final {

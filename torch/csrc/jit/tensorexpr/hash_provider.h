@@ -5,8 +5,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <utility>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -134,7 +132,7 @@ class TORCH_API HashProvider : public IRVisitor {
     IRPrinter printer(ss);
     e->accept(&printer);
     SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
-    putHash(std::move(e), hash);
+    putHash(e, hash);
 
     return hash;
   }
@@ -150,7 +148,7 @@ class TORCH_API HashProvider : public IRVisitor {
     IRPrinter printer(ss);
     s->accept(&printer);
     SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
-    putHash(std::move(s), hash);
+    putHash(s, hash);
 
     return hash;
   }
@@ -177,7 +175,7 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
   void _hash_combine(SimplifierHashType& seed, ExprPtr e) {
-    _hash_combine(seed, hash(std::move(e)));
+    _hash_combine(seed, hash(e));
   }
 
   template <typename T, typename... Types>

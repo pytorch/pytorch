@@ -97,19 +97,13 @@ class DecorateInfo(object):
             for dtype in self.dtypes:
                 assert isinstance(dtype, torch.dtype)
 
-    def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
+    def is_active(self, cls_name, test_name, device_type, dtype):
         return (
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
             and (self.device_type is None or self.device_type == device_type)
             and (self.dtypes is None or dtype in self.dtypes)
-            # Support callables over kwargs to determine if the decorator is active.
-            and (
-                self.active_if(param_kwargs)
-                if isinstance(self.active_if, Callable)
-                else self.active_if
-            )
         )
 
 
@@ -1207,14 +1201,12 @@ class OpInfo(object):
             self, device, dtype, requires_grad, **kwargs
         )
 
-    def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
+    def get_decorators(self, test_class, test_name, device, dtype):
         """Returns the decorators targeting the given test."""
         result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
-                if decorator.is_active(
-                    test_class, test_name, device, dtype, param_kwargs
-                ):
+                if decorator.is_active(test_class, test_name, device, dtype):
                     result.extend(decorator.decorators)
             else:
                 result.append(decorator)

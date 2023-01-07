@@ -39,7 +39,8 @@ Tensor quantize_per_tensor(
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
 
-  vTensor v_output{context, input.sizes(), scale, zero_point, dtype};
+  vTensor v_output{
+      context, input.sizes(), input.options().dtype(dtype), scale, zero_point};
 
   const struct Block final {
     uvec3 extents;
@@ -99,7 +100,7 @@ Tensor dequantize_helper(
   vTensor v_output{
       context,
       input.sizes(),
-      c10::kFloat,
+      input.options().dtype(c10::kFloat),
   };
 
   const struct Block final {

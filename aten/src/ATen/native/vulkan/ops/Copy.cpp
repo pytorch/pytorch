@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Utils.h>
-#include <ATen/vulkan/Context.h>
 
 namespace at {
 namespace native {
@@ -114,7 +113,8 @@ void transfer_vulkan_to_cpu(vTensor& v_src, Tensor& dst) {
 
   context->fences().return_fence(fence);
 
-  dst = utils::nc4hw_to_nchw(dst_tmp, v_src.sizes()).to(v_src.dtype());
+  dst =
+      utils::nc4hw_to_nchw(dst_tmp, v_src.sizes()).to(v_src.options().dtype());
 }
 
 void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
@@ -262,47 +262,27 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
   return dst;
 }
 
-vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
+ops::vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
   TORCH_CHECK(
       src.device().type() == at::kCPU,
       "Vulkan to_vulkan(): input tensor must be a CPU tensor!")
 
-  vTensor v_ret{
+  ops::vTensor v_ret{
       api::context(),
       src.sizes(),
-      src.scalar_type(),
-      storage_type,
-      src.suggest_memory_format(),
-  };
+      src.options().memory_format(src.suggest_memory_format()),
+      storage_type};
 
   ops::pack_cpu_to_vulkan(src, v_ret);
 
   return v_ret;
 }
 
-at::Tensor from_vulkan(vTensor& v_src) {
-  at::TensorOptions opt(at::kCPU);
-  opt = opt.dtype(v_src.dtype());
-
-  at::Tensor ret = at::empty(v_src.sizes(), opt).to(v_src.memory_format());
+at::Tensor from_vulkan(ops::vTensor& v_src) {
+  at::Tensor ret = at::empty(v_src.sizes(), v_src.options().device(at::kCPU));
   ops::pack_vulkan_to_cpu(v_src, ret);
   return ret;
 }
-
-//
-// VulkanImpl
-//
-
-struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
-  bool is_vulkan_available() const override {
-    return api::available();
-  }
-
-  Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
-    return vulkan::ops::copy_(self, src);
-  }
-};
-static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
 
 } // namespace ops
 } // namespace vulkan

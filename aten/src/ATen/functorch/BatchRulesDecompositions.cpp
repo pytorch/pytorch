@@ -124,7 +124,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(gradient, tensorarrayint);
   OP_DECOMPOSE2(gradient, tensorarray);
   OP_DECOMPOSE2(greater_equal, Tensor );
-  OP_DECOMPOSE2(greater_equal, Scalar );
   OP_DECOMPOSE2(greater, Tensor );
   OP_DECOMPOSE(grid_sampler);
   OP_DECOMPOSE(group_norm);

@@ -40,7 +40,7 @@ vTensor pack_weights(const Tensor& weight_arg) {
           dst_kh_sz,
           dst_kw_sz,
       },
-      weight_arg.scalar_type(),
+      weight.options(),
   };
 
   api::StorageBuffer staging(context, at::kFloat, v_weight.gpu_numel());
@@ -103,7 +103,7 @@ vTensor pack_biases(
             dst_kh_sz,
             dst_kw_sz,
         },
-        bias_arg->scalar_type(),
+        bias_arg->options(),
     };
 
     api::StorageBuffer staging(context, at::kFloat, v_bias.gpu_numel());
@@ -132,7 +132,7 @@ vTensor pack_biases(
     vTensor v_bias{
         api::context(),
         {1},
-        weight_arg.scalar_type(),
+        weight_arg.options(),
     };
 
     api::StorageBuffer staging(context, at::kFloat, v_bias.gpu_numel());
@@ -235,7 +235,7 @@ Tensor run_addmm_context(
           v_input.sizes()[Layout::Parameter::height],
           unpacked_weight_sizes[Layout::Parameter::width],
       },
-      input_arg.scalar_type(),
+      input.options(),
   };
 
   if (bias_defined) {

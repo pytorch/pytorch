@@ -527,7 +527,7 @@ vTensor pack_weights(
   vTensor v_weight{
       api::context(),
       weight_rearranged.sizes(),
-      weight_arg.scalar_type(),
+      weight_arg.options(),
       quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
@@ -552,7 +552,7 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       bias_rearranged.sizes(),
-      bias_rearranged.scalar_type(),
+      bias_rearranged.options(),
       quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
@@ -1070,7 +1070,7 @@ Tensor run_conv2d_context_impl(
   vTensor v_output{
       context,
       output_size,
-      input_arg.scalar_type(),
+      input_arg.options(),
   };
 
   if (quantized) {

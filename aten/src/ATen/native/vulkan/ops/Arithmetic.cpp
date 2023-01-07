@@ -104,7 +104,7 @@ Tensor arithmetic_scalar(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.options(),
   };
 
   const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
@@ -208,7 +208,7 @@ Tensor arithmetic_tensor(
   vTensor v_output{
       context,
       broadcast_size(self_arg, other_arg),
-      self_arg.scalar_type(),
+      v_self.options(),
   };
 
   const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
@@ -277,10 +277,9 @@ Tensor quantized_arithmetic_tensor(
   vTensor v_output{
       context,
       broadcast_size(self_arg, other_arg),
+      self.options().dtype(c10::kQUInt8),
       scale,
-      zero_point,
-      c10::kQUInt8,
-  };
+      zero_point};
 
   const double scale1 = v_self.get_scale();
   const double scale2 = v_other.get_scale();
