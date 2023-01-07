@@ -616,8 +616,6 @@ Utilities
     set_warn_always
     is_warn_always_enabled
     vmap
-    enable_check_sparse_tensor_invariants
-    is_check_sparse_tensor_invariants_enabled
     _assert
     sym_float
     sym_int

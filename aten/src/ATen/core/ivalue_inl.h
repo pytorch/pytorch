@@ -2152,7 +2152,7 @@ inline IValue IValue::make_capsule(
 template <
     typename T,
     std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
-IValue::IValue(c10::intrusive_ptr<T> custom_class) {
+IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
   auto classType = []() {
     try {
       return c10::getCustomClassType<c10::intrusive_ptr<T>>();
@@ -2166,7 +2166,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(ivalue_obj.release());
-  tag = Tag::Object;
+
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
