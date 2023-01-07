@@ -282,7 +282,7 @@ __all__ = [
     "wrap_logical_op_with_negation",
     "zeros_like",
     "zeros",
-    "zero"
+    "zero",
 ]
 
 
