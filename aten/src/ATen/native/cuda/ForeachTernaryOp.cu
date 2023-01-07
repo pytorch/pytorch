@@ -15,17 +15,6 @@
 
 namespace at { namespace native {
 
-// Ref: [GPU Pro Tip: Lerp Faster in C++](https://developer.nvidia.com/blog/lerp-faster-cuda/)
-template<>
-C10_HOST_DEVICE C10_ALWAYS_INLINE float lerp(const float start, const float end, const float weight) {
-  return fma(weight, end, fma(-weight, start, start));
-}
-
-template<>
-C10_HOST_DEVICE C10_ALWAYS_INLINE double lerp(const double start, const double end, const double weight) {
-  return fma(weight, end, fma(-weight, start, start));
-}
-
 template <typename T>
 struct LerpFunctor {
   inline C10_DEVICE T operator()(const T self, const T end, const T weight) {
