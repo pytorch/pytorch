@@ -109,7 +109,7 @@ class BenchmarkGraph : public benchmark::Fixture {
     return executor_.get();
   }
 
-  void SetUp(const ::benchmark::State& state) {
+  void SetUp(const ::benchmark::State& state) override {
     auto& executor_ = getExecutorCacheMap()[graphName()];
     // Makes sure same graph hasn't been compiled before
     if (!executor_) {
@@ -121,7 +121,7 @@ class BenchmarkGraph : public benchmark::Fixture {
     }
   }
 
-  void TearDown(const ::benchmark::State& state) {}
+  void TearDown(const ::benchmark::State& state) override {}
 
  protected:
   static executorCache::ExecutorMap& getExecutorCacheMap() {
@@ -185,15 +185,15 @@ class BenchmarkGraph : public benchmark::Fixture {
     BENCHMARK_NAME, SETUP_FUSION, RUN_FUSION, ...)                      \
   class BENCHMARK_NAME##___GRAPH : public BenchmarkGraph {              \
    public:                                                              \
-    std::string graphName() {                                           \
+   std::string graphName() override {                                   \
       return NVFUSER_TO_STRING(BENCHMARK_NAME##___GRAPH);               \
     }                                                                   \
-    SetupFusionFunction setupFusion() {                                 \
+   SetupFusionFunction setupFusion() override {                         \
       return [](Fusion* fusion) { SETUP_FUSION(fusion, __VA_ARGS__); }; \
     }                                                                   \
   };                                                                    \
   BENCHMARK_DEFINE_F(BENCHMARK_NAME##___GRAPH, BENCHMARK_NAME)          \
-  (benchmark::State & benchmark_state) {                                \
+      (benchmark::State & benchmark_state) {                            \
     RUN_FUSION(                                                         \
         benchmark_state,                                                \
         BENCHMARK_NAME##___GRAPH::getExecutorCache(),                   \
