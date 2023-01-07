@@ -167,12 +167,10 @@ class TensorVariable(VariableTracker):
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
         if result is None:
-            var = GetAttrVariable(self, name)
-            proxy_node = var.as_proxy().node
-            if "example_value" not in proxy_node.meta:
-                example_value = get_fake_value(proxy_node, tx)
-                var.set_example_value(example_value)
-            result = var
+            proxy = getattr(self.as_proxy(), name)
+            if "example_value" not in proxy.node.meta:
+                proxy.node.meta["example_value"] = get_fake_value(proxy.node, tx)
+            result = GetAttrVariable(self, name, proxy)
 
         if result is None:
             raise NotImplementedError()
