@@ -107,6 +107,16 @@ unary_list = [
     torch.nn.GELU(approximate="tanh"),
     torch.nn.ReLU6(),
     torch.nn.SiLU(),
+    lambda x: F.relu(x),
+    lambda x: F.sigmoid(x),
+    lambda x: F.tanh(x),
+    lambda x: F.hardswish(x),
+    lambda x: F.leaky_relu(x, 0.1),
+    lambda x: F.hardtanh(x, min_val=-0.5, max_val=4),
+    lambda x: F.gelu(x, approximate="none"),
+    lambda x: F.gelu(x, approximate="tanh"),
+    lambda x: F.relu6(x),
+    lambda x: F.silu(x),
 ]
 
 
@@ -1672,6 +1682,26 @@ class CommonTemplate:
     # see https://github.com/pytorch/pytorch/issues/87745.
     @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
     def test_conv2d_unary(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                unary_fn,
+                in_channels,
+                out_channels,
+                **kwargs,
+            ):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    **kwargs,
+                )
+                self.unary_fn = unary_fn
+
+            def forward(self, x):
+                x = self.conv(x)
+                return self.unary_fn(x)
+
         test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(
             unary_list,
@@ -1695,17 +1725,15 @@ class CommonTemplate:
             oC = 32 * groups
             iC = 3 * groups
             x_shape = (1, iC, 112, 112)
-            mod = torch.nn.Sequential(
-                torch.nn.Conv2d(
-                    iC,
-                    oC,
-                    kernel_size=kernel_size,
-                    padding=padding,
-                    dilation=dilation,
-                    groups=groups,
-                    bias=bias,
-                ),
+            mod = M(
                 unary_fn,
+                iC,
+                oC,
+                kernel_size=kernel_size,
+                padding=padding,
+                dilation=dilation,
+                groups=groups,
+                bias=bias,
             ).eval()
 
             # TODO: add bf16 test for cpu path?
@@ -1829,14 +1857,33 @@ class CommonTemplate:
                 )
 
     def test_linear_unary(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                unary_fn,
+                in_features,
+                out_features,
+                bias,
+                **kwargs,
+            ):
+                super(M, self).__init__()
+                self.linear = torch.nn.Linear(
+                    in_features,
+                    out_features,
+                    bias,
+                    **kwargs,
+                )
+                self.unary_fn = unary_fn
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.unary_fn(x)
+
         options = itertools.product(unary_list, [[2, 3, 10], [2, 10]], [True, False])
         dtype = torch.bfloat16
         if has_bf16_support():
             for eltwise_fn, input_shape, bias in options:
-                mod = torch.nn.Sequential(
-                    torch.nn.Linear(input_shape[-1], 30, bias=bias), eltwise_fn
-                ).eval()
-
+                mod = M(eltwise_fn, input_shape[-1], 30, bias=bias).eval()
                 # only fuse for linear when the dtype is bf16
                 mod = mod.to(dtype)
                 v = torch.randn(input_shape).to(dtype)
@@ -4122,11 +4169,35 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(102400), torch.randn(3)])
 
+    def test_empty1(self):
+        def fn():
+            return torch.empty((1, 128, 128))
+
+        self.common(fn, [], assert_equal=False)
+
+    def test_empty2(self):
+        def fn():
+            return aten.empty((1, 128, 128))
+
+        self.common(fn, [], assert_equal=False)
+
+    def test_new_empty(self):
+        def fn(a):
+            return aten.new_empty(a, [1, 128, 128])
+
+        self.common(fn, [torch.randn(55)], assert_equal=False)
+
+    def test_empty_strided(self):
+        def fn():
+            return aten.empty_strided([1, 128, 128], [16384, 128, 1])
+
+        self.common(fn, [], assert_equal=False)
+
     def test_new_empty_strided(self):
         def fn(a):
-            return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
+            return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1])
 
-        self.common(fn, [torch.randn(55)])
+        self.common(fn, [torch.randn(55)], assert_equal=False)
 
     @patch.object(torch._inductor.config.triton, "cudagraphs", True)
     def test_dropout(self):
@@ -4992,6 +5063,17 @@ class CommonTemplate:
             assert callable(func), "not a callable"
             func()
 
+    def test_pixel_shuffle_channels_last(self):
+        def fn(x):
+            x = torch.nn.functional.pixel_shuffle(x, 2)
+            x = torch.nn.functional.relu(x)
+            return x
+
+        self.common(
+            fn,
+            (torch.randn(1, 16, 64, 72).to(memory_format=torch.channels_last),),
+        )
+
 
 if HAS_CPU:
 
@@ -5281,6 +5363,30 @@ if HAS_CPU:
                 compiled = compile_fx_inner(traced, [x])
                 assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_vec_cpu_only_for_all_available_isa(self):
+            def fn(x):
+                return (torch.erf(x),)
+
+            x = torch.randn((2, 9))
+            x[0, 0] = torch.nan
+            x[1, -1] = torch.nan
+
+            bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()] + [
+                None
+            ]
+            for item in bit_widths:
+                with patch.object(config.cpp, "simdlen", item):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x)
+                    compiled = compile_fx_inner(traced, [x])
+                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
