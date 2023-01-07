@@ -3260,6 +3260,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_mT_tensor_attribute(self):
+        def fn(x, y):
+            a = x.mT
+            return torch.add(a, y)
+
+        x = torch.rand((4, 5, 6))
+        y = torch.rand((4, 6, 5))
+
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod

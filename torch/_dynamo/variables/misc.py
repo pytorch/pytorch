@@ -556,18 +556,25 @@ class LambdaVariable(VariableTracker):
 
 
 class GetAttrVariable(VariableTracker):
-    def __init__(self, obj, name, **kwargs):
+    def __init__(self, obj, name, example_value=None, **kwargs):
         super(GetAttrVariable, self).__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
+        self.example_value = example_value
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
+    def set_example_value(self, example_value):
+        self.example_value = example_value
+
     def as_proxy(self):
-        return getattr(self.obj.as_proxy(), self.name)
+        ret = getattr(self.obj.as_proxy(), self.name)
+        if self.example_value is not None:
+            ret.node.meta["example_value"] = self.example_value
+        return ret
 
     def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):

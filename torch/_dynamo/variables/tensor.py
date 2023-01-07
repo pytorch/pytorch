@@ -20,6 +20,7 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
+from .misc import GetAttrVariable
 
 
 class TensorVariable(VariableTracker):
@@ -164,6 +165,14 @@ class TensorVariable(VariableTracker):
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+
+        if result is None:
+            var = GetAttrVariable(self, name)
+            proxy_node = var.as_proxy().node
+            if "example_value" not in proxy_node.meta:
+                example_value = get_fake_value(proxy_node, tx)
+                var.set_example_value(example_value)
+            result = var
 
         if result is None:
             raise NotImplementedError()
