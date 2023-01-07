@@ -92,7 +92,7 @@ void preprocessCaffe2Ops(Block* block) {
       const auto& args = schema.arguments();
       size_t origin_inputs_index = 0;
       for (const auto& arg : args) {
-        const auto& type = arg.type();
+        auto type = arg.type();
         TORCH_INTERNAL_ASSERT(origin_inputs_index < origin_inputs.size());
         const auto& origin_input = origin_inputs[origin_inputs_index++];
         if (type->kind() == TypeKind::OptionalType &&

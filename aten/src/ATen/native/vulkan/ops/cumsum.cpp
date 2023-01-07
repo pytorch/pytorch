@@ -36,7 +36,7 @@ Tensor cumsum(
   vTensor v_output{
       context,
       input_arg.sizes(),
-      input_arg.scalar_type(),
+      input_arg.options(),
   };
 
   const struct Block final {

@@ -4,7 +4,7 @@
 #include <cuda.h>  // for CUDA_VERSION
 #endif
 
-#if !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 #include <cub/version.cuh>
 #else
 #define CUB_VERSION 0

@@ -123,15 +123,13 @@ def _get_state_dict_2d_layout(
             assert (
                 len(value.local_shards()) == 1
             ), "Cannot handle ST with multiple shards"
-            assert isinstance(
-                value, ShardedTensor
-            ), "Can only handle nested ShardedTensor"
+            assert isinstance(ShardedTensor, value)
             shard = value.local_shards()[0]
             specs[key] = (
                 shard.metadata.shard_offsets,
                 shard.metadata.shard_sizes,
             )
-            dp_pg = shard.tensor._process_group  # type: ignore[attr-defined]
+            dp_pg = shard.tensor._process_group
 
     return (
         specs,

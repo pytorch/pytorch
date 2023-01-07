@@ -123,7 +123,7 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
     return false;
   }
 #endif
-#if !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 10000
   return attr.type == cudaMemoryTypeHost;
 #else
   return attr.memoryType == cudaMemoryTypeHost;

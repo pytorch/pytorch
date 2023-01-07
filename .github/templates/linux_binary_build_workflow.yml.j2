@@ -80,8 +80,7 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+      !{{ common.setup_rocm_linux() }}
       - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
@@ -98,8 +97,7 @@ jobs:
           docker-image: !{{ config["container_image"] }}
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+      !{{ common.teardown_rocm_linux() }}
 {%- endif %}
 
 {%- if branches == "nightly" %}

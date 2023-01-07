@@ -80,13 +80,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     type = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
-  const bool maybe_support_half = (
-    // Only CUDA supports half precision, but since meta tensors don't have a
-    // device we err on the side of accepting it
-    (device.is_cuda() || device.is_meta()) &&
-    !at::detail::getCUDAHooks().hasROCM()
-  );
-  if (maybe_support_half) {
+  if (device.is_cuda() && !at::detail::getCUDAHooks().hasROCM()) {
     TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
   } else {
     TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
