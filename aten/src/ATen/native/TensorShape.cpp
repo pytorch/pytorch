@@ -162,7 +162,6 @@
 #include <ATen/ops/split_with_sizes_native.h>
 #include <ATen/ops/squeeze_copy_native.h>
 #include <ATen/ops/squeeze_native.h>
-#include <ATen/ops/squeeze.h>
 #include <ATen/ops/stack_native.h>
 #include <ATen/ops/sub.h>
 #include <ATen/ops/sum.h>
@@ -3094,22 +3093,6 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   return std::make_tuple(std::move(sizes), std::move(strides));
 }
 
-std::tuple<SymDimVector, SymDimVector>
-inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> dim_mask) {
-  const auto ndim = tensor.dim();
-  const auto sym_sizes = tensor.sym_sizes();
-  const auto sym_strides = tensor.sym_strides();
-
-  SymDimVector out_sizes, out_strides;
-  for (const auto d: c10::irange(ndim)) {
-    if (!dim_mask.test(d) || sym_sizes[d] != 1) {
-      out_sizes.push_back(sym_sizes[d]);
-      out_strides.push_back(sym_strides[d]);
-    }
-  }
-  return std::make_tuple(std::move(out_sizes), std::move(out_strides));
-}
-
 namespace {
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
@@ -3132,21 +3115,18 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 }
 
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
-Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
+Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   SymDimVector sizes;
   SymDimVector strides;
-  const auto ndim = self.dim();
-  auto mask = dims.has_value()
-      ? dim_list_to_bitset(dims, self.dim())
-      : std::bitset<dim_bitset_size>((1ull << self.dim()) - 1);
-  std::tie(sizes, strides) = inferSqueezeGeometry(self, mask);
+  std::tie(sizes, strides) = dim.has_value() ? inferSqueezeGeometry(self, dim.value()) : inferSqueezeGeometry(self);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
-    for (const auto d : c10::irange(ndim)) {
-      if (mask.test(d) && self.sizes()[d] == 1) {
+    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(0, self.dim());
+    for (const auto d : dims) {
+      if (self.sizes()[d] == 1) {
         TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
         if (d < axis) {
           ++shift;
@@ -3162,8 +3142,13 @@ Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
   // TODO: quantized Tensor support for SymInt needs to be added but basic building blocs
   // are missing for now.
   auto result = make_qtensor(self, C10_AS_INTARRAYREF_SLOW(sizes), C10_AS_INTARRAYREF_SLOW(strides), std::move(quantizer));
-  auto maybe_outnames = namedinference::compute_squeeze_outnames(self, mask);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  if (dim.has_value()) {
+    namedinference::propagate_names_except(result, self, {dim.value()});
+  } else {
+    auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
+    namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  }
+
   return result;
 }
 
@@ -3176,7 +3161,10 @@ Tensor squeeze(const Tensor& self) {
 }
 
 Tensor squeeze_quantized(const Tensor& self) {
-  return squeeze_qtensor(self, c10::nullopt);
+  at::Tensor result = squeeze_qtensor(self, c10::nullopt);
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  return result;
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
@@ -3192,19 +3180,8 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
 }
 
 Tensor squeeze_quantized(const Tensor& self, int64_t dim) {
-  return squeeze_qtensor(self, dim);
-}
-
-Tensor squeeze(const Tensor& self, IntArrayRef dims) {
-  auto mask = dim_list_to_bitset(dims, self.dim());
-  auto g = inferSqueezeGeometry(self, mask);
-  at::Tensor result = self.as_strided_symint(std::get<0>(g), std::get<1>(g));
-  auto maybe_outnames = namedinference::compute_squeeze_outnames(self, mask);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-  return result;
-}
-
-Tensor squeeze_quantized(const Tensor& self, IntArrayRef dim) {
+  int64_t dims = self.dim();
+  dim = maybe_wrap_dim(dim, dims);
   return squeeze_qtensor(self, dim);
 }
 
@@ -3223,13 +3200,6 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
     return self;
   }
   auto g = inferSqueezeGeometry(self, dim);
-  self.as_strided__symint(std::get<0>(g), std::get<1>(g));
-  return self;
-}
-
-Tensor & squeeze_(Tensor &self, IntArrayRef dims) {
-  auto mask = dim_list_to_bitset(dims, self.dim());
-  auto g = inferSqueezeGeometry(self, mask);
   self.as_strided__symint(std::get<0>(g), std::get<1>(g));
   return self;
 }
@@ -4067,13 +4037,6 @@ at::Tensor& squeeze_copy_out(const at::Tensor & self, at::Tensor & out) {
 
 at::Tensor& squeeze_copy_dim_out(const at::Tensor & self, int64_t dim, at::Tensor & out) {
   auto tmp = self.squeeze(dim);
-  out.copy_(tmp);
-  return out;
-}
-
-
-at::Tensor& squeeze_copy_dims_out(const at::Tensor & self, IntArrayRef dims, at::Tensor & out) {
-  auto tmp = self.squeeze(dims);
   out.copy_(tmp);
   return out;
 }
