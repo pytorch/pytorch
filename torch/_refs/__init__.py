@@ -10,11 +10,10 @@ from functools import partial, reduce, singledispatch, wraps
 from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
+
 import torch._prims as prims
 import torch._prims_common as utils
 from torch import sym_float, sym_int
-
-from torch._decomp.decompositions import pw_cast_for_int_to_real
 from torch._prims_common import (
     check,
     DeviceLikeType,
@@ -705,7 +704,10 @@ def log_softmax(
 
 @register_decomposition(aten.logsumexp)
 @out_wrapper()
-@pw_cast_for_int_to_real
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
 def logsumexp(
     self: TensorLikeType, dim: DimsType, keepdim: bool = False
 ) -> TensorLikeType:
@@ -714,7 +716,7 @@ def logsumexp(
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
-    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
+    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)  # type: ignore[arg-type]
     maxes_squeezed = torch.masked_fill(
         maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
     )
