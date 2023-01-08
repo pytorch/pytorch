@@ -156,12 +156,12 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 #### Prerequisites
 If you are installing from source, you will need:
 - Python 3.7 or later (for Linux, Python 3.7.6+ or 3.8.1+ is needed)
-- A C++14 compatible compiler, such as clang
+- A C++17 compatible compiler, such as clang
 
 We highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
 If you want to compile with CUDA support, install the following (note that CUDA is not supported on macOS)
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 10.2 or above
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 11.0 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
@@ -219,7 +219,7 @@ git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
 git submodule sync
-git submodule update --init --recursive --jobs 0
+git submodule update --init --recursive
 ```
 
 #### Install PyTorch
@@ -250,16 +250,12 @@ This is caused by `ld` from the Conda environment shadowing the system `ld`. You
 **On macOS**
 
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py develop
+python3 setup.py develop
 ```
 
 **On Windows**
 
 Choose Correct Visual Studio Version.
-
-Sometimes there are regressions in new versions of Visual Studio, so
-it's best to use the same Visual Studio Version [16.8.5](https://github.com/pytorch/pytorch/blob/master/.circleci/scripts/vs_install.ps1) as Pytorch CI's.
 
 PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from

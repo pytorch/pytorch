@@ -222,7 +222,7 @@ struct UnpackInstructions {
           stack.emplace_back(lst);
         } break;
         case PUSH_NONE: {
-          stack.emplace_back(IValue());
+          stack.emplace_back();
         }
       }
     }

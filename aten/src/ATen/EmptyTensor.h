@@ -6,7 +6,7 @@ namespace detail {
 
 template <class ArrayRefType>
 inline void check_size_nonnegative(ArrayRefType size) {
-  for (auto x : size) {
+  for (const auto& x : size) {
     TORCH_CHECK(
         x >= 0,
         "Trying to create tensor with negative dimension ",
@@ -20,6 +20,10 @@ TORCH_API size_t computeStorageNbytesContiguous(
     IntArrayRef sizes,
     size_t itemsize,
     size_t storage_offset = 0);
+TORCH_API SymInt computeStorageNbytesContiguous(
+    SymIntArrayRef sizes,
+    const SymInt& itemsize,
+    const SymInt& storage_offset = 0);
 TORCH_API size_t computeStorageNbytes(
     IntArrayRef sizes,
     IntArrayRef strides,
@@ -28,8 +32,8 @@ TORCH_API size_t computeStorageNbytes(
 TORCH_API SymInt computeStorageNbytes(
     SymIntArrayRef sizes,
     SymIntArrayRef strides,
-    SymInt itemsize,
-    SymInt storage_offset = 0);
+    const SymInt& itemsize,
+    const SymInt& storage_offset = 0);
 
 TORCH_API TensorBase empty_generic(
     IntArrayRef size,

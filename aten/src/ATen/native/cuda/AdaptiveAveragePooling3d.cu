@@ -18,6 +18,8 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#include <ATen/native/AdaptivePooling.h>
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -425,6 +427,8 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   TensorArg grad_input_arg{gradInput, "gradInput", 1};
   TensorArg grad_output_arg{gradOutput_, "gradOutput_", 2};
   TensorArg input_arg{input, "input", 3};
+
+  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
 
   checkAllSameGPU(
       "adaptive_avg_pool3d_out_cuda",

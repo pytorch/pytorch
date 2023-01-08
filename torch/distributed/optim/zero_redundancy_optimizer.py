@@ -323,11 +323,10 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> import torch.nn as nn
         >>> from torch.distributed.optim import ZeroRedundancyOptimizer
         >>> from torch.nn.parallel import DistributedDataParallel as DDP
-
-        >>> # xdoctest: +SKIP
         >>> model = nn.Sequential(*[nn.Linear(2000, 2000).to(rank) for _ in range(20)])
         >>> ddp = DDP(model, device_ids=[rank])
         >>> opt = ZeroRedundancyOptimizer(
