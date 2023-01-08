@@ -5,7 +5,9 @@ import math
 import unittest
 import functools
 import itertools
+import pickle
 from copy import deepcopy
+import weakref
 
 import torch
 import torch.optim as optim
@@ -46,6 +48,7 @@ from torch.testing._internal.common_utils import (
 )
 from typing import Dict, Any, Tuple
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
+from torch.utils._pytree import tree_flatten
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -298,13 +301,12 @@ class TestOptim(TestCase):
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
 
-        # Make sure that device of state['step'] is still CPU
+        # Make sure that all singleton tensors in the state_dict are still on CPU.
         new_state_dict = optimizer_cuda.state_dict()
-        if "step" in state_dict["state"][0] and torch.is_tensor(
-            state_dict["state"][0]["step"]
-        ):
-            for state in new_state_dict["state"].values():
-                self.assertEqual(state["step"].device.type, "cpu")
+        flat_new_state_dict, _ = tree_flatten(new_state_dict)
+        for state_item in flat_new_state_dict:
+            if torch.is_tensor(state_item) and state_item.dim() == 0:
+                self.assertEqual(state_item.device.type, "cpu")
 
         for _i in range(20):
             optimizer.step(fn)
@@ -3157,6 +3159,36 @@ class TestLRScheduler(TestCase):
         ref = test()
         assert ref() is None
         gc.enable()
+
+    def test_cycle_lr_state_dict_picklable(self):
+        adam_opt = optim.Adam(self.net.parameters())
+        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
+        self.assertIsInstance(scheduler._scale_fn_ref, weakref.WeakMethod)
+        state = scheduler.state_dict()
+        self.assertNotIn("_scale_fn_ref", state)
+        pickle.dumps(state)
+
+    def test_cycle_lr_scale_fn_restored_from_state_dict(self):
+        adam_opt = optim.Adam(self.net.parameters())
+
+        # Case 1: Built-in mode
+        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, mode="triangular2")
+        restored_scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
+        restored_scheduler.load_state_dict(scheduler.state_dict())
+        self.assertTrue(restored_scheduler.mode == scheduler.mode == "triangular2")
+        self.assertIsNotNone(restored_scheduler._scale_fn_ref) and self.assertIsNotNone(scheduler._scale_fn_ref)
+        self.assertIs(restored_scheduler._scale_fn_custom, None)
+        self.assertIs(scheduler._scale_fn_custom, None)
+
+        # Case 2: Custom `scale_fn`
+        def scale_fn(_):
+            return 0.5
+
+        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
+        restored_scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
+        restored_scheduler.load_state_dict(scheduler.state_dict())
+        self.assertIs(scheduler._scale_fn_custom, scale_fn)
+        self.assertIs(restored_scheduler._scale_fn_custom, scale_fn)
 
     def test_onecycle_lr_invalid_anneal_strategy(self):
         with self.assertRaises(ValueError):

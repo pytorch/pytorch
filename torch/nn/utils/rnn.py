@@ -20,6 +20,7 @@ PackedSequence_.__annotations__ = {'data': torch.Tensor, 'batch_sizes': torch.Te
                                    'sorted_indices': Optional[torch.Tensor],
                                    'unsorted_indices': Optional[torch.Tensor]}
 
+
 def bind(optional, fn):
     if optional is None:
         return None
@@ -279,7 +280,7 @@ def pad_packed_sequence(
 
     Example:
         >>> from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-        >>> seq = torch.tensor([[1,2,0], [3,0,0], [4,5,6]])
+        >>> seq = torch.tensor([[1, 2, 0], [3, 0, 0], [4, 5, 6]])
         >>> lens = [2, 1, 3]
         >>> packed = pack_padded_sequence(seq, lens, batch_first=True, enforce_sorted=False)
         >>> packed
@@ -464,8 +465,8 @@ def pack_sequence(sequences: List[Tensor], enforce_sorted: bool = True) -> Packe
 
     Example:
         >>> from torch.nn.utils.rnn import pack_sequence
-        >>> a = torch.tensor([1,2,3])
-        >>> b = torch.tensor([4,5])
+        >>> a = torch.tensor([1, 2, 3])
+        >>> b = torch.tensor([4, 5])
         >>> c = torch.tensor([6])
         >>> pack_sequence([a, b, c])
         PackedSequence(data=tensor([1, 4, 6, 2, 5, 3]), batch_sizes=tensor([3, 2, 1]), sorted_indices=None, unsorted_indices=None)
@@ -492,8 +493,8 @@ def unpack_sequence(packed_sequences: PackedSequence) -> List[Tensor]:
 
     Example:
         >>> from torch.nn.utils.rnn import pack_sequence, unpack_sequence
-        >>> a = torch.tensor([1,2,3])
-        >>> b = torch.tensor([4,5])
+        >>> a = torch.tensor([1, 2, 3])
+        >>> b = torch.tensor([4, 5])
         >>> c = torch.tensor([6])
         >>> sequences = [a, b, c]
         >>> print(sequences)
