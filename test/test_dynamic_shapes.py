@@ -584,18 +584,15 @@ class TestSymNumberMagicMethods(TestCase):
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
 
-# Checks that we correctly implement Python floor division semantics with
-# FloorDiv:
-# https://peps.python.org/pep-0238/#semantics-of-floor-division
-# https://docs.python.org/3/library/stdtypes.html#numeric-types-int-float-complex
+# Checks that we correctly implement Python floordiv semantics with FloorDiv.
+# See NOTE [ SymPy eval and assumptions ]
 class TestFloorDiv(TestCase):
     @skipIfNoSympy
     def test_floordiv(self):
         values = (
-            # See NOTE [ Checking types with SymPy ]
-            # Note: complex is parsed as SymPy Add by FloorDiv (even when
-            # created with the complex constructor). And complex is not
-            # supported by Python floordiv.
+            # complex is parsed as SymPy Add by FloorDiv (even when created with
+            # the complex constructor) and complex is not supported by Python
+            # floordiv.
             1.5 + 2.5j,
             # These test type-promotion and flooring behavior:
             2.9,
@@ -627,6 +624,7 @@ class TestFloorDiv(TestCase):
             shape_env = ShapeEnv()
             return shape_env.evaluate_expr(FloorDiv(x, y))
 
+
         def other_func(func, x, y):
             if func is python_func:
                 return torch_func(x, y)
@@ -638,8 +636,8 @@ class TestFloorDiv(TestCase):
             torch_func,
         )
 
-        # Note: we do not check error messages on the Python side to avoid
-        # depending on an interpreter version.
+        # We do not check error messages on the Python side to avoid depending
+        # on an interpreter version.
         for func, (x, y) in itertools.product(funcs, itertools.chain(
             itertools.product(values, values),
             itertools.product(neg_values, values),
@@ -681,6 +679,49 @@ class TestFloorDiv(TestCase):
             else:
                 # otherwise, compare results
                 self.assertEqual(func(x, y), other_func(func, x, y))
+
+    @skipIfNoSympy
+    def test_floordiv_assumptions(self):
+        # We define two Symbols (with different names) for each type to make
+        # sure the behavior is consistent regardless of whether both arguments
+        # are the same object or not.
+        cases = (
+            sympy.Symbol("i1", integer=True),
+            sympy.Symbol("i2", integer=True),
+            sympy.Symbol("r1", real=True),
+            sympy.Symbol("r2", real=True),
+            sympy.Symbol("c1", complex=True, real=False, integer=False),
+            sympy.Symbol("c2", complex=True, real=False, integer=False),
+            sympy.Symbol("s1"),
+            sympy.Symbol("s2"),
+        )
+
+        for base, divisor in itertools.product(cases, repeat=2):
+            def op():
+                return FloorDiv(base, divisor)
+
+            def is_complex(x):
+                return x.is_integer is False and x.is_real is False and x.is_complex
+
+            if is_complex(base) or is_complex(divisor):
+                self.assertRaisesRegex(
+                    TypeError,
+                    (r"unsupported operand type\(s\) for //: 'Symbol' and 'Symbol',"
+                     r" expected integer or real"),
+                    op)
+                continue
+
+            op = op()
+
+            # In regular Python, x//x == 1.0 if x is a float, but FloorDiv
+            # always returns an integer 1 when both args are the same object.
+            # This even works for Symbols with no assumptions specified.
+            if base is divisor or (base.is_integer and divisor.is_integer):
+                self.assertTrue(op.is_integer)
+                self.assertTrue(op.is_real)
+            else:
+                self.assertEqual(op.is_integer, None)
+                self.assertTrue(op.is_real)
 
 if __name__ == '__main__':
     run_tests()
