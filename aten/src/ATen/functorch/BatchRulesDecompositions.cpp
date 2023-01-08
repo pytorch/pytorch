@@ -144,7 +144,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(less, Tensor );
   OP_DECOMPOSE(linalg_cond);
   OP_DECOMPOSE(linalg_cholesky);
-  OP_DECOMPOSE(linalg_det);
+  OP_DECOMPOSE(c);
   OP_DECOMPOSE(linalg_eigvalsh);
   OP_DECOMPOSE(linalg_eigvals);
   OP_DECOMPOSE(linalg_inv);
@@ -160,6 +160,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(linalg_svdvals);
   OP_DECOMPOSE(linalg_tensorinv);
   OP_DECOMPOSE(linalg_vander);
+  OP_DECOMPOSE(linalg_vander, int);
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
