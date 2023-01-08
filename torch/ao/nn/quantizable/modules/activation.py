@@ -8,6 +8,10 @@ from typing import Optional, Tuple
 
 import warnings
 
+__all__ = [
+    "MultiheadAttention"
+]
+
 class MultiheadAttention(nn.MultiheadAttention):
     _FLOAT_MODULE = nn.MultiheadAttention
 
@@ -236,7 +240,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                 key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = True,
                 attn_mask: Optional[Tensor] = None,
-                average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
+                average_attn_weights: bool = True,
+                is_causal: bool = False) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Note::
         Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
@@ -273,6 +278,8 @@ class MultiheadAttention(nn.MultiheadAttention):
           while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
           is not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
+        - is_causal: If specified, applies a causal mask as attention mask. Mutually exclusive with providing attn_mask.
+          Default: ``False``.
         - average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
           heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
           effect when ``need_weights=True.``. Default: True (i.e. average weights across heads)
@@ -286,7 +293,8 @@ class MultiheadAttention(nn.MultiheadAttention):
           head of shape :math:`(N, num_heads, L, S)`.
         """
         return self._forward_impl(query, key, value, key_padding_mask,
-                                  need_weights, attn_mask, average_attn_weights)
+                                  need_weights, attn_mask, average_attn_weights,
+                                  is_causal)
 
     def _forward_impl(self,
                       query: Tensor,
@@ -295,7 +303,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                       key_padding_mask: Optional[Tensor] = None,
                       need_weights: bool = True,
                       attn_mask: Optional[Tensor] = None,
-                      average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
+                      average_attn_weights: bool = True,
+                      is_causal: bool = False) -> Tuple[Tensor, Optional[Tensor]]:
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
         #
@@ -303,6 +312,12 @@ class MultiheadAttention(nn.MultiheadAttention):
         # `torch.nn.functional.multi_head_attention`. Will need to refactor.
         static_k = None
         static_v = None
+
+        if attn_mask is not None and is_causal:
+            raise AssertionError("Only allow causal mask or attn_mask")
+
+        if is_causal:
+            raise AssertionError("causal mask not supported by AO MHA module")
 
         if self.batch_first:
             query, key, value = [x.transpose(0, 1) for x in (query, key, value)]

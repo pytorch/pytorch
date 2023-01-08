@@ -1419,7 +1419,7 @@ def get_native_function_declarations(
     backend_indices: Dict[DispatchKey, BackendIndex],
     native_function_decl_gen: Callable[
         [Union[NativeFunctionsGroup, NativeFunction], BackendIndex], List[str]
-    ],
+    ] = dest.compute_native_function_declaration,
 ) -> List[str]:
     """
     Generate kernel declarations, in `NativeFunction(s).h`.
@@ -1755,7 +1755,6 @@ def gen_aggregated_headers(
     declarations = get_native_function_declarations(
         grouped_native_functions=grouped_native_functions,
         backend_indices=backend_indices,
-        native_function_decl_gen=dest.compute_native_function_declaration,
     )
     cpu_fm.write(
         "NativeFunctions.h",
