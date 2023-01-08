@@ -63,6 +63,21 @@ jobs:
         run: |
           git config --global core.symlinks true
 
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            To forward remote desktop on your local machine ssh as follows:
+              ssh -L 3389:localhost:3389 %%username%%@%%hostname%%
+            And then change password using `passwd` command.
+
+            To start tests locally, change working folder to \actions-runner\_work\pytorch\pytorch\test,
+            Activate miniconda and Visual Studio environment and set PYTHON_PATH, by running:
+              call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+              set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -86,20 +101,13 @@ jobs:
             echo "CONDA_INSTALL=${CONDA} install";
           } >> "${GITHUB_ENV}"
 
-      - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-          instructions: |
-            To forward remote desktop on your local machine ssh as follows:
-              ssh -L 3389:localhost:3389 %%username%%@%%hostname%%
-            And then change password using `passwd` command.
-
-            To start tests locally, change working folder to \actions-runner\_work\pytorch\pytorch\test,
-            Activate miniconda and Visual Studio environment and set PYTHON_PATH, by running:
-              call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
-              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
-              set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
+      - name: Setup openblas on Windows CUDA
+        if: inputs.cuda-version != 'cpu'
+        shell: bash
+        run:
+          # Try out openblas on Windows CUDA instead of mkl, if this works, move this to
+          # the AMI
+          ${CONDA_INSTALL} -c conda-forge openblas=0.3.21
 
       - name: Start monitoring script
         id: monitor-script

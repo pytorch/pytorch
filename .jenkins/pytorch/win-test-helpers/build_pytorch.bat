@@ -17,6 +17,7 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
 
+:: Use openblas instead of mkl for Windows CUDA
 if "%USE_CUDA%"=="1" goto mkl_build_end
 
 call %INSTALLER_DIR%\install_mkl.bat
@@ -78,12 +79,6 @@ set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
 set CUDNN_ROOT_DIR=%CUDA_PATH%
 set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
 set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
-
-:: TODO: G5 runner uses AMD instead of Intel CPU, so Windows CI would need to
-:: build on Intel CPU but test on AMD CPU similar to ROCm. This would need to
-:: be investigated further. This only applies to Windows CUDA build running on
-:: G5, Windows CPU build remains the same.
-set USE_MKLDNN=0
 
 :cuda_build_end
 
