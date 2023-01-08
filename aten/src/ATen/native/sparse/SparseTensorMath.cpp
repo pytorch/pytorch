@@ -843,42 +843,6 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
-  // // TODO: Use a specialized CSR kernel for performance if needed
-  if (t_.is_sparse_csr() && src_.layout() == kStrided) {
-    return mul_out_sparse_csr(t_, src_.sparse_mask(t_), r);
-  }
-  if (t_.layout() == kStrided && src_.is_sparse_csr()) {
-    return mul_out_sparse_csr(t_.sparse_mask(src_), src_, r);
-  }
-  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
-  Tensor t = t_.to_sparse();
-  Tensor src = src_.to_sparse();
-  Tensor tmp_result = t.mul(src);
-  auto r_sparse_csr = tmp_result.to_sparse_csr();
-  r.resize_as_sparse_(r_sparse_csr);
-  r.copy_(r_sparse_csr);
-  return r;
-}
-
-Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
-  auto commonDtype = at::result_type(self, other);
-  if (self.is_sparse_csr() && other.layout() == kStrided) {
-    return mul_sparse_csr(self, other.sparse_mask(self));
-  }
-  if (self.layout() == kStrided && other.is_sparse_csr()) {
-    return mul_sparse_csr(self.sparse_mask(other), other);
-  }
-  auto result_options = self.options().dtype(commonDtype);
-  // CSR is 2d!
-  Tensor result = at::empty({0, 0}, result_options);
-  return at::mul_out(result, self, other); // redispatch!
-}
-
-Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
-  return at::mul_out(self, self, other); // redispatch!
-}
-
 // A generic function to implement pointwise-like operations
 // with index intersection between dense and sparse COO tensors.
 // NOTE: op is always called as op(dense_values, sparse_values),

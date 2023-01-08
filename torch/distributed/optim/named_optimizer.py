@@ -5,8 +5,10 @@ from copy import deepcopy
 from typing import Any, Collection, Dict, List, Mapping, Union
 
 import torch
+import torch.nn as nn
 from torch import optim
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
 __all__: List[str] = []
@@ -31,6 +33,8 @@ class _NamedOptimizer(optim.Optimizer):
             `param_groups` to pass to optimizer if specified.
             The key of the inner map needs to be FQNs.
             Default: None
+        module (nn.Module): the module whose parameters to updated
+            by the optimizer.
         args: arguments to pass to the optimizer constructor.
         kwargs: arguments to pass to the optimizer constructor.
 
@@ -60,11 +64,13 @@ class _NamedOptimizer(optim.Optimizer):
         named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
         optimizer_class: optim.Optimizer,
         param_groups: Collection[Mapping[str, Any]] = None,
+        module: nn.Module = None,
         *args,
         **kwargs,
     ) -> None:
         torch._C._log_api_usage_once("torch.distributed.optim._NamedOptimizer")
         self.param_groups: Collection[Mapping[str, Any]] = param_groups  # type: ignore[assignment]
+        self._param_groups_check()
         self.named_parameters = dict(named_parameters)
         params_for_optimizer = (
             self.named_parameters.values() if param_groups is None else param_groups
@@ -74,7 +80,7 @@ class _NamedOptimizer(optim.Optimizer):
             *args,
             **kwargs,
         )
-        # TODO: Add param_groups validations and unit tests.
+        self.module = module
         if param_groups is None:
             self.ordered_param_keys = list(self.named_parameters.keys())
         else:
@@ -92,6 +98,25 @@ class _NamedOptimizer(optim.Optimizer):
                         )
                     ordered_param_keys.append(param_to_key[param])
             self.ordered_param_keys = ordered_param_keys
+        # Update param_groups from optimizer.
+        self.param_groups = self._optimizer.param_groups
+
+    def _param_groups_check(self):
+        if self.param_groups is not None:
+            for param_group in self.param_groups:
+                assert isinstance(param_group, dict), "param group must be a dict"
+                assert "params" in param_group, "param group must contain key params"
+                params = param_group["params"]
+                if isinstance(params, torch.Tensor):
+                    params = [params]
+                params = list(params)
+                for param in params:
+                    if not isinstance(param, torch.Tensor):
+                        raise TypeError(
+                            "optimizer can only optimize Tensors, "
+                            "but one of the params is " + torch.typename(param)
+                        )
+                param_group["params"] = params
 
     def state_dict(self) -> Dict[str, Any]:
         """
@@ -117,7 +142,7 @@ class _NamedOptimizer(optim.Optimizer):
                     ret_group[k] = deepcopy(v)
             ret_groups.append(ret_group)
 
-        return {"state": ret_state, "param_groups": ret_groups}
+        return self._post_state_dict({"state": ret_state, "param_groups": ret_groups})
 
     def step(self):
         """
@@ -157,6 +182,7 @@ class _NamedOptimizer(optim.Optimizer):
             By doing this, we can validate the optim ``state_dict`` to be loaded.
         """
         new_state_dict = self._optimizer.state_dict()
+        state_dict = self._pre_load_state_dict(state_dict)
         state = state_dict["state"]
         new_state = new_state_dict["state"]
         if len(new_state) == 0:
@@ -170,10 +196,9 @@ class _NamedOptimizer(optim.Optimizer):
                 f"Expects equal length as {len(new_state)} in `state_dict` state length but found {len(state)}."
             )
         for idx, param_key in enumerate(self.ordered_param_keys):
+            # When the conditional training is performed, not all parameters are updated in the optim.
             if param_key not in state.keys():
-                raise ValueError(
-                    f"Expect {param_key} as a parameter in `state_dict` state but not found."
-                )
+                continue
             if len(state[param_key]) != len(new_state[idx]):
                 raise ValueError(
                     f"Expects equal length as {len(new_state[idx])} for parameter {param_key} but found: {len(state[param_key])}"
@@ -249,6 +274,16 @@ class _NamedOptimizer(optim.Optimizer):
         raise NotImplementedError(
             "add_param_group not supported yet and might be implemented soon."
         )
+
+    def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
+        if isinstance(self.module, FSDP):
+            return FSDP._load_optim_state_dict_pre_hook(self.module, self._optimizer, state_dict)
+        return state_dict
+
+    def _post_state_dict(self, state_dict) -> Dict[str, Any]:
+        if isinstance(self.module, FSDP):
+            FSDP._optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
+        return state_dict
 
 
 def _gen_param_group_key(param_keys: List[str]) -> str:
