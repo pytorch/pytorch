@@ -6,12 +6,11 @@ import types
 from collections import OrderedDict
 from typing import Dict, List
 
-import numpy
-
 import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -20,7 +19,9 @@ from ..source import GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    HAS_NUMPY,
     istype,
+    np,
     product,
     proxy_args_kwargs,
     specialize_args_kwargs,
@@ -53,6 +54,20 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
     torch._shape_as_tensor,
 ]
 
+constant_fold_functions = [
+    torch._assert,
+    torch._utils._get_device_index,
+    torch.cuda.is_available,
+    torch.device,
+    torch.distributed.is_available,
+    torch.finfo,
+    torch.get_default_dtype,
+    torch.iinfo,
+    torch.is_floating_point,
+    torch.nn.functional._Reduction.get_enum,
+]
+if torch.distributed.is_available():
+    constant_fold_functions.append(torch.distributed.is_initialized)
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
@@ -158,16 +173,7 @@ class TorchVariable(VariableTracker):
         return self.value
 
     def can_constant_fold_through(self):
-        if self.value in (
-            torch._assert,
-            torch.device,
-            torch.finfo,
-            torch.iinfo,
-            torch.is_floating_point,
-            torch.cuda.is_available,
-            torch.nn.functional._Reduction.get_enum,
-            torch._utils._get_device_index,
-        ):
+        if self.value in constant_fold_functions:
             return True
         return getattr(self.value, "__module__", None) == "math"
 
@@ -310,6 +316,25 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
+        elif self.value is torch.backends.cudnn.is_acceptable:
+            # is_acceptable(tensor) returns true if
+            #   (a) tensor dtype/device are supported by cudnn
+            #   (b) cudnn is available
+            #   (c) some initialization has completed
+            # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
+            assert (
+                len(args) == 1 or "tensor" in kwargs
+            ), "Expect 1 input to cudnn.is_acceptable"
+            tensor_variable = args[0] if len(args) > 0 else kwargs["tensor"]
+            assert isinstance(
+                tensor_variable, TensorVariable
+            ), "Expect input to cudnn.is_acceptable to be a tensor"
+            tensor_inp = torch.tensor(
+                0, dtype=tensor_variable.dtype, device=tensor_variable.device
+            )
+            return ConstantVariable(
+                torch.backends.cudnn.is_acceptable(tensor_inp), **options
+            )
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")
@@ -422,13 +447,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
             if (
-                self.value in tensortype_to_dtype
+                HAS_NUMPY
+                and self.value in tensortype_to_dtype
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
                 and args[0].is_python_constant()
             ):
                 for x in args[0].items:
-                    if isinstance(x.value, numpy.generic):
+                    if isinstance(x.value, np.generic):
                         x.value = x.value.item()
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
@@ -745,7 +771,7 @@ class TorchPyOperator(VariableTracker):
                 # equal
                 comparable_state = state._replace(
                     output=state.output._replace(
-                        guards=set(),
+                        guard_state=GuardsCheckpointState(set()),
                         nn_modules=None,
                         # Timestamp is monotonically increasing so we don't
                         # care about divergence
@@ -781,8 +807,8 @@ class TorchPyOperator(VariableTracker):
                 unimplemented(true_cmp.diff(false_cmp))
 
             # Add guards
-            tx.output.guards |= false_guards
-            tx.output.guards |= true_guards
+            tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
+            tx.output.tracing_context.guards_context.dynamo_guards |= true_guards
 
             true_name = add_subgraph(
                 "true", torch.fx.GraphModule(true_nn_modules, true_graph)

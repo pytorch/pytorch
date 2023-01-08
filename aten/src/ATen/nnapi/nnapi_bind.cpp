@@ -1,3 +1,4 @@
+#include <utility>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -37,7 +38,7 @@ void NnapiCompilation::init(
     std::vector<at::Tensor> parameter_buffers
 ) {
   init2(
-    serialized_model_tensor,
+    std::move(serialized_model_tensor),
     std::move(parameter_buffers),
     ANEURALNETWORKS_PREFER_SUSTAINED_SPEED,
     false);

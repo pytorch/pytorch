@@ -6,6 +6,9 @@ from torch.nn import init
 from torch.nn.parameter import Parameter
 from torch.nn.utils.fusion import fuse_linear_bn_weights
 
+__all__ = [
+    "LinearBn1d",
+]
 
 class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
     r"""
