@@ -450,7 +450,9 @@ public:
    */
   bool is(const List<T>& rhs) const;
 
-  std::vector<T> vec() const;
+  std::vector<T> vec() &&;
+
+  std::vector<T> vec() const&;
 
   /**
    * Returns the number of Lists currently pointing to this same list.
