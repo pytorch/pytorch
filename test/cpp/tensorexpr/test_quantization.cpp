@@ -24,8 +24,7 @@ using namespace torch::jit::tensorexpr;
 
 class Quantization : public ::testing::Test {
  public:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  void SetUp() {
+  void SetUp() override {
     getTEMustUseLLVMOnCPU() = false;
   }
 };

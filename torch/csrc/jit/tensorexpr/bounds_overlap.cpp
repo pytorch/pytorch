@@ -326,7 +326,7 @@ std::vector<IndexBounds> subtractIndicesBounds(
 
     Bound remaining = A[i];
 
-    for (auto slice : slices) {
+    for (const auto& slice : slices) {
       IndexBounds newRegion;
       newRegion.reserve(A.size());
       TORCH_INTERNAL_ASSERT(
