@@ -17,9 +17,13 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
 
+if "%USE_CUDA%"=="1" goto mkl_build_end
+
 call %INSTALLER_DIR%\install_mkl.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
+
+:mkl_build_end
 
 call %INSTALLER_DIR%\install_magma.bat
 if errorlevel 1 exit /b
