@@ -1178,10 +1178,14 @@ The following :mod:`torch` functions support sparse tensors:
 
 To manage checking sparse tensor invariants, the following tools are provided:
 
-:class:`torch.sparse.check_sparse_tensor_invariants`
-:func:`torch.sparse.check_sparse_tensor_invariants.is_enabled`
-:func:`torch.sparse.check_sparse_tensor_invariants.enable`
-:func:`torch.sparse.check_sparse_tensor_invariants.disable`
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    sparse.check_sparse_tensor_invariants
+    sparse.check_sparse_tensor_invariants.is_enabled
+    sparse.check_sparse_tensor_invariants.enable
+    sparse.check_sparse_tensor_invariants.disable
 
 Unary functions
 ---------------
