@@ -363,8 +363,8 @@ Specifying a positive offset::
 class check_sparse_tensor_invariants(object):
     """A tool to control checking sparse tensor invariants.
 
-There exists the following options to manage invariant checks in
-sparse tensor construction:
+The following options exists to manage sparsr tensor invariants
+checking in sparse tensor construction:
 
 1. Using a context manager::
 
@@ -396,13 +396,11 @@ sparse tensor construction:
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
     RuntimeError: `crow_indices[..., -1] == nnz` is not satisfied.
-
     """
 
-    # interface to global context
     @staticmethod
     def is_enabled():
-        r"""Returns True if the sparse tensor invariants check is enabled.
+        r"""Returns True if the sparse tensor invariants checking is enabled.
 
 .. note::
 
@@ -414,13 +412,13 @@ sparse tensor construction:
 
     @staticmethod
     def enable():
-        r"""Enable sparse tensor invariants check in sparse tensor constructors.
+        r"""Enable sparse tensor invariants checking in sparse tensor constructors.
 
 .. note::
 
     By default, the sparse tensor invariants checks are disabled. Use
     :func:`torch.sparse.check_sparse_tensor_invariants.is_enabled` to
-    retrieve the current state of checking sparse tensor invariants.
+    retrieve the current state of sparse tensor invariants checking.
 
 .. note::
 
@@ -434,7 +432,7 @@ sparse tensor construction:
 
     @staticmethod
     def disable():
-        r"""Disable sparse tensor invariants check in sparse tensor constructors.
+        r"""Disable sparse tensor invariants checking in sparse tensor constructors.
 
 See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more information.
         """
