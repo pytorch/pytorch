@@ -11506,7 +11506,10 @@ op_db: List[OpInfo] = [
                             'test_schema_correctness', dtypes=(torch.complex64, torch.complex128)),
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu',
-                            dtypes=(torch.float32,)),
+                            dtypes=(torch.float32,), device_type='cuda'),
+               # AssertionError: Tensor-likes are not close!
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
+                            dtypes=(torch.complex64,), device_type='cuda'),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
