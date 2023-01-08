@@ -331,7 +331,11 @@ bool List<T>::is(const List<T>& rhs) const {
 
 template<class T>
 std::vector<T> List<T>::vec() && {
-  std::vector<T> result(make_move_iterator(begin()), make_move_iterator(end()));
+  if (use_count() == 1) {
+    std::vector<T> result(make_move_iterator(begin()), make_move_iterator(end()));
+    return result;
+  }
+  std::vector<T> result(begin(), end());
   return result;
 }
 
