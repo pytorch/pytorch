@@ -3709,8 +3709,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=True,
                               skip_inplace=inplace_failures)
 
-    @parametrize('noncontiguous', (False, True))
-    def test_linalg_svd(self, device, noncontiguous):
+    def test_linalg_svd(self, device):
         # linalg_svd returns a tuple of three tensors, (U, S, Vh).
         # Given the same input, it may return different tensors,
         # because svd isn't unique. To test that the svd is correct, we multiply
@@ -3731,8 +3730,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
                                   postprocess_fn=compute_A)
 
-    @parametrize('noncontiguous', (False, True))
-    def test_linalg_eigh(self, device, noncontiguous):
+    def test_linalg_eigh(self, device):
         # linalg_svd returns two tensors, (Q, L).
         # Given the same input, it may return different tensors,
         # because the eig decomposition isn't unique.
@@ -3752,7 +3750,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
-                                  postprocess_fn=compute_A, noncontiguous=noncontiguous)
+                                  postprocess_fn=compute_A)
 
     def test_slogdet(self, device):
         # There's no OpInfo for this
