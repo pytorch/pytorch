@@ -70,11 +70,14 @@ def aot_autograd(**kwargs):
         bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
         kwargs["bw_compiler"] = _wrapped_bw_compiler
 
+        from torch._inductor.debug import enable_aot_logging
+
         try:
             # NB: NOT cloned!
-            cg = aot_module_simplified(gm, example_inputs, **kwargs)
-            counters["aot_autograd"]["ok"] += 1
-            return eval_frame.disable(cg)
+            with enable_aot_logging():
+                cg = aot_module_simplified(gm, example_inputs, **kwargs)
+                counters["aot_autograd"]["ok"] += 1
+                return eval_frame.disable(cg)
         except Exception:
             counters["aot_autograd"]["not_ok"] += 1
             raise
@@ -360,6 +363,14 @@ def cudagraphs(model, inputs):
 
 aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
 
+aot_torchxla_trivial = aot_autograd(
+    fw_compiler=BACKENDS["torchxla_trivial"],
+)
+
+aot_torchxla_trace_once = aot_autograd(
+    fw_compiler=BACKENDS["torchxla_trace_once"],
+)
+
 
 def create_aot_backends():
     """
@@ -396,3 +407,6 @@ def create_aot_backends():
     # aot_inductor_debug just replaces the inductor compiler with nop to help
     # isolate inductor vs aot_eager errors
     BACKENDS["aot_inductor_debug"] = aot_inductor_debug
+
+    BACKENDS["aot_torchxla_trivial"] = aot_torchxla_trivial
+    BACKENDS["aot_torchxla_trace_once"] = aot_torchxla_trace_once

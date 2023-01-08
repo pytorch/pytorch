@@ -172,7 +172,7 @@ const Tensor& resize__plumbing(
       optional_memory_format == c10::MemoryFormat::Contiguous,
       "resize_: batching rule only supports None or Contiguous MemoryFormat");
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "resize__plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level)) {
     c10::impl::ExcludeDispatchKeyGuard guard2(DispatchKey::FuncTorchBatched);
@@ -531,6 +531,7 @@ std::tuple<Tensor, optional<int64_t>> diag_embed_batch_rule(const Tensor& self, 
 }
 
 Tensor trace_decomp(const Tensor& tensor) {
+  TORCH_CHECK(tensor.dim() == 2, "trace: expected a matrix, but got tensor with dim ", tensor.dim());
   return tensor.diagonal().sum();
 }
 

@@ -23,8 +23,10 @@ from torch.ao.quantization.qconfig import (
     qconfig_equals,
 )
 from torch.ao.quantization.stubs import DeQuantStub
-from torch.ao.quantization.utils import activation_is_statically_quantized
-from torch.ao.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.utils import (
+    activation_is_statically_quantized,
+)
+from torch.ao.quantization.observer import _is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
 
@@ -70,8 +72,9 @@ NON_QUANTIZABLE_WEIGHT_OPS = {torch.nn.functional.layer_norm, torch.nn.functiona
 
 def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
     """Returns if node arg is weight"""
-    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config.configs:
-        weight_index = backend_config.configs[node.target]._input_type_to_index.get("weight")
+    if isinstance(node, Node) and node.op == "call_function" and \
+            node.target in backend_config._pattern_complex_format_to_config:
+        weight_index = backend_config._pattern_complex_format_to_config[node.target]._input_type_to_index.get("weight")
         if weight_index is not None and weight_index < len(node.args) and node.args[weight_index] is arg:
             return True
         return node.kwargs.get("weight") is arg
@@ -79,8 +82,9 @@ def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> b
 
 def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
     """Returns if node arg is bias"""
-    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config.configs:
-        bias_index = backend_config.configs[node.target]._input_type_to_index.get("bias")
+    if isinstance(node, Node) and node.op == "call_function" and \
+            node.target in backend_config._pattern_complex_format_to_config:
+        bias_index = backend_config._pattern_complex_format_to_config[node.target]._input_type_to_index.get("bias")
         if bias_index is not None and bias_index < len(node.args) and node.args[bias_index] is arg:
             return True
         return node.kwargs.get("bias") is arg
@@ -248,7 +252,7 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
         result = False
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
-        if is_activation_post_process(modules[node.target]):
+        if _is_activation_post_process(modules[node.target]):
             result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'call_module':
         result = False
@@ -825,7 +829,7 @@ def _qconfig_satisfies_dtype_config_constraints(
     satisfies_constraints = True
     if activation_post_process_ctr is not None:
         activation_post_process = activation_post_process_ctr()
-        assert is_activation_post_process(activation_post_process)
+        assert _is_activation_post_process(activation_post_process)
         # If dtypes don't match, don't check the activation_post_process and return True early
         if activation_post_process.dtype != dtype_with_constraints.dtype:
             return True

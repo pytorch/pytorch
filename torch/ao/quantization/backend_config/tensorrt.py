@@ -12,6 +12,11 @@ from ._common_operator_config_utils import (
     _get_share_qparams_op_configs,
 )
 
+__all__ = [
+    "get_tensorrt_backend_config",
+    "get_tensorrt_backend_config_dict",
+]
+
 def get_tensorrt_backend_config() -> BackendConfig:
     """
     Return the `BackendConfig` for the TensorRT backend.
@@ -69,8 +74,3 @@ def get_tensorrt_backend_config_dict():
     Return the `BackendConfig` for the TensorRT backend in dictionary form.
     """
     return get_tensorrt_backend_config().to_dict()
-
-__all__ = [
-    "get_tensorrt_backend_config",
-    "get_tensorrt_backend_config_dict",
-]
