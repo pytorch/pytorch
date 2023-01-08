@@ -321,6 +321,15 @@ invariants:
    Dense dimensions always follow sparse dimensions, that is, mixing
    of dense and sparse dimensions is not supported.
 
+.. note::
+
+   To be sure that a constructed sparse tensor has consistent indices,
+   values, and size, the invariant checks can be enabled per tensor
+   creation via ``check_invariants=True`` keyword argument, or
+   globally using :class:`torch.sparse.check_sparse_tensor_invariants`
+   context manager instance. By default, the sparse tensor invariants
+   checks are disabled.
+
 .. _sparse-uncoalesced-coo-docs:
 
 Uncoalesced sparse COO tensors
@@ -530,6 +539,13 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix#Compressed_sparse_row_(CSR,_CRS_o
      where ``plain_dim_size`` is the number of plain dimensions
      (orthogonal to compressed dimensions, e.g. columns or rows).
 
+   To be sure that a constructed sparse tensor has consistent indices,
+   values, and size, the invariant checks can be enabled per tensor
+   creation via ``check_invariants=True`` keyword argument, or
+   globally using :class:`torch.sparse.check_sparse_tensor_invariants`
+   context manager instance. By default, the sparse tensor invariants
+   checks are disabled.
+
 .. note::
 
    The generalization of sparse compressed layouts to N-dimensional
@@ -660,18 +676,6 @@ argument is optional and will be deduced from the ``crow_indices`` and
    ``col_indices``. If the number of columns needs to be larger than
    in the deduced ``size`` then the ``size`` argument must be
    specified explicitly.
-
-.. note::
-
-   The indices tensors ``crow_indices`` and ``col_indices`` must
-   comply so-called sparse compressed tensor invariants that relate
-   the sizes of the indices and values tensors as well as the content
-   of indices. To be sure that a constructed sparse tensor has
-   consistent indices, values, and size, the invariant checks can be
-   enabled per tensor creation via ``check_invariants=True`` keyword
-   argument, or globally using
-   :func:`torch.sparse.check_sparse_tensor_invariants`
-   context manager instance.
 
 The simplest way of constructing a 2-D sparse CSR tensor from a
 strided or sparse COO tensor is to use
@@ -1174,7 +1178,7 @@ The following :mod:`torch` functions support sparse tensors:
 
 To manage checking sparse tensor invariants, the following tools are provided:
 
-:func:`torch.sparse.check_sparse_tensor_invariants`
+:class:`torch.sparse.check_sparse_tensor_invariants`
 :func:`torch.sparse.check_sparse_tensor_invariants.is_enabled`
 :func:`torch.sparse.check_sparse_tensor_invariants.enable`
 :func:`torch.sparse.check_sparse_tensor_invariants.disable`

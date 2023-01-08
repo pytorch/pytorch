@@ -393,7 +393,10 @@ sparse tensor construction:
    For example::
 
     >>> torch.sparse_csr_tensor([0, 1, 3], [0, 1], [1, 2], check_invariants=True)
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in <module>
     RuntimeError: `crow_indices[..., -1] == nnz` is not satisfied.
+
     """
 
     # interface to global context
