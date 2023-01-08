@@ -1180,7 +1180,6 @@ endif()
 # ---[ OpenMP
 if(USE_OPENMP AND NOT TARGET caffe2::openmp)
   include(${CMAKE_CURRENT_LIST_DIR}/Modules/FindOpenMP.cmake)
-  find_package(OpenMP REQUIRED)
   if(OPENMP_FOUND)
     message(STATUS "Adding OpenMP CXX_FLAGS: " ${OpenMP_CXX_FLAGS})
     if(OpenMP_CXX_LIBRARIES)
