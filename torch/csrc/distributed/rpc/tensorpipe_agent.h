@@ -446,8 +446,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
       }
     }
 
-   private:
     GroupMembershipLockGuard(const GroupMembershipLockGuard&) = delete;
+   private:
     std::mutex& ref_;
     bool isStaticGroup_;
   };
