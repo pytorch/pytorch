@@ -12,6 +12,7 @@ from torch._C._profiler import _ExperimentalConfig, ProfilerActivity, RecordScop
 from torch.autograd.profiler import record_function
 
 from .profiler import (
+    _profile_using_dynolog,
     _KinetoProfile,
     ExecutionGraphObserver,
     profile,
@@ -35,3 +36,4 @@ __all__ = [
 ]
 
 from . import itt
+_profile_using_dynolog()

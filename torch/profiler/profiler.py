@@ -34,7 +34,6 @@ __all__ = [
 PROFILER_STEP_NAME = "ProfilerStep"
 _dynolog_handle = None
 
-logging.basicConfig(format="%(asctime)s:%(name)s:%(filename)s:%(lineno)s-%(levelname)s:%(message)s")
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
 
@@ -62,7 +61,7 @@ def _profile_using_dynolog(override: bool = False):
     hook. Requires the 'KINETO_USE_DAEMON' environment variable to be set.
     """
     global _dynolog_handle
-    if _dynolog_handle is not None and os.environ.get("KINETO_USE_DAEMON", None) is not None or override is True:
+    if _dynolog_handle is None and (os.environ.get("KINETO_USE_DAEMON", None) is not None or override is True):
         _dynolog_handle = True
         _ = register_optimizer_step_post_hook(_optimizer_post_hook)
         logger.info("Registered optimizer step post hook")

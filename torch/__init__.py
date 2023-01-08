@@ -1284,7 +1284,3 @@ import torch.fx.experimental.symbolic_shapes
 from torch import func as func
 
 from torch.func import vmap
-
-# Enable trace collection through dynolog
-from torch.profiler.profiler import _profile_using_dynolog
-_profile_using_dynolog(override=False)
