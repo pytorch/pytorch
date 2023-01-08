@@ -22,6 +22,7 @@ try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import]
     from sympy.printing.str import StrPrinter  # type: ignore[import]
+    from sympy.core.logic import fuzzy_and, fuzzy_or  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -268,6 +269,19 @@ if HAS_SYMPY:
             else:
                 return base / divisor
 
+    # NOTE [ SymPy eval and assumptions ]
+    # In eval, we only return values in cases where we always want to evaluate.
+    # In other cases, the result will just be FloorDiv(a, b), which needs to be
+    # evaluated later if necessary.
+    #
+    # We also define is_real=True and provide _eval_* methods to make the SymPy
+    # assumptions system aware of Python floordiv semantics. For instance, this
+    # ensures that correct assumptions are propagated when working with SymPy
+    # Symbols. Two integer Symbols should return an integer result.
+    #
+    # https://peps.python.org/pep-0238/#semantics-of-floor-division
+    # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
+    # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     class FloorDiv(sympy.Function):
         """
         We maintain this so that:
@@ -276,41 +290,42 @@ if HAS_SYMPY:
         """
         nargs = (2,)
 
+        # Default return type. For instance, this applies when both arguments
+        # are Symbols without any assumptions.
+        # See NOTE [ SymPy eval and assumptions ]
+        is_real = True
+
+        @property
+        def base(self):
+            return self.args[0]
+
+        @property
+        def divisor(self):
+            return self.args[1]
+
         def _sympystr(self, printer):
-            lhs = self.args[0]
-            rhs = self.args[1]
-            lhs_str = printer._print(lhs)
-            rhs_str = printer._print(rhs)
-            if precedence(lhs) < precedence(sympy.div):
-                lhs_str = f"({lhs_str})"
-            if precedence(rhs) < precedence(sympy.div):
-                rhs_str = f"({rhs_str})"
+            base_str = printer._print(self.base)
+            divisor_str = printer._print(self.divisor)
+            if precedence(self.base) < precedence(sympy.div):
+                base_str = f"({base_str})"
+            if precedence(self.divisor) < precedence(sympy.div):
+                divisor_str = f"({divisor_str})"
+            return f"{base_str}//{divisor_str}"
 
-            return f"{lhs_str}//{rhs_str}"
+        # Assumptions based on argument types.
+        # See NOTE [ SymPy eval and assumptions ]
+        def _eval_is_real(self):
+            return fuzzy_or([self.base.is_real, self.divisor.is_real])
 
+        def _eval_is_integer(self):
+            return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
+
+        # Automatic evaluation.
+        # See NOTE [ SymPy eval and assumptions ]
         @classmethod
         def eval(cls, base, divisor):
-            # NOTE [ Checking types with SymPy ]
-            # Python has a dedicated complex type, but SymPy represents complex
-            # with Add exprs.
-            #
-            # isinstance doesn't work for arbitrary exprs and for Symbols, even
-            # when the latter have integer=True set during construction. So you
-            # are supposed to use the is_* properties, but it's also not always
-            # reliable as 0 has both is_integer and is_real set to True no
-            # matter whether it's constructed as a Float or an Integer.
-            #
-            # Also, booleans cannot be used in arithmetic exprs in SymPy and
-            # cannot be passed to the Integer and Float constructors.
-            # https://github.com/pytorch/pytorch/issues/90900
             def check_supported_type(x):
-                # Note: we disallow complex as in regular Python, but we have to
-                # check for is_integer and is_real explicitly because Integer
-                # and Float have is_complex set to True. We also don't allow
-                # booleans because they cannot be used in arithmetic exprs in
-                # SymPy.
-                if (not x.is_integer and not x.is_real and x.is_complex
-                        or x.is_Boolean):
+                if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
                     raise TypeError(
                         f"unsupported operand type(s) for //: "
                         f"'{type(base).__name__}' and '{type(divisor).__name__}'"
@@ -320,20 +335,16 @@ if HAS_SYMPY:
             check_supported_type(divisor)
 
             # We don't provide the same error message as in Python because SymPy
-            # makes it difficult to check the types:
-            # See NOTE [ Checking types with SymPy ]
-            if divisor == 0:
+            # makes it difficult to check the types.
+            if divisor.is_zero:
                 raise ZeroDivisionError("division by zero")
 
             # We don't cast the return type as in Python because SymPy makes it
-            # difficult to check the types:
-            # See NOTE [ Checking types with SymPy ]
-            if base == 0:
-                return sympy.Integer(0)
+            # difficult to check the types.
+            if base.is_zero:
+                return sympy.S.Zero
             if divisor == 1:
                 return sympy.floor(base)
-            if base == divisor:
-                return sympy.Integer(1)
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
             if isinstance(base, FloorDiv):
@@ -1069,8 +1080,10 @@ class ShapeEnv(object):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        # Note: do not short-circuit here without evaluating as we might need to
-        # compute FloorDiv exprs in some cases.
+        # NB: do not short-circuit here without evaluating as we might need to
+        # compute FloorDiv exprs in some cases. That is, anything not simplified
+        # by FloorDiv.eval.
+        # See NOTE [ SymPy eval and assumptions ]
         expr = self.simplify(expr)
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
