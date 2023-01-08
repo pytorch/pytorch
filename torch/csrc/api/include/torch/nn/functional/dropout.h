@@ -2,6 +2,8 @@
 
 #include <torch/nn/options/dropout.h>
 
+#include <utility>
+
 namespace torch {
 namespace nn {
 namespace functional {
@@ -38,7 +40,7 @@ inline Tensor dropout(Tensor input, double p, bool training, bool inplace) {
 /// ```
 inline Tensor dropout(Tensor input, const DropoutFuncOptions& options = {}) {
   return detail::dropout(
-      input, options.p(), options.training(), options.inplace());
+      std::move(input), options.p(), options.training(), options.inplace());
 }
 
 // ============================================================================
@@ -86,7 +88,8 @@ inline Tensor _dropoutNd_helper(
 }
 
 inline Tensor dropout2d(Tensor input, double p, bool training, bool inplace) {
-  return _dropoutNd_helper<3, 4>(input, p, training, inplace, "dropout2d");
+  return _dropoutNd_helper<3, 4>(
+      std::move(input), p, training, inplace, "dropout2d");
 }
 
 } // namespace detail
@@ -108,7 +111,7 @@ inline Tensor dropout2d(
     Tensor input,
     const Dropout2dFuncOptions& options = {}) {
   return detail::dropout2d(
-      input, options.p(), options.training(), options.inplace());
+      std::move(input), options.p(), options.training(), options.inplace());
 }
 
 // ============================================================================
@@ -117,7 +120,8 @@ inline Tensor dropout2d(
 namespace detail {
 
 inline Tensor dropout3d(Tensor input, double p, bool training, bool inplace) {
-  return _dropoutNd_helper<4, 5>(input, p, training, inplace, "dropout3d");
+  return _dropoutNd_helper<4, 5>(
+      std::move(input), p, training, inplace, "dropout3d");
 }
 
 } // namespace detail
@@ -139,7 +143,7 @@ inline Tensor dropout3d(
     Tensor input,
     const Dropout3dFuncOptions& options = {}) {
   return detail::dropout3d(
-      input, options.p(), options.training(), options.inplace());
+      std::move(input), options.p(), options.training(), options.inplace());
 }
 
 // ============================================================================
@@ -180,7 +184,7 @@ inline Tensor alpha_dropout(
     Tensor input,
     const AlphaDropoutFuncOptions& options = {}) {
   return detail::alpha_dropout(
-      input, options.p(), options.training(), options.inplace());
+      std::move(input), options.p(), options.training(), options.inplace());
 }
 
 // ============================================================================
@@ -222,7 +226,7 @@ inline Tensor feature_alpha_dropout(
     Tensor input,
     const FeatureAlphaDropoutFuncOptions& options = {}) {
   return detail::feature_alpha_dropout(
-      input, options.p(), options.training(), options.inplace());
+      std::move(input), options.p(), options.training(), options.inplace());
 }
 
 } // namespace functional
