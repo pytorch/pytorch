@@ -2,14 +2,10 @@ import torch
 from torch import Tensor
 from torch._subclasses.fake_tensor import FakeTensor
 from typing import Dict, List, Any
-import export_schema as ex
+import torch.export.export_schema as ex
 from torch.fx.interpreter import Interpreter
 import operator
 from itertools import chain
-
-import torch._dynamo
-from torchvision.models import resnet18
-
 
 should_export_buffer = False
 should_export_parameters_buffer = False
@@ -71,67 +67,7 @@ def export_node_meta(node_meta: Dict[str, Any]) -> ex.NodeMetadata:
         return "Skipped"
 
 
-def export_arg(arg: Any) -> ex.Argument:
 
-    if isinstance(arg, torch.fx.Node):
-        return ex.Argument(
-            type = ex.Argument.ArgumentType.TENSOR,
-            value = ex.TensorArgument(
-                name = arg.name,
-            )
-        )
-    elif isinstance(arg, bool):
-        return ex.Argument(
-            type = ex.Argument.ArgumentType.BOOL,
-            value = arg,
-        )
-    elif isinstance(arg, str):
-        return ex.Argument(
-            type = ex.Argument.ArgumentType.STRING,
-            value = arg,
-        )
-    elif isinstance(arg, int):
-        return ex.Argument(
-            type = ex.Argument.ArgumentType.INT,
-            value = arg,
-        )
-    elif isinstance(arg, float):
-        return ex.Argument(
-            type = ex.Argument.ArgumentType.FLOAT,
-            value = arg,
-        )
-    elif arg is None:
-        return ex.Argument(
-            type = ex.Argument.ArgumentType.NONE,
-            value = None,
-        )
-    elif isinstance(arg, (list, tuple)):
-
-        if all(isinstance(a, int) for a in arg):
-            return ex.Argument(
-                type = ex.Argument.ArgumentType.INTS,
-                value = arg,
-            )
-        elif all(isinstance(a, float) for a in arg):
-            return ex.Argument(
-                type = ex.Argument.ArgumentType.FLOATS,
-                value = arg,
-            )
-        elif all(isinstance(a, bool) for a in arg):
-            return ex.Argument(
-                type = ex.Argument.ArgumentType.BOOLS,
-                value = arg,
-            )
-        else:
-            raise RuntimeError(f"Unsupported list/tuple argument type: {type(arg)}")
-    else:
-        raise RuntimeError(f"Unsupported argument type: {type(arg)}")
-
-def export_node_args(args: List[Any]) -> List[ex.Argument]:
-    return [export_arg(arg) for arg in args]
-
-def export_node_kwargs(kwargs: Dict[str, Any]) -> Dict[str, ex.Argument]:
-    return {key: export_arg(arg) for key, arg in kwargs.items()}
 
 class ExportInterpreter(Interpreter):
     def __init__(self, gm: torch.fx.GraphModule):
@@ -154,6 +90,7 @@ class ExportInterpreter(Interpreter):
         ex_graph.outputs = []
         ex_graph.nodes = []
         ex_graph.ivalues = []
+        ex_graph.symint_values = {}
 
         for name, t in chain(gm.named_parameters(), gm.named_buffers()):
             ex_graph.ivalues.append(
@@ -162,6 +99,51 @@ class ExportInterpreter(Interpreter):
                     meta=export_tensor_meta(t),
                 )
             )
+
+    def _export_arg(self, arg: Any) -> ex.Argument:
+        if isinstance(arg, torch.fx.Node):
+            name = arg.name
+            if name in self.ex_graph.symint_values:
+                return ex.SymIntArgument(name = name)
+            else:
+                return ex.TensorArgument(name = arg.name)
+        elif isinstance(arg, bool):
+            return arg
+        elif isinstance(arg, str):
+            return arg
+        elif isinstance(arg, int):
+            return arg
+        elif isinstance(arg, float):
+            return arg
+        elif arg is None:
+            return None
+        elif isinstance(arg, torch.device):
+            return ex.Device(
+                type = arg.type,
+                index = arg.index
+            )
+        elif isinstance(arg, (list, tuple)):
+            # ints
+            if all(isinstance(a, int) for a in arg):
+                return arg
+            # floats
+            elif all(isinstance(a, float) for a in arg):
+                return arg
+            # bools
+            elif all(isinstance(a, bool) for a in arg):
+                return arg
+            elif all(isinstance(a, torch.fx.Node) for a in arg):
+                return [self._export_arg(a) for a in arg]
+            else:
+                raise RuntimeError(f"Unsupported list/tuple argument type: {type(arg)}")
+        else:
+            raise RuntimeError(f"Unsupported argument type: {type(arg)}")
+
+    def _export_node_args(self, args: List[Any]) -> List[ex.Argument]:
+        return [self._export_arg(arg) for arg in args]
+
+    def _export_node_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, ex.Argument]:
+        return {key: self._export_arg(arg) for key, arg in kwargs.items()}
 
 
     def placeholder(self, target: str, args, kwargs):
@@ -205,15 +187,59 @@ class ExportInterpreter(Interpreter):
         fx_node = self.current_node
         # special handling for multiple return values
 
-        output_fake_tensors: Dict[str, FakeTensor] = {}
+        def get_result_type(result: Any) -> str:
+            if isinstance(result, torch.Tensor):
+                return "Tensor"
+            elif isinstance(result, int):
+                return "SymInt"
+            else:
+                raise RuntimeError(f"Unsupported return type: {type(result)}")
+
+        result_types = []
         if isinstance(result, (list, tuple)):
-            # Is user nodes sorted in the order of the return values?
-            # TODO: Might need to use getitem's index to fix the output order
-            for user_node in fx_node.users:
-                assert user_node.target is operator.getitem, "Consumer of multiple return values should be getitem"
-                output_fake_tensors[user_node.name] = user_node.meta.get("val", None)
+            result_types = [get_result_type(r) for r in result]
         else:
-            output_fake_tensors[fx_node.name] = fx_node.meta.get("val", None)
+            result_types = [get_result_type(result)]
+        assert all(t == result_types[0] for t in result_types), "All return values should have the same type"
+
+
+        ex_outputs: List[ex.ReturnArgument] = []
+
+        if result_types[0] == "Tensor":
+            output_fake_tensors: Dict[str, FakeTensor] = {}
+            if isinstance(result, (list, tuple)):
+                # Is user nodes sorted in the order of the return values?
+                # TODO: Might need to use getitem's index to fix the output order
+                for user_node in fx_node.users:
+                    assert user_node.target is operator.getitem, "Consumer of multiple return values should be getitem"
+                    output_fake_tensors[user_node.name] = user_node.meta.get("val", None)
+            else:
+                output_fake_tensors[fx_node.name] = fx_node.meta.get("val", None)
+
+
+            for name, fake_tensor in output_fake_tensors.items():
+                ivalue = ex.IValue(
+                    name = name,
+                    meta = export_tensor_meta(fake_tensor) if fake_tensor is not None else None,
+                )
+                self.ex_graph.ivalues.append(ivalue)
+
+                ex_outputs.append(ex.TensorArgument(name = name))
+
+        elif result_types[0] == "SymInt":
+            output_symints: Dict[str, int] = {}
+
+            if isinstance(result, (list, tuple)):
+                for user_node, r in zip(fx_node.users, result):
+                    assert user_node.target is operator.getitem, "Consumer of multiple return values should be getitem"
+                    output_symints[user_node.name] = r
+            else:
+                output_symints[fx_node.name] = result
+
+            for name, symint in output_symints.items():
+                self.ex_graph.symint_values[name] = symint
+
+                ex_outputs.append(ex.SymIntArgument(name = name))
 
 
         if isinstance(fx_node.target, torch._ops.OpOverload):
@@ -224,24 +250,13 @@ class ExportInterpreter(Interpreter):
         node = ex.Node(
             op = fx_node.op,
             target = target_name,
-            args = export_node_args(fx_node.args),
-            kwargs = export_node_kwargs(fx_node.kwargs),
-            outputs = [
-                ex.TensorArgument(
-                    name = name,
-                ) for name in output_fake_tensors.keys()
-            ],
+            args = self._export_node_args(fx_node.args),
+            kwargs = self._export_node_kwargs(fx_node.kwargs),
+            outputs = ex_outputs,
             # TODO: create a new ivalue here, meta might have faketensor info
             metadata = export_node_meta(self.current_node.meta),
         )
         self.ex_graph.nodes.append(node)
-
-        for name, fake_tensor in output_fake_tensors.items():
-            ivalue = ex.IValue(
-                name = name,
-                meta = export_tensor_meta(fake_tensor) if fake_tensor is not None else None,
-            )
-            self.ex_graph.ivalues.append(ivalue)
 
         return result
 
@@ -288,17 +303,3 @@ class ExportInterpreter(Interpreter):
         self.ex_graph.output = node
 
         return result
-
-
-device = "cuda"
-batch_size = 2
-model = resnet18().cuda().eval()
-x = torch.rand(batch_size, 3, 224, 224, device=device, dtype=torch.float)
-gm, guard = torch._dynamo.export(model, x, aten_graph=True)
-
-exporter = ExportInterpreter(gm)
-exporter.run(x)
-
-import prettyprinter as pp
-pp.install_extras()
-pp.pprint(exporter.ex_gm)

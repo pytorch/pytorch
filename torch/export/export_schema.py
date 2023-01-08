@@ -70,70 +70,53 @@ Scalar = Union[int, float, bool]
 class TensorArgument:
     name: str   # identifier of the tensor, which must exist in graph's ivalues map
 
-
+# This is a SymInt Arugment used in the args of an node
+# We intentionally don't store the SymInt's value here, as the same SymInt argument can be used in multiple nodes
+# This field is an reference to the SymInt
 @dataclass
-class Argument:
+class SymIntArgument:
+    name: str   # identifier of the symint, which must exist in graph's symint_values map
 
-    # Permissible types for operator's arguments
-    class ArgumentType(Enum):
-        NONE = auto()       # !!! This is used for nullable arguments, is this the right way to handle None?
+#  Permissible return types for operators
+# !!! Notice: this assumes that a node can only return Tensor(s) and Symint(s), and not other int/float/bool types...
+# !!! What about .item()? Do we need to handle this?
+ReturnArgument = Union[
+    TensorArgument,
+    SymIntArgument,
+]
 
-        TENSOR = auto()
-        # TENSORS = auto()    # !!! This is an important decision to decide how to handle list of tensors. More discussion to come.
 
-        SCALAR = auto()     # !!! Scalar is already an union type: Union[int, float, bool], check if serialization library can handle this
-        # SCALARS = auto()    # !!! for Scalar[], used in native_function.yaml, but not used in canonical aten ops yet... Consider if we need this
+# Permissible argument types for operators
+Argument = Union[
+    # None          # !!! This is used for nullable arguments, is this the right way to handle None?
 
-        BOOL = auto()
-        BOOLS = auto()      # for bool[]
-                            # !!! There are use of bool[3] in canonical aten ops, consider if we can simplify this
+    TensorArgument,
+    # List[TensorArgument],   # !!! This is an important decision to decide how to handle list of tensors. More discussion to come.
 
-        INT = auto()
-        INTS = auto()       # for int[]
+    SymIntArgument,         # Symint can be an argument, there are symint in native_function.yaml
+    List[SymIntArgument],   # Symint[] can be an argement, there are symint[] in native_function.yaml
 
-        FLOAT = auto()
-        FLOATS = auto()     # for float[]
+    Scalar,         # !!! Scalar is already an union type: Union[int, float, bool], check if serialization library can handle this
+    # List[Scalar], # !!! for Scalar[], used in native_function.yaml, but not used in canonical aten ops yet... Consider if we need this
+    bool,
+    List[bool],     # for bool[]
+                    # !!! There are use of bool[3] in canonical aten ops, consider if we can simplify this
+    int,
+    List[int],      # for int[]
+    float,
+    List[float],    # for float[]
+    str,
+    # List[str],    # !!! There is no str[] in native_function.yaml. Consider if this is needed for expressiveness
 
-        STRING = auto()
-        # STRINGS = auto()    # !!! There is no str[] in native_function.yaml. Consider if this is needed for expressiveness
+    # Graph,            # !!! Consider how to handle condition op, which need to pass in a graph for the branch
+    # List[Graph],      # !!! What about list of graphs? Do we need this?
 
-        # SYMINT = auto()    # !!! Can Symint be an arguement?, there are symint in native_function.yaml
-        # SYMINT = auto()    # !!! Can Symint[] be an arguement? there are symint[] in native_function.yaml
-
-        # GRAPH = auto()      # !!! Consider how to handle condition op, which need to pass in a graph for the branch
-        # GRAPHS = auto()      # !!! What about list of graphs? Do we need this?
-
-        # !!! Following types doesn't have a list version in native_function.yaml
-        SCALAR_TYPE = auto()
-        MEMORY_FORMAT = auto()
-        LAYOUT = auto()
-        DEVICE = auto()
-
-    # Declaration of which type the value field is storing
-    type: ArgumentType
-
-    value: Union[
-        TensorArgument,
-        # List[TensorArgument],
-        Scalar,
-        # List[Scalar],
-        bool,
-        List[bool],
-        int,
-        List[int],
-        float,
-        List[float],
-        str,
-        # List[str],
-        # SymInt,
-        # List[SymInt],
-        # Graph,
-        # List[Graph],
-        ScalarType,
-        MemoryFormat,
-        Layout,
-        Device,
-    ]
+    # !!! Following types doesn't have a list version in native_function.yaml
+    ScalarType,
+    MemoryFormat,
+    Layout,
+    Device,
+]
 
 # !!! How to model optional fields? Is it an operator schema annotation, or an argument type?
 #     Tensor?
@@ -263,10 +246,9 @@ class Node:
                                       # !!! Not all types in Argument are used as kwargs, e.g. TensorArgument should not be used as kwargs
                                       # Do we want to enforce this in the schema? i.e. only allow certain types to be used as kwargs?
 
-    outputs: List[TensorArgument]   # A list of Tensor Argument returned by this node
-                                    # !!! Notice: this assumes that a node can only return Tensor(s), and not other int/float/bool types...
+    outputs: List[ReturnArgument]   # A list of Argument returned by this node
 
-    metadata: NodeMetadata              # metadata fields for this node
+    metadata: NodeMetadata          # metadata fields for this node
 
 
 # Maps to fx.Graph
@@ -288,6 +270,10 @@ class Graph:
     # Tensor values that appear in the graph
     # They could be graph inputs, graph outputs, or intermediate values produced by nodes
     ivalues: List[IValue]
+
+    # SymInts that appear in the graph
+    # Key is the name/identifier of the SymInt, not the expression of the SymInt
+    symint_values: Dict[str, SymInt]
 
 
 # Maps to fx.GraphModule
