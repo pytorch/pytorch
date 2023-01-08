@@ -258,7 +258,7 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
   using pointer = value_type*;
   using const_pointer = const value_type*;
 
-  sherwood_v3_table() {}
+  sherwood_v3_table() = default;
   explicit sherwood_v3_table(
       size_type bucket_count,
       const ArgumentHash& hash = ArgumentHash(),
@@ -1948,7 +1948,7 @@ class flat_hash_map
   using mapped_type = V;
 
   using Table::Table;
-  flat_hash_map() {}
+  flat_hash_map() = default;
 
   inline V& operator[](const K& key) {
     return emplace(key, convertible_to_value()).first->second;
@@ -2061,7 +2061,7 @@ class flat_hash_set
   using key_type = T;
 
   using Table::Table;
-  flat_hash_set() {}
+  flat_hash_set() = default;
 
   template <typename... Args>
   std::pair<typename Table::iterator, bool> emplace(Args&&... args) {

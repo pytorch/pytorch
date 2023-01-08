@@ -76,8 +76,8 @@ struct __array_traits<_Tp, 0> final {
   }
 };
 
-[[noreturn]] inline void __throw_out_of_range(std::string msg) {
-  throw std::out_of_range(std::move(msg));
+[[noreturn]] inline void __throw_out_of_range(const std::string& msg) {
+  throw std::out_of_range(msg);
 }
 } // namespace detail
 
