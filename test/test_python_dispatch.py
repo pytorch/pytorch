@@ -947,9 +947,16 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 raise ErrorA(self.msg)
 
+        class B(TorchDispatchMode):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA(self.msg)
+
         with self.assertRaisesRegex(ErrorA, "layer2"):
             with A("layer1"):
-                with A("layer2"):
+                with B("layer2"):
                     torch.empty([])
 
     def test_make_subclass_with_modes(self):
@@ -1049,17 +1056,18 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             with PoliteMode():
                 a.abs()
 
-    def test_nesting_same_mode(self):
-        # If the pushed mode is the same instance as the current mode, we allow pushing an already active mode.
+    def test_nesting_across_instances(self):
+        # If the pushed mode is a different instance from current mode, we raise
+        modeA = LoggingTensorMode()
 
-        with capture_logs(is_mode=True) as logs:
-            with LoggingTensorMode() as reenabled:
-                with reenabled:
-                    torch.empty([])
-            self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
+        def foo():
+            with modeA, modeA:
+                torch.empty([])
 
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: foo(),
+            """Illegal attempt to push an already pushed mode onto the stack"""
+        )
 
     def test_error_using_class_method_on_mode(self):
         class A(TorchDispatchMode):
