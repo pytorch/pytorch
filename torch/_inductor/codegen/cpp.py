@@ -1180,6 +1180,7 @@ class CppVecKernelChecker(CppVecKernel):
                 current_node: torch.fx.Node = V.interpreter.current_node
 
                 assert len(self.ranges) == len(self.itervars)
+
                 def mod_indexing_rep(x, y, z):
                     if z.is_constant():
                         return x / y
