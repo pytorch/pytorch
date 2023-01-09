@@ -674,6 +674,7 @@ def export(
             graph_with_interpreter,
             decomposition_table=decomposition_table,
             tracing_mode=tracing_mode,
+            _allow_non_fake_inputs=True,
         )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
