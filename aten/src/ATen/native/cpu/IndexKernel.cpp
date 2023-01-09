@@ -550,9 +550,10 @@ void cpu_hflip_channels_last_uint8_ch3(at::TensorIterator& iter) {
     int64_t i = 0;
 
 #ifdef CPU_CAPABILITY_AVX2
+    constexpr auto vec_size = 256 / (8 * sizeof(uint8_t));
 
-    if (size0 == 3) {
-      constexpr auto vec_size = 256 / (8 * sizeof(uint8_t));
+    if (size0 == 3 && size > vec_size) {
+
       const auto proc_vec_size = 2 * ((vec_size / 2) / size0);
       const auto delta = vec_size - proc_vec_size * size0;
       __m256i data_vec, reversed_vec;
@@ -577,11 +578,9 @@ void cpu_hflip_channels_last_uint8_ch3(at::TensorIterator& iter) {
       );
 
       // shift output pointer by size0
-      if (size > proc_vec_size * size0) {
-        data[0] += size0 * stride;
-      }
+      data[0] += size0 * stride;
 
-      for (; i < size - proc_vec_size * size0; i += proc_vec_size * size0) {
+      for (; i < size - vec_size; i += proc_vec_size * size0) {
 
         // load 256-bits by two 128-bits parts
         auto a0 = _mm_loadu_si128((__m128i *) data[1]);
@@ -611,10 +610,7 @@ void cpu_hflip_channels_last_uint8_ch3(at::TensorIterator& iter) {
         }
 
       }
-
-      if (i > 0) {
-        data[0] -= size0 * stride;
-      }
+      data[0] -= size0 * stride;
     }
 
 #endif
@@ -704,7 +700,9 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       }
       // other dtypes (float16, bfloat16, complex) are handled by cpu_kernel_vec (see below)
     } else if (iter.has_contiguous_first_dim()) {
-      // Special case: channels last hflip on (N, 3, H, W) and dtype=kByte
+      // Special cases:
+      // a) channels last hflip on (N, 3, H, W) and dtype=kByte
+      // b) flip dim=-2 on (N, ..., M, 3) and dtype=kByte
       auto output_strides = iter.strides(0);
       if (iter.dtype() == at::kByte && output_strides[1] == -3 /* TODO: MORE CONDITIONS MISSING */) {
         return cpu_hflip_channels_last_uint8_ch3(iter);
