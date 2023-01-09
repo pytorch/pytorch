@@ -219,6 +219,7 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._free_event_queue = root_state._free_event_queue
         fsdp_state._handles_prefetched = root_state._handles_prefetched
         fsdp_state._needs_pre_backward_unshard = root_state._needs_pre_backward_unshard
+        fsdp_state._reduce_scatter_handles = root_state._reduce_scatter_handles
         for handle in fsdp_state._handles:
             handle.init_flat_param_attributes()
     for attr_name, attr_values in attr_name_to_values.items():
@@ -660,9 +661,15 @@ def _post_backward_hook(
 
         # Wait for all ops in the current stream (e.g. gradient
         # computation) to finish before reduce-scattering the gradient
-        state._streams["post_backward"].wait_stream(torch.cuda.current_stream())
+        # state._streams["post_backward"].wait_stream(torch.cuda.current_stream())
+        # Wait for any previous async reduce-scatters to ensure that their
+        # unsharded gradient memories are freed
+        for work in state._reduce_scatter_handles:
+            work.wait()
+        state._reduce_scatter_handles.clear()
 
-        with torch.cuda.stream(state._streams["post_backward"]):
+        # with torch.cuda.stream(state._streams["post_backward"]):
+        with torch.cuda.stream(torch.cuda.current_stream()):
             autograd_computed_grad = flat_param.grad.data
             if state._exec_order_data.is_first_iter:  # only check once
                 _check_comm_hook(
@@ -692,11 +699,10 @@ def _post_backward_hook(
                     else unsharded_grad
                 )
                 new_sharded_grad = torch.empty_like(chunks[0])  # padded
-                state._communication_hook(
-                    state._communication_hook_state,
-                    padded_unsharded_grad,
-                    new_sharded_grad,
+                work = torch.distributed.reduce_scatter_tensor(
+                    new_sharded_grad, padded_unsharded_grad, async_op=True
                 )
+                state._reduce_scatter_handles.append(work)
                 if handle._sharding_strategy in (
                     HandleShardingStrategy.HYBRID_SHARD,
                     HandleShardingStrategy._HYBRID_SHARD_ZERO2,
@@ -868,6 +874,9 @@ def _post_backward_final_callback(
     root_state._exec_order_data.next_iter()
 
     for fsdp_state in traversal_utils._get_fsdp_states(module):
+        # Wait on any remaining async reduce-scatters
+        for work in fsdp_state._reduce_scatter_handles:
+            work.wait()
         _catch_all_reshard(fsdp_state)
         _finalize_params(fsdp_state)
         fsdp_state._ran_pre_backward_hook.clear()

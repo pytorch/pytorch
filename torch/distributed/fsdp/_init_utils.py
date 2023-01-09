@@ -342,6 +342,7 @@ def _init_runtime_state(
     # Used to prevent running the pre-backward hook multiple times
     _ran_pre_backward_hook: Dict[_HandlesKey, bool] = {}
     state._ran_pre_backward_hook = _ran_pre_backward_hook
+    state._reduce_scatter_handles = []
     return state
 
 
