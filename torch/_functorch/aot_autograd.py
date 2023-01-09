@@ -579,7 +579,7 @@ def run_functionalized_fw_and_collect_metadata(
                 torch._sync(f_arg)
                 new_arg = torch._from_functional_tensor(f_arg)
             if arg is not new_arg:
-                if StorageWeakRef(arg._storage()) == StorageWeakRef(new_arg._storage()):
+                if StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(new_arg.untyped_storage()):
                     mutates_data = False
                     mutates_metadata = True
                 else:
@@ -608,7 +608,7 @@ def run_functionalized_fw_and_collect_metadata(
             [x for x in input_info if x.mutates_data or x.mutates_metadata]
         )
         inp_storage_refs = {
-            StorageWeakRef(inpt._storage()): idx
+            StorageWeakRef(inpt.untyped_storage()): idx
             for idx, inpt in enumerate(flat_f_args)
             if isinstance(inpt, torch.Tensor)
         }
@@ -627,9 +627,9 @@ def run_functionalized_fw_and_collect_metadata(
         for o in flat_f_outs:
             if (
                 isinstance(o, torch.Tensor)
-                and StorageWeakRef(o._storage()) in inp_storage_refs
+                and StorageWeakRef(o.untyped_storage()) in inp_storage_refs
             ):
-                base_idx = inp_storage_refs[StorageWeakRef(o._storage())]
+                base_idx = inp_storage_refs[StorageWeakRef(o.untyped_storage())]
                 is_input_tensor = id(o) in inp_tensor_ids
                 if is_input_tensor:
                     output_type = OutputType.is_input
@@ -1173,7 +1173,7 @@ def merge_view_inputs(
     other_args = []
     for i, inpt in enumerate(fwd_inputs):
         if isinstance(inpt, Tensor):
-            storage_ref = StorageWeakRef(inpt._storage())
+            storage_ref = StorageWeakRef(inpt.untyped_storage())
             storage_ref_to_idx[storage_ref].append(i)
         else:
             other_args.append(inpt)
@@ -1223,7 +1223,7 @@ def merge_view_inputs(
             # Case where none of the aliases have a ._base
             # we generate a synthetic base without gradients, and generate views off of it
             example_idx = aliased_input_indices[0]
-            synthetic_base = torch.Tensor(fwd_inputs[example_idx]._storage())
+            synthetic_base = torch.Tensor(fwd_inputs[example_idx].untyped_storage())
         else:
             # Case where all of the aliases require gradients, and have the same _base.
             synthetic_base = non_none_bases[0]
