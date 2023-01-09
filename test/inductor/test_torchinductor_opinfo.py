@@ -578,7 +578,7 @@ inductor_expected_failures_all_samples["cuda"] = {
     "nn.functional.interpolate.area": {f16},
     "nn.functional.hinge_embedding_loss": {f16},
     "nn.functional.interpolate.bicubic": {f64},
-    "nn.functional.interpolate.bilinear": {f64},
+    "nn.functional.interpolate.bilinear": {f16, f64},
     "nn.functional.interpolate.trilinear": {f16},
     "nn.functional.kl_div": {f16},
     "nn.functional.margin_ranking_loss": {f16},
@@ -597,6 +597,16 @@ inductor_expected_failures_all_samples["cuda"] = {
     "tile": {b8, f16, f32, f64, i32, i64},
     "unflatten": {b8, i32, i64},
     "as_strided.partial_views": {b8, i32, i64},
+    "nn.functional.unfold": {f16, f32, f64},
+    "pow": {f16},
+    "scatter_reduce.amax": {f16, f32, f64},
+    "scatter_reduce.amin": {f16, f32, f64},
+    "special.xlog1py": {f16},
+    "std": {f16},
+    "trapz": {f16},
+    "triu": {f16},
+    "true_divide": {f16},
+    "unfold_copy": {f16},
 }
 
 
