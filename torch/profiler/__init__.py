@@ -36,4 +36,4 @@ __all__ = [
 ]
 
 from . import itt
-_profile_using_dynolog()
+_profile_using_dynolog(override=False)

@@ -1,3 +1,4 @@
+import contextlib
 import gzip
 import json
 import os
@@ -21,6 +22,7 @@ from torch._C._profiler import (
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler import _memory_profiler
 from torch.optim.optimizer import register_optimizer_step_post_hook
+from torch.utils.hooks import RemovableHandle
 
 
 __all__ = [
@@ -55,16 +57,28 @@ def _optimizer_post_hook(optimizer, args, kwargs):
     KinetoStepTracker.increment_step("Optimizer")
 
 
-def _profile_using_dynolog(override: bool = False):
+@contextlib.contextmanager
+def _dynolog_handler_context():
+    global _dynolog_handle
+    if _dynolog_handle is None:
+        _dynolog_handle = True
+    yield
+    _dynolog_handle = None
+
+
+def _profile_using_dynolog(override: bool = False) -> Optional[RemovableHandle]:
     """
     To enable tracing via dynolog we register a global optimizer step post
     hook. Requires the 'KINETO_USE_DAEMON' environment variable to be set.
     """
     global _dynolog_handle
-    if _dynolog_handle is None and (os.environ.get("KINETO_USE_DAEMON", None) is not None or override is True):
-        _dynolog_handle = True
-        _ = register_optimizer_step_post_hook(_optimizer_post_hook)
-        logger.info("Registered optimizer step post hook")
+    hook_handle: Optional[RemovableHandle] = None
+    with _dynolog_handler_context():
+        if _dynolog_handle is True and (os.environ.get("KINETO_USE_DAEMON", None) is not None or override is True):
+            hook_handle = register_optimizer_step_post_hook(_optimizer_post_hook)
+            _dynolog_handle = False
+            logger.info("Registered optimizer step post hook")
+    return hook_handle
 
 
 class _KinetoProfile(object):
