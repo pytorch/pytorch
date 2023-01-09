@@ -494,7 +494,7 @@ inductor_expected_failures_all_samples["cpu"] = {
     "pow": {f16},
     "norm": {f16},
     "pca_lowrank": {f32, f64},
-    "svd_lowrank": {f32, f64}
+    "svd_lowrank": {f32, f64},
 }
 inductor_expected_failures_all_samples["cuda"] = {
     "__rpow__": {f16},
