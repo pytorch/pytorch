@@ -109,7 +109,7 @@ CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     "twins_pcpvt_base",  # timeout
 ]
 
-CI_SKIP_INDCUTOR_INFERENCE = [
+CI_SKIP_INDUCTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
     "DALLE2_pytorch",
@@ -134,7 +134,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
 ]
 
 CI_SKIP_INDUCTOR_TRAINING = [
-    *CI_SKIP_INDCUTOR_INFERENCE,
+    *CI_SKIP_INDUCTOR_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
@@ -1813,7 +1813,7 @@ def run(runner, args, original_dir=None):
             args.exclude = (
                 CI_SKIP_INDUCTOR_TRAINING
                 if args.training
-                else CI_SKIP_INDCUTOR_INFERENCE
+                else CI_SKIP_INDUCTOR_INFERENCE
             )
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
