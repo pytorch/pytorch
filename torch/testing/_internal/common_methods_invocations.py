@@ -16072,13 +16072,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # MPS has some mild accuracy issues for float16. We divide the tolerances by 10
-               DecorateInfo(
-                   toleranceOverride({torch.float16: tol(atol=1e-4, rtol=0.01)}),
-                   'TestConsistency',
-                   'test_output_match',
-
-               ),
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
                DecorateInfo(
                    unittest.skip("Skipped!"),
@@ -16589,11 +16582,6 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.float16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=(torch.float16,)),
-            # TODO: Meta not implemented for out overloads
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
         ),
     ),
     ReductionOpInfo(
