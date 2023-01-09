@@ -138,7 +138,7 @@ static inline void checkUnpackSlice(
     Py_ssize_t* start_ptr,
     Py_ssize_t* stop_ptr,
     Py_ssize_t* step_ptr) {
-  if (!THPUtils_unpackSlice(index, start_ptr, stop_ptr, step_ptr)) {
+  if (PySlice_Unpack(index, start_ptr, stop_ptr, step_ptr) != 0) {
     throw python_error();
   }
 }

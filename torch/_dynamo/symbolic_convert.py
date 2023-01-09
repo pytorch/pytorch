@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 from unittest.mock import patch
 
 import torch
+from torch._guards import Checkpointable
 
 from . import (
     allowed_functions,
@@ -369,7 +370,7 @@ def break_graph_if_unsupported(*, push):
     return decorator
 
 
-class InstructionTranslatorBase(object):
+class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
     symbolic_globals: Dict[str, VariableTracker]
@@ -1576,10 +1577,7 @@ class InstructionTranslatorBase(object):
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
-        self._fake_mode = torch._subclasses.FakeTensorMode(
-            throw_on_data_dependent_ops=True,
-            shape_env=output.shape_env,
-        )
+        self._fake_mode = output.tracing_context.fake_mode
 
         self.checkpoint = None
         self.random_calls = []
