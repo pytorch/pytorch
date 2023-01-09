@@ -22,6 +22,10 @@ const api::ShaderInfo& get_shader_info(const std::string& shader_name);
  */
 const api::ShaderInfo& look_up_shader_info(const std::string& op_name);
 
+void set_registry_override(
+    const std::string& op_name,
+    const std::string& shader_name);
+
 } // namespace vulkan
 } // namespace native
 } // namespace at
