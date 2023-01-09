@@ -106,7 +106,7 @@ class Adam(Optimizer):
             Passing True can impair ungraphed performance, so if you don't intend to
             graph capture this instance, leave it False (default: False)
         differentiable (bool,optional): use adaptative calculation of the derivative of 
-            learning rate (default: False)
+            learning rate, setting to true can affect performance (default: False) 
         fused (bool, optional): whether the fused implementation (CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. Since the fused implementation is usually significantly faster than
