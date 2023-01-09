@@ -12,7 +12,7 @@ import textwrap
 import yaml
 from collections import OrderedDict
 from torchgen.code_template import CodeTemplate
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Optional
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
