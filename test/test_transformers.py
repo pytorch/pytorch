@@ -979,13 +979,18 @@ class TestTransformers(NNTestCase):
             key = key.contiguous()
             value = value.contiguous()
 
-        with sdp_kernel(enable_math=False):
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
             actual = torch.nn.functional._scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
-        with sdp_kernel(enable_flash=False):
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
             math_ref = torch.nn.functional._scaled_dot_product_attention(
                 query.contiguous(), key.contiguous(), value.contiguous(),
                 attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+
+        # Since we are setting need weights to false lets check that the returned values are of size 0
+        if type == "dense":
+            assert actual[1].numel() == 0
+            assert math_ref[1].numel() == 0
 
         self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
 
@@ -1012,10 +1017,10 @@ class TestTransformers(NNTestCase):
             key = key.contiguous()
             value = value.contiguous()
 
-        with sdp_kernel(enable_math=False):
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
             actual = torch.nn.functional._scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
-        with sdp_kernel(enable_flash=False):
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
             math_ref = torch.nn.functional._scaled_dot_product_attention(
                 query.contiguous(), key.contiguous(), value.contiguous(),
                 attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
@@ -1329,6 +1334,34 @@ class TestTransformers(NNTestCase):
             with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
                 _ = torch.nn.functional._scaled_dot_product_attention(
                     q, k, v, None, 0.0, False, False)
+
+    @parametrize("device", device_list)
+    @slowTest
+    def test_train_with_is_causal(self, device):
+        iters = 100
+        layer = nn.TransformerEncoderLayer(
+            d_model=2,
+            dim_feedforward=4,
+            nhead=2,
+            batch_first=True,
+            activation="gelu",
+            dropout=0,
+        )
+        criterion = nn.MSELoss()
+        encoder = nn.TransformerEncoder(layer, 2).to(device)
+        optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
+        encoder.train()
+        for i in range(iters):
+            encoder.train()
+            optimizer.zero_grad()
+            inputs = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
+
+            outputs = encoder(inputs, is_causal=True)
+
+            loss = criterion(outputs[:, 0:2, :], inputs[:, 0:2, :])
+            loss.backward()
+            optimizer.step()
+
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
