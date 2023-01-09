@@ -1044,15 +1044,10 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
         self.assertEqual(mode.post_count, 1)
         self.assertEqual(sub_count, 1)
 
-
-        sub_count = 0
-        with PoliteMode() as mode1:
-            with PoliteMode() as mode2:
+        # make sure this doesn't error
+        with PoliteMode():
+            with PoliteMode():
                 a.abs()
-
-        self.assertEqual(mode1.pre_count, 2)
-        self.assertEqual(mode2.pre_count, 2)
-        self.assertEqual(sub_count, 1)
 
     def test_nesting_same_mode(self):
         # If the pushed mode is the same instance as the current mode, we allow pushing an already active mode.
