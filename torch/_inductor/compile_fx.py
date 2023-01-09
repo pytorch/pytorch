@@ -30,7 +30,6 @@ ALIGNMENT = 16
 
 aot_autograd = dynamo_optimizations.training.aot_autograd
 normalize_ir = dynamo_optimizations.normalize.normalize_ir
-is_aot_autograd_safe_to_run = dynamo_optimizations.training.is_aot_autograd_safe_to_run
 count_calls = dynamo_utils.count_calls
 
 
@@ -350,10 +349,6 @@ def compile_fx(
     inner_compile=compile_fx_inner,
 ):
     """Main entrypoint to a compile given FX graph"""
-
-    if not is_aot_autograd_safe_to_run(model_, example_inputs_):
-        log.warning("Aot Autograd is not safe to run, so falling back to eager")
-        return model_
 
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
