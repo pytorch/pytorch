@@ -36,9 +36,26 @@ def _change_class(module, params_and_buffers) -> None:
     module._orig_class = cls
 
 
-def _create_tied_weights_map(module, params_and_buffers):
-    # creates a weight map of {tied_name: name_given_by_user} for all weights where one of their tied weights is passed
-    #
+def _create_tied_weights_map(module: 'torch.nn.Module', params_and_buffers: Dict[str, Tensor]) -> Dict[str, str]:
+    """
+    _create_tied_weights_map(module: Module, params_and_buffers: Dict[str, Tensor]) -> Dict[str, str]
+
+    Creates a weight map of {tied_name: name_given_by_user} for all weights where one of their tied weights is passed
+
+    ex: Foo() has self.foo and self.tied_foo, which are tied. If a user passed {'foo': ...} as the reparamaterization,
+        this would return {'tied_foo': 'foo'}. Similarly if a user passed {'tied_foo': ...}, this returns
+        {'tied_foo': 'foo'}.
+
+    ex: If there aren't any tied weights and the user passed values for every parameter and buffer, this will return a
+        map where every name maps to an empty set: {'l1.weight': set(), 'l1.bias': set(), ...}
+
+    ex: The map only contains values that a user is reparamaterizing. For example, if module = nn.Linear(...) and the
+        user only passed a new value for 'bias', this looks returns: {'bias': set()}
+
+    This is useful because we will start by reparamaterizing all the keys of params_and_buffers, then all the key from
+    this returned dictionary.
+    """
+
     # The basic algorithm looks like:
     #   - index all weights by their original tensor value to find tied weights
     #     - when we encounter a weight not used by the user, we save it in a set (second element in the tuple)
@@ -50,31 +67,40 @@ def _create_tied_weights_map(module, params_and_buffers):
     names = params_and_buffers.keys()
     weight_to_name_and_tied_names: Dict[torch.Tensor, Tuple[Optional[str], Set[str]]] = {}
 
-    def add_to_name_map(name, t):
-        if t in weight_to_name_and_tied_names:
-            first_seen_name = weight_to_name_and_tied_names[t][0]
-            if name in names and first_seen_name and params_and_buffers[name] is not params_and_buffers[first_seen_name]:
-                raise ValueError(f"functional_call got values for both {name} and {first_seen_name}, which are tied.")
-            elif name in names:
-                weight_to_name_and_tied_names[t] = (name, weight_to_name_and_tied_names[t][1])
-            else:
-                weight_to_name_and_tied_names[t][1].add(name)
+    # create a map keyed by tensor value so that tied weights get mapped to the same key. The value is the interesting
+    # part at the end it's (used_name, (tied_names)).
+    # For example, in the first example where there's tied weights self.foo and self.tied_foo and the user passes a
+    # value for self.foo, this will return {torch.Tensor(...): ('foo', set('tied_foo'))}
+    def add_to_name_map(n: str, t: torch.Tensor):
+        # if the tensor hasn't been seen before, add it to the map
+        if t not in weight_to_name_and_tied_names:
+            weight_to_name_and_tied_names[t] = (n, set()) if n in names else (None, {n})
+            return
+
+        # check that the user didn't pass two different tensors for the same tied weight
+        first_seen_name = weight_to_name_and_tied_names[t][0]
+        if n in names and first_seen_name and params_and_buffers[n] is not params_and_buffers[first_seen_name]:
+            raise ValueError(f"functional_call got values for both {n} and {first_seen_name}, which are tied.")
+
+        if n in names:
+            weight_to_name_and_tied_names[t] = (n, weight_to_name_and_tied_names[t][1])
         else:
-            weight_to_name_and_tied_names[t] = (name, set()) if name in names else (None, {name})
+            weight_to_name_and_tied_names[t][1].add(n)
 
-    for name, t in module.named_parameters(remove_duplicate=False):
-        add_to_name_map(name, t)
+    tensor: Tensor
+    for name, tensor in module.named_parameters(remove_duplicate=False):
+        add_to_name_map(name, tensor)
 
-    for name, t in module.named_buffers(remove_duplicate=False):
-        add_to_name_map(name, t)
+    for name, tensor in module.named_buffers(remove_duplicate=False):
+        add_to_name_map(name, tensor)
 
     # make {tied_name: name_given_by_user} from pairs of (name_given_by_user, set(all_tied_names))
     tied_weights_to_given_name = {}
-    for name, tied_names in weight_to_name_and_tied_names.values():
-        if name is None:  # no mapping was passed for this tensor, use original tensor
+    for name_given_by_user, tied_names in weight_to_name_and_tied_names.values():
+        if name_given_by_user is None:  # no mapping was passed for this tensor, use original tensor
             continue
         for tied_name in tied_names:
-            tied_weights_to_given_name[tied_name] = name
+            tied_weights_to_given_name[tied_name] = name_given_by_user
     return tied_weights_to_given_name
 
 
@@ -140,7 +166,8 @@ def functional_call(
     parameters_and_buffers: Dict[str, Tensor],
     args: Union[Any, Tuple],
     kwargs: Dict[str, Any] = None,
-    tie_weights: bool = False,
+    *,
+    tie_weights: bool = True,
 ):
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.
@@ -164,12 +191,31 @@ def functional_call(
             >>> print(mod.foo)  # tensor(0.)
             >>> print(a['foo'])  # tensor(1.)
 
+    .. note:: If the module has tied weights, whether or not the reparameterization respects the tying is determined
+        by the tie_weights flag.
+
+        Example::
+
+            >>> a = {'foo': torch.zeros(())}
+            >>> # xdoctest: +SKIP
+            >>> mod = Foo()  # has both self.foo and self.foo_tied which are tied. Returns x + self.foo + self.foo_tied
+            >>> print(mod.foo)  # tensor(1.)
+            >>> mod(torch.zeros(()))  # tensor(2.)
+            >>> functional_call(mod, a, torch.zeros(()))  # tensor(0.) since it will change self.foo_tied too
+            >>> functional_call(mod, a, torch.zeros(()), tie_weights=False)  # tensor(1.)--self.foo_tied is not updated
+            >>> new_a = {'foo', torch.zeros(()), 'foo_tied': torch.zeros(())}
+            >>> functional_call(mod, new_a, torch.zeros()) # tensor(0.)
+
     Args:
         module (torch.nn.Module): the module to call
         parameters_and_buffers (dict of str and Tensor): the parameters that will be used in
             the module call.
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
+        tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
+            tied in the reparamaterized version. Therefore, if True and different values are passed for the tied
+            paramaters and buffers, it will error. If False, it will not respect the originally tied parameters and
+            buffes unless the values passed for both weights are the same.
 
     Returns:
         Any: the result of calling ``module``.

@@ -13,7 +13,6 @@ from inspect import signature
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
-import numpy
 import sympy
 from sympy import Expr, Integer
 
@@ -357,13 +356,12 @@ class Loops(IRNode):
 
     @cache_on_self
     def inner_fn_str(self):
-        try:
-            with V.set_ops_handler(V.MockHandler()), patch.object(
-                FlexibleLayout, "allow_indexing", True
-            ):
-                return str(self.inner_fn(self._index(self.ranges)))
-        except Exception as e:
-            return f"inner_fn(): {e}"
+        formatter = V.KernelFormatterHandler(V.MockHandler())
+        with V.set_ops_handler(formatter), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = self.inner_fn(self._index(self.ranges))
+            return formatter.getvalue(result)
 
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
@@ -479,18 +477,15 @@ class Reduction(Loops):
 
     @cache_on_self
     def inner_fn_str(self):
-        try:
-            with V.set_ops_handler(V.MockHandler()), patch.object(
-                FlexibleLayout, "allow_indexing", True
-            ):
-                return str(
-                    self.inner_fn(
-                        self._index(self.ranges),
-                        self._index(self.reduction_ranges, "r"),
-                    )
-                )
-        except Exception as e:
-            return f"inner_fn(): {e}"
+        formatter = V.KernelFormatterHandler(V.MockHandler())
+        with V.set_ops_handler(formatter), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = self.inner_fn(
+                self._index(self.ranges),
+                self._index(self.reduction_ranges, "r"),
+            )
+            return formatter.getvalue(result)
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -1180,7 +1175,8 @@ class PermuteView(BaseView):
 
     @classmethod
     def create(cls, x, dims):
-        assert set(cls._map_neg_dims(dims)) == set(range(len(dims)))
+        dims = cls._map_neg_dims(dims)
+        assert set(dims) == set(range(len(dims)))
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
@@ -1635,6 +1631,17 @@ class Layout(IRNode):
                 return False
         return True
 
+    def is_channels_last_contiguous(self):
+        ndim = len(self.size)
+        if ndim not in [4, 5]:
+            return False
+        for left, right, size in zip(
+            self.stride, make_channels_last_strides_for(self.size), self.size
+        ):
+            if size != 1 and left != right:
+                return False
+        return True
+
     def is_transposed(self):
         for left, right, size in zip(
             self.stride,
@@ -2073,10 +2080,9 @@ class ComputedBuffer(Buffer):
             ]
 
             if reads:
-                stride_lengths = numpy.array(
-                    [V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads],
-                    dtype=numpy.int64,
-                )
+                stride_lengths = [
+                    V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads
+                ]
                 from .scheduler import pick_loop_order
 
                 return pick_loop_order(stride_lengths, self.get_size(), priority_idx)
@@ -2203,14 +2209,12 @@ class ComputedBuffer(Buffer):
             priority_idx = []
 
         try:
-            strides = numpy.array(
-                [
-                    V.graph.sizevars.stride_hints(expr, index_vars)
-                    for expr in memory_addrs
-                ],
-                dtype=numpy.int64,
+            strides = [
+                V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs
+            ]
+            assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
+                index_vars
             )
-            assert strides.shape == (len(memory_addrs), len(index_vars))
             # consider both layout(strides) and reordering(reordering_reindex)
             if reordering_reindex is not None:
                 for i in range(len(memory_addrs)):
@@ -2311,13 +2315,27 @@ class ConcatKernel(NopKernel):
                     )
             offsets_end.append(new_size[dim])
 
+        output_stride = FlexibleLayout.contiguous_strides(new_size)
+        # If any of the inputs is in CL format, use CL format for the output
+        for i in range(len(inputs)):
+            x = inputs[i]
+            if is_storage_and_layout(x):
+                layout = x.get_layout()
+                if (
+                    isinstance(layout, FixedLayout)
+                    and layout.is_channels_last_contiguous()
+                ):
+                    # use CL stride for the output
+                    output_stride = make_channels_last_strides_for(new_size)
+                    break
+
         kernel = ConcatKernel(
             name=None,
             layout=FixedLayout(
                 device=device,
                 dtype=dtype,
                 size=new_size,
-                stride=FlexibleLayout.contiguous_strides(new_size),
+                stride=output_stride,
             ),
             inputs=[],
         )
@@ -3886,7 +3904,7 @@ class StorageBox(MutableBox):
             """
             heavy_ops = ["exp"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
-            return any([fn_str.startswith(op + "(") for op in heavy_ops])
+            return any([(op + "(") in fn_str for op in heavy_ops])
 
         if (
             users > 1
@@ -3918,6 +3936,21 @@ class StorageBox(MutableBox):
                 data=data,
             ).get_read_writes()
         return len(read_writes.reads)
+
+
+class InterpreterShim(torch.fx.Interpreter):
+    def __init__(self, graph, submodules):
+        """
+        We don't call super() here to avoid constructing a
+        GraphModule which is very expensive (it does codegen).
+        """
+        self.module = self
+        self.graph = graph
+        self.submodules = submodules
+        self.garbage_collect_values = False
+        self.env = {}
+        self.fetch_attr = submodules.__getitem__
+        self.name = V.get_ops_handler().name
 
 
 class LoopBody:
@@ -3977,7 +4010,7 @@ class LoopBody:
     def add_indirect(self):
         name = f"indirect{len(self.indirect_vars)}"
         var = sympy_symbol(name)
-        self.indirect_vars.append([var])
+        self.indirect_vars.append(var)
         return var
 
     def replace_indirect(self, old, new):
@@ -4023,6 +4056,8 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):
+            self.name = "CaptureIndexing"
+
             def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, "reads", name)
                 return self._inner.load(name, index)
@@ -4093,20 +4128,7 @@ class LoopBodyBlock:
         graph = self.graph
         submodules = self.body.submodules
 
-        class InterpreterShim(torch.fx.Interpreter):
-            def __init__(self):
-                """
-                We don't call super() here to avoid constructing a
-                GraphModule which is very expensive (it does codegen).
-                """
-                self.module = self
-                self.graph = graph
-                self.submodules = submodules
-                self.garbage_collect_values = False
-                self.env = {}
-                self.fetch_attr = submodules.__getitem__
-
-        return InterpreterShim().run(V.get_ops_handler())
+        return InterpreterShim(graph, submodules).run(V.get_ops_handler())
 
     def debug_str(self, name="block"):
         code = torch.fx.GraphModule(self.body.submodules, self.graph).code

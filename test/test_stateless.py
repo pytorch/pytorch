@@ -9,7 +9,8 @@ import torch
 
 import torch.nn.utils.stateless as stateless
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, parametrize, instantiate_parametrized_tests, \
+    subtest
 
 
 class MockModule(torch.nn.Module):
@@ -34,7 +35,8 @@ class MockTiedModule(torch.nn.Module):
 
 
 class TestStatelessFunctionalAPI(TestCase):
-    def _run_call_with_mock_module(self, module, device='cpu', prefix=''):
+    def _run_call_with_mock_module(self, module, functional_call, device='cpu', prefix=''):
+
         x = torch.rand((1, 1)).to(device)
         weight = torch.tensor([[1.0]], device=device)
         bias = torch.tensor([0.0], device=device)
@@ -55,7 +57,7 @@ class TestStatelessFunctionalAPI(TestCase):
         # the parameters represent an identity function contrary to the
         # existing params in module. So here we expect the result to be the
         # same as the input if the weight swapping went well.
-        res = stateless.functional_call(module, parameters, x)
+        res = functional_call(module, parameters, x)
         self.assertEqual(x, res)
         # check that the weight remain unmodified
         cur_weight = to_check.l1.weight
@@ -63,35 +65,51 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertEqual(cur_weight, prev_weight)
         self.assertEqual(cur_buffer, prev_buffer)
 
-    def test_functional_call(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_functional_call(self, functional_call):
         module = MockModule()
-        self._run_call_with_mock_module(module)
+        self._run_call_with_mock_module(module, functional_call)
 
-    def test_functional_call_with_jit(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_functional_call_with_jit(self, functional_call):
         module = MockModule()
         jit_module = torch.jit.script(module)
         with self.assertRaisesRegex(
             RuntimeError,
             r'used with Jitted modules'
         ):
-            self._run_call_with_mock_module(jit_module)
+            self._run_call_with_mock_module(jit_module, functional_call)
         x = torch.rand((1, 1))
         traced_module = torch.jit.trace(module, x)
         with self.assertRaisesRegex(
             RuntimeError,
             r'used with Jitted modules'
         ):
-            self._run_call_with_mock_module(traced_module)
+            self._run_call_with_mock_module(traced_module, functional_call)
 
     @unittest.skipIf(not TEST_MULTIGPU, 'multi-GPU not supported')
     @unittest.skip("This doesn't work right now")
-    def test_functional_call_with_data_parallel(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_functional_call_with_data_parallel(self, functional_call):
         module = MockModule()
         module.cuda()
         dp_module = torch.nn.DataParallel(module, [0, 1])
-        self._run_call_with_mock_module(dp_module, device='cuda', prefix='module')
+        self._run_call_with_mock_module(dp_module, functional_call, device='cuda', prefix='module')
 
-    def test_functional_call_with_gradient(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_functional_call_with_gradient(self, functional_call):
         module = MockModule()
         x = torch.rand((1, 1))
         weight = torch.tensor([[1.0]], requires_grad=True)
@@ -100,7 +118,7 @@ class TestStatelessFunctionalAPI(TestCase):
         parameters = {'l1.weight': weight,
                       'l1.bias': bias,
                       'buffer': buffer}
-        res = stateless.functional_call(module, parameters, x)
+        res = functional_call(module, parameters, x)
         # Check that a backward step calculates the gradient of the supplied parameters
         res.backward()
         self.assertIsNotNone(weight.grad)
@@ -111,7 +129,11 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertIsNone(module.l1.bias.grad)
         self.assertIsNone(module.buffer.grad)
 
-    def test_functional_batch_norm(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_functional_batch_norm(self, functional_call):
         module = torch.nn.BatchNorm1d(10)
         module.train()  # Allow stats update
         # lets replace the running_mean buffer and check if its correctly updated
@@ -119,16 +141,20 @@ class TestStatelessFunctionalAPI(TestCase):
         rm = torch.zeros(10)
         parameters = {'running_mean': rm}
         prev_rm = module.running_mean.clone()
-        res = stateless.functional_call(module, parameters, x)
+        res = functional_call(module, parameters, x)
         cur_rm = module.running_mean
         self.assertEqual(cur_rm, prev_rm)
         self.assertEqual(rm, torch.full((10,), 12.8))
         # Now run functional without reparametrization and check that the module has
         # been updated
-        res = stateless.functional_call(module, {}, x)
+        res = functional_call(module, {}, x)
         self.assertEqual(module.running_mean, torch.full((10,), 12.8))
 
-    def test_circular_references(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_circular_references(self, functional_call):
         module = MockModule()
         # Add a circular reference
         module.l1.m = module
@@ -141,7 +167,7 @@ class TestStatelessFunctionalAPI(TestCase):
                       'l1.m.buffer': buffer}
         prev_weight = module.l1.weight.clone()
         prev_buffer = module.buffer.clone()
-        res = stateless.functional_call(module, parameters, x, tie_weights=False)
+        res = functional_call(module, parameters, x, tie_weights=False)
         self.assertEqual(x, res)
         # check that the weights remain unmodified and were correctly accesed
         cur_weight = module.l1.weight
@@ -149,7 +175,11 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertEqual(cur_weight, prev_weight)
         self.assertEqual(cur_buffer, prev_buffer)
 
-    def test_reparametrized_module_change_parametrization_original(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_reparametrized_module_change_parametrization_original(self, functional_call):
         module = MockModule()
         torch.nn.utils.parametrizations.spectral_norm(module.l1)
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
@@ -161,13 +191,17 @@ class TestStatelessFunctionalAPI(TestCase):
         parameters = {'l1.parametrizations.weight.original': torch.nn.Parameter(torch.tensor([[1.0]])),
                       'l1.bias': torch.tensor([0.0]),
                       'buffer': torch.tensor([0.0])}
-        res = stateless.functional_call(module, parameters, x)
+        res = functional_call(module, parameters, x)
         self.assertEqual(x, res)
         # verify that the spectral normalization is still applied
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
         self.assertEqual(orig_sn_weight, module.l1.weight)
 
-    def test_reparamertize_module_fail_reset_to_original(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_reparamertize_module_fail_reset_to_original(self, functional_call):
         module = MockModule()
         torch.nn.utils.parametrizations.spectral_norm(module.l1)
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
@@ -180,14 +214,26 @@ class TestStatelessFunctionalAPI(TestCase):
                       'buffer': torch.tensor([0.0])}
         with self.assertRaisesRegex(RuntimeError, "shapes cannot be multiplied"):
             x = torch.rand((4, 5))  # to work, it should be of size (1, 1)
-            stateless.functional_call(module, parameters, x)  # this call will fail because x is the wrong size
+            functional_call(module, parameters, x)  # this call will fail because x is the wrong size
 
         # verify that the spectral normalization is still applied
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
         self.assertEqual(orig_sn_weight, module.l1.weight)
 
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_tied_weights_warns(self, functional_call):
+        module = MockModule()
+        module.tied_bias = module.l1.bias
+        module.register_buffer("tied_buffer", module.buffer)
 
-    def test_reparamertize_tie_weights(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_reparamertize_tie_weights(self, functional_call):
         module = MockTiedModule()
         weight = torch.tensor([[2.0]],)
         bias = torch.tensor([5.0])
@@ -197,10 +243,15 @@ class TestStatelessFunctionalAPI(TestCase):
                       'l1.bias': bias,
                       'buffer': buffer}
         x = torch.randn(1, 1)
-        out = stateless.functional_call(module, parameters, x, tie_weights=True)
+        out = functional_call(module, parameters, x, tie_weights=True)
         self.assertEqual(out, x * weight + bias + bias + buffer + buffer)
 
-    def test_reparamertize_tie_some_weights(self):
+
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_reparamertize_tie_some_weights(self, functional_call):
         module = MockTiedModule()
         weight = torch.tensor([[2.0]],)
         buffer = torch.tensor([3.0])
@@ -211,7 +262,11 @@ class TestStatelessFunctionalAPI(TestCase):
         out = stateless.functional_call(module, parameters, x, tie_weights=True)
         self.assertEqual(out, x * 2. + module.l1.bias + module.tied_bias + buffer + buffer)
 
-    def test_tied_weights_errors(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_tied_weights_errors(self, functional_call):
         module = MockTiedModule()
         weight = torch.tensor([[1.0]],)
         bias = torch.tensor([0.0])
@@ -221,26 +276,26 @@ class TestStatelessFunctionalAPI(TestCase):
                       'l1.bias': bias,
                       'buffer': buffer}
         x = torch.randn(1, 1)
-        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=True))
+        self.assertNotWarn(lambda: functional_call(module, parameters, x, tie_weights=True))
 
         # if tied values are the same tensors, shouldn't warn
         parameters['tied_bias'] = bias
         parameters['tied_buffer'] = buffer
-        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=True))
+        self.assertNotWarn(lambda: functional_call(module, parameters, x, tie_weights=True))
         del parameters['tied_bias']
         del parameters['tied_buffer']
 
         with self.assertRaisesRegex(ValueError, "functional_call got values for both (l1.bias|tied_bias)"):
             parameters['tied_bias'] = torch.tensor([5.0])
-            stateless.functional_call(module, parameters, x, tie_weights=True)
+            functional_call(module, parameters, x, tie_weights=True)
         del parameters['tied_bias']
 
         with self.assertRaisesRegex(ValueError, "functional_call got values for both (buffer|tied_buffer)"):
             parameters['tied_buffer'] = torch.tensor([5.0])
-            stateless.functional_call(module, parameters, x, tie_weights=True)
+            functional_call(module, parameters, x, tie_weights=True)
 
 
-    def test_tied_weights_no_error_without_kwarg(self):
+    def test_tied_weights_no_error_without_flag(self):
         module = MockTiedModule()
         weight = torch.tensor([[1.0]],)
         bias = torch.tensor([0.0])
@@ -257,8 +312,11 @@ class TestStatelessFunctionalAPI(TestCase):
         parameters['tied_buffer'] = torch.tensor([5.0])
         self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=False))
 
-
-    def test_setattr(self):
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_setattr(self, functional_call):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -270,9 +328,61 @@ class TestStatelessFunctionalAPI(TestCase):
 
         a = {'foo': torch.zeros(())}
         mod = Foo()
-        stateless.functional_call(mod, a, torch.ones(()))
+        functional_call(mod, a, torch.ones(()))
         self.assertEqual(mod.foo, torch.zeros(()))
         self.assertEqual(a['foo'], torch.ones(()))
+
+    @parametrize("functional_call", [
+        subtest(torch.func.functional_call, "torch_func"),
+        subtest(stateless.functional_call, "stateless")
+    ])
+    def test_functional_call_with_kwargs(self, functional_call):
+        class Foo(torch.nn.Module):
+            def __init__(self, x):
+                super().__init__()
+                self.x = x
+
+            def forward(self, inp, *, other_inp):
+                return inp * self.x + other_inp
+
+        a = {'x': torch.zeros(2, 3)}
+        mod = Foo(torch.randn(2, 3))
+        inp, other_inp = torch.randn(2, 3), torch.randn(2, 3)
+        with self.assertRaisesRegex(TypeError, "missing 1 required keyword-only argument: 'other_inp'"):
+            functional_call(mod, a, inp)
+        res = functional_call(mod, a, inp, {'other_inp': other_inp})
+        self.assertEqual(res, other_inp)
+        res_1 = functional_call(mod, a, (), {'inp': inp, 'other_inp': other_inp})
+        self.assertEqual(res, res_1)
+
+
+    def test_functional_call_tuple_dicts(self):
+        mod = MockModule()
+        x = torch.rand((1, 1))
+        parameters = {k: torch.ones_like(v) for k, v in mod.named_parameters()}
+        buffers = {k: torch.zeros_like(v) for k, v in mod.named_buffers()}
+
+        # two dictionaries
+        res = torch.func.functional_call(mod, (parameters, buffers), x)
+        self.assertEqual(res, x + 1)
+
+        # no dictionaries
+        res = torch.func.functional_call(mod, (), x)
+        self.assertEqual(res, mod(x))
+
+        # three dictonaries
+        a = ({'l1.weight': torch.ones(1, 1)}, {'l1.bias': torch.ones(1)}, {'buffer': torch.zeros(1)})
+        res = torch.func.functional_call(mod, a, x)
+        self.assertEqual(res, x + 1)
+
+
+    def test_functional_call_multiple_dicts_error(self):
+        mod = MockModule()
+        x = torch.rand((1, 1))
+        parameters = {'l1.weight': torch.zeros((1, 1)), 'l1.bias': torch.zeros((1, 1))}
+        repeated_parameters = {'l1.weight': torch.ones((1, 1))}
+        with self.assertRaisesRegex(ValueError, "l1.weight appeared in multiple dictionaries"):
+            torch.func.functional_call(mod, (parameters, repeated_parameters), x)
 
 
 class TestStatelessDeprecation(TestCase):
@@ -312,6 +422,11 @@ import torch
                 cwd=os.path.dirname(os.path.realpath(__file__)),)
         except subprocess.CalledProcessError as e:
             self.assertFalse(e.returncode, "Import failed while running python in optimized mode")
+
+
+instantiate_parametrized_tests(
+    TestStatelessFunctionalAPI,
+)
 
 if __name__ == '__main__':
     run_tests()
