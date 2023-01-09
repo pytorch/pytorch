@@ -635,6 +635,10 @@ class FakeTensor(torch.Tensor):
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
         assert fake_mode is not None
+
+        # if we've hit this instead of the mode, then a higher pri mode must
+        # have returned NotImplemented. Redispatching will cause an infinite
+        # loop but one of the other args may be a supported subclass
         if hasattr(fake_mode, "tracking") and fake_mode.tracking.on_stack:
             return NotImplemented
 
@@ -1162,5 +1166,5 @@ class FakeCopyMode(TorchFunctionMode):
             memo[id(tensor)] = out
             return out
         else:
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)
