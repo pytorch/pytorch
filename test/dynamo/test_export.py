@@ -1495,7 +1495,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(has_sym_size)
 
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
