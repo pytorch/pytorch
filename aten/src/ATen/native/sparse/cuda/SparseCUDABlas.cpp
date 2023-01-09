@@ -163,9 +163,9 @@ void _csrmm2(
     descA, descB,
     beta,
     descC,
-    cusparse_value_type,  /* data type in which the computation is executed */
-    CUSPARSE_SPMM_CSR_ALG1,  /* default computing algorithm for CSR sparse matrix format */
-    &bufferSize           /* output */
+    cusparse_value_type,      /* data type in which the computation is executed */
+    CUSPARSE_SPMM_CSR_ALG1,   /* default computing algorithm for CSR sparse matrix format */
+    &bufferSize               /* output */
   ));
 
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
@@ -177,9 +177,9 @@ void _csrmm2(
     descA, descB,
     beta,
     descC,
-    cusparse_value_type,  /* data type in which the computation is executed */
-    CUSPARSE_SPMM_CSR_ALG1,  /* default computing algorithm for CSR sparse matrix format */
-    dataPtr.get()         /* external buffer */
+    cusparse_value_type,      /* data type in which the computation is executed */
+    CUSPARSE_SPMM_CSR_ALG1,   /* default computing algorithm for CSR sparse matrix format */
+    dataPtr.get()             /* external buffer */
   ));
 
   TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(descA));
