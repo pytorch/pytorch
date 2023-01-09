@@ -371,3 +371,51 @@ class NamedOptimizerTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, err_msg):
             named_optim_2.load_state_dict(state_dict_to_load)
+
+    def test_add_param_group(self):
+        m = TestDummyModel()
+        m_dup = TestDummyModel()
+        optim = torch.optim.SGD(
+            [
+                {"params": m.net1.parameters()},
+                {"params": m.net3.parameters(), "lr": 1e-3},
+            ],
+            lr=1e-2,
+            momentum=0.9,
+        )
+        named_optim = _NamedOptimizer(
+            m_dup.named_parameters(),
+            torch.optim.SGD,
+            [
+                {"params": m_dup.net1.parameters()},
+                {"params": m_dup.net3.parameters(), "lr": 1e-3},
+            ],
+            lr=1e-2,
+            momentum=0.9,
+        )
+
+        for _ in range(2):
+            x = torch.rand(5, 8)
+            y = m(x)
+            y.sum().backward()
+            optim.step()
+
+            y = m_dup(x)
+            y.sum().backward()
+            named_optim.step()
+
+        self._compare_param_groups(optim.param_groups, named_optim.param_groups)
+        optim.add_param_group({"params": m.net2.parameters(), "lr": 1e-5})
+        named_optim.add_param_group({"params": m_dup.net2.parameters(), "lr": 1e-5})
+
+        for _ in range(2):
+            x = torch.rand(5, 8)
+            y = m(x)
+            y.sum().backward()
+            optim.step()
+
+            y = m_dup(x)
+            y.sum().backward()
+            named_optim.step()
+
+        self._compare_param_groups(optim.param_groups, named_optim.param_groups)
