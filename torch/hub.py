@@ -1,3 +1,4 @@
+import contextlib
 import errno
 import hashlib
 import json
@@ -11,7 +12,7 @@ import warnings
 import zipfile
 from pathlib import Path
 from typing import Dict, Optional, Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 from torch.serialization import MAP_LOCATION
@@ -77,6 +78,15 @@ READ_DATA_CHUNK = 8192
 _hub_dir = None
 
 
+@contextlib.contextmanager
+def _add_to_sys_path(path):
+    sys.path.insert(0, path)
+    try:
+        yield
+    finally:
+        sys.path.remove(path)
+
+
 # Copied from tools/shared/module_loader to be included in torch package
 def _import_module(name, path):
     import importlib.util
@@ -136,16 +146,17 @@ def _parse_repo_info(github):
                 ref = 'master'
             else:
                 raise
-        except OSError as e:  # Accounting for timeout error such that the code loads from cache when there is no internet
-            ref = None
-            for possible_ref in ['main', 'master']:
-                is_ref_in_cache = os.path.exists(
-                    f"{get_dir()}/{repo_owner}_{repo_name}_{possible_ref}")
-                if is_ref_in_cache:
+        except URLError as e:
+            # No internet connection, need to check for cache as last resort
+            for possible_ref in ("main", "master"):
+                if os.path.exists(f"{get_dir()}/{repo_owner}_{repo_name}_{possible_ref}"):
                     ref = possible_ref
                     break
-            if ref == None:
-                raise
+            if ref is None:
+                raise RuntimeError(
+                    "It looks like there is no internet connection and the "
+                    f"repo could not be found in the cache ({get_dir()})"
+                ) from e
     return repo_owner, repo_name, ref
 
 
@@ -404,12 +415,9 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
     repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "list", verbose=True,
                                     skip_validation=skip_validation)
 
-    sys.path.insert(0, repo_dir)
-
-    hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
-    hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
-
-    sys.path.remove(repo_dir)
+    with _add_to_sys_path(repo_dir):
+        hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
+        hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
     # We take functions starts with '_' as internal helper functions
     entrypoints = [f for f in dir(hub_module) if callable(getattr(hub_module, f)) and not f.startswith('_')]
@@ -457,12 +465,9 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
     repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "help", verbose=True,
                                     skip_validation=skip_validation)
 
-    sys.path.insert(0, repo_dir)
-
-    hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
-    hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
-
-    sys.path.remove(repo_dir)
+    with _add_to_sys_path(repo_dir):
+        hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
+        hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
     entry = _load_entry_from_hubconf(hub_module, model)
 
@@ -574,15 +579,12 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
         >>> path = '/some/local/path/pytorch/vision'
         >>> model = _load_local(path, 'resnet50', weights='ResNet50_Weights.IMAGENET1K_V1')
     """
-    sys.path.insert(0, hubconf_dir)
+    with _add_to_sys_path(hubconf_dir):
+        hubconf_path = os.path.join(hubconf_dir, MODULE_HUBCONF)
+        hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
-    hubconf_path = os.path.join(hubconf_dir, MODULE_HUBCONF)
-    hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
-
-    entry = _load_entry_from_hubconf(hub_module, model)
-    model = entry(*args, **kwargs)
-
-    sys.path.remove(hubconf_dir)
+        entry = _load_entry_from_hubconf(hub_module, model)
+        model = entry(*args, **kwargs)
 
     return model
 
