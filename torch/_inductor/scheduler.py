@@ -361,10 +361,18 @@ class SchedulerNode(BaseSchedulerNode):
                         ):
                             V.kernel.mutations.add(input_node.get_name())
                             V.kernel.mutations.add(self.get_name())
+
                         # update last usage of reused node
-                        # From the checks above it follows that
-                        # input_node.get_name() in self.last_usage
-                        self.last_usage.remove(input_node.get_name())
+                        if isinstance(
+                            V.kernel, torch._inductor.codegen.triton.TritonKernel
+                        ):
+                            # From the checks above it follows that
+                            # input_node.get_name() in self.last_usage
+                            self.last_usage.remove(input_node.get_name())
+                        else:
+                            # On CPU nodes may be allocated twice (??) so the last_usage
+                            # field may already be updated
+                            self.last_usage.discard(input_node.get_name())
 
                         return
         super().allocate()
