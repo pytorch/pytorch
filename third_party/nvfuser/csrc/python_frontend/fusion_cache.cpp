@@ -111,7 +111,7 @@ c10::optional<size_t> FusionCache::createChild(RecordFunctor* rec) {
   RecordFunctor* new_rec = rec->clone();
   triePtr()->children[new_rec] = std::make_unique<TrieNode>(new_rec, fusion_id);
   if (rec->recordType() == RecordType::End) {
-    terminal_nodes_.push_back( triePtr()->children[new_rec].get());
+    terminal_nodes_.push_back(triePtr()->children[new_rec].get());
   }
   if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
     std::stringstream ss;
@@ -130,8 +130,7 @@ void FusionCache::resetTriePtr() {
 
 void FusionCache::traverseTrie(RecordFunctor* rec) {
   TORCH_CHECK(
-      !triePtr()->isTerminal(),
-      "Cannot traverse trie from a terminal entry!");
+      !triePtr()->isTerminal(), "Cannot traverse trie from a terminal entry!");
   auto trie_node = triePtr()->children.find(rec);
   TORCH_CHECK(
       trie_node != std::end(triePtr()->children),
@@ -143,8 +142,7 @@ void FusionCache::traverseTrie(RecordFunctor* rec) {
 
 TrieNode* FusionCache::triePtr() const {
   TORCH_INTERNAL_ASSERT(
-      trie_ptr_ != nullptr,
-      "The trie node is unexpectedly null.");
+      trie_ptr_ != nullptr, "The trie node is unexpectedly null.");
   return trie_ptr_;
 }
 

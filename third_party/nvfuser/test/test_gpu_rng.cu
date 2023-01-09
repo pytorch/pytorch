@@ -218,8 +218,6 @@ TEST_F(NVFuserTest, FusionRNGManualScheduleValidateWithCURand2_CUDA) {
   TensorView* tv0 = rand({size1, size2, size3, size4}, DataType::Float);
   fusion->addOutput(tv0);
 
-  auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
-
   FusionExecutor fe;
   fe.compileFusion(fusion, {10, 10, 10, 10});
 

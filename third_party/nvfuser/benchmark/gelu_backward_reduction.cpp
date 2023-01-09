@@ -17,27 +17,33 @@
 using namespace torch::jit::fuser::cuda;
 
 // Return reduction tensor view and output of reduction
-static void setupGeluBackwardReduction(Fusion* fusion, DataType dtype, int red_axis) {
+static void setupGeluBackwardReduction(
+    Fusion* fusion,
+    DataType dtype,
+    int red_axis) {
   FusionGuard fg(fusion);
 
   constexpr float k_079 = 0.79788456;
   constexpr float k_004 = 0.044715;
   constexpr float k_010 = 0.1070322243;
 
-  // input fp16 is converted to fp32 before caluclation and converted back to fp16 after calculation
+  // input fp16 is converted to fp32 before caluclation and converted back to
+  // fp16 after calculation
   bool is_fp16 = dtype == DataType::Half;
 
   // gradient tensor
   auto t0 = makeContigTensor(2, dtype);
   fusion->addInput(t0);
   auto t1 = t0;
-  if(is_fp16) t1 = castOp(DataType::Float, t0);
+  if (is_fp16)
+    t1 = castOp(DataType::Float, t0);
 
   // input tensor
   auto t4 = makeContigTensor(2, dtype);
   fusion->addInput(t4);
   auto t5 = t4;
-  if(is_fp16) t5 = castOp(DataType::Float, t4);
+  if (is_fp16)
+    t5 = castOp(DataType::Float, t4);
 
   // calc-1, gelu backward
   auto t7 = castOp(DataType::Float, t5);
@@ -63,7 +69,8 @@ static void setupGeluBackwardReduction(Fusion* fusion, DataType dtype, int red_a
 
   // output of gelu backward
   auto t27 = t26;
-  if(is_fp16) t27 = castOp(dtype, t26);
+  if (is_fp16)
+    t27 = castOp(dtype, t26);
   fusion->addOutput(t27);
 
   // calc-2, reduction
@@ -71,7 +78,8 @@ static void setupGeluBackwardReduction(Fusion* fusion, DataType dtype, int red_a
 
   // output of reduction
   auto t28 = t26r;
-  if(is_fp16) t28 = castOp(dtype, t26r);
+  if (is_fp16)
+    t28 = castOp(dtype, t26r);
   fusion->addOutput(t28);
 }
 
@@ -110,7 +118,8 @@ static void NvFuserScheduler_GeluBackwardReduction(
   C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     clearL2Cache();
-    auto cg_outputs = fusion_executor_cache->runFusionWithInputs({aten_input_grad, aten_input_x});
+    auto cg_outputs = fusion_executor_cache->runFusionWithInputs(
+        {aten_input_grad, aten_input_x});
     benchmark_state.SetIterationTime(
         executor_instance->kernelTimeMs() / 1000.0);
   }
@@ -133,14 +142,14 @@ static void Baseline_GeluBackwardReduction(
   constexpr float k_079 = 0.79788456;
   constexpr float k_004 = 0.044715;
   constexpr float k_010 = 0.1070322243;
-  constexpr bool  use_fused = true;
+  constexpr bool use_fused = true;
   at::manual_seed(0);
   auto options =
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
 
-  auto tensor_shape = reduction_dim ?
-                      std::vector<int64_t>{iter_size, reduction_size}:
-                      std::vector<int64_t>{reduction_size, iter_size};
+  auto tensor_shape = reduction_dim
+      ? std::vector<int64_t>{iter_size, reduction_size}
+      : std::vector<int64_t>{reduction_size, iter_size};
 
   at::Tensor at_grad = at::randn(tensor_shape, options);
   at::Tensor at_xvar = at::randn(tensor_shape, options);
@@ -152,16 +161,18 @@ static void Baseline_GeluBackwardReduction(
     CudaKernelTimer timer;
 
     auto at_x = at_xvar;
-    if(dtype == DataType::Half) at_x = at_xvar.to(c10::ScalarType::Float);
+    if (dtype == DataType::Half)
+      at_x = at_xvar.to(c10::ScalarType::Float);
 
-    if(!use_fused){
+    if (!use_fused) {
       auto at_tanh_out = (k_079 * at_x * (1 + k_004 * at_x * at_x)).tanh();
       auto at_ff = 0.5 * at_x *
-            ((1 - at_tanh_out * at_tanh_out) * (k_079 + k_010 * at_x * at_x)) +
-        0.5 * (1 + at_tanh_out);
+              ((1 - at_tanh_out * at_tanh_out) *
+               (k_079 + k_010 * at_x * at_x)) +
+          0.5 * (1 + at_tanh_out);
       auto at_output_pointwise = at_ff * at_grad;
       auto at_output_reduction = at_output_pointwise.sum({0});
-    }else{
+    } else {
       auto at_output_pointwise = at::gelu_backward(at_grad, at_x, "tanh");
       auto at_output_reduction = at_output_pointwise.sum({0});
     }
@@ -179,19 +190,23 @@ static void Baseline_GeluBackwardReduction(
 
 //------------------------------------------------------------------------------
 
-static void Baseline_GeluBackwardReduction_Outer_fp32(benchmark::State& benchmark_state) {
+static void Baseline_GeluBackwardReduction_Outer_fp32(
+    benchmark::State& benchmark_state) {
   Baseline_GeluBackwardReduction(benchmark_state, DataType::Float, 0);
 }
 
-static void Baseline_GeluBackwardReduction_Outer_fp16(benchmark::State& benchmark_state) {
+static void Baseline_GeluBackwardReduction_Outer_fp16(
+    benchmark::State& benchmark_state) {
   Baseline_GeluBackwardReduction(benchmark_state, DataType::Half, 0);
 }
 
-static void Baseline_GeluBackwardReduction_Inner_fp32(benchmark::State& benchmark_state) {
+static void Baseline_GeluBackwardReduction_Inner_fp32(
+    benchmark::State& benchmark_state) {
   Baseline_GeluBackwardReduction(benchmark_state, DataType::Float, 1);
 }
 
-static void Baseline_GeluBackwardReduction_Inner_fp16(benchmark::State& benchmark_state) {
+static void Baseline_GeluBackwardReduction_Inner_fp16(
+    benchmark::State& benchmark_state) {
   Baseline_GeluBackwardReduction(benchmark_state, DataType::Half, 1);
 }
 

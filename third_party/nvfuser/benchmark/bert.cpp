@@ -672,13 +672,11 @@ static void DivMaxSoftDropBwd_fp16(benchmark::State& benchmark_state) {
   MagicScheduler_DivMaxSoftDropBwd(benchmark_state, DataType::Half);
 }
 
-static void BiasDropoutAddLayernormFwd_fp32(
-    benchmark::State& benchmark_state) {
+static void BiasDropoutAddLayernormFwd_fp32(benchmark::State& benchmark_state) {
   MagicScheduler_BiasDropoutAddLayernormFwd(benchmark_state, DataType::Float);
 }
 
-static void BiasDropoutAddLayernormFwd_tf32(
-    benchmark::State& benchmark_state) {
+static void BiasDropoutAddLayernormFwd_tf32(benchmark::State& benchmark_state) {
   MagicScheduler_BiasDropoutAddLayernormFwd(benchmark_state, DataType::Float);
 }
 

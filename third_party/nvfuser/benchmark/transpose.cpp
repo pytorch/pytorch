@@ -13,15 +13,16 @@
 
 #include <benchmark/utils.h>
 
-#define TRANSPOSE_CONFIG {true, false, false, false}
+#define TRANSPOSE_CONFIG \
+  { true, false, false, false }
 
 using namespace torch::jit::fuser::cuda;
 
 struct TransposeConfig {
-    bool input1_transpose_axes = false;
-    bool input2_transpose_axes = false;
-    bool intermediate_transpose_axes = false;
-    bool output_transpose_axes = false;
+  bool input1_transpose_axes = false;
+  bool input2_transpose_axes = false;
+  bool intermediate_transpose_axes = false;
+  bool output_transpose_axes = false;
 };
 
 std::vector<at::Tensor> generateInputs(
@@ -58,10 +59,10 @@ std::vector<at::Tensor> generateInputs(
     }
   }
 
-  auto optionalTransposeSize =
-      [&transpose_shape, &non_transpose_shape](bool transpose_tensor) {
-        return (transpose_tensor) ? transpose_shape : non_transpose_shape;
-      };
+  auto optionalTransposeSize = [&transpose_shape,
+                                &non_transpose_shape](bool transpose_tensor) {
+    return (transpose_tensor) ? transpose_shape : non_transpose_shape;
+  };
 
   at::Tensor aten_input1 =
       at::randn(optionalTransposeSize(input1_transpose_axes), options);
@@ -306,7 +307,6 @@ NVFUSER_TRANSPOSE_SQUARE_RUN(
 
 //------------------------------------------------------------------------------
 
-
 #define NVFUSER_TRANSPOSE_RUN(TITLE, DTYPE, NUM_DIMS, AXIS1, AXIS2, CONFIG) \
   NVFUSER_BENCHMARK_DEFINE(                                                 \
       TITLE,                                                                \
@@ -320,7 +320,7 @@ NVFUSER_TRANSPOSE_SQUARE_RUN(
   NVFUSER_BENCHMARK_RUN(TITLE)                                              \
       ->RangeMultiplier(8)                                                  \
       ->Ranges({{2, 256 * 256}, {160, 320}})                                \
-      ->Unit(benchmark::kMicrosecond)                                       \
+      ->Unit(benchmark::kMicrosecond)
 
 NVFUSER_TRANSPOSE_RUN(
     NF_Transpose_fp32_Inner_2D_01_Axis,

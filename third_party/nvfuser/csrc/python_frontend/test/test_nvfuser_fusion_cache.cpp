@@ -74,8 +74,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
 
     // Cache Lookup should not succeed becase no records are in the cache
     try {
-      auto empty_cache_entry_ptr =
-          fc->queryChildren(test_record.get());
+      auto empty_cache_entry_ptr = fc->queryChildren(test_record.get());
       ASSERT_TRUE(empty_cache_entry_ptr == c10::nullopt);
       SUCCEED();
     } catch (const std::exception& e) {

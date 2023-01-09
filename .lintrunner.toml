@@ -54,6 +54,8 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'test/cpp/**/*.h',
     'test/cpp/**/*.cpp',
+    'third_party/nvfuser/**/*.h',
+    'third_party/nvfuser/**/*.cpp',
 ]
 exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
@@ -238,7 +240,6 @@ exclude_patterns = [
     'torch/csrc/cuda/python_nccl.cpp',
     'torch/csrc/autograd/FunctionsManual.cpp',
     'torch/csrc/generic/*.cpp',
-    'torch/csrc/jit/codegen/cuda/runtime/*',
     'torch/csrc/utils/disable_torch_function.cpp',
 ]
 init_command = [

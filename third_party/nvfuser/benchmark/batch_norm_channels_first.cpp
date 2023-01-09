@@ -184,11 +184,13 @@ static void Baseline_BatchNorm_cuDNN_fp16(benchmark::State& benchmark_state) {
 }
 
 // Simple aliases just for names in the printed output
-static void Baseline_ResNet_BatchNorm_cuDNN_fp16(benchmark::State& benchmark_state) {
+static void Baseline_ResNet_BatchNorm_cuDNN_fp16(
+    benchmark::State& benchmark_state) {
   Baseline_BatchNorm(benchmark_state, DataType::Half);
 }
 
-static void Baseline_ResNext_BatchNorm_cuDNN_fp16(benchmark::State& benchmark_state) {
+static void Baseline_ResNext_BatchNorm_cuDNN_fp16(
+    benchmark::State& benchmark_state) {
   Baseline_BatchNorm(benchmark_state, DataType::Half);
 }
 

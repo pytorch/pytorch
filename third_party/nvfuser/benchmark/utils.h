@@ -185,15 +185,15 @@ class BenchmarkGraph : public benchmark::Fixture {
     BENCHMARK_NAME, SETUP_FUSION, RUN_FUSION, ...)                      \
   class BENCHMARK_NAME##___GRAPH : public BenchmarkGraph {              \
    public:                                                              \
-   std::string graphName() override {                                   \
+    std::string graphName() override {                                  \
       return NVFUSER_TO_STRING(BENCHMARK_NAME##___GRAPH);               \
     }                                                                   \
-   SetupFusionFunction setupFusion() override {                         \
+    SetupFusionFunction setupFusion() override {                        \
       return [](Fusion* fusion) { SETUP_FUSION(fusion, __VA_ARGS__); }; \
     }                                                                   \
   };                                                                    \
   BENCHMARK_DEFINE_F(BENCHMARK_NAME##___GRAPH, BENCHMARK_NAME)          \
-      (benchmark::State & benchmark_state) {                            \
+  (benchmark::State & benchmark_state) {                                \
     RUN_FUSION(                                                         \
         benchmark_state,                                                \
         BENCHMARK_NAME##___GRAPH::getExecutorCache(),                   \

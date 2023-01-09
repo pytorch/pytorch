@@ -75,8 +75,9 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_bcast7(
   // Outer two dimensions only - floatx2 - t3, t4
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *
-      //           t2 + t7    t3 + t4                 t36 + t37
-      t2.numel() * (4 + 2) + t3.numel() * 4 * 2 + input_shape[2] * (4 * 2) +
+          //           t2 + t7    t3 + t4                 t36 + t37
+          t2.numel() * (4 + 2) +
+      t3.numel() * 4 * 2 + input_shape[2] * (4 * 2) +
       // T39
       t2.numel() * 2);
 }
@@ -190,9 +191,8 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_bcast5(
   // Outer two dims only - floatx2 - t22, t27
 
   benchmark_state.SetBytesProcessed(
-      int64_t(benchmark_state.iterations()) *
-      t2.numel() * (2 * 4 + 2 * 2 + 1) + t5.numel() * 5 * 4 +
-      input_shape[0] * input_shape[1] * 2 * 4);
+      int64_t(benchmark_state.iterations()) * t2.numel() * (2 * 4 + 2 * 2 + 1) +
+      t5.numel() * 5 * 4 + input_shape[0] * input_shape[1] * 2 * 4);
 }
 
 NVFUSER_BENCHMARK_DEFINE(

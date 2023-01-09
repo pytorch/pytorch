@@ -91,8 +91,7 @@ std::string toString(const PointwiseParams& params) {
 
 std::string toString(const TransposeParams& params) {
   std::stringstream ss;
-  ss << "Tile size: (" << params.tile_size1 << "," << params.tile_size2
-     << ")/";
+  ss << "Tile size: (" << params.tile_size1 << "," << params.tile_size2 << ")/";
   ss << "Vectorize size: (" << params.vectorize_factor1 << ","
      << params.vectorize_factor2 << ")";
   return ss.str();

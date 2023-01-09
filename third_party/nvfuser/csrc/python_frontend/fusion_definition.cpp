@@ -102,14 +102,12 @@ FusionDefinition* FusionDefinition::enter() {
 
 void FusionDefinition::exit() {
   FUSER_PERF_SCOPE("FusionDefinition::exit");
-  auto cache_entry =
-      fusionCachePtr()->queryChildren(end_record_.get());
+  auto cache_entry = fusionCachePtr()->queryChildren(end_record_.get());
   if (!cache_entry.has_value()) {
     if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
-    auto fusion_id =
-        fusionCachePtr()->createChild(end_record_.get());
+    auto fusion_id = fusionCachePtr()->createChild(end_record_.get());
     TORCH_CHECK(fusion_id.has_value(), "Invalid fusion id!");
     fusionInterfacePtr()->define(fusion_id.value());
     fusionCachePtr()->traverseTrie(end_record_.get());
@@ -167,8 +165,7 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       "operations.  The max_length for FusionDefintion's might need to be ",
       "increased if the definition is created as expected.");
   recording_.emplace_back(record);
-  auto cache_entry =
-      fusionCachePtr()->queryChildren(recording_.back().get());
+  auto cache_entry = fusionCachePtr()->queryChildren(recording_.back().get());
   // If the Record is found in the cache, the FusionDefinition and the Cache
   // will not share Record given the Record had to be created in order to
   // match it but it also already existed in the cache.

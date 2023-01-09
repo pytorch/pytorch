@@ -1,6 +1,6 @@
 #pragma once
-#include <c10/util/complex.h>
 #include <arith.h>
+#include <c10/util/complex.h>
 #include <ir_interface_nodes.h>
 #include <ops/alias.h>
 #include <ops/normalization.h>
@@ -1760,7 +1760,8 @@ struct FullOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
-  virtual void print(std::ostream& os, bool close_function = true) const override {
+  virtual void print(std::ostream& os, bool close_function = true)
+      const override {
     RecordFunctor::print(os, false);
     os << ", shape=[";
     bool first_arg = true;

@@ -211,11 +211,13 @@ static void Baseline_BatchNorm_nhwc_BWD_cuDNN_fp16(
 }
 
 // Simple aliases just for names in the printed output
-static void Baseline_ResNet_BatchNorm_nhwc_BWD_cuDNN_fp16(benchmark::State& benchmark_state) {
+static void Baseline_ResNet_BatchNorm_nhwc_BWD_cuDNN_fp16(
+    benchmark::State& benchmark_state) {
   Baseline_BatchNorm_nhwc_BWD(benchmark_state, DataType::Half);
 }
 
-static void Baseline_ResNext_BatchNorm_nhwc_BWD_cuDNN_fp16(benchmark::State& benchmark_state) {
+static void Baseline_ResNext_BatchNorm_nhwc_BWD_cuDNN_fp16(
+    benchmark::State& benchmark_state) {
   Baseline_BatchNorm_nhwc_BWD(benchmark_state, DataType::Half);
 }
 
