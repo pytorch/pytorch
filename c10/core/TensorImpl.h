@@ -29,6 +29,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <utility>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -216,7 +217,7 @@ enum class PyInterpreterStatus {
 } // namespace impl
 
 struct C10_API NamedTensorMetaInterface {
-  virtual ~NamedTensorMetaInterface(){};
+  virtual ~NamedTensorMetaInterface() = default;
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::clone");
@@ -265,7 +266,7 @@ struct C10_API ExtraMeta {
   bool_is_non_overlapping_and_dense is_non_overlapping_and_dense_{true};
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 
-  ExtraMeta() {}
+  ExtraMeta() = default;
 
   ExtraMeta(
       SymDimVector sizes,
@@ -2336,7 +2337,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_storage_and_dtype(
       at::Storage storage,
       const caffe2::TypeMeta data_type) {
-    set_storage_keep_dtype(storage);
+    set_storage_keep_dtype(std::move(storage));
     data_type_ = data_type;
   }
 

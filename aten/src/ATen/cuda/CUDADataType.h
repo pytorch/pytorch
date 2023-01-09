@@ -45,7 +45,7 @@ template<> inline cudaDataType getCudaDataType<int>() {
 }
 #endif
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
 template<> inline cudaDataType getCudaDataType<int16_t>() {
   return CUDA_R_16I;
 }
@@ -80,7 +80,7 @@ inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type)
       return CUDA_C_32F;
     case c10::ScalarType::ComplexDouble:
       return CUDA_C_64F;
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
     case c10::ScalarType::Short:
       return CUDA_R_16I;
     case c10::ScalarType::Long:
