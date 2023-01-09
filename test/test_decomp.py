@@ -432,6 +432,13 @@ class TestDecomp(TestCase):
                 # without this check, incorrect decomps at the python dispatcher level can still pass because
                 # they're checking aten decomps at the
                 self.assertEqual(decomp_out, non_decomp_out)
+                decomp_out[0].sum().backward()
+                decomp_grads = [p.grad for p in m.parameters()]
+
+                m.zero_grad()
+                non_decomp_out[0].sum().backward()
+                non_decomp_grads = [p.grad for p in m.parameters()]
+                self.assertEqual(decomp_grads, non_decomp_grads)
 
 
     class DecompCrossRefMode(TorchDispatchMode):
