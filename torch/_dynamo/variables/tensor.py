@@ -13,6 +13,8 @@ from ..source import AttrSource
 from ..utils import (
     get_fake_value,
     get_real_value,
+    HAS_NUMPY,
+    np,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
@@ -152,10 +154,37 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "dim", [], {})
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
-        elif name == "T":
-            args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
-            result = self.call_method(tx, "permute", args, {})
-
+        elif name in ("T", "H"):
+            out = (
+                tx.output.create_proxy(
+                    "call_method",
+                    "conj",
+                    *proxy_args_kwargs([self], {}),
+                )
+                if name == "H"
+                else self
+            )
+            args_list = [
+                variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)
+            ]
+            args = [variables.TupleVariable(args_list)]
+            result = out.call_method(tx, "permute", args, {})
+        elif name in ("mT", "mH"):
+            out = (
+                tx.output.create_proxy(
+                    "call_method",
+                    "conj",
+                    *proxy_args_kwargs([self], {}),
+                )
+                if name == "mH"
+                else self
+            )
+            dims = (-2, -1) if self.ndim > 0 else (-1, 0)
+            args = [
+                variables.ConstantVariable(dims[0]),
+                variables.ConstantVariable(dims[1]),
+            ]
+            result = out.call_method(tx, "transpose", args, {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
 
@@ -550,35 +579,6 @@ class TensorWithTFOverrideVariable(VariableTracker):
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 
-class UnspecializedNumpyVariable(TensorVariable):
-    """
-    This is a 1-element tensor represents unspecialized numpy float/int.
-    """
-
-    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
-        raw_value = kwargs.pop("raw_value", None)
-        super(UnspecializedNumpyVariable, self).__init__(proxy, **kwargs)
-        self.raw_value = raw_value
-
-    @classmethod
-    def from_tensor_variable(cls, tensor_variable, raw_value):
-        # Convert a `TensorVariable` instance into an `UnspecializedNumpyVariable` instance.
-        return UnspecializedNumpyVariable(
-            **dict(tensor_variable.__dict__), raw_value=raw_value
-        )
-
-    def as_specialized(self, tx):
-        for graph_arg in tx.output.graphargs:
-            if graph_arg.source is self.source:
-                graph_arg.erase()
-
-        for g in self.guards:
-            if g.is_volatile:
-                g.create_fn = GuardBuilder.CONSTANT_MATCH
-
-        return ConstantVariable(value=self.raw_value, guards=self.guards)
-
-
 class UnspecializedPythonVariable(TensorVariable):
     """
     This is a 1-element tensor represents unspecialized python float/int.
@@ -586,6 +586,8 @@ class UnspecializedPythonVariable(TensorVariable):
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         raw_value = kwargs.pop("raw_value", None)
+        if HAS_NUMPY and isinstance(raw_value, np.number):
+            raw_values = raw_value.item()
         need_unwrap = kwargs.pop("need_unwrap", True)
         super(UnspecializedPythonVariable, self).__init__(proxy, **kwargs)
         self.raw_value = raw_value
