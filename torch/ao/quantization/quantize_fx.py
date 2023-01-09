@@ -3,6 +3,10 @@ import warnings
 
 import torch
 from torch.fx import GraphModule
+from torch.fx.proxy import (
+    Scope,
+    ScopeContextManager
+)
 from .fx.tracer import QuantizationTracer
 from .fx import fuse  # noqa: F401
 from .fx import prepare  # noqa: F401
@@ -61,16 +65,6 @@ def _fuse_fx(
     _check_is_graph_module(graph_module)
     return fuse(
         graph_module, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
-
-
-class Scope(torch.fx.proxy.Scope):
-    def __init__(self, module_path: str, module_type: Any):
-        super().__init__(module_path, module_type)
-
-
-class ScopeContextManager(torch.fx.proxy.ScopeContextManager):
-    def __init__(self, scope: Scope, current_scope: Scope):
-        super().__init__(scope, current_scope)
 
 
 def _prepare_fx(

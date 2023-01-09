@@ -1,6 +1,9 @@
 import torch
 from torch.fx._symbolic_trace import Tracer
-from torch.fx.proxy import Scope
+from torch.fx.proxy import (
+    Scope,
+    ScopeContextManager
+)
 from torch.nn.intrinsic import _FusedModule
 from typing import List, Callable
 
