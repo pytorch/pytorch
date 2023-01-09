@@ -175,6 +175,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE(special_modified_bessel_i1);
   UNARY_POINTWISE(special_scaled_modified_bessel_k0);
   UNARY_POINTWISE(special_scaled_modified_bessel_k1);
+  UNARY_POINTWISE(special_modified_bessel_k0);
+  UNARY_POINTWISE(special_modified_bessel_k1);
+  UNARY_POINTWISE(special_spherical_bessel_j0);
 
   // Activation functions (from https://pytorch.org/docs/stable/nn.html#non-linear-activations-weighted-sum-nonlinearity)
   UNARY_POINTWISE_ALL(elu);
