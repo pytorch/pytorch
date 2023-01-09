@@ -154,6 +154,8 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "dim", [], {})
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
+        # TODO: reimplement the T/H/mT/mH by generating a function call
+        # to torch.Tensor.{T/H/mT/mH}.__get__
         elif name in ("T", "H"):
             out = (
                 tx.output.create_proxy(
