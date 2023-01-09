@@ -51,6 +51,7 @@ except ImportError:
 
 
 # Note [ROCm parallel CI testing]
+# !! Temporarily disabled. Running in parallel might be causing hangs.
 # https://github.com/pytorch/pytorch/pull/85770 added file-granularity parallel testing.
 # In .jenkins/pytorch/test.sh, TEST_CONFIG == "default", CUDA and HIP_VISIBLE_DEVICES is set to 0.
 # This results in multiple test files sharing the same GPU.
@@ -62,6 +63,7 @@ except ImportError:
 # Assigning each Pool worker their own dedicated GPU avoids the ROCm oversubscription issues.
 # This should also result in better overall wall clock time since all GPUs can be utilized.
 def maybe_set_hip_visible_devies():
+    return  # disabling
     # Special handling of ROCm GHA runners for parallel (file granularity) tests.
     if torch.version.hip:
         p = current_process()
