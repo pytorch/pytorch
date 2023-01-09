@@ -2039,15 +2039,15 @@ def one_layer_rnn(inp, hidden, params, has_biases, nonlinearity, reverse=False):
 
     precomputed_input = F.linear(inp, ih_weight, ih_bias)
     precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
-    cur_hidden = hidden
+    cur_hidden = hidden.unsqueeze(0)
     step_output = []
     for inp in precomputed_input:
         cur_hidden = nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + inp)
         step_output.append(cur_hidden)
 
-    out = torch.stack(step_output, 0)
+    out = torch.cat(step_output, 0)
 
-    return out, cur_hidden
+    return out, cur_hidden.squeeze(0)
 
 
 def _rnn_helper(
@@ -2092,6 +2092,7 @@ def _rnn_helper(
     return input, final_hiddens
 
 
+@register_decomposition(aten.rnn_tanh.input)
 @aten.rnn_tanh.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.rnn_tanh.input.py_impl(DispatchKey.Autograd)
 def rnn_tanh_input(
@@ -2122,6 +2123,7 @@ def rnn_tanh_input(
     return out, torch.stack(final_hiddens, 0)
 
 
+@register_decomposition(aten.rnn_relu.input)
 @aten.rnn_relu.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.rnn_relu.input.py_impl(DispatchKey.Autograd)
 def rnn_relu_input(
@@ -2161,32 +2163,33 @@ def one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
         params[4] if len(params) == 5 else params[2] if len(params) == 3 else None
     )
 
-    hx = hidden[0]
-    cx = hidden[1]
+    hx = hidden[0].unsqueeze(0)
+    cx = hidden[1].unsqueeze(0)
 
     precomputed_input = F.linear(inp, ih_weight, ih_bias)
     precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
     step_output = []
     for inp in precomputed_input:
         gates = F.linear(hx, hh_weight, hh_bias) + inp
-        chunked_gates = gates.chunk(4, 1)
+        chunked_gates = gates.chunk(4, 2)
         in_gate = chunked_gates[0].sigmoid()
         forget_gate = chunked_gates[1].sigmoid()
         cell_gate = chunked_gates[2].tanh()
         out_gate = chunked_gates[3].sigmoid()
         cy = forget_gate * cx + (in_gate * cell_gate)
         hy = out_gate * cy.tanh()
-        hy = hy if hr_weight is None else hy @ hr_weight.t()
+        hy = hy if hr_weight is None else F.linear(hy, hr_weight, None)
 
         step_output.append(hy)
         hx = hy
         cx = cy
 
-    out = torch.stack(step_output, 0)
+    out = torch.cat(step_output, 0)
 
-    return out, (hx, cx)
+    return out, (hx.squeeze(1), cx.squeeze(1))
 
 
+@register_decomposition(aten.lstm.input)
 @aten.lstm.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.lstm.input.py_impl(DispatchKey.Autograd)
 def lstm_impl(
