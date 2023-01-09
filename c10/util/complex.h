@@ -510,23 +510,6 @@ std::basic_istream<CharT, Traits>& operator>>(
 //
 // The implementation of these functions also follow the design of C++20
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-namespace c10_internal {
-template <typename T>
-C10_HOST_DEVICE constexpr thrust::complex<T>
-cuda101bug_cast_c10_complex_to_thrust_complex(const c10::complex<T>& x) {
-#if defined(CUDA_VERSION) && (CUDA_VERSION < 10020)
-  // This is to circumvent a CUDA compilation bug. See
-  // https://github.com/pytorch/pytorch/pull/38941 . When the bug is fixed, we
-  // should do static_cast directly.
-  return thrust::complex<T>(x.real(), x.imag());
-#else
-  return static_cast<thrust::complex<T>>(x);
-#endif
-}
-} // namespace c10_internal
-#endif
-
 namespace std {
 
 template <typename T>
@@ -542,8 +525,7 @@ constexpr T imag(const c10::complex<T>& z) {
 template <typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return thrust::abs(
-      c10_internal::cuda101bug_cast_c10_complex_to_thrust_complex(z));
+  return thrust::abs(static_cast<thrust::complex<T>>(z));
 #else
   return std::abs(static_cast<std::complex<T>>(z));
 #endif
