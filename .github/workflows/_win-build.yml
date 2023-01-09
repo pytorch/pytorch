@@ -83,14 +83,6 @@ jobs:
             echo "CONDA_INSTALL=${CONDA} install";
           } >> "${GITHUB_ENV}"
 
-      - name: Setup openblas on Windows CUDA
-        if: inputs.cuda-version != 'cpu'
-        shell: bash
-        run:
-          # Try out openblas on Windows CUDA instead of mkl, if this works, move this to
-          # the AMI
-          ${CONDA_INSTALL} -c conda-forge openblas=0.3.21
-
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
