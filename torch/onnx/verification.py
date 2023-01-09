@@ -1787,6 +1787,8 @@ def find_mismatch(
     Example::
 
         >>> import torch
+        >>> import torch.onnx.verification
+        >>> torch.manual_seed(0)
         >>> opset_version = 15
         >>> # Define a custom symbolic function for aten::relu.
         >>> # The custom symbolic function is incorrect, which will result in mismatches.
@@ -1809,7 +1811,7 @@ def find_mismatch(
         ...         )
         ...     def forward(self, x):
         ...         return self.layers(x)
-        >>> graph_info = torch.onnx.find_mismatch(
+        >>> graph_info = torch.onnx.verification.find_mismatch(
         ...     Model(),
         ...     (torch.randn(2, 3),),
         ...     opset_version=opset_version,
@@ -1817,10 +1819,9 @@ def find_mismatch(
         ===================== Mismatch info for graph partition : ======================
         ================================ Mismatch error ================================
         Tensor-likes are not close!
-
         Mismatched elements: 12 / 12 (100.0%)
-        Greatest absolute difference: 0.3058328777551651 at index (1, 2) (up to 1e-07 allowed)
-        Greatest relative difference: 12.117157606919632 at index (1, 5) (up to 0.001 allowed)
+        Greatest absolute difference: 0.2328854203224182 at index (1, 2) (up to 1e-07 allowed)
+        Greatest relative difference: 0.699536174352349 at index (1, 3) (up to 0.001 allowed)
         ==================================== Tree: =====================================
         5 X   __2 X    __1 ✓
         id:  |  id: 0 |  id: 00
