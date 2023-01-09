@@ -151,26 +151,18 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   // profiling allocator should not throw.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(true, true, false));
-  #if !defined(_WIN32) || !defined(__CUDA_ARCH__)
   ASSERT_TRUE(ref_output.equal(output));
-  #endif
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(false, false, false));
-  #if !defined(_WIN32) || !defined(__CUDA_ARCH__)
   ASSERT_TRUE(ref_output.equal(output));
-  #endif
   // Furthermore profiling allocator should return the same pointers
   // back for the intermediate tensors
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(true, true, true));
-  #if !defined(_WIN32) || !defined(__CUDA_ARCH__)
   ASSERT_TRUE(ref_output.equal(output));
-  #endif
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(false, false, true));
-  #if !defined(_WIN32) || !defined(__CUDA_ARCH__)
   ASSERT_TRUE(ref_output.equal(output));
-  #endif
 
   // When control flow conditions are different between profiling and evaluation
   // profiling allocator should throw.
@@ -181,12 +173,18 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
 }
 
 int main(int argc, char* argv[]) {
+  #ifdef C10_MOBILE
   // Setting the priority high to make sure no other allocator gets used instead of this.
   c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
   // Need to disable mkldnn for this test since it allocatred memory
   // via raw_allocate inteface which requires context pointer and raw
   // pointer to be the same. Tis is not true for mobile allocator.
   at::globalContext().setUserEnabledMkldnn(false);
+  #else
+  // Setting the priority high to make sure no other allocator gets used instead of this.
+  c10::SetCPUAllocator(c10::GetDefaultCPUAllocator(), /*priority*/ 100);
+  #endif
+
   ::testing::InitGoogleTest(&argc, argv);
   at::manual_seed(42);
   return RUN_ALL_TESTS();
