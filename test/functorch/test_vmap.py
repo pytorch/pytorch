@@ -3764,6 +3764,18 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         check_vmap_fallback(self, test, torch.slogdet)
 
+    def test_index_fill(self, device):
+        # There's no OpInfo for this
+        def test():
+            B = 2
+            x = torch.randn(B, 5, 5, device=device)
+            dim = -2
+            index = torch.tensor([[2, 3], [0, 4]])
+
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, 5.0), {}, (None, None, 0, None))
+
+        check_vmap_fallback(self, test, torch.slogdet)
+
     def test_fill__Tensor(self, device):
         # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
         def test():
