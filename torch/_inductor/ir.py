@@ -3491,7 +3491,7 @@ class ConvolutionUnary(ExternKernelAlloc):
             wrapper.writeline(f"param_args = [{', '.join(self.codegen_args())}]")
             wrapper.writeline(
                 f"{self.get_name()}_param = get_mkldnn_param({wrapper.mkldnn_param_count}, \
-torch.ops.mkldnn._create_conv_param, *param_args)"
+torch.ops.mkldnn._create_conv_param, 0, *param_args)"
             )
             wrapper.writeline(
                 f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args()) + ', ' + self.get_name() + '_param'})"
@@ -3553,7 +3553,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             wrapper.writeline(f"param_args = [{', '.join(self.codegen_args())}]")
             wrapper.writeline(
                 f"{self.get_name()}_param = get_mkldnn_param({wrapper.mkldnn_param_count}, \
-torch.ops.mkldnn._create_conv_param_binary, *param_args)"
+torch.ops.mkldnn._create_conv_param_binary, 0, *param_args)"
             )
             wrapper.writeline(
                 f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args()) + ', ' + self.get_name() + '_param'})"

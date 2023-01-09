@@ -363,17 +363,17 @@ class WrapperCodeGen(CodeGen):
                 def __init__(self):
                     self.p_cache = dict()
 
-                def add_param(self, param_id, param, param_type):
-                    self.p_cache[param_id] = (param, param_type)
+                def add_param(self, param_key, param, param_type):
+                    self.p_cache[param_key] = (param, param_type)
 
-                def get_param(self, param_id):
-                    if param_id in self.p_cache:
-                        return self.p_cache[param_id][0]
+                def get_param(self, param_key):
+                    if param_key in self.p_cache:
+                        return self.p_cache[param_key][0]
                     else:
                         return 0
 
-                def check_param(self, param_id):
-                    if param_id in self.p_cache:
+                def check_param(self, param_key):
+                    if param_key in self.p_cache:
                         return True
                     else:
                         return False
@@ -386,20 +386,30 @@ class WrapperCodeGen(CodeGen):
                 def __del__(self):
                     self.clear()
 
+            def gen_mkldnn_cache_key(op_id, *param_args):
+                # Add op id and multi-threading number as part of key
+                key = [op_id, torch.get_num_threads()]
+                for arg in param_args[0]:
+                    # Add inputs tensors' shape as part of key, assume weight/bias shape will not change
+                    if isinstance(arg, torch.Tensor) and not isinstance(arg, torch.nn.parameter.Parameter):
+                        key.append(arg.size())
+                return tuple(key)
+
             param_cache = mkldnn_param_cache()
             param_cache_lock = threading.Lock()
-            def get_mkldnn_param(op_id, torch_func, *param_args):
-                if param_cache.check_param(op_id):
-                    conv_param = param_cache.get_param(op_id)
+            def get_mkldnn_param(op_id, torch_func, param_type, *param_args):
+                cache_key = gen_mkldnn_cache_key(op_id, param_args)
+                if param_cache.check_param(cache_key):
+                    param = param_cache.get_param(cache_key)
                 else:
                     param_cache_lock.acquire()
-                    if param_cache.check_param(op_id):
+                    if param_cache.check_param(cache_key):
                         param_cache_lock.release()
-                        return param_cache.get_param(op_id)
-                    conv_param = torch_func(*param_args)
-                    param_cache.add_param(op_id, conv_param, 0)
+                        return param_cache.get_param(cache_key)
+                    param = torch_func(*param_args)
+                    param_cache.add_param(cache_key, param, param_type)
                     param_cache_lock.release()
-                return conv_param
+                return param
             """
         )
 
