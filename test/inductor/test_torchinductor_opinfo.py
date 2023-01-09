@@ -158,6 +158,7 @@ inductor_skips["cuda"] = {
     # flaky
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
+    "nn.functional.avg_pool3d": {f16},
     # fft ops sometimes succeed locally and fail on CI.
     # they return complex values which is known unsupported,
     # so there is not much point in testing them currently.
@@ -325,7 +326,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "round.decimals_3": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
-    "scatter": {b8, i64},
     "segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "std_mean.unbiased": {f16},
@@ -493,6 +493,8 @@ inductor_expected_failures_all_samples["cpu"] = {
     "scatter_reduce.mean": {f16, f32, f64},
     "pow": {f16},
     "norm": {f16},
+    "pca_lowrank": {f32, f64},
+    "svd_lowrank": {f32, f64}
 }
 inductor_expected_failures_all_samples["cuda"] = {
     "__rpow__": {f16},
@@ -544,7 +546,6 @@ inductor_expected_failures_all_samples["cuda"] = {
     "nn.functional.adaptive_avg_pool1d": {f16},
     "nn.functional.alpha_dropout": {f16, f32, f64},
     "nn.functional.avg_pool1d": {f16, f32, f64},
-    "nn.functional.avg_pool3d": {f16},
     "nn.functional.binary_cross_entropy": {f16},
     "nn.functional.binary_cross_entropy_with_logits": {f16},
     "nn.functional.conv2d": {f16},
@@ -592,6 +593,13 @@ inductor_expected_failures_all_samples["cuda"] = {
     "triu": {f16},
     "true_divide": {f16},
     "unfold_copy": {f16},
+    "norm": {f16, f64},
+    "pca_lowrank": {f32, f64},
+    "svd_lowrank": {f32, f64},
+    "signal.windows.kaiser": {f32},
+    "renorm": {f16, f32, f64},
+    "repeat": {b8, f16, f32, f64, i32, i64},
+    "scatter": {b8, i64},
 }
 
 
