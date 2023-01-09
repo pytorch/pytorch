@@ -1,8 +1,9 @@
 import collections
 import dataclasses
-from typing import Any
+import enum
+from typing import Any, Optional
 
-from torch._guards import Guard, GuardSource
+from torch._guards import GuardSource, Source
 
 from . import utils
 from .bytecode_transformation import create_instruction
@@ -35,27 +36,13 @@ def is_constant_source(source):
     return False
 
 
-@dataclasses.dataclass
-class Source:
-    def reconstruct(self, codegen):
-        raise NotImplementedError()
-
-    def guard_source(self):
-        raise NotImplementedError()
-
-    def name(self):
-        raise NotImplementedError()
-
-    def make_guard(self, fn, is_volatile=False):
-        if self.guard_source() is GuardSource.CONSTANT:
-            raise NotImplementedError()
-        return Guard(self.name(), self.guard_source(), fn, is_volatile)
-
-    def is_nn_module(self):
-        return self.guard_source() in (
-            GuardSource.LOCAL_NN_MODULE,
-            GuardSource.GLOBAL_NN_MODULE,
-        )
+def is_input_source(source):
+    return source.guard_source() in [
+        GuardSource.LOCAL,
+        GuardSource.GLOBAL,
+        GuardSource.LOCAL_NN_MODULE,
+        GuardSource.GLOBAL_NN_MODULE,
+    ]
 
 
 @dataclasses.dataclass
@@ -135,6 +122,7 @@ class AttrSource(Source):
         else:
             self.base = base
             self.member = member
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return self.base.reconstruct(codegen) + codegen.create_load_attrs(self.member)
@@ -148,10 +136,68 @@ class AttrSource(Source):
         return f"{self.base.name()}.{self.member}"
 
 
+class TensorProperty(enum.Enum):
+    SIZE = 0
+    STRIDE = 1
+    STORAGE_OFFSET = 2
+
+
+@dataclasses.dataclass
+class TensorPropertySource(Source):
+    base: Source
+    prop: TensorProperty
+    idx: Optional[int] = None  # None for STORAGE_OFFSET
+
+    def __post_init__(self):
+        assert self.base is not None
+        if self.prop is TensorProperty.STORAGE_OFFSET:
+            assert self.idx is None
+        else:
+            assert self.idx is not None
+
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        if self.prop is TensorProperty.SIZE:
+            return f"{self.base.name()}.size()[{self.idx}]"
+        elif self.prop is TensorProperty.STRIDE:
+            return f"{self.base.name()}.stride()[{self.idx}]"
+        elif self.prop is TensorProperty.STORAGE_OFFSET:
+            assert self.idx is None
+            return f"{self.base.name()}.storage_offset()"
+        else:
+            raise AssertionError(f"unhandled {self.prop}")
+
+
+@dataclasses.dataclass
+class NegateSource(Source):
+    base: Source
+
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        # NB: use method call so that function stripping regexes work
+        return f"{self.base.name()}.__neg__()"
+
+
 @dataclasses.dataclass
 class GetItemSource(Source):
     base: Source
     index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
@@ -191,6 +237,9 @@ class TupleIteratorGetItemSource(GetItemSource):
 class TypeSource(Source):
     base: Source
 
+    def __post_init__(self):
+        assert self.base is not None
+
     def reconstruct(self, codegen):
         codegen.load_import_from("builtins", "type")
         return self.base.reconstruct(codegen) + [create_instruction("CALL_FUNCTION", 1)]
@@ -206,6 +255,9 @@ class TypeSource(Source):
 class ODictGetItemSource(Source):
     base: Source
     index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return (
