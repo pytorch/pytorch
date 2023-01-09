@@ -2039,15 +2039,15 @@ def one_layer_rnn(inp, hidden, params, has_biases, nonlinearity, reverse=False):
 
     precomputed_input = F.linear(inp, ih_weight, ih_bias)
     precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
-    cur_hidden = hidden
+    cur_hidden = hidden.unsqueeze(0)
     step_output = []
     for inp in precomputed_input:
         cur_hidden = nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + inp)
         step_output.append(cur_hidden)
 
-    out = torch.stack(step_output, 0)
+    out = torch.cat(step_output, 0)
 
-    return out, cur_hidden
+    return out, cur_hidden.squeeze(0)
 
 
 def _rnn_helper(
@@ -2092,6 +2092,7 @@ def _rnn_helper(
     return input, final_hiddens
 
 
+@register_decomposition(aten.rnn_tanh.input)
 @aten.rnn_tanh.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.rnn_tanh.input.py_impl(DispatchKey.Autograd)
 def rnn_tanh_input(
@@ -2122,6 +2123,7 @@ def rnn_tanh_input(
     return out, torch.stack(final_hiddens, 0)
 
 
+@register_decomposition(aten.rnn_relu.input)
 @aten.rnn_relu.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.rnn_relu.input.py_impl(DispatchKey.Autograd)
 def rnn_relu_input(

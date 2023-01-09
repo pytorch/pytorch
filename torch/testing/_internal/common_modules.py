@@ -954,7 +954,7 @@ def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, tr
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(**cons_args),
-                forward_input=FunctionInput(make_input((2, 2))),
+                forward_input=FunctionInput(make_input((3, 2))),
                 reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
             )
         )
