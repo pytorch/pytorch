@@ -173,16 +173,18 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
 }
 
 int main(int argc, char* argv[]) {
-  #ifdef C10_MOBILE
+  // TODO: Despite its name, this only tests the CPU allocator for mobile and does not
+  // cover the default CPU allocator. The latter behaves differently and also needs to
+  // have tests (may be it already does)
+
   // Setting the priority high to make sure no other allocator gets used instead of this.
   c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
+
+  #ifdef C10_MOBILE
   // Need to disable mkldnn for this test since it allocatred memory
   // via raw_allocate inteface which requires context pointer and raw
   // pointer to be the same. Tis is not true for mobile allocator.
   at::globalContext().setUserEnabledMkldnn(false);
-  #else
-  // Setting the priority high to make sure no other allocator gets used instead of this.
-  c10::SetCPUAllocator(c10::GetDefaultCPUAllocator(), /*priority*/ 100);
   #endif
 
   ::testing::InitGoogleTest(&argc, argv);
