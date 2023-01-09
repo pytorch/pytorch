@@ -98,6 +98,8 @@ class SubgraphMatcher:
         gn_value = getattr(gn.graph.owning_module, gn.target)
         if type(pn_value) != type(gn_value):
             return False
+
+        # Don't require exact match on tensor values.
         if isinstance(pn_value, torch.Tensor):
             return isinstance(gn_value, torch.Tensor)
         else:
