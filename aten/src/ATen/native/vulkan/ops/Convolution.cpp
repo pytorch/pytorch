@@ -332,7 +332,7 @@ static api::ShaderInfo get_shader(
       }
       break;
     case Conv2dPointwise:
-      shader = VK_KERNEL(conv2d_pw_2x2);
+      shader = VK_LOOKUP_KERNEL(conv2d_pw);
       break;
   }
   return shader;
