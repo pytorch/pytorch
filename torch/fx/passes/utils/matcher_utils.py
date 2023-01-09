@@ -99,7 +99,7 @@ class SubgraphMatcher:
         if type(pn_value) != type(gn_value):
             return False
         if isinstance(pn_value, torch.Tensor):
-            return isinstance (gn_value, torch.Tensor)
+            return isinstance(gn_value, torch.Tensor)
         else:
             raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
         return False
