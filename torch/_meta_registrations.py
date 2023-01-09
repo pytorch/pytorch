@@ -2346,7 +2346,7 @@ def mkldnn_rnn_layer(
         cy = torch.empty(0, device=input.device)
     else:
         cy = cx_.new_empty(cx_.shape)
-    workspace = input.new_empty([hidden_size * 1024], dtype=torch.uint8)
+    workspace = torch.empty(0, device=input.device, dtype=torch.uint8)
     return output, hy, cy, workspace
 
 

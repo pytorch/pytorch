@@ -123,10 +123,6 @@ struct RNNParams {
     }
   }
 
-  bool is_input_packed() const {
-    return batch_sizes.size() != 0;
-  }
-
   // mkldnn memory descriptors
   using format = ideep::format_tag;
   using desc = ideep::tensor::desc;
@@ -233,27 +229,6 @@ static inline ideep::tensor get_mkldnn_tensor(
   return {desc, tensor.data_ptr()};
 }
 
-// Init a aten tensor according to ideep tensor's desc.
-static inline Tensor empty_aten_tensor_from_desc(
-    const ideep::tensor::desc& desc,
-    const at::TensorOptions& options) {
-  auto ndims = desc.data.ndims;
-  auto nblks = desc.blocking_desc().inner_nblks;
-  std::vector<int64_t> at_sizes(ndims + nblks);
-  auto padded_dims = desc.padded_dims();
-  auto blk_sizes = desc.blocking_desc().inner_blks;
-  auto blk_idxs = desc.blocking_desc().inner_idxs;
-  std::vector<int64_t> blk_size_per_dim(ndims, 1);
-  for (auto i = 0; i < nblks; i++) {
-    at_sizes[i + ndims] = blk_sizes[i];
-    blk_size_per_dim[blk_idxs[i]] *= blk_sizes[i];
-  }
-  for (auto i = 0; i < ndims; i++) {
-    at_sizes[i] = padded_dims[i] / blk_size_per_dim[i];
-  }
-  return at::empty(at_sizes, options);
-}
-
 std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
     const Tensor& w0,
     const Tensor& w1,
@@ -316,8 +291,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   Tensor workspace = Tensor();
   auto pd = ideep::lstm_forward_training::prepare(
       x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
-  workspace = empty_aten_tensor_from_desc(
-      pd.workspace_desc(), input.options().dtype(at::kByte));
+  workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
   ideep::tensor mkldnn_workspace;
   mkldnn_workspace.init(
       pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
@@ -498,15 +472,13 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool has_biases, bool batch_first, double dropout_p,
     bool train, bool bidirectional, IntArrayRef batch_sizes) {
-//   TORCH_CHECK(!train || dropout_p == 0.0, "mkldnn_rnn doesn't support dropout");
   TORCH_CHECK(batch_sizes.size() == 0, "mkldnn_rnn doesn't support packed input");
   if (static_cast<ideep::rnn_kind>(mode) != ideep::rnn_kind::LSTM) {
     TORCH_CHECK(!cx_.defined(), "mkldnn_rnn: illegal defined cx for non-LSTM RNN");
   }
 
   auto input = input_;
-  bool is_input_packed = batch_sizes.size() != 0;
-  if (batch_first && !is_input_packed) {
+  if (batch_first) {
     input = input.transpose(0, 1);
   }
   input = input.contiguous();
@@ -546,7 +518,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
   auto output = layer_input;
   auto hy = at::stack(layer_hy, 0);
   auto cy = at::stack(layer_cy, 0);
-  if (batch_first && !is_input_packed) {
+  if (batch_first) {
     output = output.transpose(0, 1);
   }
   return std::make_tuple(output, hy, cy);

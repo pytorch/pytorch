@@ -3,8 +3,6 @@
 import copy
 import itertools
 import functools
-import sys
-import time
 import unittest
 
 try:
@@ -42,9 +40,6 @@ def has_bf16_support():
     return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
 
 types = [torch.float, torch.bfloat16]
-
-def get_rand_seed():
-    return int(time.time() * 1000000000)
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
@@ -1288,9 +1283,8 @@ class TestMkldnn(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_lstm(self):
-        rand_seed = int(get_rand_seed())
-        print("{} rand sed: {}".format(sys._getframe().f_code.co_name, rand_seed))
-        torch.manual_seed(rand_seed)
+        seed = 2023
+        torch.manual_seed(seed)
 
         params_list = self._lstm_params_list()
         for dtype in types:
@@ -1325,12 +1319,12 @@ class TestMkldnn(TestCase):
                 model2 = copy.deepcopy(model)
                 with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16):
                     torch._C._set_mkldnn_enabled(False)
-                    torch.manual_seed(rand_seed)
+                    torch.manual_seed(seed)
                     output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
                                                                          (self._cast_dtype(h1, bf16), self._cast_dtype(c1, bf16)))
 
                     torch._C._set_mkldnn_enabled(True)
-                    torch.manual_seed(rand_seed)
+                    torch.manual_seed(seed)
                     output2, (hn2, cn2) = model2(input2, (h2, c2))
                     self.assertEqual(output1, output2, rtol=rtol, atol=atol)
                     self.assertEqual(hn1, hn2, rtol=rtol, atol=atol)
@@ -1338,11 +1332,11 @@ class TestMkldnn(TestCase):
 
                     if training:
                         torch._C._set_mkldnn_enabled(False)
-                        torch.manual_seed(rand_seed)
+                        torch.manual_seed(seed)
                         output1.sum().backward(retain_graph=True)
 
                         torch._C._set_mkldnn_enabled(True)
-                        torch.manual_seed(rand_seed)
+                        torch.manual_seed(seed)
                         output2.sum().backward(retain_graph=True)
 
                         self.assertEqual(input1.grad, input2.grad, rtol=rtol, atol=atol)
@@ -1351,18 +1345,18 @@ class TestMkldnn(TestCase):
                             self.assertEqual(para.grad, self._cast_dtype(getattr(model2, name).grad, bf16), rtol=rtol, atol=atol)
 
                         torch._C._set_mkldnn_enabled(False)
-                        torch.manual_seed(rand_seed)
+                        torch.manual_seed(seed)
                         hn1.sum().backward(retain_graph=True)
                         torch._C._set_mkldnn_enabled(True)
-                        torch.manual_seed(rand_seed)
+                        torch.manual_seed(seed)
                         hn2.sum().backward(retain_graph=True)
                         self.assertEqual(h1.grad, h2.grad, rtol=rtol, atol=atol)
 
                         torch._C._set_mkldnn_enabled(False)
-                        torch.manual_seed(rand_seed)
+                        torch.manual_seed(seed)
                         cn1.sum().backward(retain_graph=True)
                         torch._C._set_mkldnn_enabled(True)
-                        torch.manual_seed(rand_seed)
+                        torch.manual_seed(seed)
                         cn2.sum().backward(retain_graph=True)
                         self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
 
