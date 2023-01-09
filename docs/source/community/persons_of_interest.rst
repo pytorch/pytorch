@@ -277,6 +277,13 @@ Docs / Tutorials
 
 - Svetlana Karslioglu (`svekars <https://github.com/svekars>`__)
 
+torch.hub
+~~~~~~~~~
+
+-  Nicolas Hug (`nicolashug <https://github.com/nicolashug>`__)
+-  Vincent Moens (`vmoens <https://github.com/vmoens>`__)
+-  (emeritus) Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
+
 Library-level maintainers
 -------------------------
 
@@ -346,3 +353,8 @@ TorchData / TorchArrow
 ~~~~~~~~~~~~~~~~~~~~~~
 -  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  Wenlei Xie (`wenleix <https://github.com/wenleix>`__)
+
+TorchRL
+~~~~~~~
+
+-  Vincent Moens (`vmoens <https://github.com/vmoens>`__)
