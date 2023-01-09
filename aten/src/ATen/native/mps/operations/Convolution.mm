@@ -39,19 +39,6 @@ void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
   descriptor_.groups = groups;
 }
 
-static
-MPSShape* get_mps_conv_shape(const Tensor& tensor, bool is_channels_last) {
-  if (is_channels_last) {
-    const auto tensorSizes = tensor.sizes();
-    const NSUInteger N = tensorSizes[0];
-    const NSUInteger C = tensorSizes[1];
-    const NSUInteger H = tensorSizes[2];
-    const NSUInteger W = tensorSizes[3];
-    return @[@(N), @(H), @(W), @(C)];
-  }
-  return at::native::mps::getMPSShape(tensor);
-}
-
 Tensor _mps_convolution(
     const Tensor& input_t,
     const Tensor& weight_t,
@@ -139,7 +126,7 @@ Tensor _mps_convolution(
                                     + mps::getTensorsStringKey({input_t, weight_t}) + ":"
                                     + to_string(bias_defined) + ":" + bias_shape_key;
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-    MPSShape* inputShape = get_mps_conv_shape(input_t, is_channels_last);
+    MPSShape* inputShape = mps::getMPSShape(input_t, memory_format);
     if(!cachedGraph) {
       native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
 
@@ -167,11 +154,7 @@ Tensor _mps_convolution(
                                                                       descriptor: descriptor_
                                                                             name: nil];
           if (is_channels_last) {
-            // NHWC -> NCHW
-            outputTensor = [mpsGraph transposeTensor: [mpsGraph transposeTensor:outputTensor dimension:-1 withDimension:-2 name:nil]
-                                           dimension: -2
-                                       withDimension: -3
-                                                name: nil];
+            outputTensor = mps::convertNHWCtoNCHW(mpsGraph, outputTensor);
           }
 
           if(bias_defined) {
@@ -334,9 +317,8 @@ Tensor mps_convolution_backward_weights(
   using namespace mps;
   CheckedFrom c = "mps_convolution_backward_weights";
   auto memory_format = input_t.suggest_memory_format();
-  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
-  MPSShape* inputShape = get_mps_conv_shape(input_t, is_channels_last);
-  MPSShape* gradOutputShape = get_mps_conv_shape(grad_output_t, is_channels_last);
+  MPSShape* inputShape = getMPSShape(input_t, memory_format);
+  MPSShape* gradOutputShape = getMPSShape(grad_output_t, memory_format);
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
