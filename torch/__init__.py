@@ -35,7 +35,6 @@ import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
-    'set_default_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
@@ -443,49 +442,6 @@ def is_storage(obj):
         obj (Object): Object to test
     """
     return type(obj) in _storage_classes
-
-
-_GLOBAL_DEVICE_CONTEXT = None
-
-def set_default_device(device):
-    """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
-    does not affect factory function calls which are called with an explicit
-    ``device`` argument.  Factory calls will be performed as if they
-    were passed ``device`` as an argument.
-
-    To only temporarily change the default device instead of setting it
-    globally, use ``with torch.device(device):`` instead.
-
-    The default device is initially ``cpu``.  If you set the default tensor
-    device to another device (e.g., ``cuda``) without a device index, tensors
-    will be allocated on whatever the current device for the device type,
-    even after :func:`torch.cuda.set_device` is called.
-
-    Args:
-        device (device or string): the device to set as default
-
-    Example::
-
-        >>> # xdoctest: +SKIP("requires cuda, changes global state")
-        >>> torch.tensor([1.2, 3]).device
-        device(type='cpu')
-        >>> torch.set_default_device('cuda')  # current device is 0
-        >>> torch.tensor([1.2, 3]).device
-        device(type='cuda', index=0)
-        >>> torch.set_default_device('cuda:1')
-        >>> torch.tensor([1.2, 3]).device
-        device(type='cuda', index=1)
-
-    """
-    global _GLOBAL_DEVICE_CONTEXT
-    if _GLOBAL_DEVICE_CONTEXT is not None:
-        _GLOBAL_DEVICE_CONTEXT.__exit__(None, None, None)
-    if device is None:
-        _GLOBAL_DEVICE_CONTEXT = None
-        return
-    from torch.utils._device import DeviceContext
-    _GLOBAL_DEVICE_CONTEXT = DeviceContext(device)
-    _GLOBAL_DEVICE_CONTEXT.__enter__()
 
 
 def set_default_tensor_type(t):
