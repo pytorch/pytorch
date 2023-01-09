@@ -5,7 +5,6 @@ import os
 import tempfile
 from enum import Enum
 from functools import partial
-import logging
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from warnings import warn
 
@@ -36,8 +35,6 @@ __all__ = [
 PROFILER_STEP_NAME = "ProfilerStep"
 _dynolog_handle = None
 
-logger = logging.getLogger(__name__)
-logger.setLevel(level=logging.INFO)
 
 def supported_activities():
     """
@@ -59,6 +56,10 @@ def _optimizer_post_hook(optimizer, args, kwargs):
 
 @contextlib.contextmanager
 def _dynolog_handler_context():
+    """
+    The code before the yield statement runs when the context starts before any code from
+    the context is executed. The code after the yield statement runs after the context ends.
+    """
     global _dynolog_handle
     if _dynolog_handle is None:
         _dynolog_handle = True
@@ -74,10 +75,12 @@ def _profile_using_dynolog(override: bool = False) -> Optional[RemovableHandle]:
     global _dynolog_handle
     hook_handle: Optional[RemovableHandle] = None
     with _dynolog_handler_context():
+        # check if hook has been registered and environment variable is set properly.
+        # the override option is to handle the test cases only.
         if _dynolog_handle is True and (os.environ.get("KINETO_USE_DAEMON", None) is not None or override is True):
             hook_handle = register_optimizer_step_post_hook(_optimizer_post_hook)
+            # set _dynolog_handle to False to prevent re-registeration of the hook.
             _dynolog_handle = False
-            logger.info("Registered optimizer step post hook")
     return hook_handle
 
 
