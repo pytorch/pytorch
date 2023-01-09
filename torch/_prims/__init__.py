@@ -1270,6 +1270,21 @@ broadcast_in_dim = _make_prim(
 )
 
 
+def _validate_collapse_args(a: Tensor, start: int, end: int) -> None:
+    # Special-case for zero dimensional tensors
+    ndim = max(1, a.dim())
+    utils.validate_idx(ndim, start)
+    utils.validate_exclusive_idx(ndim, end)
+
+    # Verifies end is strictly greater than start
+    # (Collapse requires a non-empty interval)
+    utils.check(
+        end > start,
+        lambda: f"Attempting to collapse but end, {end}, is less than or equal to start, {start}!",
+        ValueError,
+    )
+
+
 def _collapsed_shape(shape: ShapeType, start: int, end: int) -> Tuple[int, ...]:
     """
     Returns the shape of a with dims in [start, end) merged into a single dimension.
@@ -1289,6 +1304,8 @@ def _collapse_view_helper(
 ) -> Tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
+    _validate_collapse_args(a, start, end)
+
     # Special-case for zero dimensional tensors
     if a.ndim == 0:
         shape = (1,)
@@ -1296,17 +1313,6 @@ def _collapse_view_helper(
     else:
         shape = a.shape  # type: ignore[assignment]
         strides = a.stride()  # type: ignore[assignment]
-
-    utils.validate_idx(len(shape), start)
-    utils.validate_exclusive_idx(len(shape), end)
-
-    # Verifies end is strictly greater than start
-    # (Collapse requires a non-empty interval)
-    if end <= start:
-        msg = "Attempting to collapse but end, {0}, is less than or equal to start, {1}!".format(
-            end, start
-        )
-        raise ValueError(msg)
 
     if a.ndim == 0 or (end - 1 == start):
         return shape, strides
@@ -1707,6 +1713,13 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
     return a.as_strided(new_shape, new_strides, a.storage_offset())
 
 
+def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
+    for idx in reversed(sorted(dimensions)):
+        a = torch.squeeze(a, dim=idx)
+
+    return a
+
+
 _squeeze_doc = """
   Creates a view of the tensor with the specified dimensions removed.
 
@@ -1716,7 +1729,7 @@ _squeeze_doc = """
 squeeze = _make_prim(
     schema="squeeze(Tensor(a) a, int[] dimensions) -> Tensor(a)",
     meta=_squeeze_meta,
-    impl_aten=torch.squeeze,
+    impl_aten=_squeeze_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_squeeze_doc,
 )
@@ -1837,10 +1850,7 @@ as_strided_scatter = _make_prim(
 
 def _collapse_meta(a: Tensor, start: int, end: int) -> Tensor:
     # Special-case for zero dimensional tensors
-    ndim = max(1, a.dim())
-    utils.validate_idx(ndim, start)
-    utils.validate_exclusive_idx(ndim, end)
-
+    _validate_collapse_args(a, start, end)
     new_shape = _collapsed_shape(a.shape, start, end)
     return a.new_empty(new_shape)
 
