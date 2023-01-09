@@ -422,7 +422,7 @@ inductor_all_samples = {
     "T",
     "H",
     "mT",
-    "mH"
+    "mH",
 }
 
 
