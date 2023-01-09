@@ -3,7 +3,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
-#include <type_traits>
 #include <omp.h>
 
 #include <ATen/core/PhiloxRNGEngine.h>
