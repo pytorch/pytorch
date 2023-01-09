@@ -7088,7 +7088,8 @@ class TestConvolutionMPS(TestCase):
         def helper(shape, in_channels=1, out_channels=1, kernel_size=3, groups=1):
             # https://github.com/pytorch/pytorch/issues/84511
             conv_cpu = torch.nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, groups=groups)
-            conv_mps = torch.nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, groups=groups).to("mps")
+            conv_mps = torch.nn.Conv1d(
+                in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, groups=groups).to("mps")
             conv_mps.weight.data = conv_cpu.weight.data.detach().clone().to("mps").requires_grad_(True)
             conv_mps.bias.data = conv_cpu.bias.data.detach().clone().to("mps").requires_grad_(True)
 
