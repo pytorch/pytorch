@@ -184,6 +184,10 @@ inductor_skips["cuda"] = {
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
+    "T": {b8, f16, f32, f64, i32, i64},
+    "H": {b8, f16, f32, f64, i32, i64},
+    "mH": {b8, f16, f32, f64, i32, i64},
+    "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
@@ -243,6 +247,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
     "normal.number_mean": {f16, f32, f64},
+    "pca_lowrank": {f32, f64},
     "polar": {f32, f64},
     "quantile": {f32, f64},
     "rand_like": {f16, f32, f64},
@@ -256,6 +261,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
+    "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     "tril": {f16},
@@ -270,6 +276,10 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
+    "T": {b8, f16, f32, f64, i32, i64},
+    "H": {b8, f16, f32, f64, i32, i64},
+    "mH": {b8, f16, f32, f64, i32, i64},
+    "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
     "allclose": {f16, f32, f64},
@@ -317,6 +327,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
     "normal.number_mean": {f16, f32, f64},
+    "pca_lowrank": {f32, f64},
     "polar": {f32, f64},
     "pow": {i32, i64},
     "rand_like": {f16, f32, f64},
@@ -330,6 +341,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "sparse.sampled_addmm": {f32, f64},
     "std_mean.unbiased": {f16},
     "stft": {f32, f64},
+    "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16, f32, f64},
