@@ -1003,7 +1003,6 @@ class CppVecKernelChecker(CppVecKernel):
             torch.float32,
             torch.bool,
             torch.uint8,
-            torch.long,
         ]
         self.store_supported_dtypes: list[torch.dtype] = [torch.float, torch.float32]
         # Cache the dtypes of the store operation. If the store is mixing dtypes, the
@@ -1089,6 +1088,31 @@ class CppVecKernelChecker(CppVecKernel):
             self.simd_vec = False
         return self.simd_vec
 
+    def is_supported_cmp(self, node: torch.fx.Node):
+        def get_node_dtype(node):
+            if type(node) == torch.fx.Node:
+                return None if "dtype" not in node.meta else node.meta["dtype"]
+            else:
+                return None
+
+        def get_cmp_dtypes(node: torch.fx.Node):
+            return get_node_dtype(node.args[-2]), get_node_dtype(node.args[-1])
+
+        assert len(node.args) >= 2
+        # cmp(x, y): y is a magic value like x >= 1
+        if type(node.args[-1]) in [int, float]:
+            return True
+        # cmp(x, y): x is a magic value like 1 >= y
+        if type(node.args[-2]) in [int, float]:
+            return False
+
+        left_dtype, right_dtype = get_cmp_dtypes(node)
+        if left_dtype is None or right_dtype is None:
+            # TODO(Eikan): Should be conservative?
+            return True
+        else:
+            return left_dtype == right_dtype
+
     def is_load_only_block(self, sub_graph: torch.fx.Graph):
         # The sub graph only contains "placeholder", "output", "get_index", "load"
         is_load_only = False
@@ -1128,8 +1152,20 @@ class CppVecKernelChecker(CppVecKernel):
 
         class VecCheckerProxy:
             @staticmethod
+            def _bin_cmp_op(x, y):
+                current_node: torch.fx.Node = V.interpreter.current_node
+                if not self.is_supported_cmp(current_node):
+                    self.simd_vec = False
+                return self.simd_vec
+
+            @staticmethod
             def __getattr__(name):
+                bin_cmp_ops = ["eq", "ne", "le", "ge", "lt", "gt"]
+
                 def inner(*args, **kwargs):
+                    if name in bin_cmp_ops:
+                        return VecCheckerProxy._bin_cmp_op(args, kwargs)
+
                     if not (name in self.fast_vec_list):
                         self.simd_vec = False
                     return self.simd_vec
@@ -1161,13 +1197,15 @@ class CppVecKernelChecker(CppVecKernel):
                     and val >= i32_iinfo.min
                 ):
                     current_node.meta["dtype"] = torch.int32
+
                 f32_iinfo = numpy.finfo(numpy.float32)
-                if (
-                    dtype == torch.double
-                    and val <= f32_iinfo.max
-                    and val >= f32_iinfo.min
-                ):
-                    current_node.meta["dtype"] = torch.float32
+                if dtype == torch.double:
+                    if (
+                        (val <= f32_iinfo.max and val >= f32_iinfo.min)
+                        or (val == numpy.inf)
+                        or (val == -numpy.inf)
+                    ):
+                        current_node.meta["dtype"] = torch.float32
 
                 supported_dtype = (torch.float32, torch.int32)
                 is_supported_dtype = current_node.meta["dtype"] in (supported_dtype)

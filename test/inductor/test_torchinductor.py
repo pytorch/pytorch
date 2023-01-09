@@ -5536,6 +5536,18 @@ if HAS_CPU:
 
                     vec_checker.simd_vec = True
                     InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.min, np.inf
+                    )
+                    self.assertTrue(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.min, -np.inf
+                    )
+                    self.assertTrue(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
                         V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
                     )
                     self.assertFalse(vec_checker.simd_vec)
