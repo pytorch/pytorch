@@ -466,7 +466,7 @@ class Optimizer:
                             else:
                                 p.grad.requires_grad_(False)
                             if p.grad.is_sparse:
-                                if p.grad.is_cuda():
+                                if p.grad.is_cuda:
                                     per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p)
                                 else:
                                     p.grad.zero_()
