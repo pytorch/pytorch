@@ -907,12 +907,14 @@ def _make_elementwise_binary_reference(
         ) -> Tensor:
             check(
                 supports_lhs_python_scalar or not isinstance(a, Number),
-                lambda: "{name}: Received a lhs Python scalar to an elementwise binary operation that does not accept lhs scalars!",
+                lambda: f"{name}: Received a lhs Python scalar to an elementwise binary "
+                "operation that does not accept lhs scalars!",
                 ValueError,
             )
             check(
                 supports_rhs_python_scalar or not isinstance(b, Number),
-                lambda: "{name}: Received a rhs Python scalar to an elementwise binary operation that does not accept rhs scalars!",
+                lambda: f"{name}: Received a rhs Python scalar to an elementwise binary "
+                "operation that does not accept rhs scalars!",
                 ValueError,
             )
             check(
@@ -1430,6 +1432,20 @@ def lcm(a: TensorLikeType, b: TensorLikeType):
 )
 def le(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.le(a, b)
+
+
+@_make_elementwise_binary_reference(
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
+def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    # Nb. this implementation does nto distribute the gradients evenly when a == b
+    mask = a >= b
+    max_ = torch.where(mask, a, b)
+    min_ = torch.where(mask, b, a)
+    inf_mask = torch.logical_and(torch.isinf(a), a == b)
+    return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
 
 # TODO: add docstring
