@@ -826,7 +826,9 @@ class TritonKernel(Kernel):
         # TODO(lezcano) We could potentially do better
         # https://github.com/pytorch/pytorch/pull/91316#issuecomment-1364680622
         if self.mutations:
-            last_use = any(name in self.current_node.last_usage for name in self.mutations)
+            last_use = any(
+                name in self.current_node.last_usage for name in self.mutations
+            )
         else:
             last_use = name in self.current_node.last_usage
         ep = "" if last_use else ", eviction_policy='evict_last'"
@@ -869,7 +871,7 @@ class TritonKernel(Kernel):
         var = self.args.output(name)
         index, mask_vars, mask = self.indexing(index, dense_indexing=True)
 
-        # Lezcano: Setting the eviction_policy would be useful in in_out_ptrs, 
+        # Lezcano: Setting the eviction_policy would be useful in in_out_ptrs,
         # but it's not supported by triton master ATM
         # See how we set it in loads in the future if they support it again.
         if mode is None:
