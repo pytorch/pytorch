@@ -635,6 +635,9 @@ class FakeTensor(torch.Tensor):
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
         assert fake_mode is not None
+        if hasattr(fake_mode, "tracking") and fake_mode.tracking.on_stack:
+            return NotImplemented
+
         with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
