@@ -32,7 +32,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return self.value
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from . import ConstantVariable
+        from .builder import VariableBuilder
+
         options = VariableTracker.propagate(self)
+        source = AttrSource(self.source, name) if self.source else None
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
@@ -42,6 +46,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserFunctionVariable(obj.__get__(self.value), **options)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, **options)
+
+        if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
+            obj
+        ):
+            if source:
+                return VariableBuilder(tx, source)(obj).add_options(options)
+            elif ConstantVariable.is_literal(obj):
+                return ConstantVariable(obj, **options)
 
         return super(UserDefinedClassVariable, self).var_getattr(tx, name)
 

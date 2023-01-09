@@ -6,6 +6,8 @@
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/StridedRandomAccessor.h>
+#include <ATen/native/CompositeRandomAccessor.h>
 #include <c10/util/irange.h>
 #include <unordered_map>
 
@@ -165,6 +167,9 @@ void _csr_matmult(
 
     for (const auto jj : c10::irange(length)) {
       (void)jj; //Suppress unused variable warning
+
+      // NOTE: the linked list that encodes col indices
+      // is not guaranteed to be sorted.
       Cj[nnz] = head;
       Cx[nnz] = sums[head];
       nnz++;
@@ -175,6 +180,17 @@ void _csr_matmult(
       next[temp] = -1; // clear arrays
       sums[temp] = 0;
     }
+
+    // Make sure that col indices are sorted.
+    // TODO: a better approach is to implement a CSR @ CSC kernel.
+    auto col_indices_accessor = StridedRandomAccessor<int64_t>(Cj + nnz - length, 1);
+    auto val_accessor = StridedRandomAccessor<scalar_t>(Cx + nnz - length, 1);
+    auto kv_accessor = CompositeRandomAccessorCPU<
+      decltype(col_indices_accessor), decltype(val_accessor)
+    >(col_indices_accessor, val_accessor);
+    std::sort(kv_accessor, kv_accessor + length, [](const auto& lhs, const auto& rhs) -> bool {
+        return get<0>(lhs) < get<0>(rhs);
+    });
 
     Cp[i + 1] = nnz;
   }
@@ -191,25 +207,18 @@ void sparse_matmul_kernel(
   */
 
   auto M = mat1.size(0);
-  auto K = mat1.size(1);
   auto N = mat2.size(1);
 
-  auto mat1_indices_ = mat1._indices().contiguous();
-  auto mat1_values = mat1._values().contiguous();
-  Tensor mat1_row_indices = mat1_indices_.select(0, 0);
-  Tensor mat1_col_indices = mat1_indices_.select(0, 1);
+  const auto mat1_csr = mat1.to_sparse_csr();
+  const auto mat2_csr = mat2.to_sparse_csr();
 
-  Tensor mat1_indptr = coo_to_csr(mat1_row_indices.data_ptr<int64_t>(), M, mat1._nnz());
-
-  auto mat2_indices_ = mat2._indices().contiguous();
-  auto mat2_values = mat2._values().contiguous();
-  Tensor mat2_row_indices = mat2_indices_.select(0, 0);
-  Tensor mat2_col_indices = mat2_indices_.select(0, 1);
-
-  Tensor mat2_indptr = coo_to_csr(mat2_row_indices.data_ptr<int64_t>(), K, mat2._nnz());
-
-  auto nnz = _csr_matmult_maxnnz(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_col_indices.data_ptr<int64_t>(),
-      mat2_indptr.data_ptr<int64_t>(), mat2_col_indices.data_ptr<int64_t>());
+  const auto nnz = _csr_matmult_maxnnz(
+      M,
+      N,
+      mat1_csr.crow_indices().data_ptr<int64_t>(),
+      mat1_csr.col_indices().data_ptr<int64_t>(),
+      mat2_csr.crow_indices().data_ptr<int64_t>(),
+      mat2_csr.col_indices().data_ptr<int64_t>());
 
   auto output_indices = output._indices();
   auto output_values = output._values();
@@ -221,11 +230,22 @@ void sparse_matmul_kernel(
   Tensor output_row_indices = output_indices.select(0, 0);
   Tensor output_col_indices = output_indices.select(0, 1);
 
-  _csr_matmult(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_col_indices.data_ptr<int64_t>(), mat1_values.data_ptr<scalar_t>(),
-  mat2_indptr.data_ptr<int64_t>(), mat2_col_indices.data_ptr<int64_t>(), mat2_values.data_ptr<scalar_t>(),
-  output_indptr.data_ptr<int64_t>(), output_col_indices.data_ptr<int64_t>(), output_values.data_ptr<scalar_t>());
+  // TODO: replace with a CSR @ CSC kernel for better performance.
+  _csr_matmult(
+      M,
+      N,
+      mat1_csr.crow_indices().data_ptr<int64_t>(),
+      mat1_csr.col_indices().data_ptr<int64_t>(),
+      mat1_csr.values().data_ptr<scalar_t>(),
+      mat2_csr.crow_indices().data_ptr<int64_t>(),
+      mat2_csr.col_indices().data_ptr<int64_t>(),
+      mat2_csr.values().data_ptr<scalar_t>(),
+      output_indptr.data_ptr<int64_t>(),
+      output_col_indices.data_ptr<int64_t>(),
+      output_values.data_ptr<scalar_t>());
 
   csr_to_coo(M, output_indptr.data_ptr<int64_t>(), output_row_indices.data_ptr<int64_t>());
+  output._coalesced_(true);
 }
 
 } // end anonymous namespace
