@@ -473,7 +473,27 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 
     @wraps(func)
     def wrapper_fn(*args):
-        vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
+        is_out_complex_dtype = []
+
+        def complex_to_real_wrapper(fn):
+            def wrapper(*args):
+                output = fn(*args)
+                flat_output, out_spec = tree_flatten(output)
+                flat_output_complex_as_real = []
+                for out in flat_output:
+                    if isinstance(out, torch.Tensor) and out.is_complex():
+                        flat_output_complex_as_real.append(torch.view_as_real(out))
+                        is_out_complex_dtype.append(True)
+                    else:
+                        flat_output_complex_as_real.append(out)
+                        is_out_complex_dtype.append(False)
+
+                output = tree_unflatten(flat_output_complex_as_real, out_spec)
+                return output
+
+            return wrapper
+
+        vjp_out = _vjp_with_argnums(complex_to_real_wrapper(func), *args, argnums=argnums, has_aux=has_aux)
         if has_aux:
             output, vjp_fn, aux = vjp_out
         else:
@@ -585,9 +605,20 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
         flat_jacobians_per_input = [result.split(flat_output_numels, dim=0) for result in flat_jacobians_per_input]
+
+        def split_and_reshape(out_idx, split, out, primal):
+            if is_out_complex_dtype[out_idx]:
+                complex_dim = len(out.shape) - 1
+                split = split.view(out.shape + primal.shape)
+                # This returns a new Tensor.
+                return torch.view_as_complex(split.movedim(complex_dim, -1).contiguous())
+            else:
+                # This is always returns a view!
+                return split.view(out.shape + primal.shape)
+
         flat_input_flat_output = [
-            tuple(split.view(out.shape + primal.shape)
-                  for split, out in zip(splits, flat_output))
+            tuple(split_and_reshape(out_idx, split, out, primal)
+                  for out_idx, (split, out) in enumerate(zip(splits, flat_output)))
             for splits, primal in zip(flat_jacobians_per_input, flat_primals)
         ]
 
