@@ -1811,6 +1811,7 @@ def find_mismatch(
         ...         )
         ...     def forward(self, x):
         ...         return self.layers(x)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
         >>> graph_info = torch.onnx.verification.find_mismatch(
         ...     Model(),
         ...     (torch.randn(2, 3),),
