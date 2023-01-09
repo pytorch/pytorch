@@ -15,6 +15,7 @@ import torch
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..ir import ReductionHint
+from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     get_fused_kernel_name,
     instance_descriptor,
@@ -23,6 +24,7 @@ from ..utils import (
     sympy_symbol,
 )
 from ..virtualized import ops, V
+
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -450,8 +452,8 @@ class IterationRangesRoot(IterationRanges):
         return list(reversed(index_vars)), list(reversed(sizes))
 
     def ranges_code(self):
-        size = self.kernel.reshape_size_str(self.index, self.prefix)
-        return f"tl.reshape(tl.arange(0, {self.prefix.upper()}BLOCK), {size})"
+        size = self.kernel.indexing_size_str(self.index, self.prefix)
+        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}"
 
     def pid_cache_lookup(self, key):
         if key in self.pid_cache:
@@ -880,11 +882,11 @@ class TritonKernel(Kernel):
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
-        sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
-        sizes[-1] = "1"
+        sizes = [":" for _ in self.range_trees]
+        sizes[-1] = "None"
         reduction_range_prefix = self.range_trees[-1].prefix
-        reduction_sizes = ["1" for _ in self.range_trees]
-        reduction_sizes[-1] = f"{reduction_range_prefix.upper()}BLOCK"
+        reduction_sizes = ["None" for _ in self.range_trees]
+        reduction_sizes[-1] = ":"
 
         if reduction_type == "any":
             reduction_type = "max"
@@ -895,8 +897,9 @@ class TritonKernel(Kernel):
         if (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
+            default_value = f" + {default}" if default != 0 else ""
             self.body.writeline(
-                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}) + {default}"
+                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}){default_value}"
             )
             accumulator_index = None
             if reduction_type in {"argmax", "argmin"}:
@@ -930,17 +933,17 @@ class TritonKernel(Kernel):
                 # argmax, argmin
                 self.suffix.writelines(
                     [
-                        f"{accumulator_index}_reduce = tl.reshape(",
-                        f"\ttl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}]).to(tl.int32)",
-                        f"{accumulator_index}_mask = (tl.reshape(tl.arange(0, {reduction_range_prefix.upper()}BLOCK),",
-                        f"\t[{', '.join(reduction_sizes)}]) == {accumulator_index}_reduce)",
-                        f"{result_var} = tl.reshape(tl.sum(",
-                        f"\ttl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim}), [{', '.join(sizes)}])",
+                        f"{accumulator_index}_reduce = "
+                        f"tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}].to(tl.int32)",
+                        f"{accumulator_index}_mask = tl.arange(0, {reduction_range_prefix.upper()}BLOCK)"
+                        f"[{', '.join(reduction_sizes)}] == {accumulator_index}_reduce",
+                        f"{result_var} = tl.sum("
+                        f"tl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim})[{', '.join(sizes)}]",
                     ]
                 )
             else:
                 self.suffix.writeline(
-                    f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
+                    f"{result_var} = tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}]"
                 )
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
@@ -1037,6 +1040,7 @@ class TritonKernel(Kernel):
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
+        mutated_args = sorted(mutated_args)
 
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
@@ -1117,10 +1121,10 @@ class TritonKernel(Kernel):
                         f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}  # dynamic_shapes=False"
                     )
 
-    def reshape_size_str(self, i=None, x=None):
-        sizes = ["1"] * (len(self.range_trees) - int(self.numels[-1] == 1))
+    def indexing_size_str(self, i=None, x=None):
+        sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
         if i is not None:
-            sizes[i] = f"{x.upper()}BLOCK"
+            sizes[i] = ":"
         return f"[{', '.join(sizes)}]"
 
     def dense_size_str(self):
@@ -1337,7 +1341,12 @@ class TritonScheduling:
                 elif node is EnableReduction:
                     stack.close()
                 else:
-                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+                    # TODO - mostly works but needs a couple fixes
+                    if not config.dynamic_shapes:
+                        # TODO - use split ranges ?
+                        indexing_dtype_strength_reduction(node._body)
+                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                    node.codegen(index_vars)
 
         wrapper = V.graph.wrapper_code
         src_code = kernel.codegen_kernel()
