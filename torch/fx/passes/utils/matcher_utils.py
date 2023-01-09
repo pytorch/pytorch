@@ -94,6 +94,8 @@ class SubgraphMatcher:
 
     def _match_attributes(self, pn: Node, gn: Node) -> bool:
         # Attributes matching is compilcated. Right now we only support matching constant tensor
+        assert isinstance(pn.target, str), f"pn.target {pn.target} must be a string."
+        assert isinstance(gn.target, str), f"gn.target {gn.target} must be a string."
         pn_value = getattr(pn.graph.owning_module, pn.target)
         gn_value = getattr(gn.graph.owning_module, gn.target)
         if type(pn_value) != type(gn_value):
