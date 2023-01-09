@@ -511,6 +511,9 @@ class TestReductions(TestCase):
         # and faster than ``[log(sum(exp(a[:i]))) for i in range(a.shape[0])]``
         # the for-loop above should produce similar precision as logcumsumexp (it's just slower),
         # so it can be used as the expected values to check our computation
+        
+        # using logsumexp from scipy because by the time of writing this test code,
+        # torch.logsumexp has not been implemented for complex numbers
         from scipy.special import logsumexp
 
         def zero_out_neg_inf(t):
@@ -533,9 +536,11 @@ class TestReductions(TestCase):
             res = np.concatenate(res_lst, axis=dim)
             return torch.as_tensor(res)
 
-        def compare_logcumsumexp(a, expected=None):
+        def compare_logcumsumexp(a, expected=None, prnt=False):
             for i in range(a.ndim):
                 actual = torch.logcumsumexp(a, dim=i)
+                if prnt:
+                    print(actual)
                 # if the expected is not given, then revert to scipy's logsumexp
                 if expected is None:
                     expected2 = logcumsumexp_slow(a, dim=i)
@@ -589,7 +594,7 @@ class TestReductions(TestCase):
             complex(inf, nan),
             complex(nan, nan),
         ])
-        compare_logcumsumexp(a3_input, a3_expected)
+        compare_logcumsumexp(a3_input, a3_expected, prnt=True)
 
         a4_input = torch.tensor([
             complex(-inf, inf),
