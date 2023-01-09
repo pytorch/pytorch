@@ -37,9 +37,12 @@ cond = PyOperator("cond")
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     def _unwrap_proxy(e):
-        if not isinstance(e, (torch.Tensor, torch.SymInt, torch.SymFloat)):
+        if isinstance(e, torch.Tensor):
+            return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
+        elif isinstance(e, (torch.SymInt, torch.SymFloat)):
+            return get_proxy_slot(e.node, proxy_mode.tracer, e, lambda e: e())
+        else:
             return e
-        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
 
     assert isinstance(operands, list), "Cond operands must be a list of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
