@@ -688,7 +688,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
     bool return_softmax,
     bool is_causal) {
   // Used for tracking usage statistics
-  C10_LOG_API_USAGE_ONCE("torch.flash_attention");
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
@@ -757,7 +757,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
     bool compute_log_sumexp,
     bool is_causal) {
   // Used for tracking usage statistics
-  C10_LOG_API_USAGE_ONCE("torch.mem_efficient_attention");
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
   // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
   // Key   -> Key(Batch x KV_seq_len x Num_heads x Dim_per_head)
   // Value -> Value(Batch x KV_seq_len x  Num_heads x Dim_per_head)
