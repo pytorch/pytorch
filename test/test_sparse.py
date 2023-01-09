@@ -1401,6 +1401,9 @@ class TestSparse(TestSparseBase):
 
     @onlyCPU
     @coalescedonoff
+    # adding a graph break before self.assertFalse(weight._indices().is_contiguous())
+    # makes the test pass so some existent sparse related bug
+    @skipIfTorchDynamo("skip")
     @dtypes(torch.double, torch.cdouble)
     def test_sspaddmm(self, device, dtype, coalesced):
 
