@@ -56,7 +56,6 @@ jobs:
   linux-focal-rocm5_3-py3_8-test:
     name: linux-focal-rocm5.3-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    if: false
     needs: linux-focal-rocm5_3-py3_8-build
     with:
       build-environment: linux-focal-rocm5.3-py3.8
