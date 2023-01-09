@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 decompositions = get_decompositions(
     [
+        aten.linspace,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
@@ -44,6 +45,7 @@ decompositions = get_decompositions(
         aten.grid_sampler_2d,
         aten.hardsigmoid,
         aten.hardsigmoid_backward,
+        aten.upsample_bilinear2d,
         aten.hardswish,
         aten.hardswish_backward,
         aten.hardtanh,
