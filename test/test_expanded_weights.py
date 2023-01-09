@@ -398,7 +398,10 @@ class TestExpandedWeightModule(TestCase):
 
         with freeze_rng_state():
             # get per sample grads with ExpandedWeights context manager
-            actual_res = call_for_per_sample_grads(module, batch_size=batch_size, loss_reduction="sum", batch_first=batch_first)(input, *args, **kwargs).sum()
+            actual_res = call_for_per_sample_grads(module,
+                                                   batch_size=batch_size,
+                                                   loss_reduction="sum",
+                                                   batch_first=batch_first)(input, *args, **kwargs).sum()
             actual_res.backward()
             actual_grads = []
             for param in module.parameters():

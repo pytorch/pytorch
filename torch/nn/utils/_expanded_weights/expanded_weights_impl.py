@@ -21,13 +21,13 @@ expanded_weights_rnn_decomps = {
 
 @contextmanager
 def batch_second(args, kwargs):
-    tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.batch_first, val=False), args)
-    tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.batch_first, val=False), kwargs)
+    tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=False), args)
+    tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=False), kwargs)
     try:
         yield
     finally:
-        tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.batch_first, val=True), args)
-        tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.batch_first, val=True), kwargs)
+        tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=True), args)
+        tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=True), kwargs)
 
 
 def implements_per_sample_grads(torch_function):
@@ -97,5 +97,5 @@ class ExpandedWeight(torch.Tensor):
     def shape(self):
         return self.orig_weight.shape
 
-    def batch_first(self, val=True):
-        self.batch_first = val
+    def set_batch_first(self, is_batch_first=True):
+        self.batch_first = is_batch_first

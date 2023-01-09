@@ -2039,7 +2039,7 @@ def one_layer_rnn(inp, hidden, params, has_biases, nonlinearity, reverse=False):
 
     precomputed_input = F.linear(inp, ih_weight, ih_bias)
     precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
-    cur_hidden = hidden
+    cur_hidden = hidden.unsqueeze(0)
     step_output = []
     for inp in precomputed_input:
         cur_hidden = nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + inp)
@@ -2047,7 +2047,7 @@ def one_layer_rnn(inp, hidden, params, has_biases, nonlinearity, reverse=False):
 
     out = torch.cat(step_output, 0)
 
-    return out, cur_hidden
+    return out, cur_hidden.squeeze(0)
 
 
 def _rnn_helper(
@@ -2106,7 +2106,7 @@ def rnn_tanh_input(
     bidirectional,
     batch_first,
 ):
-    hidden = hx.unsqueeze(1).unbind(0)  # keeps the batch dim as always the first dim
+    hidden = hx.unbind(0)
     params = gather_params(params, has_biases, False)
     out, final_hiddens = _rnn_helper(
         input,
@@ -2137,7 +2137,7 @@ def rnn_relu_input(
     bidirectional,
     batch_first,
 ):
-    hidden = hx.unsqueeze(1).unbind(0)  # keeps the batch dim as always the first dim
+    hidden = hx.unbind(0)
     params = gather_params(params, has_biases, False)
     out, final_hiddens = _rnn_helper(
         input,

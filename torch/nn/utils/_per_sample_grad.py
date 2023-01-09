@@ -1,8 +1,6 @@
 import functools
-from contextlib import nullcontext
 
 import torch
-from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.utils.stateless import functional_call
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
 
