@@ -55,7 +55,8 @@ logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else loggin
 @functools.lru_cache(None)
 def cache_dir():
     return os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR", f"/tmp/torchinductor_{getpass.getuser()}"
+        "TORCHINDUCTOR_CACHE_DIR",
+        f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
     )
 
 
@@ -413,6 +414,13 @@ class CppCodeCache:
                 global _libgomp
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
                 return cdll.LoadLibrary(path)
+            if "failed to map segment from shared object" in str(e):
+                raise OSError(
+                    f"{e}.  The most common reason this may occur is if the {tempfile.gettempdir()} folder "
+                    "is mounted with noexec (e.g., by default Docker mounts tmp file systems "
+                    f"as noexec).  Please remount {tempfile.gettempdir()} with exec enabled, or set another "
+                    "temporary directory with TORCHINDUCTOR_CACHE_DIR environment variable."
+                ) from e
             raise
 
     @classmethod
