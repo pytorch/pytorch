@@ -225,8 +225,9 @@ if 'REBUILD' not in os.environ and 'BUILD_ENVIRONMENT' in os.environ:
     subprocess.run(['echo', 'cd', '/D', '\"%CD%\"', '>>',
         os.environ['TMP_DIR_WIN'] + '/ci_scripts/pytorch_env_restore_helper.bat'])
 
-    subprocess.run(['aws', 's3', 'cp', '\"s3://ossci-windows/Restore PyTorch Environment.lnk\"',
-        '\"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"'])
+    #subprocess.run(['aws', 's3', 'cp', '\"s3://ossci-windows/Restore PyTorch Environment.lnk\"',
+    #    '\"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"'])
+
 
 subprocess.run(['echo', str(os.environ)])
 subprocess.run(['env'])
