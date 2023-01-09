@@ -1356,7 +1356,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    def test_permute(self):
+    def test_permute1(self):
         def fn(a):
             return (
                 torch.permute(a + 1, [2, 1, 4, 0, 3]) + 2,
@@ -1364,6 +1364,15 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn(2, 2, 2, 2, 2),))
+
+    def test_permute2(self):
+        def fn(a):
+            a = a.unfold(0, 2, 1)
+            a = torch.unsqueeze(a, 1)
+            a = torch.permute(a, [0, 2, 3, -3])
+            return (a,)
+
+        self.common(fn, (torch.randn(4, 4),))
 
     def test_expand(self):
         def fn(a):
@@ -2883,6 +2892,38 @@ class CommonTemplate:
             ),
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
+
+    def test_cat_of_loops_and_extern_kernel(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    64,
+                    5,
+                    1,
+                    **kwargs,
+                )
+                self.max_pool2d = torch.nn.MaxPool2d(2)
+
+            def forward(self, x, y):
+                x1 = self.conv(x)
+                y1 = self.max_pool2d(y)
+                return torch.cat([x1, y1], 1)
+
+        mod = M()
+        opt_mod = torch._dynamo.optimize("inductor")(mod)
+        memory_format = torch.channels_last
+        inputs = (
+            torch.randn([1, 64, 16, 16]).to(memory_format=memory_format),
+            torch.randn([1, 64, 32, 32]).to(memory_format=memory_format),
+        )
+        y = mod(*inputs)
+        opt_y = opt_mod(*inputs)
+        self.assertEqual(y, opt_y)
+        self.assertEqual(y.stride(), opt_y.stride())
 
     def test_stack(self):
         def fn(a, b):
@@ -5234,7 +5275,6 @@ if HAS_CPU:
                 real_out = fn(value)
                 compiled_out = opt_fn(value)
                 assert same(real_out, compiled_out, equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count < 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
