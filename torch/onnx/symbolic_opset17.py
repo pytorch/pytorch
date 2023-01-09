@@ -20,18 +20,20 @@ from typing import Sequence
 
 from torch import _C
 from torch.onnx import symbolic_helper
-from torch.onnx._internal import jit_utils, registration
+from torch.onnx._internal import jit_utils, registration, _beartype
+
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
 
-__all__ = ["layer_norm"]
+__all__ = ["layer_norm", "sigmoid"]
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=17)
 
 
 @_onnx_symbolic("aten::layer_norm")
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "none")
+@_beartype.beartype
 def layer_norm(
     g: jit_utils.GraphContext,
     input: _C.Value,
@@ -54,3 +56,11 @@ def layer_norm(
         epsilon_f=eps,
         axis_i=axis,
     )
+
+@_onnx_symbolic("aten::sigmoid")
+@symbolic_helper.parse_args("t")
+@_beartype.beartype
+def sigmoid(g: jit_utils.GraphContext, self):
+    print("\nTITAI sigmoid symbolic_fn 17")
+    from onnxscript import opset17 as op
+    return op.Sigmoid(self)

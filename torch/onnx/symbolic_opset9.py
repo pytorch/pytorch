@@ -725,11 +725,12 @@ def atan(g: jit_utils.GraphContext, self):
 
 
 @_onnx_symbolic("aten::sigmoid")
-# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
-@symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
+@symbolic_helper.parse_args("v")
 @_beartype.beartype
 def sigmoid(g: jit_utils.GraphContext, self):
-    return g.op("Sigmoid", self)
+    print("\nTITAI sigmoid symbolic_fn9")
+    from onnxscript import opset17 as op
+    return op.Sigmoid(self)
 
 
 @_onnx_symbolic("aten::sign")
