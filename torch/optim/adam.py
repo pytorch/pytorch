@@ -122,6 +122,7 @@ class Adam(Optimizer):
                  weight_decay=0, amsgrad=False, *, foreach: Optional[bool] = None,
                  maximize: bool = False, capturable: bool = False,
                  differentiable: bool = False, fused: Optional[bool] = None):
+        print("params from adam init", params)
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -312,6 +313,7 @@ def adam(params: List[Tensor],
     # and when differentiable=False.
     # We still respect when the user inputs False for fused.
     if fused is None:
+        print(f"fused was NONE")
         if not differentiable and all(
             p.is_cuda and torch.is_floating_point(p)
             for p in params + grads + exp_avgs + exp_avg_sqs + max_exp_avg_sqs + state_steps
@@ -319,6 +321,8 @@ def adam(params: List[Tensor],
             fused = True
         else:
             fused = False
+    print(f"fused is {fused}")
+    print(params, grads, exp_avgs + exp_avg_sqs + max_exp_avg_sqs)
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
@@ -334,6 +338,7 @@ def adam(params: List[Tensor],
         func = _multi_tensor_adam
     elif fused and not torch.jit.is_scripting():
         func = _fused_adam
+        print("calling fused impl!")
     else:
         func = _single_tensor_adam
 

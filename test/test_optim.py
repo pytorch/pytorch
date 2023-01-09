@@ -670,8 +670,25 @@ class TestOptim(TestCase):
                 params_with_flags = deepcopy(params)
                 params_with_flags[flag] = enabled
 
+                # print("PRINTING PARAMS")
+                ps = []
+                for i, p in enumerate(model.parameters()):
+                    if i % 2 == 0:
+                        p = p.to(dtype=torch.float32).detach()
+                        p.grad = torch.zeros_like(p)
+                        p.requires_grad = True
+                    else:
+                        p = p.to(device='cuda:1').detach()
+                        p.requires_grad = True
+                        p.grad = torch.zeros_like(p)
+                    ps.append(p)
+                    # print(p)
+                    # print(p.grad)
+
+                # print("done PRINTING PARAMS")
+
                 optimizer = optimizer_constructor(
-                    model.parameters(), **params_with_flags
+                    ps, **params_with_flags
                 )
 
                 for _ in range(kIterations):
