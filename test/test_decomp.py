@@ -428,6 +428,7 @@ class TestDecomp(TestCase):
                 decomp_out = m(*args, **kwargs)
 
             non_decomp_out = m(*args, **kwargs)
+
             if is_python_dispatcher_decomp:
                 # without this check, incorrect decomps at the python dispatcher level can still pass because
                 # they're checking aten decomps at the
