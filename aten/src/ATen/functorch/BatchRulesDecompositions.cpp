@@ -144,7 +144,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(less, Tensor );
   OP_DECOMPOSE(linalg_cond);
   OP_DECOMPOSE(linalg_cholesky);
-  OP_DECOMPOSE(c);
+  OP_DECOMPOSE(linalg_det);
   OP_DECOMPOSE(linalg_eigvalsh);
   OP_DECOMPOSE(linalg_eigvals);
   OP_DECOMPOSE(linalg_inv);
