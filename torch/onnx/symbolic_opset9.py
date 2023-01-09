@@ -163,6 +163,7 @@ __all__ = [
     "mish",
     "mm",
     "movedim",
+    "mse_loss"
     "mul",
     "multinomial",
     "mv",
