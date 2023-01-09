@@ -286,7 +286,7 @@ class TensorVariable(VariableTracker):
                 unimplemented(f"Tensor.{name}")
         elif name == "__len__":
             if self.size:
-                assert not config.dynamic_shapes
+                assert not config.dynamic_shapes or tx.export
                 return ConstantVariable(self.size[0], **options)
             else:
                 return wrap_fx_proxy(

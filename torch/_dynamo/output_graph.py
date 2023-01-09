@@ -381,6 +381,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
+                if self.root_tx.export:
+                    options["size"] = target.size()
                 return wrap_fx_proxy(
                     self.root_tx,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
