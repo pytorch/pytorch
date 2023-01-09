@@ -1176,16 +1176,13 @@ The following :mod:`torch` functions support sparse tensors:
 :func:`~torch.zeros`
 :func:`~torch.zeros_like`
 
-To manage checking sparse tensor invariants, the following tools are provided:
+To manage checking sparse tensor invariants, see:
 
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     sparse.check_sparse_tensor_invariants
-    sparse.check_sparse_tensor_invariants.is_enabled
-    sparse.check_sparse_tensor_invariants.enable
-    sparse.check_sparse_tensor_invariants.disable
 
 Unary functions
 ---------------
