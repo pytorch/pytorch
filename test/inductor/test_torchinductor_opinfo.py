@@ -298,7 +298,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.pinv.singular": {f32, f64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
@@ -420,6 +419,10 @@ inductor_all_samples = {
     "amax",
     "amin",
     "all",
+    "T",
+    "H",
+    "mT",
+    "mH"
 }
 
 

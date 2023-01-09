@@ -188,7 +188,7 @@ class TensorVariable(VariableTracker):
                 ]
                 result = out.call_method(tx, "transpose", args, {})
             else:
-                result = out
+                result = out.call_method(tx, "t", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
 
