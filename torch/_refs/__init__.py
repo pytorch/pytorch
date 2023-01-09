@@ -907,12 +907,14 @@ def _make_elementwise_binary_reference(
         ) -> Tensor:
             check(
                 supports_lhs_python_scalar or not isinstance(a, Number),
-                lambda: f"{name}: Received a lhs Python scalar to an elementwise binary operation that does not accept lhs scalars!",
+                lambda: f"{name}: Received a lhs Python scalar to an elementwise binary "
+                "operation that does not accept lhs scalars!",
                 ValueError,
             )
             check(
                 supports_rhs_python_scalar or not isinstance(b, Number),
-                lambda: f"{name}: Received a rhs Python scalar to an elementwise binary operation that does not accept rhs scalars!",
+                lambda: f"{name}: Received a rhs Python scalar to an elementwise binary "
+                "operation that does not accept rhs scalars!",
                 ValueError,
             )
             check(
