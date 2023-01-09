@@ -1,10 +1,10 @@
+# -*- coding: utf-8 -*-
 from typing import Optional, Iterable
 
 import torch
 from math import sqrt
 
 from torch import Tensor
-from torch._prims_common import is_float_dtype
 from torch._torch_docs import factory_common_args, parse_kwargs, merge_dicts
 
 __all__ = [
@@ -18,6 +18,7 @@ __all__ = [
     'hamming',
     'hann',
     'kaiser',
+    'nuttall',
 ]
 
 window_common_args = merge_dicts(
@@ -33,7 +34,6 @@ window_common_args = merge_dicts(
     {
         "normalization": "The window is normalized to 1 (maximum value is 1). However, the 1 doesn't appear if "
                          ":attr:`M` is even and :attr:`sym` is `True`.",
-        "return": "Tensor: A 1-D tensor of size ``M`` containing the window."
     }
 )
 
@@ -71,8 +71,8 @@ def _window_function_checks(function_name: str, M: int, dtype: torch.dtype, layo
         raise ValueError(f'{function_name} requires non-negative window length, got M={M}')
     if layout is not torch.strided:
         raise ValueError(f'{function_name} is implemented for strided tensors only, got: {layout}')
-    if not is_float_dtype(dtype):
-        raise ValueError(f'{function_name} expects floating point dtypes, got: {dtype}')
+    if not (dtype in [torch.float32, torch.float64]):
+        raise ValueError(f'{function_name} expects float32 or float64 dtypes, got: {dtype}')
 
 
 @_add_docstr(
@@ -106,9 +106,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -189,9 +186,6 @@ Keyword args:
     {device}
     {requires_grad}
 
-Returns:
-    {return}
-
 Examples::
 
     >>> # Generates a symmetric cosine window.
@@ -260,9 +254,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -415,9 +406,6 @@ Keyword args:
     {device}
     {requires_grad}
 
-Returns:
-    {return}
-
 Examples::
 
     >>> # Generates a symmetric Hamming window.
@@ -464,9 +452,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -519,9 +504,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -576,9 +558,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -648,9 +627,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -728,9 +704,6 @@ Keyword args:
     {device}
     {requires_grad}
 
-Returns:
-    {return}
-
 Examples::
 
     >>> # Generates a symmetric Hamming window with the general Hamming window.
@@ -754,6 +727,70 @@ def general_hamming(M,
                     requires_grad: bool = False) -> Tensor:
     return general_cosine(M,
                           a=[alpha, 1. - alpha],
+                          sym=sym,
+                          dtype=dtype,
+                          layout=layout,
+                          device=device,
+                          requires_grad=requires_grad)
+
+
+@_add_docstr(
+    r"""
+Computes the minimum 4-term Blackman-Harris window according to Nuttall.
+
+.. math::
+    w_n = 1 - 0.36358 \cos{(z_n)} + 0.48917 \cos{(2z_n)} - 0.13659 \cos{(3z_n)} + 0.01064 \cos{(4z_n)}
+
+where ``z_n = 2 π n/ M``.
+    """,
+    """
+
+{normalization}
+
+Arguments:
+    {M}
+
+Keyword args:
+    {sym}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+References::
+
+    - A. Nuttall, “Some windows with very good sidelobe behavior,”
+      IEEE Transactions on Acoustics, Speech, and Signal Processing, vol. 29, no. 1, pp. 84-91,
+      Feb 1981. https://doi.org/10.1109/TASSP.1981.1163506
+
+    - Heinzel G. et al., “Spectrum and spectral density estimation by the Discrete Fourier transform (DFT),
+      including a comprehensive list of window functions and some new flat-top windows”,
+      February 15, 2002 https://holometer.fnal.gov/GH_FFT.pdf
+
+Examples::
+
+    >>> # Generates a symmetric Nutall window.
+    >>> torch.signal.windows.general_hamming(5, sym=True)
+    tensor([3.6280e-04, 2.2698e-01, 1.0000e+00, 2.2698e-01, 3.6280e-04])
+
+    >>> # Generates a periodic Nuttall window.
+    >>> torch.signal.windows.general_hamming(5, sym=False)
+    tensor([3.6280e-04, 1.1052e-01, 7.9826e-01, 7.9826e-01, 1.1052e-01])
+""".format(
+        **window_common_args
+    ),
+)
+def nuttall(
+        M: int,
+        *,
+        sym: bool = True,
+        dtype: Optional[torch.dtype] = None,
+        layout: torch.layout = torch.strided,
+        device: Optional[torch.device] = None,
+        requires_grad: bool = False
+) -> Tensor:
+    return general_cosine(M,
+                          a=[0.3635819, 0.4891775, 0.1365995, 0.0106411],
                           sym=sym,
                           dtype=dtype,
                           layout=layout,

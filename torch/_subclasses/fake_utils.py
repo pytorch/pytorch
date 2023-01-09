@@ -13,7 +13,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 
 
-aten = torch.ops.aten
+aten = torch._ops.ops.aten
 
 
 def outputs_alias_inputs(outputs, inputs):
