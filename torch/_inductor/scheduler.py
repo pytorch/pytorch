@@ -361,8 +361,8 @@ class SchedulerNode(BaseSchedulerNode):
                         ):
                             V.kernel.mutations.add(input_node.get_name())
                             V.kernel.mutations.add(self.get_name())
-                        # update last usage of reused nodoe
-                        # From the checks above it follows that 
+                        # update last usage of reused node
+                        # From the checks above it follows that
                         # input_node.get_name() in self.last_usage
                         self.last_usage.remove(input_node.get_name())
 
