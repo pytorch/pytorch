@@ -1090,7 +1090,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
         for source in sources:
             relative_sources.add("." + source.replace(build_dir, ""))
         sources = list(relative_sources)
-        
+
     include_dirs += include_paths(cuda=True)
     kwargs['include_dirs'] = include_dirs
 
