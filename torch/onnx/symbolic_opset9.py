@@ -728,8 +728,9 @@ def atan(g: jit_utils.GraphContext, self):
 @symbolic_helper.parse_args("v")
 @_beartype.beartype
 def sigmoid(g: jit_utils.GraphContext, self):
-    print("\nTITAI sigmoid symbolic_fn9")
-    from onnxscript import opset17 as op
+    from onnxscript import opset9 as op
+
+    # onnxscript API with torchscript_evaluator will trigger g.op
     return op.Sigmoid(self)
 
 

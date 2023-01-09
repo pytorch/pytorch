@@ -169,6 +169,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
     # data structure in ONNXScript.
     g = torch._C.Graph()
 
+    # initialize onnx downstream graph
     graph_context = jit_utils.GraphContext(
         graph=g,
         block=g.block(),  # Pointless. Just make linter happy.
@@ -177,9 +178,9 @@ def _export_fx_to_ts(fx_module_with_metadata):
         params_dict={},  # Pointless. Just make linter happy.
         env={},  # Pointless. Just make linter happy.
     )
-    # initialize onnx downstream graph
-    from onnxscript import opset17 as op
-    # reset cache (This could also be at the end of the graph builder)
+    from onnxscript import opset9 as op
+
+    # reset cache (This could also be done at the end of the graph builder)
     op.reset_graph()
     op.initialize_graph(graph_context)
 
@@ -218,7 +219,6 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 ), f"Node creates None with target={node.target} and name={node.name}"
             fx_name_to_ts_value[node.name] = v
         elif node.op == "call_function":
-            print("\nTITAI Node: ", node)
             # aten ops and other statless functions.
             if (
                 isinstance(node.target, torch._ops.OpOverload)

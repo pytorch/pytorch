@@ -59,10 +59,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.sigmoid = torch.nn.Sigmoid()
+
             def forward(self, x):
                 return self.sigmoid(x)
 
-        self.opset_version = 17
         self.run_test_with_fx_to_onnx_exporter(SigmoidModel(), (x,))
 
 
