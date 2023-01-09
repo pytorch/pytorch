@@ -1069,6 +1069,7 @@
   dispatch:
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
+    MPS: _bincount_mps
   tags: dynamic_output_shape
   autogen: bincount.out
 
@@ -3098,6 +3099,7 @@
 - func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: nan_to_num_out
+    MPS: nan_to_num_out_mps
     SparseCPU, SparseCUDA: nan_to_num_sparse_out
   tags: pointwise
 
@@ -4089,6 +4091,7 @@
 - func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   dispatch:
     CPU, CUDA: _cdist_forward
+    MPS: _cdist_forward_mps
   autogen: _cdist_forward.out
 
 - func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
@@ -4412,6 +4415,7 @@
   dispatch:
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
+    MPS: randperm_out_mps
 
 - func: range.step(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -5798,6 +5802,7 @@
   dispatch:
     CPU: unique_consecutive_cpu
     CUDA: unique_consecutive_cuda
+    MPS: unique_consecutive_mps
   tags: dynamic_output_shape
   autogen: unique_consecutive.out
 
@@ -5806,6 +5811,7 @@
   dispatch:
     CPU: unique_dim_consecutive_cpu
     CUDA: unique_dim_consecutive_cuda
+    MPS: unique_dim_consecutive_mps
   tags: dynamic_output_shape
   autogen: unique_dim_consecutive.out
 
@@ -5818,6 +5824,7 @@
   dispatch:
     CPU: _unique2_cpu
     CUDA: _unique2_cuda
+    MPS: _unique2_mps
   tags: dynamic_output_shape
   autogen: _unique2.out
 
@@ -6173,6 +6180,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: norm_dtype_out
+    MPS: norm_dtype_out_mps
 
 - func: norm.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -8520,6 +8528,7 @@
   dispatch:
     CPU: nonzero_out_cpu
     CUDA: nonzero_out_cuda
+    MPS: nonzero_out_mps
   tags: dynamic_output_shape
 
 - func: nonzero(Tensor self) -> Tensor
@@ -8527,6 +8536,7 @@
   dispatch:
     CPU: nonzero_cpu
     CUDA: nonzero_cuda
+    MPS: nonzero_mps
   tags: [dynamic_output_shape, canonical]
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
@@ -11657,6 +11667,7 @@
   dispatch:
     CPU: _upsample_nearest_exact1d_out_cpu
     CUDA: _upsample_nearest_exact1d_out_cuda
+    MPS: _upsample_nearest_exact1d_out_mps
 
 - func: upsample_nearest1d(Tensor self, SymInt[1] output_size, float? scales=None) -> Tensor
   python_module: nn
@@ -11672,6 +11683,7 @@
   dispatch:
     CPU: upsample_nearest1d_backward_out_cpu
     CUDA: upsample_nearest1d_backward_out_cuda
+    MPS: upsample_nearest1d_backward_out_mps
 
 - func: _upsample_nearest_exact1d_backward.grad_input(Tensor grad_output, SymInt[1] output_size, SymInt[3] input_size, float? scales=None, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -11679,6 +11691,7 @@
   dispatch:
     CPU: _upsample_nearest_exact1d_backward_out_cpu
     CUDA: _upsample_nearest_exact1d_backward_out_cuda
+    MPS: _upsample_nearest_exact1d_backward_out_mps
 
 - func: upsample_nearest1d_backward(Tensor grad_output, SymInt[1] output_size, SymInt[3] input_size, float? scales=None) -> Tensor
   python_module: nn
@@ -12675,7 +12688,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_cross_out
+    CPU, CUDA, MPS: linalg_cross_out
 
 # linalg.lu_factor
 - func: linalg_lu_factor(Tensor A, *, bool pivot=True) -> (Tensor LU, Tensor pivots)

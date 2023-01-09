@@ -233,6 +233,30 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.sqrt()"
 
     @staticmethod
+    def eq(x, y):
+        return f"{x} == {y}"
+
+    @staticmethod
+    def ne(x, y):
+        return f"{x} != {y}"
+
+    @staticmethod
+    def lt(x, y):
+        return f"{x} < {y}"
+
+    @staticmethod
+    def gt(x, y):
+        return f"{x} > {y}"
+
+    @staticmethod
+    def le(x, y):
+        return f"{x} <= {y}"
+
+    @staticmethod
+    def ge(x, y):
+        return f"{x} >= {y}"
+
+    @staticmethod
     def rsqrt(x):
         return f"{x}.rsqrt()"
 
@@ -278,7 +302,10 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def tanh(a):
-        return f"{a}.tanh()"
+        vec_one = f"decltype({a})(1)"
+        vec_two = f"decltype({a})(2)"
+        vec_minus_two = f"decltype({a})(-2)"
+        return f"{vec_two} / ({vec_one} + ({vec_minus_two} * {a}).exp()) - {vec_one}"
 
     @staticmethod
     def reciprocal(a):
@@ -582,6 +609,8 @@ class CppKernel(Kernel):
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = DeferredIndentedBuffer()
         self.reduction_var_map = {}
+        self.preloads = IndentedBuffer()
+        self.poststores = DeferredIndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
 
     def scale_index_with_offset(
@@ -696,11 +725,14 @@ class CppKernel(Kernel):
                 with contextlib.ExitStack() as stack:
                     assert kernel
                     if hasattr(kernel, "codegen_inner_loops"):
+                        code.splice(kernel.preloads)
                         kernel.codegen_inner_loops(code)
                         stack.enter_context(code.indent())
                     code.splice(kernel.loads)
                     code.splice(kernel.compute)
                     code.splice(kernel.stores)
+                if hasattr(kernel, "codegen_inner_loops"):
+                    code.splice(kernel.poststores)
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
                 with contextlib.ExitStack() as stack_outer:
@@ -911,155 +943,143 @@ class CppVecKernel(CppKernel):
         self.cse.store_cache[name] = tmpvar
 
 
-def load_store_only_kernel(cls):
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
-
-    def __enter__(self):
-        class LoadStoreOnlyChecker:
-            @staticmethod
-            def __getattr__(name):
-                def inner(*args, **kwargs):
-                    raise AssertionError("Only load and store are allowed")
-
-                return inner
-
-            @staticmethod
-            def load(name: str, index: sympy.Expr):
-                return self.load(name, index)
-
-            @staticmethod
-            def store(name, index, value, mode=None):
-                return self.store(name, index, value, mode=mode)
-
-        self.exit_stack = contextlib.ExitStack()
-        self.exit_stack.enter_context(V.set_ops_handler(LoadStoreOnlyChecker()))
-        self.exit_stack.enter_context(V.set_kernel_handler(self))
-        return self
-
-    cls.__exit__ = __exit__
-    cls.__enter__ = __enter__
-
-    return cls
-
-
-@load_store_only_kernel
 class CppTile2DKernel(CppVecKernel):
+    """
+    A vector kernel that handles the 2d tiles with the tile size defined in `tiling_factor` on
+    the inner-most loop level and one of the outer loop level (`outer_tiling_idx`). When the data
+    tile is accessed in a contiguous way from the outer loop axis, a transposition is applied on the
+    tile to make the access contiguous from the inner-most loop axis. Then, the same vectorization
+    logic from its parent `CppVecKernel` is leveraged for load/store/compute. The transposed tile load
+    and store are generated into kernel.preloads and kernel.poststores buffers.
+
+    The loop structure looks like below:
+    for ...
+      for i_outer ...
+        for ...
+          for inner_most ...
+            float tmp0[16*16]; TILE2D_COPY_TRANSPOSE(tmp0, in_ptr0 + ..., ...); // into kernel.preloads
+            float tmp1[16*16]; // into kernel.preloads
+            for i_inner ... { // the kernel inner loop
+              vectorized loads/compute/stores (e.g., load tmp0, store tmp1) // into kernel.loads/compute/stores
+            }
+            TILE2D_COPY_TRANSPOSE(out_ptr0 + ..., tmp1, ...) // into kernel.poststores
+    """
+
     def __init__(self, args, num_threads, tiling_factor, outer_tiling_idx):
         super().__init__(args, num_threads, tiling_factor)
         self.outer_tiling_idx = outer_tiling_idx
-        self.load_contig_inner_most: Dict[str, bool] = {}
 
-    def transform_tile2d_index(self, index, offset=0):
-        assert self.is_stride1_at(self.itervars[-1], index) or self.is_stride1_at(
+    def inner_itervar(self):
+        return sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
+
+    def need_vec_transpose(self, index):
+        return self.is_stride1_at(
             self.itervars[self.outer_tiling_idx], index
-        )
-        assert not self.is_invariant_under(
-            self.itervars[-1], index
-        ) and not self.is_invariant_under(self.itervars[self.outer_tiling_idx], index)
-        # Scale the stride1 dim
-        if self.is_stride1_at(self.itervars[-1], index):
-            non_contig_idx = self.outer_tiling_idx
-            contig_idx = len(self.itervars) - 1
-        else:
-            non_contig_idx = len(self.itervars) - 1
-            contig_idx = self.outer_tiling_idx
-        new_index = self.scale_index_with_offset(
-            index, self.tiling_factor, itervar_idx=contig_idx
-        )
-        new_index = self.scale_index_with_offset(
-            new_index, self.tiling_factor, itervar_idx=non_contig_idx, offset=offset
-        )
-        return new_index, contig_idx, non_contig_idx
+        ) and not self.is_invariant_under(self.itervars[-1], index)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
+        inner = self.inner_itervar()
         expanded_index = sympy.expand(index)
-        offset = sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
-        new_index, contig_idx, non_contig_idx = self.transform_tile2d_index(
-            expanded_index
-        )
-        new_index_with_offset, *_ = self.transform_tile2d_index(expanded_index, offset)
-        assert new_index != expanded_index
-        assert new_index_with_offset != expanded_index
-
-        # Make sure the tmp tile buffer is contiguous along inner-most itervar
-        if contig_idx == len(self.itervars) - 1:
-            expr = (
-                f"TILE2D_COPY(__place_holder__ + {offset} * {self.tiling_factor}, {var} + {cexpr(new_index_with_offset)}, "
-                f"{offset}, {self.tiling_factor})"
-            )
-        else:
-            ld_src = f"{cexpr(self.stride_at(self.itervars[non_contig_idx], expanded_index))}"
+        if self.need_vec_transpose(expanded_index):
+            # transposed tile load outside the kernel inner loop
+            ld_src = f"{cexpr(self.stride_at(self.itervars[-1], expanded_index))}"
             ld_dst = f"{self.tiling_factor}"
+            new_index = self.scale_index_with_offset(
+                expanded_index, self.tiling_factor, itervar_idx=-1
+            )
+            new_index = self.scale_index_with_offset(
+                new_index, self.tiling_factor, itervar_idx=self.outer_tiling_idx
+            )
             expr = f"TILE2D_COPY_TRANSPOSE(__place_holder__, {var} + {cexpr(new_index)}, {ld_dst}, {ld_src})"
-
-        if expr in self.cse.cache:
-            return self.cse.cache[expr]
-
-        cse_var = self.cse.generate(self.loads, expr, write=False)
-        expr = expr.replace("__place_holder__", str(cse_var))
-        # TODO(jgong5): support other data types than float
-        # TODO(jgong5): the following statement is too complex to handle by cse.generate
-        #               maybe extending cse.generate to support the line below would be better?
-        line = f"float {cse_var}[{self.tiling_factor}*{self.tiling_factor}] __attribute__ ((aligned (16))); {expr};"
-        V.kernel.current_node.codegen_originating_info(self.loads, only_once=True)
-        self.loads.writeline(line)
-
-        return cse_var
+            if expr not in self.cse.cache:
+                cse_var = self.cse.generate(self.preloads, expr, write=False)
+                expr = expr.replace("__place_holder__", str(cse_var))
+                # TODO(jgong5): support data types other than float
+                line = f"float {cse_var}[{self.tiling_factor}*{self.tiling_factor}] __attribute__ ((aligned (16))); {expr};"
+                self.preloads.writeline(line)
+            else:
+                cse_var = self.cse.cache[expr]
+            # vector load inside the kernel inner loop
+            line = f"at::vec::Vectorized<float>::loadu({cse_var} + {cexpr(inner * self.tiling_factor)})"
+            return self.cse.generate(self.loads, line)
+        else:
+            new_index = self.scale_index_with_offset(
+                expanded_index,
+                self.tiling_factor,
+                itervar_idx=self.outer_tiling_idx,
+                offset=inner,
+            )
+            return super().load(name, new_index)
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
+
+        inner = self.inner_itervar()
         index = self.rename_indexing(index)
         assert mode is None
         # TODO(jgong5): assert the index is an affine expression on the itervars in concern
         expanded_index = sympy.expand(index)
-        offset = sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
-        new_index, contig_idx, non_contig_idx = self.transform_tile2d_index(
-            expanded_index
-        )
-        new_index_with_offset, *_ = self.transform_tile2d_index(expanded_index, offset)
-        assert new_index != expanded_index
-        assert new_index_with_offset != expanded_index
-
-        # TODO(jgong5): cache the transposed result for multiple use
-        if contig_idx == len(self.itervars) - 1:
-            line = (
-                f"TILE2D_COPY({var} + {cexpr(new_index_with_offset)}, {value} + {offset} * {self.tiling_factor}, "
-                f"{offset}, {self.tiling_factor});"
-            )
-        else:
-            ld_dst = f"{cexpr(self.stride_at(self.itervars[non_contig_idx], expanded_index))}"
+        if self.need_vec_transpose(expanded_index):
+            # transposed tile store outside the kernel inner loop
+            ld_dst = f"{cexpr(self.stride_at(self.itervars[-1], expanded_index))}"
             ld_src = f"{self.tiling_factor}"
-            line = f"TILE2D_COPY_TRANSPOSE({var} + {cexpr(new_index)}, {value}, {ld_dst}, {ld_src});"
+            new_index = self.scale_index_with_offset(
+                expanded_index, self.tiling_factor, itervar_idx=-1
+            )
+            new_index = self.scale_index_with_offset(
+                new_index, self.tiling_factor, itervar_idx=self.outer_tiling_idx
+            )
+            cse_var = self.cse.newvar()
+            line = f"float {cse_var}[{self.tiling_factor}*{self.tiling_factor}];"
+            self.preloads.writeline(line)
+            line = f"TILE2D_COPY_TRANSPOSE({var} + {cexpr(new_index)}, {cse_var}, {ld_dst}, {ld_src});"
+            self.poststores.writeline(name, line)
+            # vector store inside the kernel inner loop
+            line = f"{value}.store({cse_var} + {cexpr(inner * self.tiling_factor)});"
+            self.stores.writeline(name, line)
+        else:
+            new_index = self.scale_index_with_offset(
+                expanded_index,
+                self.tiling_factor,
+                itervar_idx=self.outer_tiling_idx,
+                offset=inner,
+            )
+            super().store(name, new_index, value, mode)
 
-        self.stores.writeline(name, line)
+    def codegen_inner_loops(self, code):
+        inner = self.inner_itervar()
+        code.writeline(
+            f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++)"
+        )
 
 
-@load_store_only_kernel
 class CppTile2DTailKernel(CppKernel):
+    """
+    A scalar kernel that handles the tail of inner-most loop split from a 2d tiling. The tile of the outer
+    loop axis is handled with a kernel inner loop (see method `codegen_inner_loops`).
+    """
+
     def __init__(self, args, num_threads, tiling_factor, outer_tiling_idx):
         super().__init__(args, num_threads)
         self.outer_tiling_idx = outer_tiling_idx
         self.tiling_factor = tiling_factor
 
-    def inner_itervar_name(self):
-        return f"{self.itervars[self.outer_tiling_idx]}_inner"
-
-    def transform_tile2d_index_in_tail(self, index):
-        inner = sympy.symbols(self.inner_itervar_name())
-        new_index = self.scale_index_with_offset(
-            index, self.tiling_factor, itervar_idx=self.outer_tiling_idx, offset=inner
-        )
-        return new_index
+    def inner_itervar(self):
+        return sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
 
     def load(self, name: str, index: sympy.Expr):
         index = self.rename_indexing(index)
         expanded_index = sympy.expand(index)
-        new_index = self.transform_tile2d_index_in_tail(expanded_index)
+        new_index = self.scale_index_with_offset(
+            expanded_index,
+            self.tiling_factor,
+            itervar_idx=self.outer_tiling_idx,
+            offset=self.inner_itervar(),
+        )
         return super().load(name, new_index)
 
     def store(self, name, index, value, mode=None):
@@ -1068,11 +1088,16 @@ class CppTile2DTailKernel(CppKernel):
         index = self.rename_indexing(index)
         assert mode is None
         expanded_index = sympy.expand(index)
-        new_index = self.transform_tile2d_index_in_tail(expanded_index)
+        new_index = self.scale_index_with_offset(
+            expanded_index,
+            self.tiling_factor,
+            itervar_idx=self.outer_tiling_idx,
+            offset=self.inner_itervar(),
+        )
         super().store(name, new_index, value, mode)
 
     def codegen_inner_loops(self, code):
-        inner = self.inner_itervar_name()
+        inner = self.inner_itervar()
         code.writeline(
             f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++)"
         )
@@ -1226,10 +1251,11 @@ class CppVecKernelChecker(CppVecKernel):
 
 class CppTile2DKernelChecker(CppVecKernelChecker):
     """
-    We only addresss a narrow set of situations. All of the following conditions should be met:
-    1. There are only loads and stores.
-    2. All buffer accesses should be contiguous (stride-1) along one of the itervars.
-    3. There exists one and only one outer loop var having contiguous buffer accesses.
+    Currently, we only address the situations with following constraints.
+    1. There exists one and only one fp32 load/store with outer loop var having contiguous buffer accesses.
+    2. When a load/store doesn't have contiguous access in an outer loop var, the access should be
+       vectorizable from the inner-most dim.
+    3. No reduction.
     """
 
     def __init__(self, args, num_threads, tiling_factor):
@@ -1240,63 +1266,53 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
     def check_can_tile2d(self, name: str, index: sympy.Expr):
         if not self.can_tile2d:
             return
-        if not V.graph.get_dtype(name) in [
-            torch.float,
-        ]:
-            self.can_tile2d = False
-            return
         # check contiguity from any of the outer loops
         has_stride1 = False
-        for loop_idx, itervar in enumerate(self.itervars):
+        for loop_idx, itervar in enumerate(self.itervars[:-1]):
             if self.is_stride1_at(itervar, index):
                 # only support 2d tile now
-                if loop_idx < len(self.itervars) - 1:
-                    if self.outer_tiling_idx >= 0 and self.outer_tiling_idx != loop_idx:
-                        self.can_tile2d = False
-                        return
-                    else:
-                        self.outer_tiling_idx = loop_idx
+                if V.graph.get_dtype(name) not in [torch.float, torch.float32] or (
+                    self.outer_tiling_idx >= 0 and self.outer_tiling_idx != loop_idx
+                ):
+                    self.can_tile2d = False
+                    return
+                else:
+                    self.outer_tiling_idx = loop_idx
                 has_stride1 = True
-        if not has_stride1:
+        if not has_stride1 and not self.could_vec(name, index):
             self.can_tile2d = False
+        return self.can_tile2d
 
     def load(self, name: str, index: sympy.Expr):
-        self.check_can_tile2d(name, index)
+        if not V.graph.get_dtype(name) in [
+            torch.float,
+            torch.float32,
+            torch.bool,
+            torch.uint8,
+        ]:
+            self.can_tile2d = False
+            return self.can_tile2d
+        index = self.rename_indexing(index)
+        return self.check_can_tile2d(name, index)
 
     def store(self, name, index, value, mode=None):
-        self.check_can_tile2d(name, index)
+        if not V.graph.get_dtype(name) in [
+            torch.float,
+            torch.float32,
+        ]:
+            self.can_tile2d = False
+            return self.can_tile2d
+        index = self.rename_indexing(index)
+        return self.check_can_tile2d(name, index)
+
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+        self.can_tile2d = False
+        return self.can_tile2d
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        assert self._orig_wrapper_code is not None
-        # Restore the wrapper_code
-        V.graph.wrapper_code = self._orig_wrapper_code
-        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
-
-    def __enter__(self):
-        # See notes in CppVecKernelChecker
-        self._orig_wrapper_code = V.graph.wrapper_code
-        V.graph.wrapper_code = WrapperCodeGen()
-
-        class Tile2DCheckerProxy:
-            @staticmethod
-            def __getattr__(name):
-                def inner(*args, **kwargs):
-                    self.can_tile2d = False
-                    return sympy.Symbol("tmp")
-
-                return inner
-
-            @staticmethod
-            def load(name: str, index: sympy.Expr):
-                return self.load(name, index)
-
-            @staticmethod
-            def store(name, index, value, mode=None):
-                return self.store(name, index, value, mode=mode)
-
-        self.exit_stack.enter_context(V.set_ops_handler(Tile2DCheckerProxy()))
-        self.exit_stack.enter_context(V.set_kernel_handler(self))
-        return self
+        super().__exit__(exc_type, exc_val, exc_tb)
+        if not self.simd_vec or self.outer_tiling_idx < 0:
+            self.can_tile2d = False
 
 
 class CppKernelProxy(CppKernel):
