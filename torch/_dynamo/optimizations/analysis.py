@@ -1,4 +1,3 @@
-import functools
 import itertools
 import operator
 
@@ -8,11 +7,6 @@ from torch._subclasses import FakeTensorMode  # noqa: F401
 from torch.fx.node import map_aggregate
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._pytree import tree_map
-
-from .. import config
-
-from ..utils import deepcopy_to_fake_tensor
 
 
 class ShapeAliasingAndMutationProp(ShapeProp):
@@ -112,41 +106,3 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         finally:
             # cleanup
             self.env.clear()
-
-
-def has_mutation(gm, example_inputs, inputs_only=False):
-    """Check if the graph module has any form of mutation.  If inputs_only is
-    true, we only check for mutation of inputs"""
-    # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
-
-    def _wrap_to_fake_tensor(t, *, f_mode):
-        if isinstance(t, torch.Tensor):
-            # TODO: it probably doesn't matter if we're dynamic shapes or not
-            static_shapes_ = config.dynamic_shapes is False
-            return fake_mode.from_tensor(
-                t, static_shapes=config.dynamic_shapes is not False
-            )
-        else:
-            return t
-
-    # Our analysis pass should use dynamic shape tensor inputs
-    # when dynamic shapes are enabled.
-    # We don't actually care about the guards that are created
-    # on those shapes though, so just create a fresh ShapeEnv here.
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-    fake_mode = FakeTensorMode(shape_env=ShapeEnv() if config.dynamic_shapes else None)
-    fake_wrapper = functools.partial(_wrap_to_fake_tensor, f_mode=fake_mode)
-    example_inputs = tree_map(fake_wrapper, example_inputs)
-    new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
-    with fake_mode.restore() if hasattr(fake_mode, "restore") else fake_mode:
-        ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
-
-    for node in new_gm.graph.nodes:
-        if node.meta["is_mutation"] or node.meta["is_input_mutation"]:
-            if inputs_only:
-                if node.meta["is_input_alias"]:
-                    return True
-            else:
-                return True
-    return False
