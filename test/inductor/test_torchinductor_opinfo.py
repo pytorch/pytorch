@@ -144,8 +144,8 @@ inductor_skips["cpu"] = {
     "fft.irfft2": {b8, f16, f32, f64, i32, i64},
     "fft.irfftn": {b8, f16, f32, f64, i32, i64},
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
-    "fft.rfft2": {f16, f32, f64},
-    "fft.rfftn": {f16, f32, f64},
+    "fft.rfft2": {f16, f32, f64, b8, i32, i64},
+    "fft.rfftn": {f16, f32, f64, b8, i32, i64},
 }
 
 inductor_skips["cuda"] = {
@@ -215,7 +215,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.pinv.singular": {f32, f64},
     "masked.norm": {f16},
     "masked.normalize": {f16},
     "masked.var": {f16},
@@ -297,8 +296,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.pinv.singular": {f32, f64},
-    "linalg.householder_product": {f32},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
