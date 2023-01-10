@@ -2463,7 +2463,7 @@ class TestTEFuser(JitTestCase):
 
             self.assertEqual(res, f(x, y))
 
-    @unittest.skipIf(not RUN_CUDA_HAFL, "half-precision NNC fusion requires CUDA")
+    @unittest.skipIf(not RUN_CUDA_HALF, "half-precision NNC fusion requires CUDA")
     def test_pow_multiple_dtype(self):
         def fn(p: torch.Tensor, gamma: float = 2.0) -> torch.Tensor:
             p = torch.sigmoid(p)
