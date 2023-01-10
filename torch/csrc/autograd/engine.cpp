@@ -349,7 +349,7 @@ void Engine::thread_init(
 
 #if defined(USE_CUDA)
   if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
-    set_device(device);
+  set_device(device);
   }
 #else
   set_device(device);
@@ -1217,7 +1217,6 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
-  initialize_device_threads_pool();
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
@@ -1336,6 +1335,7 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
 auto Engine::ready_queue(
     std::shared_ptr<ReadyQueue> cpu_ready_queue,
     at::Device device) -> std::shared_ptr<ReadyQueue> {
+  initialize_device_threads_pool();
   bool multithreading_disabled =
       !c10::AutogradState::get_tls_state().get_multithreading_enabled();
   if (multithreading_disabled || should_run_in_cpu_ready_queue(device.type())) {
