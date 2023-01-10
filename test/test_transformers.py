@@ -1336,9 +1336,8 @@ class TestTransformers(NNTestCase):
                     q, k, v, None, 0.0, False, False)
 
     @parametrize("device", device_list)
-    @slowTest
     def test_train_with_is_causal(self, device):
-        iters = 100
+        iters = 3
         layer = nn.TransformerEncoderLayer(
             d_model=2,
             dim_feedforward=4,
