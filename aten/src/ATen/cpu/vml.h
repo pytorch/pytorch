@@ -50,11 +50,8 @@ using namespace vec;
   namespace fallback {                                                  \
   template <typename scalar_t>                                          \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
-        using vec_t = Vectorized<vec_scalar_t<scalar_t>>;               \
-        vec::map([](vec_t x) { return x.op(); },                        \
-            out + begin, in + begin, end - begin);                      \
-      });                                                               \
+    using vec_t = Vectorized<vec_scalar_t<scalar_t>>;                   \
+    vec::map([](vec_t x) { return x.op(); }, out, in, size);            \
   }}                                                                    \
   template <typename scalar_t>                                          \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
@@ -95,6 +92,18 @@ IMPLEMENT_VML(lgamma)
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
+class MklThreadGuard {
+  int old_num_threads_;
+public:
+
+  MklThreadGuard(int64_t num_threads):
+    old_num_threads_(mkl_set_num_threads_local(num_threads)){
+  }
+  ~MklThreadGuard() {
+    mkl_set_num_threads_local(old_num_threads_);
+  }
+};
+
 inline bool use_mkl_kernels() {
   static const bool cache = [] {
     cpuinfo_initialize();
@@ -115,6 +124,7 @@ static_assert(
     if (!use_mkl_kernels()) {                                           \
       return fallback::v##op(out, in, size);                            \
     }                                                                   \
+    MklThreadGuard guard(1);                                            \
     int64_t max_mkl_ind = std::numeric_limits<MKL_INT>::max();          \
     if (size <= static_cast<int64_t>(max_mkl_ind)) {                    \
       vm##mkltype##mklop(                                               \
