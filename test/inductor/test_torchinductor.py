@@ -2034,6 +2034,22 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
+    def test_to_memory_format(self):
+        def fn(a, memory_format):
+            return a.to(memory_format=memory_format)
+
+        self.common(
+            fn,
+            (torch.randn([2, 2, 10, 10]), torch.channels_last),
+        )
+        self.common(
+            fn,
+            (
+                torch.randn([2, 2, 10, 10]).to(memory_format=torch.channels_last),
+                torch.contiguous_format,
+            ),
+        )
+
     @requires_cuda()
     def test_to_device_constant(self):
         def fn(a):
