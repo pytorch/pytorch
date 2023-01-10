@@ -218,13 +218,13 @@ default_reuse_input_qconfig = QConfig(activation=default_reuse_input_observer,
 Default qconfig for operators that reuse the observers from input Tensor, e.g. reshape
 """
 
-def get_default_qconfig(backend='fbgemm', version=0):
+def get_default_qconfig(backend='x86', version=0):
     """
     Returns the default PTQ qconfig for the specified backend.
 
     Args:
       * `backend` (str): a string representing the target backend. Currently supports
-        `x86`, `fbgemm` (default), `qnnpack` and `onednn`.
+        `x86` (default), `fbgemm`, `qnnpack` and `onednn`.
 
     Return:
         qconfig
@@ -301,13 +301,13 @@ default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=
 default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
-def get_default_qat_qconfig(backend='fbgemm', version=1):
+def get_default_qat_qconfig(backend='x86', version=1):
     """
     Returns the default QAT qconfig for the specified backend.
 
     Args:
       * `backend` (str): a string representing the target backend. Currently supports
-        `x86`, `fbgemm` (default), `qnnpack` and `onednn`.
+        `x86` (default), `fbgemm`, `qnnpack` and `onednn`.
       * `version`: version, for backwards compatibility. Can be `None` or `1`.
 
     Return:
@@ -402,13 +402,13 @@ default_per_channel_symmetric_qnnpack_qat_qconfig = QConfig(
                                                        eps=2 ** -12),
     weight=fused_per_channel_wt_fake_quant_range_neg_127_to_127)
 
-def get_default_qconfig_dict(backend='fbgemm', version=0):
+def get_default_qconfig_dict(backend='x86', version=0):
     warnings.warn(
         "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "
         "a future version. Please use torch.ao.quantization.get_default_qconfig_mapping instead.")
     return torch.ao.quantization.get_default_qconfig_mapping(backend, version).to_dict()
 
-def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
+def get_default_qat_qconfig_dict(backend='x86', version=1):
     warnings.warn(
         "torch.ao.quantization.get_default_qat_qconfig_dict is deprecated and will be removed in "
         "a future version. Please use torch.ao.quantization.get_default_qat_qconfig_mapping instead.")

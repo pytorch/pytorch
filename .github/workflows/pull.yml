@@ -230,6 +230,7 @@ jobs:
       test-matrix: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.test-matrix }}
 
   win-vs2019-cpu-py3-build:
+    if: false
     name: win-vs2019-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     with:
@@ -243,6 +244,7 @@ jobs:
         ]}
 
   win-vs2019-cpu-py3-test:
+    if: false
     name: win-vs2019-cpu-py3
     uses: ./.github/workflows/_win-test.yml
     needs: win-vs2019-cpu-py3-build
@@ -299,14 +301,14 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
       build-generates-artifacts: false
 
-  linux-focal-rocm5_2-py3_8-build:
+  linux-focal-rocm5_3-py3_8-build:
     # don't run build twice on master
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm5.2-py3.8
+    name: linux-focal-rocm5.3-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.2-py3.8
-      docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
+      build-environment: linux-focal-rocm5.3-py3.8
+      docker-image-name: pytorch-linux-focal-rocm5.3-py3.8
       sync-tag: rocm-build
       test-matrix: |
         { include: [

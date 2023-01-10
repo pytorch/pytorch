@@ -430,7 +430,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     (void)called;
   }
 
-  bool initialized() {
+  bool initialized() override {
     return devs_initialized_flags.size() > 0;
   }
 

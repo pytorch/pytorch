@@ -5,13 +5,14 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <iostream>
 #include <ATen/Operators.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
+#include <iostream>
+#include <torch/library.h>
 
 
 namespace at { namespace functorch {
@@ -319,7 +320,7 @@ Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indice
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "index_plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level)) {
     return at::index(self, indices);
@@ -506,7 +507,7 @@ Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indice
 , const Tensor & values, bool accumulate) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "index_put__plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
     return self.index_put_(indices, values, accumulate);
@@ -545,7 +546,7 @@ Tensor &_index_put_impl__plumbing(Tensor &self, const List<optional<Tensor>> &in
                                   const Tensor &values, bool accumulate, bool unsafe) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "_index_put_impl__plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
     return at::_index_put_impl_(self, indices, values, accumulate, unsafe);
@@ -666,7 +667,7 @@ Tensor index_put_plumbing(const Tensor & self, const List<optional<Tensor>> & in
                           const Tensor & values, bool accumulate) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "index_put_plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
     return self.index_put(indices, values, accumulate);
@@ -1074,6 +1075,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(scatter_add, scatter_add_batch_rule);
   VMAP_SUPPORT2(scatter, reduce, scatter_reduce_batch_rule);
   VMAP_SUPPORT2(scatter, value_reduce, scatter_value_reduce_batch_rule);
+  // as_strided_scatter does not work with the for-loop fallback today,
+  // because as_strided_scatter will return an output that matches
+  // the strides/storage_offset of its input.
+  // With the for loop fallback, each input tensor is a slice into
+  // the larger batched tensor.
+  m.impl("as_strided_scatter", torch::CppFunction::makeFromBoxedFunction<&vmapErrorFallback>());
 }
 
 }}

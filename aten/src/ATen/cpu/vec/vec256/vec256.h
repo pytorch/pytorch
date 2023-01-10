@@ -256,8 +256,7 @@ inline Vectorized<int16_t> flip(const Vectorized<int16_t> & v) {
   return _mm256_permute2x128_si256(reversed, reversed, 1);
 }
 
-template<>
-inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
+inline __m256i flip8(const __m256i & v) {
   const __m256i mask_int8 = _mm256_set_epi8(
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
@@ -266,6 +265,15 @@ inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
   return _mm256_permute2x128_si256(reversed, reversed, 1);
 }
 
+template<>
+inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
+  return flip8(v);
+}
+
+template<>
+inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
+  return flip8(v);
+}
 
 #endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
