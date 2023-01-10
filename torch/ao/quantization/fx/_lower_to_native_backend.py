@@ -263,12 +263,12 @@ STATIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type
     nni.ConvReLU3d: (nnqr.Conv3d, nniq.ConvReLU3d),
 }
 
-# The difference between STATIC_LOWER_FUSED_MODULE_TWO_DQ_NODES_MAP and STATIC_LOWER_FUSED_MODULE_MAP:
-# The refer node inside STATIC_LOWER_FUSED_MODULE_TWO_DQ_NODES_MAP has 2 dq input nodes.
+# The difference between STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP and STATIC_LOWER_FUSED_MODULE_MAP:
+# The refer node inside STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP has 2 dq input nodes.
 # Mapping from fused module class to a 2-tuple of:
 #   1) The inner reference module class
 #   2) The replacement static quantized module class for lowering
-STATIC_LOWER_FUSED_MODULE_TWO_DQ_NODES_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
+STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
     nni.ConvAdd2d: (nnqr.Conv2d, nniq.ConvAdd2d),
     nni.ConvAddReLU2d: (nnqr.Conv2d, nniq.ConvAddReLU2d),
 }
@@ -480,7 +480,7 @@ def _match_static_pattern(
 
     return (q_node, relu_node, ref_node)
 
-def _match_static_pattern_with_two_dq_inputs(
+def _match_static_pattern_with_two_inputs(
     node: Node,
     modules: Dict[str, nn.Module],
     qconfig_map: Dict[str, QConfigAny],
@@ -586,7 +586,7 @@ def _lower_static_weighted_ref_module(
         model.graph.erase_node(scale_node)
         model.graph.erase_node(zero_point_node)
 
-def _lower_static_weighted_ref_module_with_two_dq_inputs(
+def _lower_static_weighted_ref_module_with_two_inputs(
         model: QuantizedGraphModule,
         qconfig_map: Dict[str, QConfigAny]):
     """
@@ -603,8 +603,8 @@ def _lower_static_weighted_ref_module_with_two_dq_inputs(
     for n in model.graph.nodes:
         #                                            (dequantize \
         # Step 0: Find nodes that match this pattern (dequantize - ref module - quantize)
-        matching_modules = list(STATIC_LOWER_FUSED_MODULE_TWO_DQ_NODES_MAP.keys())
-        (q_node, ref_node) = _match_static_pattern_with_two_dq_inputs(
+        matching_modules = list(STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP.keys())
+        (q_node, ref_node) = _match_static_pattern_with_two_inputs(
             n, modules, qconfig_map, matching_modules)  # type: ignore[arg-type]
         if q_node is None:
             continue
@@ -619,8 +619,8 @@ def _lower_static_weighted_ref_module_with_two_dq_inputs(
         # Step 1: Change this pattern to use the corresponding quantized module
         # For fused modules, we also check whether the inner module is a reference module
         # If so, we replace the entire fused module with the corresponding quantized module
-        if ref_class in STATIC_LOWER_FUSED_MODULE_TWO_DQ_NODES_MAP:
-            inner_ref_class, q_class = STATIC_LOWER_FUSED_MODULE_TWO_DQ_NODES_MAP[ref_class]
+        if ref_class in STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP:
+            inner_ref_class, q_class = STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP[ref_class]
             if type(ref_module[0]) != inner_ref_class:  # type: ignore[index]
                 continue
         else:
@@ -1063,7 +1063,7 @@ def _lower_to_native_backend(
     operator signature so they can be lowered with the same function
     """
     _lower_static_weighted_ref_module(model, qconfig_map)
-    _lower_static_weighted_ref_module_with_two_dq_inputs(model, qconfig_map)
+    _lower_static_weighted_ref_module_with_two_inputs(model, qconfig_map)
     _lower_dynamic_weighted_ref_module(model)
     _lower_weight_only_weighted_ref_module(model)
     _lower_static_weighted_ref_functional(model, qconfig_map)
