@@ -1363,7 +1363,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
           dnnl::prop_kind::forward_inference,
           ideep::u8s8, ideep::engine::cpu_engine());
       onednn_utils::try_reorder(
-          weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+          weights, ideep::tensor::desc(params.pd.weights_desc(), groups()), weights_scales);
       ideep::convolution_transpose_forward::compute(params, src, weights, b, dst);
     }
   } else {  // not transposed
