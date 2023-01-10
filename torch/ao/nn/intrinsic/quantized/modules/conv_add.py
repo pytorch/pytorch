@@ -21,7 +21,7 @@ class ConvAdd2d(nnq.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
-        super(ConvAdd2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)
@@ -43,7 +43,7 @@ class ConvAdd2d(nnq.Conv2d):
 
     @classmethod
     def from_float(cls, mod):
-        return super(ConvAdd2d, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
@@ -64,7 +64,7 @@ class ConvAddReLU2d(nnq.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
-        super(ConvAddReLU2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)
@@ -86,7 +86,7 @@ class ConvAddReLU2d(nnq.Conv2d):
 
     @classmethod
     def from_float(cls, mod):
-        return super(ConvAddReLU2d, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
