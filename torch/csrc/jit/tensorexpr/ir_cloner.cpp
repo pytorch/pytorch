@@ -141,7 +141,7 @@ ExprPtr IRCloner::mutate(RampPtr v) {
 ExprPtr IRCloner::mutate(LoadPtr v) {
   std::vector<ExprPtr> indices_new;
   indices_new.reserve(v->indices().size());
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     indices_new.push_back(ind->accept_mutator(this));
   }
   BufPtr buf_new = to<Buf>(v->buf()->accept_mutator(this));
@@ -180,7 +180,7 @@ ExprPtr IRCloner::mutate(IfThenElsePtr v) {
 ExprPtr IRCloner::mutate(IntrinsicsPtr v) {
   std::vector<ExprPtr> params_new;
   params_new.reserve(v->nparams());
-  for (auto param : v->params()) {
+  for (const auto& param : v->params()) {
     params_new.push_back(param->accept_mutator(this));
   }
   return alloc<Intrinsics>(v->op_type(), v->dtype(), params_new);
@@ -191,7 +191,7 @@ ExprPtr IRCloner::mutate(TermPtr v) {
 
   std::vector<ExprPtr> variables_new;
   variables_new.reserve(v->variables().size());
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     variables_new.push_back(t->accept_mutator(this));
   }
   return alloc<Term>(v->hasher(), scalar_new, variables_new);
@@ -202,7 +202,7 @@ ExprPtr IRCloner::mutate(PolynomialPtr v) {
 
   std::vector<TermPtr> variables_new;
   variables_new.reserve(v->variables().size());
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     variables_new.push_back(static_to<Term>(t->accept_mutator(this)));
   }
   return alloc<Polynomial>(v->hasher(), scalar_new, variables_new);
@@ -219,7 +219,7 @@ ExprPtr IRCloner::mutate(MaxTermPtr v) {
 
   std::vector<ExprPtr> variables_new;
   variables_new.reserve(v->variables().size());
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     variables_new.push_back(t->accept_mutator(this));
   }
   return alloc<MaxTerm>(
@@ -232,7 +232,7 @@ ExprPtr IRCloner::mutate(MinTermPtr v) {
 
   std::vector<ExprPtr> variables_new;
   variables_new.reserve(v->variables().size());
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     variables_new.push_back(t->accept_mutator(this));
   }
   return alloc<MinTerm>(
@@ -244,7 +244,7 @@ ExprPtr IRCloner::mutate(ReduceOpPtr v) {
 
   std::vector<VarPtr> reduce_args_new;
   reduce_args_new.reserve(v->reduce_args().size());
-  for (auto r : v->reduce_args()) {
+  for (const auto& r : v->reduce_args()) {
     reduce_args_new.push_back(static_to<Var>(r->accept_mutator(this)));
   }
 
@@ -262,7 +262,7 @@ StmtPtr IRCloner::mutate(ForPtr v) {
 StmtPtr IRCloner::mutate(BlockPtr v) {
   std::vector<StmtPtr> stmts_new;
   stmts_new.reserve(v->nstmts());
-  for (StmtPtr stmt : *v) {
+  for (const StmtPtr& stmt : *v) {
     stmts_new.push_back(stmt->accept_mutator(this));
   }
   return alloc<Block>(stmts_new);
@@ -271,7 +271,7 @@ StmtPtr IRCloner::mutate(BlockPtr v) {
 StmtPtr IRCloner::mutate(StorePtr v) {
   std::vector<ExprPtr> indices_new;
   indices_new.reserve(v->indices().size());
-  for (auto ind : v->indices()) {
+  for (const auto& ind : v->indices()) {
     indices_new.push_back(ind->accept_mutator(this));
   }
   auto value_new = v->value()->accept_mutator(this);
@@ -282,7 +282,7 @@ StmtPtr IRCloner::mutate(StorePtr v) {
 StmtPtr IRCloner::mutate(AtomicAddPtr v) {
   std::vector<ExprPtr> indices_new;
   indices_new.reserve(v->indices().size());
-  for (auto ind : v->indices()) {
+  for (const auto& ind : v->indices()) {
     indices_new.push_back(ind->accept_mutator(this));
   }
   auto value_new = v->value()->accept_mutator(this);
@@ -309,12 +309,12 @@ StmtPtr IRCloner::mutate(ExternalCallPtr v) {
 
   std::vector<BufPtr> buf_args_new;
   buf_args_new.reserve(v->buf_args().size());
-  for (BufPtr buf_arg : v->buf_args()) {
+  for (const BufPtr& buf_arg : v->buf_args()) {
     buf_args_new.push_back(to<Buf>(buf_arg->accept_mutator(this)));
   }
   std::vector<ExprPtr> args_new;
   args_new.reserve(v->args().size());
-  for (ExprPtr arg : v->args()) {
+  for (const ExprPtr& arg : v->args()) {
     args_new.push_back(arg->accept_mutator(this));
   }
 
