@@ -179,13 +179,14 @@ the error in TorchDynamo and the user code. In addition to this flag,
 you can also set the ``log_level`` of torchdynamo through
 ``torch._dynamo.config.log_level``. The available levels are the
 following:
+
 - ``logging.DEBUG``: Print every instruction that is
-encountered in addition to all below log levels.
+  encountered in addition to all below log levels.
 - ``logging.INFO``:
-Print each function that is compiled (original and modified bytecode)
-and the graph that is captured in addition to all below log levels.
+  Print each function that is compiled (original and modified bytecode)
+  and the graph that is captured in addition to all below log levels.
 - ``logging.WARNING`` (default): Print graph breaks in addition to all
-below log levels.
+  below log levels.
 - ``logging.ERROR``: Print errors only.
 
 If a model is sufficiently large, the logs can become overwhelming. If
