@@ -18,7 +18,7 @@
 
 #include <c10/util/hash.h>
 
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -50,7 +50,7 @@ constexpr const char* GLOO_BACKEND_NAME = "gloo";
 // number can be automatically tuned, but only if we let a single
 // process take charge, and have it broadcast the limits.
 //
-class TORCH_API ProcessGroupGloo : public ProcessGroup {
+class TORCH_API ProcessGroupGloo : public Backend {
  public:
   // AsyncWork is the Gloo specific superclass for asynchronous work items.
   // We can split asynchronous work into 3 phases:
@@ -178,13 +178,13 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     int srcRank_;
   };
 
-  struct TORCH_API Options : public ProcessGroup::Options {
+  struct TORCH_API Options : public Backend::Options {
     explicit Options(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout);
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout) {
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout) {
       return c10::make_intrusive<Options>(timeout);
     }
 
@@ -213,6 +213,13 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   // If that fails (i.e. the hostname doesn't resolve to an address), it
   // falls back to binding to the loopback address.
   static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
+
+  // Create ProcessGroupGloo instance.
+  static c10::intrusive_ptr<ProcessGroupGloo> createProcessGroupGloo(
+    const c10::intrusive_ptr<Store>& store,
+    int rank,
+    int size,
+    std::chrono::milliseconds timeout);
 
   explicit ProcessGroupGloo(
       const c10::intrusive_ptr<Store>& store,

@@ -111,7 +111,7 @@ def start_processes(
               this is done by default and there is no need to manually annotate
               with the ``@record`` annotation.
 
-    ``redirects`` and ``tees`` are bitmasks specifying which std stream(s) to redirect
+    ``redirects`` and ``tee`` are bitmasks specifying which std stream(s) to redirect
     to a log file in the ``log_dir``. Valid mask values are defined in ``Std``.
     To redirect/tee only certain local ranks, pass ``redirects`` as a map with the key as
     the local rank to specify the redirect behavior for.
@@ -178,16 +178,15 @@ def start_processes(
         args: arguments to each replica
         envs: env vars to each replica
         log_dir: directory used to write log files
-        nprocs: number of copies to create (one on each process)
         start_method: multiprocessing start method (spawn, fork, forkserver)
                       ignored for binaries
         redirects: which std streams to redirect to a log file
-        tees: which std streams to redirect + print to console
+        tee: which std streams to redirect + print to console
 
     """
 
     # listdir raises FileNotFound or NotADirectoryError so no need to check manually
-    if os.listdir(log_dir):
+    if log_dir != os.devnull and os.listdir(log_dir):
         raise RuntimeError(
             f"log_dir: {log_dir} is not empty, please provide an empty log_dir"
         )
@@ -220,25 +219,31 @@ def start_processes(
     error_files = {}
 
     for local_rank in range(nprocs):
-        clogdir = os.path.join(log_dir, str(local_rank))
-        os.mkdir(clogdir)
+        if log_dir == os.devnull:
+            tee_stdouts[local_rank] = os.devnull
+            tee_stderrs[local_rank] = os.devnull
+            error_files[local_rank] = os.devnull
+            envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = ""
+        else:
+            clogdir = os.path.join(log_dir, str(local_rank))
+            os.mkdir(clogdir)
 
-        rd = redirs[local_rank]
-        if (rd & Std.OUT) == Std.OUT:
-            stdouts[local_rank] = os.path.join(clogdir, "stdout.log")
-        if (rd & Std.ERR) == Std.ERR:
-            stderrs[local_rank] = os.path.join(clogdir, "stderr.log")
+            rd = redirs[local_rank]
+            if (rd & Std.OUT) == Std.OUT:
+                stdouts[local_rank] = os.path.join(clogdir, "stdout.log")
+            if (rd & Std.ERR) == Std.ERR:
+                stderrs[local_rank] = os.path.join(clogdir, "stderr.log")
 
-        t = ts[local_rank]
-        if t & Std.OUT == Std.OUT:
-            tee_stdouts[local_rank] = stdouts[local_rank]
-        if t & Std.ERR == Std.ERR:
-            tee_stderrs[local_rank] = stderrs[local_rank]
+            t = ts[local_rank]
+            if t & Std.OUT == Std.OUT:
+                tee_stdouts[local_rank] = stdouts[local_rank]
+            if t & Std.ERR == Std.ERR:
+                tee_stderrs[local_rank] = stderrs[local_rank]
 
-        error_file = os.path.join(clogdir, "error.json")
-        error_files[local_rank] = error_file
-        log.info(f"Setting worker{local_rank} reply file to: {error_file}")
-        envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
+            error_file = os.path.join(clogdir, "error.json")
+            error_files[local_rank] = error_file
+            log.info(f"Setting worker{local_rank} reply file to: {error_file}")
+            envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
     context: PContext
     if isinstance(entrypoint, str):

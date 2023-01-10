@@ -21,7 +21,7 @@ C10_API void NoDelete(void*);
 // deallocation status and out-of-memory events to the profiler
 class C10_API ProfiledCPUMemoryReporter {
  public:
-  ProfiledCPUMemoryReporter() {}
+  ProfiledCPUMemoryReporter() = default;
   void New(void* ptr, size_t nbytes);
   void OutOfMemory(size_t nbytes);
   void Delete(void* ptr);
