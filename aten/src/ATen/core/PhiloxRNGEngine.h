@@ -105,13 +105,16 @@ public:
     #ifdef __CUDA_ARCH__
     AT_ASSERT(false, "Unsupported invocation of randn on CUDA");
     #endif
-    detail::UINT4 counter = counter_;
-    detail::UINT2 key = key_;
-    detail::UINT4 i = rand(counter, key, n_rounds);
+    if(STATE == 0) {
+      detail::UINT4 counter = counter_;
+      detail::UINT2 key = key_;
+      output_ = rand(counter, key, n_rounds);
+      incr();
+    }
     // TODO(min-jean-cho) change to Polar method, a more efficient version of Box-Muller method
     // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
-    float u1 = 1 - uint32_to_uniform_float(i[0]); // uint32_to_uniform_float returns [0,1), we need (0,1] to avoid passing 0 to log.
-    float u2 = 1 - uint32_to_uniform_float(i[1]);
+    float u1 = 1 - uint32_to_uniform_float(output_[0]); // uint32_to_uniform_float returns [0,1), we need (0,1] to avoid passing 0 to log.
+    float u2 = 1 - uint32_to_uniform_float(output_[1]);
     return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2);
   }
 
