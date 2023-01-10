@@ -702,26 +702,24 @@ def log_softmax(
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
 
 
+@register_decomposition(aten.logsumexp)
 @out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
 def logsumexp(
-    a: TensorLikeType,
-    dim: DimsType,
-    keepdim: bool = False,
+    self: TensorLikeType, dim: DimsType, keepdim: bool = False
 ) -> TensorLikeType:
-    dim = utils.canonicalize_dims(a.ndim, dim)
-    # ATen specifies int[1] type dims which expands integers to tuples of length 1
     if not isinstance(dim, Iterable):
         dim = (dim,)
-    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        # For float and complex dtypes, we shift input to exp by a constant to avoid overflow
-        a_max = amax(a, dim, keepdim=True)
-        a_max = where(abs(a_max) == float("inf"), 0.0, a_max)
-        a_max_squeezed = prims.squeeze(a_max, dim) if not keepdim else a_max
-        result = log(sum(exp(a - a_max), dim, keepdim=keepdim)) + a_max_squeezed
-    else:
-        # This case covers boolean and integer dtypes and we use non-stabilized computation
-        result = log(sum(exp(a), dim, keepdim=keepdim))
-    return result
+    if self.numel() == 0:
+        return torch.sum(torch.exp(self), dim, keepdim).log()
+    maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
+    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)  # type: ignore[arg-type]
+    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
+    return result.log().add(maxes_squeezed)
 
 
 @register_decomposition(aten.nan_to_num)
@@ -907,12 +905,14 @@ def _make_elementwise_binary_reference(
         ) -> Tensor:
             check(
                 supports_lhs_python_scalar or not isinstance(a, Number),
-                lambda: "{name}: Received a lhs Python scalar to an elementwise binary operation that does not accept lhs scalars!",
+                lambda: f"{name}: Received a lhs Python scalar to an elementwise binary "
+                "operation that does not accept lhs scalars!",
                 ValueError,
             )
             check(
                 supports_rhs_python_scalar or not isinstance(b, Number),
-                lambda: "{name}: Received a rhs Python scalar to an elementwise binary operation that does not accept rhs scalars!",
+                lambda: f"{name}: Received a rhs Python scalar to an elementwise binary "
+                "operation that does not accept rhs scalars!",
                 ValueError,
             )
             check(
@@ -1430,6 +1430,20 @@ def lcm(a: TensorLikeType, b: TensorLikeType):
 )
 def le(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.le(a, b)
+
+
+@_make_elementwise_binary_reference(
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
+def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    # Nb. this implementation does nto distribute the gradients evenly when a == b
+    mask = a >= b
+    max_ = torch.where(mask, a, b)
+    min_ = torch.where(mask, b, a)
+    inf_mask = torch.logical_and(torch.isinf(a), a == b)
+    return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
 
 # TODO: add docstring
@@ -2285,6 +2299,7 @@ def var(
     return result
 
 
+@register_decomposition(aten.std)
 @out_wrapper()
 def std(
     a: TensorLikeType,
@@ -3495,22 +3510,21 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
 
 
 @register_decomposition(aten.squeeze)
-def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
-    if dim is None:
-        dims = tuple(idx for idx, size in enumerate(a.shape) if size == 1)
-        return prims.squeeze(a, dims) if dims else prims.view_of(a)
+def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
+    if dim is not None:
+        dim = utils.canonicalize_dim(a.ndim, dim)
+        # Short-circuits if the tensor has no dimensions
+        if len(a.shape) == 0:
+            assert dim == 0
+            return prims.view_of(a)
 
-    ndim = a.ndim
-    dim = utils.canonicalize_dims(ndim, dim)
-    dims = (dim,) if isinstance(dim, Dim) else dim
-    # Short-circuits if the tensor has no dimensions
-    if ndim == 0:
-        assert len(dims) == 0 or dims == (0,)
-        return prims.view_of(a)
+        # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
+        if a.shape[dim] != 1:
+            return prims.view_of(a)
+        return prims.squeeze(a, (dim,))
 
-    # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
-    dims = tuple(d for d in dims if a.shape[d] == 1)
-    return prims.squeeze(a, dims) if dims else prims.view_of(a)
+    dims = tuple(idx for idx in range(len(a.shape)) if a.shape[idx] == 1)
+    return prims.squeeze(a, dims)
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
@@ -4813,6 +4827,7 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
+@register_decomposition(aten.norm)
 @out_wrapper(exact_dtype=True)
 def norm(
     input: TensorLikeType,

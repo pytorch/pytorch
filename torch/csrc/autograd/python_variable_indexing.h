@@ -33,7 +33,7 @@ static inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
       if (r != 0) {
         throw python_error();
       }
-      return c10::SymInt::min_representable_int();
+      return (Py_ssize_t)(c10::SymInt::min_representable_int());
     }
     return val;
   };
