@@ -1719,6 +1719,7 @@ void initJITBindings(PyObject* module) {
   py::class_<Argument>(m, "Argument")
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
+      .def_property_readonly("real_type", [](Argument& self) { return self.real_type(); })
       .def_property_readonly(
           "N",
           [](Argument& self) -> py::object {
