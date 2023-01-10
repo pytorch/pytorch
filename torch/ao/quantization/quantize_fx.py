@@ -3,11 +3,11 @@ import warnings
 
 import torch
 from torch.fx import GraphModule
-from torch.fx.proxy import (
+from .fx.tracer import QuantizationTracer
+from .fx.tracer import (  # noqa: F401
     Scope,
     ScopeContextManager
 )
-from .fx.tracer import QuantizationTracer
 from .fx import fuse  # noqa: F401
 from .fx import prepare  # noqa: F401
 from .fx.convert import convert
