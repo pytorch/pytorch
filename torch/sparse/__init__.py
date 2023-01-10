@@ -366,36 +366,42 @@ class check_sparse_tensor_invariants(object):
 The following options exists to manage sparsr tensor invariants
 checking in sparse tensor construction:
 
-1. Using a context manager::
+1. Using a context manager:
 
-     with torch.sparse.check_sparse_tensor_invariants(enable=True):
-         run_my_model()
+   .. code:: python
 
-2. Using a procedural approach::
+       with torch.sparse.check_sparse_tensor_invariants():
+           run_my_model()
 
-    prev_checks_enabled = torch.sparse.check_sparse_tensor_invariants.is_enabled()
-    torch.sparse.check_sparse_tensor_invariants.enable()
+2. Using a procedural approach:
 
-    run_my_model()
+   .. code:: python
 
-    if not prev_checks_enabled:
-        torch.sparse.check_sparse_tensor_invariants.disable()
+       prev_checks_enabled = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+       torch.sparse.check_sparse_tensor_invariants.enable()
 
-3. Using function decoration::
+       run_my_model()
 
-    @torch.sparse.check_sparse_tensor_invariants(enable=True)
-    def run_my_model():
-        ...
+       if not prev_checks_enabled:
+           torch.sparse.check_sparse_tensor_invariants.disable()
 
-    run_my_model()
+3. Using function decoration:
+
+   .. code:: python
+
+       @torch.sparse.check_sparse_tensor_invariants()
+       def run_my_model():
+           ...
+
+       run_my_model()
 
 4. Using ``check_invariants`` keyword argument in sparse tensor constructor call.
-   For example::
+   For example:
 
-    >>> torch.sparse_csr_tensor([0, 1, 3], [0, 1], [1, 2], check_invariants=True)
-    Traceback (most recent call last):
-      File "<stdin>", line 1, in <module>
-    RuntimeError: `crow_indices[..., -1] == nnz` is not satisfied.
+   >>> torch.sparse_csr_tensor([0, 1, 3], [0, 1], [1, 2], check_invariants=True)
+   Traceback (most recent call last):
+     File "<stdin>", line 1, in <module>
+   RuntimeError: `crow_indices[..., -1] == nnz` is not satisfied.
     """
 
     @staticmethod
@@ -441,13 +447,13 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
     # context manager support
     def __init__(self, enable=True):
         self.state = enable
-        self.old_state = self.is_enabled()
+        self.saved_state = self.is_enabled()
 
     def __enter__(self):
         torch._C._set_check_sparse_tensor_invariants(self.state)
 
     def __exit__(self, type, value, traceback):
-        torch._C._set_check_sparse_tensor_invariants(self.old_state)
+        torch._C._set_check_sparse_tensor_invariants(self.saved_state)
 
     # decorator support
     def __call__(self, mth):
