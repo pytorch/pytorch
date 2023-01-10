@@ -1795,6 +1795,7 @@ def verify_model_with_fx_to_onnx_exporter(
     rtol: float = 0.001,
     atol: float = 1e-7,
     acceptable_error_percentage: Optional[float] = None,
+    opset_version: Optional[int] = GLOBALS.export_onnx_opset_version,
     **_,
 ):
     if input_kwargs is None:
@@ -1815,7 +1816,7 @@ def verify_model_with_fx_to_onnx_exporter(
 
     # Make ONNX model.
     onnx_args, onnx_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
-    onnx_model = _fx.export(model, *onnx_args, **onnx_kwargs)
+    onnx_model = _fx.export(model, opset_version, *onnx_args, **onnx_kwargs)
 
     with torch.no_grad(), contextlib.ExitStack() as stack:
         tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
