@@ -716,10 +716,8 @@ def logsumexp(
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
     maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)  # type: ignore[arg-type]
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
 
