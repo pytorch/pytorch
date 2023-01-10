@@ -380,9 +380,7 @@ def _pre_forward(
     # Recursively convert args and kwargs to specified precision.
     input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
     if state.mixed_precision.cast_forward_inputs:
-        args, kwargs = _cast_forward_inputs(
-            input_dtype, *args, **kwargs
-        )
+        args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
     return args, kwargs
 
 
@@ -505,16 +503,16 @@ def _root_pre_forward(
     # Prepares the forward inputs by moving them to ``compute_device``
     # TODO: Do not use the side stream for tensor copies for now; investigate
     # the perf with/without it.
-    args_tuple, kwargs_tuple = _to_kwargs(args, kwargs, state.compute_device.index, False)
+    args_tuple, kwargs_tuple = _to_kwargs(
+        args, kwargs, state.compute_device.index, False
+    )
     args = args_tuple[0]
     kwargs = kwargs_tuple[0]
 
     input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
 
     if state.mixed_precision.cast_root_forward_inputs:
-        args, kwargs = _cast_forward_inputs(
-            input_dtype, *args, **kwargs
-        )
+        args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
     return args, kwargs
 
 

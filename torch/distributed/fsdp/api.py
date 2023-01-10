@@ -185,7 +185,6 @@ class MixedPrecision:
     cast_root_forward_inputs: bool = True
 
 
-
 @dataclass
 class CPUOffload:
     """
