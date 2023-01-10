@@ -1338,9 +1338,7 @@ class TestTransformers(NNTestCase):
 
     @parametrize("device", device_list)
     def test_train_with_is_causal(self, device):
-
         # training with is_causal
-
         S, L, E, H = 1, 2, 2, 1
         layer = nn.TransformerEncoderLayer(
             d_model=2,
