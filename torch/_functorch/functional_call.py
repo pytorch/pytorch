@@ -38,8 +38,8 @@ def functional_call(
             >>> print(mod.foo)  # tensor(0.)
             >>> print(a['foo'])  # tensor(1.)
 
-    .. note:: If the module has tied weights, whether or not the reparameterization respects the tying is determined
-        by the tie_weights flag.
+    .. note:: If the module has tied weights, whether or not functional_call respects the tying is determined by the
+        tie_weights flag.
 
         Example::
 
@@ -108,7 +108,7 @@ def functional_call(
         tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
             tied in the reparamaterized version. Therefore, if True and different values are passed for the tied
             paramaters and buffers, it will error. If False, it will not respect the originally tied parameters and
-            buffes unless the values passed for both weights are the same.
+            buffers unless the values passed for both weights are the same. Default: True.
 
     Returns:
         Any: the result of calling ``module``.
