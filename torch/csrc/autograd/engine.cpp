@@ -349,7 +349,7 @@ void Engine::thread_init(
 
 #if defined(USE_CUDA)
   if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
-  set_device(device);
+    set_device(device);
   }
 #else
   set_device(device);
