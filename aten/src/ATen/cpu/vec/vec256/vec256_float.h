@@ -156,7 +156,36 @@ public:
     return Vectorized<float>(Sleef_copysignf8(values, sign));
   }
   Vectorized<float> erf() const {
-    return Vectorized<float>(Sleef_erff8_u10(values));
+    // constants
+    const auto neg_zero_vec = _mm256_set1_ps(-0.f);
+    const auto one_vec = _mm256_set1_ps(1.0f);
+    const auto p = _mm256_set1_ps(0.3275911f);
+    const auto p1 = _mm256_set1_ps(0.254829592f);
+    const auto p2 = _mm256_set1_ps(-0.284496736f);
+    const auto p3 = _mm256_set1_ps(1.421413741f);
+    const auto p4 = _mm256_set1_ps(-1.453152027f);
+    const auto p5 = _mm256_set1_ps(1.061405429f);
+    // sign(x)
+    auto sign_mask = _mm256_and_ps(neg_zero_vec, values);
+    auto abs_vec = _mm256_xor_ps(sign_mask, values);
+    // t = 1 / (p * abs(x) + 1)
+    auto tmp0 = _mm256_fmadd_ps(p, abs_vec, one_vec);
+    auto t = _mm256_div_ps(one_vec, tmp0);
+    // r = p5 * t ^ 4 + p4 * t ^ 3 + p3 * t ^ 2 + p2 * t + p1
+    auto tmp1 = _mm256_fmadd_ps(p5, t, p4);
+    auto tmp2 = _mm256_fmadd_ps(tmp1, t, p3);
+    auto tmp3 = _mm256_fmadd_ps(tmp2, t, p2);
+    auto r = _mm256_fmadd_ps(tmp3, t, p1);
+    // - exp(- x * x)
+    auto pow_2 = _mm256_mul_ps(values, values);
+    auto neg_pow_2 = _mm256_xor_ps(neg_zero_vec, pow_2);
+    // auto tmp4 = exp(neg_pow_2);
+    auto tmp4 = Vectorized<float>(Sleef_expf8_u10(neg_pow_2));
+    auto tmp5 = _mm256_xor_ps(neg_zero_vec, tmp4);
+    // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
+    auto tmp6 = _mm256_mul_ps(tmp5, t);
+    auto tmp7 = _mm256_fmadd_ps(tmp6, r, one_vec);
+    return _mm256_xor_ps(sign_mask, tmp7);
   }
   Vectorized<float> erfc() const {
     return Vectorized<float>(Sleef_erfcf8_u15(values));

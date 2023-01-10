@@ -3,7 +3,9 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
+#include <ATen/native/TensorFactories.h>
 
 namespace at {
 namespace native {
@@ -338,6 +340,47 @@ Tensor& exponential_mps_(Tensor& self, double lambda, c10::optional<Generator> g
   return mps::random_mps_impl<double>(self, 0.0, 1.0, c10::nullopt, c10::nullopt,
                                       MPSGraphRandomDistributionUniform, gen,
                                       "exponential_mps_:" + std::to_string(lambda), random_op_block);
+}
+
+Tensor& randperm_out_mps(int64_t n, c10::optional<Generator> generator, Tensor& result) {
+  if (!is_macos_13_or_newer()) {
+    TORCH_WARN_ONCE("MPS: randperm op is supported natively starting from macOS 13.0. ",
+                    "Falling back on CPU. This may have performance implications.");
+
+    auto result_cpu = result.to("cpu");
+    at::randperm_out(result_cpu, n);
+    result.resize_as_(result_cpu);
+    result.copy_(result_cpu);
+    return result;
+  }
+
+  TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
+  TORCH_CHECK(!generator.has_value() ||
+             (generator.has_value() && result.device() == generator->device()),
+             "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
+  check_supported_max_int_with_precision(n, result);
+
+  result.resize_({n});
+  if (n == 0) {
+    return result;
+  }
+
+  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* argsortTensor = [mpsGraph argSortWithTensor:randomTensor
+                                                           axis:0
+                                                           name:nil];
+    if (result.scalar_type() != kInt) {
+      argsortTensor = [mpsGraph castTensor:argsortTensor
+                                    toType:mps::getMPSDataType(result.scalar_type())
+                                      name:@"castOutput"];
+    }
+    return argsortTensor;
+  };
+
+  return mps::random_mps_impl<int64_t>(result, 0.0, 1.0, c10::nullopt, c10::nullopt,
+                                      MPSGraphRandomDistributionUniform, generator,
+                                      "ranperm_out_mps:" + mps::getTensorsStringKey({result}), random_op_block);
 }
 
 Tensor& multinomial_with_replacement_mps_kernel(
