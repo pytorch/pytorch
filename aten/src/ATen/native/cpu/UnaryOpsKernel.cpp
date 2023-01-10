@@ -663,7 +663,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
             int64_t out_stride = strides[0] / sizeof(scalar_t);                    \
             int64_t in_stride = strides[1] / sizeof(scalar_t);                     \
             if (out_stride == 1 && in_stride == 1) {                               \
-              vml::serial::v##op(out_data, in_data, n);                            \
+              vml::v##op(out_data, in_data, n);                                    \
               return;                                                              \
             }                                                                      \
             static constexpr int64_t WIDTH = (8*1024) / sizeof(scalar_t);          \
@@ -677,7 +677,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
               if (in_buffer != in_data)                                            \
                 for (const auto j : c10::irange(width))                            \
                   in_buffer[j] = in_data[in_stride * (i + j)];                     \
-              vml::serial::v##op(out_buffer, in_buffer, width);                    \
+              vml::v##op(out_buffer, in_buffer, width);                            \
               if (out_buffer != out_data)                                          \
                 for (const auto j : c10::irange(width))                            \
                     out_data[out_stride * (i + j)] = out_buffer[j];                \
