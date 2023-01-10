@@ -32,6 +32,7 @@
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 #include <mkl.h>
+#include <cpuinfo.h>
 #endif
 
 namespace at {
@@ -40,31 +41,24 @@ inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
-template <typename scalar_t>
-inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
-  parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
-    map(
-        [](const Vectorized<scalar_t>& x) {
-          return Vectorized<scalar_t>((scalar_t)(1)) / x.sqrt();
-        },
-        out + begin,
-        in + begin,
-        end - begin);
-  });
-}
+// We define fallbacks implementations that just use vec::map for types where
+// vml is not supported, or where it is handycapped by intel (i.e. on amd).
 
 // NB: We ignore numerical errors by convention and leave them to the user
 
-#define IMPLEMENT_VML(op)                                                         \
-  template <typename scalar_t>                                                    \
-  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      using vecscalar_t = vec_scalar_t<scalar_t>;                                 \
-      map([](const Vectorized<vecscalar_t>& x) { return x.op(); },                \
-          out + begin,                                                            \
-          in + begin,                                                             \
-          end - begin);                                                           \
-    });                                                                           \
+#define IMPLEMENT_VML(op)                                               \
+  namespace fallback {                                                  \
+  template <typename scalar_t>                                          \
+  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
+    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
+        using vec_t = Vectorized<vec_scalar_t<scalar_t>>;               \
+        vec::map([](vec_t x) { return x.op(); },                        \
+            out + begin, in + begin, end - begin);                      \
+      });                                                               \
+  }}                                                                    \
+  template <typename scalar_t>                                          \
+  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
+    return fallback::v##op(out, in, size);                              \
   }
 
 IMPLEMENT_VML(abs)
@@ -101,15 +95,26 @@ IMPLEMENT_VML(lgamma)
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
+inline bool use_mkl_kernels() {
+  static const bool cache = [] {
+    cpuinfo_initialize();
+    return cpuinfo_get_current_core()->vendor == cpuinfo_vendor_intel;
+  }();
+  return cache;
+}
+
 // NB: LP64 MKL is the most commonly used and thus we assume it here. That means
 // we need to expect MKL_INT to be of type int, which implies int32_t in most
 // cases.
 static_assert(
     std::is_same<MKL_INT, int32_t>::value,
     "MKL_INT is assumed to be int32_t");
-#define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                    \
+#define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                \
   template <>                                                           \
-  inline void v##op(type * out, const type * in, int64_t size) {          \
+  inline void v##op(type * out, const type * in, int64_t size) {        \
+    if (!use_mkl_kernels()) {                                           \
+      return fallback::v##op(out, in, size);                            \
+    }                                                                   \
     int64_t max_mkl_ind = std::numeric_limits<MKL_INT>::max();          \
     if (size <= static_cast<int64_t>(max_mkl_ind)) {                    \
       vm##mkltype##mklop(                                               \
@@ -133,8 +138,8 @@ static_assert(
     }                                                                   \
   }
 
-#define IMPLEMENT_VML_MKL(op, mklop)          \
-  IMPLEMENT_VML_MKL_STUB(op, mklop, float, s) \
+#define IMPLEMENT_VML_MKL(op, mklop)           \
+  IMPLEMENT_VML_MKL_STUB(op, mklop, float, s)  \
   IMPLEMENT_VML_MKL_STUB(op, mklop, double, d)
 
 // NB: abs, cosh and sinh were temporarily disabled due to issues with Apple
