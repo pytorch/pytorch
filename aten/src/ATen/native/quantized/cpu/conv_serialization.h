@@ -95,7 +95,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
       if (firstElement.isTensor()) {
         version = 1;
       } else if (firstElement.isString()) {
-        std::string version_str = firstElement.toStringRef();
+        const std::string& version_str = firstElement.toStringRef();
         // note: not parsing the string to automatically handle bad
         // inputs
         if (version_str == "2") {

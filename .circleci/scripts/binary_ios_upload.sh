@@ -47,7 +47,7 @@ echo "${IOS_NIGHTLY_BUILD_VERSION}" > version.txt
 zip -r ${ZIPFILE} install src version.txt LICENSE
 # upload to aws
 # Install conda then 'conda install' awscli
-curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-py39_4.12.0-MacOSX-x86_64.sh
 chmod +x ~/conda.sh
 /bin/bash ~/conda.sh -b -p ~/anaconda
 export PATH="~/anaconda/bin:${PATH}"
