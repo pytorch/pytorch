@@ -29,15 +29,15 @@ class TORCH_API LazyGraphExecutor {
 
   // Override these methods to perform custom tensor registration and
   // unregistration Note: It is vital that the parent implementations are also
-  // called
-  //       in order for the tensors to show up in the live tensor list
+  // called in order for the tensors to show up in the live tensor list
   virtual void RegisterTensor(std::shared_ptr<LazyTensor::Data> data);
   virtual void UnregisterTensor(LazyTensor::Data* data);
 
-  // Seed for random generator
-  Value GetRngSeed(const BackendDevice& device);
-  uint64_t GetRunningSeed(const BackendDevice& device);
-  void SetRngSeed(const BackendDevice& device, uint64_t seed);
+  // Seed for random generator.
+  // Override to supply your own DeviceContextArena.
+  virtual Value GetRngSeed(const BackendDevice& device);
+  virtual uint64_t GetRunningSeed(const BackendDevice& device);
+  virtual void SetRngSeed(const BackendDevice& device, uint64_t seed);
 
   void DeviceBarrier(const BackendDevice& device);
 
@@ -60,7 +60,7 @@ class TORCH_API LazyGraphExecutor {
   // gets turned into device data. If wait is true, the sync operation will be
   // run synchronously. The devices argument, if not empty, tells the devices
   // which should be partecipating into the replicated computation.
-  void SyncLiveTensorsGraph(
+  virtual void SyncLiveTensorsGraph(
       const BackendDevice* device,
       c10::ArrayRef<std::string> devices,
       bool wait);
@@ -77,7 +77,8 @@ class TORCH_API LazyGraphExecutor {
 
   // Marks an execution step, which allows the tensor framework to understand
   // the computation boundaries.
-  void MarkStep(const BackendDevice& device);
+  // Override to supply your own DeviceContextArena.
+  virtual void MarkStep(const BackendDevice& device);
 
   // Waits for all the outstanding operations on all the supplied devices.
   // If devices is empty, the wait will happen for all local devices.
@@ -255,14 +256,59 @@ class TORCH_API LazyGraphExecutor {
     std::map<BackendDevice, std::unique_ptr<DataCache>> device_caches_;
   };
 
-  void ResetTrimCounter() const;
+  // The DeviceContextArena holds per device live information and statistics,
+  // among which the lazy tensors which are currently alive in the system. This
+  // is used to create computation "barriers" in order to flush pending
+  // operations and ensure the same computations are created during the training
+  // loops.
+  // TODO(alanwaketan): Add a registry such that we don't need to make all
+  // related methods virtual.
+  class DeviceContextArena {
+   protected:
+    struct DeviceContext {
+      std::mutex lock;
+      std::map<int64_t, std::weak_ptr<LazyTensor::Data>> tensors_data;
+      uint64_t seed = 101;
+      uint64_t running_seed = 101;
+      Value seed_ir_value;
+    };
 
- private:
-  struct CompilationResult {
-    BackendDevice device;
-    size_t emitted_nodes = 0;
-    ComputationPtr computation;
-    std::vector<BackendDataPtr> parameters_data;
+   public:
+    static DeviceContextArena* Get();
+    virtual ~DeviceContextArena() = default;
+
+    void RegisterTensor(std::shared_ptr<LazyTensor::Data> data);
+    void UnregisterTensor(LazyTensor::Data* data);
+
+    std::vector<LazyTensorPtr> GetLiveTensors(const BackendDevice* device);
+
+    // Overriding it allow derived class to use their own IRs for Value.
+    virtual Value GetRngSeed(const BackendDevice& device);
+    uint64_t GetRunningSeed(const BackendDevice& device);
+    void SetRngSeed(const BackendDevice& device, uint64_t seed);
+
+    void MarkStep(const BackendDevice& device);
+
+    std::vector<BackendDevice> GetActiveDevices();
+
+   protected:
+    DeviceContext* GetDeviceContext(const BackendDevice& device);
+
+    void ForAllDeviceContexts(
+        const std::function<void(DeviceContext*)>& fn,
+        const BackendDevice* device);
+
+    // Overriding it allow derived class to use their own conversions.
+    virtual Value IrValueFromScalar(
+        const at::Scalar& value,
+        at::ScalarType scalar_type,
+        const BackendDevice& device);
+
+   private:
+    std::vector<DeviceContext*> GetAllDeviceContexts();
+
+    std::mutex lock_;
+    std::map<BackendDevice, DeviceContext*> device_contexts_;
   };
 
   struct Async {
@@ -271,6 +317,7 @@ class TORCH_API LazyGraphExecutor {
         std::vector<BackendDataPtr> parameters_data,
         std::vector<BackendDataPtr> tensors_data,
         ComputationCache::TypePtr cached_computation);
+    virtual ~Async() = default;
 
     void Wait();
 
@@ -283,14 +330,29 @@ class TORCH_API LazyGraphExecutor {
     std::vector<BackendDataPtr> tensors_data;
   };
 
+  void ResetTrimCounter() const;
+
+  // Waits for this SyncTensorCollection's device barrier and acquire the lock.
+  virtual void TensorCollectionBarrier(SyncTensorCollection* coll);
+
+  // One can override to insert your own profiler.
+  virtual PostOrderData RunPostOrder(
+      const std::vector<Value>& ir_values,
+      SyncTensorCollection* coll);
+
+ private:
+  struct CompilationResult {
+    BackendDevice device;
+    size_t emitted_nodes = 0;
+    ComputationPtr computation;
+    std::vector<BackendDataPtr> parameters_data;
+  };
+
   virtual bool ShouldSyncTensor(const LazyTensorPtr tensor) const;
 
   SyncTensorCollection CollectSyncTensors(
       const std::vector<LazyTensorPtr>& tensors,
       const SyncTensorsConfig& config);
-
-  // Waits for this SyncTensorCollection's device barrier and acuire the lock.
-  void TensorCollectionBarrier(SyncTensorCollection* coll);
 
   std::vector<Value> CollectRoots(
       const std::vector<LazyTensorPtr>& tensors,
@@ -308,10 +370,6 @@ class TORCH_API LazyGraphExecutor {
       c10::ArrayRef<size_t> indices,
       std::vector<Value>& ir_values,
       std::vector<BackendDataPtr>& tensor_data_vec);
-
-  PostOrderData RunPostOrder(
-      const std::vector<Value>& ir_values,
-      SyncTensorCollection* coll);
 
   std::shared_ptr<Async> TryRunCachedSync(
       std::vector<LazyTensorPtr>* tensors,

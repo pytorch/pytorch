@@ -450,7 +450,7 @@ bool IValue::isOptionalTensorList() const {
     return false;
   }
   const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
-  const auto expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
+  const auto& expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
   return expected_ty == ty;
 }
 
@@ -1015,18 +1015,13 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
 
 StrongTypePtr::StrongTypePtr(
     std::shared_ptr<torch::jit::CompilationUnit> cu,
-    TypePtr type) {
-  cu_ = std::move(cu);
-  type_ = type;
+    TypePtr type) : cu_(std::move(cu)), type_(std::move(type)) {
   TORCH_INTERNAL_ASSERT(type_);
 }
 
 WeakTypePtr::WeakTypePtr(
     std::weak_ptr<torch::jit::CompilationUnit> cu,
-    TypePtr type) {
-  cu_ = std::move(cu);
-  type_ = type;
-}
+    TypePtr type) : cu_(std::move(cu)), type_(std::move(type)) {}
 
 WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
   if (!holds_strong_ref()) {
