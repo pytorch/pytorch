@@ -396,6 +396,7 @@ def register_full():
         dtype=None,
         layout=None,
         device=None,
+        pin_memory=False,
         requires_grad=False,
     ):
         strides = make_contiguous_strides_for(size)
