@@ -1000,11 +1000,19 @@ class TestSparseCSR(TestCase):
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_resize(self, device, dtype):
+
+        def numel(tensor):
+            r = 1
+            for s in tensor.shape:
+                r *= s
+            return r
+
         batch_shapes = [(), (2,), (2, 3)]
         for index_dtype, b in zip([torch.int32, torch.int64], batch_shapes):
             shape = (*b, 2, 3)
             nnz = 6
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            self.assertEqual(a.numel(), numel(a))
 
             new_shape = (*b, 4, 5)
             a.resize_(new_shape)
@@ -1012,6 +1020,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a.shape, new_shape)
             # resize to larger shape doesn't add specified elements
             self.assertEqual(a._nnz(), nnz)
+            self.assertEqual(a.numel(), numel(a))
 
             new_shape = (*b, 1, 5)
             a.resize_(new_shape)
@@ -1019,11 +1028,13 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a.shape, new_shape)
             # resize to smaller shape trims specified elements
             self.assertEqual(a._nnz(), 5)
+            self.assertEqual(a.numel(), numel(a))
 
             # trim batched dimensions
             a.resize_(new_shape[-2], new_shape[-1])
             self.assertEqual(a.shape, (new_shape[-2], new_shape[-1]))
             self.assertEqual(a._nnz(), 5)
+            self.assertEqual(a.numel(), numel(a))
 
     @skipMeta
     @dtypes(torch.float, torch.bool)
@@ -1352,9 +1363,17 @@ class TestSparseCSR(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not (CUDA11OrLater or TEST_WITH_ROCM), "Only CUDA 11+ is supported")
+    # hmm, the test passes ok on CUDA when Rocm is not available:
     @skipCUDAIfRocmVersionLessThan((5, 2))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_baddbmm(self, device, dtype):
+
+        # TODO: disable the invariant checks within torch.baddbmm that
+        # constructs unconventional csr tensors leading to
+        # RuntimeError: tensor dimensionality must be sum of batch,
+        #     base, and dense dimensionalities (=0 + 2 + 0) but got 3
+        # when invariant checking is enabled. When done, undecorate run_test.
+        @torch.sparse.check_sparse_tensor_invariants(enable=False)
         def run_test(c, a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
             alpha = complex(random.random(), random.random()) if dtype.is_complex else random.random()
             beta = complex(random.random(), random.random()) if dtype.is_complex else random.random()

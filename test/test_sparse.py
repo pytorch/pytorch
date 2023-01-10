@@ -4069,7 +4069,7 @@ class TestSparseAny(TestCase):
 
     @onlyCPU
     @all_sparse_layouts('layout', include_strided=False)
-    @torch.sparse.check_sparse_tensor_invariants(False)
+    @torch.sparse.check_sparse_tensor_invariants(enable=False)
     def test_check_sparse_tensor_invariants(self, layout):
 
         if layout is torch.sparse_coo:
