@@ -30,13 +30,6 @@ Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
         "mkldnn_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
-  int64_t weight_num = weight.numel();
-  if (weight_num != 1) {
-    int64_t channel_size = input.dim() > 1 ? input.size(1) : 1;
-    TORCH_CHECK(channel_size == weight_num,
-      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
-      " and channel size = ", channel_size, ".");
-  }
   const ideep::tensor& x = itensor_from_mkldnn(input);
   const ideep::tensor& w = itensor_from_tensor(weight);
 

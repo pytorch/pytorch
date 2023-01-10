@@ -2,7 +2,7 @@ import dataclasses
 import enum
 import logging
 import weakref
-from abc import ABC
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
 
@@ -33,11 +33,22 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
 
     def select(self, locals_, globals_):
-        if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE):
+        # SHAPE_ENV counts as locals, because the guard expressions
+        # created by shape env can reference f_locals
+        #
+        # RANDOM_VALUE counts as locals, because what we do is we run
+        # Python RNG and assign it to a temporary, and then perform
+        # guard tests on that temporary
+        if self in (
+            GuardSource.LOCAL,
+            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.SHAPE_ENV,
+            GuardSource.RANDOM_VALUE,
+        ):
             return locals_
         if self in (GuardSource.GLOBAL, GuardSource.GLOBAL_NN_MODULE):
             return globals_
-        raise NotImplementedError()
+        raise NotImplementedError(str(self))
 
     def is_nn_module(self) -> bool:
         return self in (GuardSource.GLOBAL_NN_MODULE, GuardSource.LOCAL_NN_MODULE)
@@ -85,7 +96,7 @@ class Guard:
     #
     # Occasionally, name is not a valid Python expression; sometimes
     # it is meaningless.  Example create_fns that are like this include
-    # GRAD_MODE and SYMBOL_MATCH.
+    # GRAD_MODE and SHAPE_ENV.
     name: str
     source: GuardSource
     create_fn: Callable[[GuardBuilderBase, "Guard"], None]
@@ -225,11 +236,13 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 
 
 class Checkpointable(ABC, Generic[T]):
+    @abstractmethod
     def copy_graphstate(self) -> T:
-        pass
+        ...
 
+    @abstractmethod
     def restore_graphstate(self, state: T):
-        pass
+        ...
 
 
 """
@@ -335,3 +348,27 @@ def tracing(context: TracingContext):
         yield _CURRENT_TRACING_CONTEXT
     finally:
         _CURRENT_TRACING_CONTEXT = old_context
+
+
+# Subclasses can be found in torch/_dynamo/source.py
+@dataclasses.dataclass
+class Source:
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        raise NotImplementedError()
+
+    def name(self):
+        raise NotImplementedError()
+
+    def make_guard(self, fn, is_volatile=False):
+        if self.guard_source() is GuardSource.CONSTANT:
+            raise NotImplementedError()
+        return Guard(self.name(), self.guard_source(), fn, is_volatile)
+
+    def is_nn_module(self):
+        return self.guard_source() in (
+            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.GLOBAL_NN_MODULE,
+        )

@@ -115,14 +115,14 @@ class DeviceMesh(object):
         # check default pg backend, should support device_type
         if device_type == "cpu":
             assert (
-                self._backend == "gloo"
+                self._backend == "gloo" or self._backend == "local"
             ), f"ProcessGroup backend: {self._backend} not supporting CPU!"
         elif device_type == "cuda":
             if self._backend == "gloo":
                 warnings.warn(
                     "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
                 )
-            assert self._backend == "gloo" or self._backend == "nccl"
+            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "local"
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type, but got {device_type}"

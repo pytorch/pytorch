@@ -148,7 +148,7 @@ inline void setStrided(
     ArrayRef<T> stride,
     T storage_offset) {
   TORCH_CHECK(size.size() == stride.size(), "mismatch in length of strides and shape");
-  for (auto val : stride) {
+  for (const auto& val : stride) {
     TORCH_CHECK(val >= 0,
                 "as_strided: Negative strides are not supported at the moment, "
                 "got strides: ", stride);
