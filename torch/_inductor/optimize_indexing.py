@@ -23,6 +23,7 @@ class ValueRanges(object):
 
     def __contains__(self, x):
         # TODO This needs to be generalised if lower/upper are sympy.Expr
+        assert not isinstance(x, sympy.Expr)
         return self.lower <= x <= self.upper
 
     @classmethod
@@ -186,8 +187,7 @@ class ValueRangeAnalysis(object):
     def div(a, b):
         # We think of this as floor(a / b)
         out = ValueRangeAnalysis.truediv(a, b)
-        floor = sympy.functions.elementary.integers.floor
-        return ValueRanges(floor(out.lower), floor(out.upper))
+        return ValueRangeAnalysis.floor(out)
 
     @staticmethod
     def add(a, b):
@@ -219,8 +219,10 @@ class ValueRangeAnalysis(object):
     @staticmethod
     def pow(a, b):
         def is_integer(val):
-            return isinstance(val, int) or (
-                hasattr(val, "is_integer") and val.is_integer
+            return (
+                isinstance(val, int)
+                or (isinstance(val, float) and val == int(val))
+                or (hasattr(val, "is_integer") and val.is_integer)
             )
 
         a = ValueRanges.wrap(a)
@@ -248,13 +250,27 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def floor(x):
-        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
+        return floor_ceil(x, sympy.functions.elementary.integers.floor)
 
     @staticmethod
     def ceil(x):
-        return ValueRanges.increasing_map(
-            x, sympy.functions.elementary.integers.ceiling
-        )
+        return floor_ceil(x, sympy.functions.elementary.integers.ceil)
+
+    @staticmethod
+    def floor_ceil(x, _fn):
+        def is_integer(val):
+            return isinstance(val, int) or (
+                hasattr(val, "is_integer") and val.is_integer
+            )
+
+        if isinteger(x):
+            fn = _fn
+        else:
+
+            def fn(x):
+                return Float(_fn(x))
+
+        return ValueRanges.increasing_map(x, fn)
 
     def __getattr__(self, name):
         log.warning(f"unhandled ValueRange op {name}")
