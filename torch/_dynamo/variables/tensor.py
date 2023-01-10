@@ -154,37 +154,10 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "dim", [], {})
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
-        elif name in ("T", "H"):
-            out = (
-                tx.output.create_proxy(
-                    "call_method",
-                    "conj",
-                    *proxy_args_kwargs([self], {}),
-                )
-                if name == "H"
-                else self
-            )
-            args_list = [
-                variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)
-            ]
-            args = [variables.TupleVariable(args_list)]
-            result = out.call_method(tx, "permute", args, {})
-        elif name in ("mT", "mH"):
-            out = (
-                tx.output.create_proxy(
-                    "call_method",
-                    "conj",
-                    *proxy_args_kwargs([self], {}),
-                )
-                if name == "mH"
-                else self
-            )
-            dims = (-2, -1) if self.ndim > 0 else (-1, 0)
-            args = [
-                variables.ConstantVariable(dims[0]),
-                variables.ConstantVariable(dims[1]),
-            ]
-            result = out.call_method(tx, "transpose", args, {})
+        elif name == "T":
+            args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
+            result = self.call_method(tx, "permute", args, {})
+
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
 
