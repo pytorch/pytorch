@@ -756,7 +756,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   }
 
   if (!mask.numel()) {
-    return mask.clone();
+    return mask.clone().to(t.device(), t.scalar_type());
   }
 
   const auto mask_values = mask._values();
