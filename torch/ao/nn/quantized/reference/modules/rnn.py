@@ -535,6 +535,11 @@ class GRU(RNNBase):
         return flat_weights
 
     def forward(self, input, hx=None):  # noqa: F811
+        # Note: this is copied from the forward of GRU in https://github.com/pytorch/pytorch/blob/master/torch/nn/modules/rnn.py
+        # only changed self._flat_weights to self.get_flat_weights()
+        # TODO: maybe we can try inheriting from that class and define get_flat_weights
+        # as a @property? this might interfere with TorchScript, if we remove that
+        # requirement in the future we should be able to do this
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
