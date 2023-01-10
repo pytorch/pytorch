@@ -112,7 +112,7 @@ class VulkanShaderGenerator(object):
         code_template = CodeTemplate.from_file(glsl_template_in)
         for template_params in self.ops_template_params[op_name]:
             content = VulkanShaderGenerator.standard_header
-            param_vals_string = "x".join([str(i) for i in template_params.values()])
+            param_vals_string = "x".join([str(i) for (k, i) in template_params.items() if k != "REGISTER_FOR"])
             output_file_name = op_name + "_" + param_vals_string + ".glsl"
             content += code_template.substitute(template_params)
             output_file = os.path.join(out_dir, output_file_name)
