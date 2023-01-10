@@ -1485,11 +1485,16 @@ class FlatParamHandle:
                 f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
-            if param.shape != view.shape:
+            if param.shape != view.shape or (
+                param.dtype != view.dtype and not self.uses_sharded_strategy
+            ):
                 # NOTE: This is a hack using `.data` to side step the
-                # check that parameter/gradient sizes match. Here,
-                # `param` has the sharded size; `grad` has the unsharded size.
-                # This happens when running in `no_sync()`.
+                # check that parameter/gradient sizes and dtypes match. Here,
+                # `param` can have the sharded size, and `grad` can have the
+                # unsharded size. Orthgonally, `param` can have the full
+                # precision dtype from `reshard()`, and `grad` can have the
+                # parameter low precision dtype. Both of these mismatches
+                # happen when running in `no_sync()`.
                 if param.grad is None:
                     param.grad = torch.empty_like(param)
                 param.grad.data = view
@@ -1509,7 +1514,10 @@ class FlatParamHandle:
             )  # did not save FQN info in `_shared_param_infos`
             param = getattr(module, param_name)
             prim_param = getattr(prim_module, prim_param_name)
-            if param.shape != prim_param.grad.shape:
+            if (
+                param.shape != prim_param.grad.shape
+                or param.dtype != prim_param.grad.dtype
+            ):
                 # NOTE: This is the same hack to use `.data` to side step the
                 # size check.
                 if param.grad is None:
@@ -1629,7 +1637,7 @@ class FlatParamHandle:
                 numel_in_shard = param_end - param_start + 1
                 assert flat_param._is_grad_none is not None  # mypy
                 if param.requires_grad and not flat_param._is_grad_none[i]:
-                    if self._keep_low_precision_grads:
+                    if self._keep_low_precision_grads or param.dtype != grad.dtype:
                         # NOTE: This is a hack using `.data` to side step the
                         # check that parameter/gradient dtypes match. Here,
                         # `param` has full precision; `grad` has low precision.
