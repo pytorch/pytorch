@@ -539,9 +539,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
-            if "__bool__" in value.__class__.__dict__:
-                guards = self.make_guards(GuardBuilder.ID_MATCH)
-            else:
+            try:
+                fn = inspect.getattr_static(value, "__bool__")
+                if isinstance(fn, types.FunctionType):
+                    guards = self.make_guards(GuardBuilder.ID_MATCH)
+                else:
+                    guards = self.make_guards(GuardBuilder.TYPE_MATCH)
+            except AttributeError:
                 guards = self.make_guards(GuardBuilder.TYPE_MATCH)
             result = UserDefinedObjectVariable(value, source=self.source, guards=guards)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):

@@ -278,20 +278,28 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            if "__bool__" in value.value.__class__.__dict__:
-                result = self.inline_user_function_return(
-                    UserFunctionVariable(getattr(value.value, "__bool__").__func__),
-                    [value],
-                    {},
-                )
-                assert isinstance(result, ConstantVariable)
-                if truth_fn(result.value):
-                    push and self.push(value)
-                    self.jump(inst)
-            else:
+            try:
+                fn = inspect.getattr_static(value.value, "__bool__")
+                if isinstance(fn, types.FunctionType):
+                    result = self.inline_user_function_return(
+                        UserFunctionVariable(fn, VariableTracker.propagate(value)),
+                        [value],
+                        {},
+                    )
+                    # Python __bool__ should always return bool
+                    assert isinstance(result, ConstantVariable)
+                    if truth_fn(result.value):
+                        push and self.push(value)
+                        self.jump(inst)
+                else:
+                    unimplemented(
+                        "generic_jump on user defined object.__bool__ is not function"
+                    )
+            except AttributeError:
                 if truth_fn(True):
                     push and self.push(value)
                     self.jump(inst)
+
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):

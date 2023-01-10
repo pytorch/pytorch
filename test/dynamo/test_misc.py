@@ -3027,6 +3027,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             def __bool__(self):
                 return self.x > 0
 
+        class C(object):
+            def __init__(self, x):
+                self.x = x
+                self.__bool__ = False
+
         def fn(x, obj):
             if not obj:
                 return x + 1
@@ -3044,6 +3049,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, obj)
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 3)
+
+        # Test if obj.__bool__ is not function
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        obj4 = C(0.5)
+        ref = fn(x, obj4)
+        res = opt_fn(x, obj4)
+        self.assertTrue(same(ref, res))
 
     def test_class_has_instancecheck_method(self):
         class A(object):
