@@ -279,7 +279,7 @@ at::Tensor rearrange_bias(
 // Shader and Workgroup size determination
 //
 
-static api::ShaderSource get_shader(
+static api::ShaderInfo get_shader(
     const IntArrayRef kernel_size,
     const IntArrayRef stride,
     const IntArrayRef padding,
@@ -306,12 +306,12 @@ static api::ShaderSource get_shader(
         break;
         // todo fail for quantized transposed conv
     }
-    return shader.shader_src;
+    return shader;
   }
 
   if (transposed) {
     shader = VK_SHADER(conv_transpose2d);
-    return shader.shader_src;
+    return shader;
   }
 
   switch (method) {
@@ -335,7 +335,7 @@ static api::ShaderSource get_shader(
       shader = VK_SHADER(conv2d_pw_2x2);
       break;
   }
-  return shader.shader_src;
+  return shader;
 }
 
 //
@@ -357,7 +357,7 @@ struct Params final {
 
 void record_op(
     api::Context* const context,
-    api::ShaderSource& compute_shader,
+    api::ShaderInfo& compute_shader,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -430,7 +430,7 @@ struct QParams final {
 
 void record_quantized_op(
     api::Context* const context,
-    api::ShaderSource& compute_shader,
+    api::ShaderInfo& compute_shader,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,

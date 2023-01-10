@@ -55,7 +55,7 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
                                   public torch::jit::CustomClassHolder {
  private:
   c10::impl::GenericList unpacked_;
-  api::ShaderSource compute_shader_{};
+  api::ShaderInfo compute_shader_{};
 
  public:
   Conv2dPackedContext(
@@ -120,7 +120,7 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
     return unpacked_;
   }
 
-  inline api::ShaderSource& compute_shader() {
+  inline api::ShaderInfo& compute_shader() {
     return compute_shader_;
   }
 };

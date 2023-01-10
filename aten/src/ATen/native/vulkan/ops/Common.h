@@ -11,13 +11,13 @@
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 #include <ATen/native/vulkan/glsl.h>
 #define VK_KERNEL(name)                          \
-  ::at::native::vulkan::api::ShaderSource {      \
+  ::at::native::vulkan::api::ShaderInfo {        \
     CONCAT_LITERALS(vulkan., name), name##_glsl, \
   }
 #else
 #include <ATen/native/vulkan/spv.h>
 #define VK_KERNEL(name)                                         \
-  ::at::native::vulkan::api::ShaderSource {                     \
+  ::at::native::vulkan::api::ShaderInfo {                       \
     CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len, \
         name##_spv_layout                                       \
   }
