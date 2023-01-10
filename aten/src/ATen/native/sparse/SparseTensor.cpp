@@ -764,7 +764,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
       mask._indices(),
       at::ones({1}, mask_values.options()).expand_as(mask_values),
       mask.sizes())._coalesced_(mask.is_coalesced());
-  return t.mul(mask_template);
+  return t.mul(mask_template).to(t.scalar_type());
 }
 
 Tensor sparse_mask_helper_cpu(
