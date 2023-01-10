@@ -10,11 +10,11 @@ namespace vulkan {
 namespace api {
 
 //
-// ShaderSource
+// ShaderInfo
 //
 
-ShaderSource::ShaderSource()
-    : type(ShaderSource::Type::SPIRV),
+ShaderInfo::ShaderInfo()
+    : type(ShaderInfo::Type::SPIRV),
       src_code{
           .spirv =
               {
@@ -23,8 +23,8 @@ ShaderSource::ShaderSource()
               },
       } {}
 
-ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
-    : type(ShaderSource::Type::GLSL),
+ShaderInfo::ShaderInfo(std::string name, const char* const glsl_src)
+    : type(ShaderInfo::Type::GLSL),
       src_code{
           .glsl =
               {
@@ -34,7 +34,7 @@ ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
       },
       kernel_name{std::move(name)} {}
 
-ShaderSource::ShaderSource(
+ShaderInfo::ShaderInfo(
     std::string name,
     const uint32_t* const spirv_bin,
     const uint32_t size,
@@ -58,21 +58,30 @@ ShaderInfo::ShaderInfo(
     const std::vector<uint32_t>& tile_size,
     const StorageType bias_storage_type,
     const StorageType weight_storage_type)
-    : shader_src(name, spirv_bin, size, layout),
+    : type(Type::SPIRV),
+      src_code{
+          .spirv =
+              {
+                  spirv_bin,
+                  size,
+              },
+      },
+      kernel_name{std::move(name)},
+      kernel_layout{layout},
       tile_size(tile_size),
       bias_storage_type(bias_storage_type),
       weight_storage_type(weight_storage_type) {
   for (uint64_t i = 0; i < tile_size.size(); ++i) {
-    shader_src.out_tile_size.data[i] = tile_size[i];
+    out_tile_size.data[i] = tile_size[i];
   }
 }
 
-bool operator==(const ShaderSource& _1, const ShaderSource& _2) {
+bool operator==(const ShaderInfo& _1, const ShaderInfo& _2) {
   if (_1.type != _2.type) {
     return false;
   }
 
-  if (_1.type == ShaderSource::Type::SPIRV) {
+  if (_1.type == ShaderInfo::Type::SPIRV) {
     return (
         _1.src_code.spirv.bin == _2.src_code.spirv.bin &&
         _1.src_code.spirv.size == _2.src_code.spirv.size);
@@ -142,7 +151,7 @@ void swap(ShaderLayout& lhs, ShaderLayout& rhs) noexcept {
 // ShaderModule
 //
 
-ShaderModule::ShaderModule(const VkDevice device, const ShaderSource& source)
+ShaderModule::ShaderModule(const VkDevice device, const ShaderInfo& source)
     : device_(device), handle_{VK_NULL_HANDLE} {
   const uint32_t* code = source.src_code.spirv.bin;
   uint32_t size = source.src_code.spirv.size;
