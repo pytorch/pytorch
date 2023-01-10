@@ -4624,7 +4624,7 @@ class TestQuantizedConv(TestCase):
             assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
             relu = torch.nn.ReLU()
             result_ref = relu(result_ref)
-        elif post_op == 'add' or post_op == 'add_relu':
+        elif post_op == 'add':
             (X_value_min, X_value_max) = (0, 4)
             X2_init = torch.randint(
                 X_value_min,
@@ -4636,9 +4636,20 @@ class TestQuantizedConv(TestCase):
             X2_q = torch.quantize_per_tensor(
                 X2, scale=X2_scale, zero_point=X2_zero_point, dtype=input_dtype)
             result_ref = result_ref + X2
-            if post_op == 'add_relu':
-                relu = torch.nn.ReLU()
-                result_ref = relu(result_ref)
+        elif post_op == 'add_relu':
+            (X_value_min, X_value_max) = (0, 4)
+            X2_init = torch.randint(
+                X_value_min,
+                X_value_max,
+                result_ref.size(),
+                device=device
+            )
+            X2 = X2_scale * (X2_init - X2_zero_point).float()
+            X2_q = torch.quantize_per_tensor(
+                X2, scale=X2_scale, zero_point=X2_zero_point, dtype=input_dtype)
+            result_ref = result_ref + X2
+            relu = torch.nn.ReLU()
+            result_ref = relu(result_ref)
         # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
