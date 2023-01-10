@@ -3,6 +3,7 @@ set -eux -o pipefail
 
 source "${BINARY_ENV_FILE:-/c/w/env}"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
+mkdir -p "$PYTORCH_LINKREPRO_DIR"
 
 export CUDA_VERSION="${DESIRED_CUDA/cu/}"
 export USE_SCCACHE=1

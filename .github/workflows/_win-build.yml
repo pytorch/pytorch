@@ -96,6 +96,7 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+          PYTORCH_LINKREPRO_DIR: /c/${{ github.run_id }}/linkrepro/
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BUILD_WHEEL: 1
@@ -117,6 +118,13 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           .jenkins/pytorch/win-build.sh
+
+      - name: Upload linkrepro
+        uses: actions/upload-artifact@v3
+        with:
+          name: linkrepro
+          path: C:\${{ github.run_id }}\linkrepro
+          retention-days: 1
 
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
@@ -143,4 +151,4 @@ jobs:
         if: always()
         timeout-minutes: 120
         with:
-          extra-delete-dir: /c/${{ github.run_id }}/build-results/
+          extra-delete-dir: '/c/${{ github.run_id }}/build-results/ /c/${{ github.run_id }}/linkrepro/'

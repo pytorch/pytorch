@@ -30,6 +30,11 @@ if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
     mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
 fi
 
+export PYTORCH_LINKREPRO_DIR=${PYTORCH_LINKREPRO_DIR:-/c/w/linkrepro}
+if [[ -n "$PYTORCH_LINKREPRO_DIR" ]]; then
+    mkdir -p "$PYTORCH_LINKREPRO_DIR" || true
+fi
+
 # This directory is used only to hold "pytorch_env_restore.bat", called via "setup_pytorch_env.bat"
 CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
 mkdir -p "$CI_SCRIPTS_DIR"
