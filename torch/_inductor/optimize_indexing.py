@@ -250,25 +250,29 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def floor(x):
-        return floor_ceil(x, sympy.functions.elementary.integers.floor)
+        return ValueRangeAnalysis.floor_ceil(
+            x, sympy.functions.elementary.integers.floor
+        )
 
     @staticmethod
     def ceil(x):
-        return floor_ceil(x, sympy.functions.elementary.integers.ceil)
+        return ValueRangeAnalysis.floor_ceil(
+            x, sympy.functions.elementary.integers.ceiling
+        )
 
     @staticmethod
-    def floor_ceil(x, _fn):
+    def floor_ceil(x, fn_int):
         def is_integer(val):
             return isinstance(val, int) or (
                 hasattr(val, "is_integer") and val.is_integer
             )
 
-        if isinteger(x):
-            fn = _fn
+        if is_integer(x):
+            fn = fn_int
         else:
 
             def fn(x):
-                return Float(_fn(x))
+                return sympy.core.numbers.Float(fn_int(x))
 
         return ValueRanges.increasing_map(x, fn)
 
