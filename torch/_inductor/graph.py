@@ -117,9 +117,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_seeds: List[str] = []
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
+        self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
-        self.scheduler = None
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -175,7 +175,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
-            if not getattr(buffer, "cpp_kernel", False):
+            if not isinstance(
+                buffer,
+                (ir.MatrixMultiply, ir.BatchMatrixMultiply, ir.MatrixMultiplyAdd),
+            ):
                 self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
@@ -293,7 +296,6 @@ class GraphLowering(torch.fx.Interpreter):
                 out = lowerings[target](*args, **kwargs)
                 return out
             except Exception as e:
-                log.exception("Error from lowering")
                 raise LoweringException(e, target, args, kwargs) from e
 
     def get_attr(self, target, args, kwargs):
@@ -366,6 +368,21 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 result = super().run_node(n)
 
+            # require the same stride order for dense outputs,
+            # so that user-land view() will not throw because inductor
+            # output different strides than eager
+            # long term the solution is to make view() always succeed
+            # with infallible strides.
+            if any(user.op == "output" for user in n.users):
+                strides = n.meta["val"].stride()
+                dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                # requiring a stride order for a non-dense output wouldn't
+                # recreate the same strides, and would fail with view, defer for now.
+                if dense and len(strides):
+                    result = ir.ExternKernel.require_stride_order(
+                        result, ir.get_stride_order(strides)
+                    )
+
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
@@ -404,6 +421,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # there are multiple branches meach with small number of memory
                 # reads, but they converge to a user.
                 result.realize_hint()
+
         return result
 
     def check_platform(self):
@@ -453,7 +471,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.init_wrapper_code()
 
         self.scheduler = Scheduler(self.buffers)
-        assert self.scheduler is not None  # mypy can't figure this out
         self.scheduler.codegen()
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()

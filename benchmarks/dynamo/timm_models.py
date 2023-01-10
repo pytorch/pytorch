@@ -188,7 +188,7 @@ class TimmRunnner(BenchmarkRunner):
         retries = 1
         success = False
         model = None
-        while not success and retries < 4:
+        while not success and retries < 6:
             try:
                 model = create_model(
                     model_name,
@@ -313,7 +313,8 @@ class TimmRunnner(BenchmarkRunner):
         return self.loss(pred, self.target) / 10.0
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        return mod(*inputs)
+        with self.autocast():
+            return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)

@@ -8,6 +8,7 @@
 
 #include <c10/util/irange.h>
 
+#include <cmath>
 #include <utility>
 
 namespace at {
@@ -312,7 +313,7 @@ float calculate_quant_loss(
   // remainder loop
   for (; i < numel; i++) {
     q_input[i] = std::max(
-        0.0f, std::min<float>(nearbyint((input[i] - xmin) * inverse_scale), qmax));
+        0.0f, std::min<float>(std::nearbyint((input[i] - xmin) * inverse_scale), qmax));
     q_input[i] = q_input[i] * scale + xmin;
     norm += (input[i] - q_input[i]) * (input[i] - q_input[i]);
   }
