@@ -70,6 +70,7 @@ storageTypeToEnum = {
     "TEXTURE_2D" : "api::StorageType::TEXTURE_2D",
     "TEXTURE_3D" : "api::StorageType::TEXTURE_3D",
     "BUFFER" : "api::StorageType::BUFFER",
+    "": "api::StorageType::UNKNOWN",
 }
 
 def determineDescriptorType(lineStr):
@@ -165,64 +166,67 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
     h += "#include <vector>\n"
     h += "#include <string>\n"
     h += "#include <ATen/native/vulkan/api/Types.h>\n"
-    h += "#include <ATen/native/vulkan/api/vk_api.h>"
+    h += "#include <ATen/native/vulkan/api/vk_api.h>\n"
 
-    nsbegin = "\nnamespace at {\nnamespace native {\nnamespace vulkan {\n"
-    nsend = "\n}\n}\n} //namespace at::native::vulkan\n"
+    nsbegin = "namespace at {\nnamespace native {\nnamespace vulkan {\n"
+    nsend = "} // namespace vulkan\n} // namespace native\n} // namespace at\n"
 
     h += nsbegin
 
-    cpp = "#include <ATen/native/vulkan/{}>".format(H_NAME)
+    # Forward declaration of ShaderInfo
+    h += "namespace api {\nstruct ShaderInfo;\n} // namespace api\n"
+
+    cpp = "#include <ATen/native/vulkan/{}>\n".format(H_NAME)
+    cpp += "#include <ATen/native/vulkan/api/Shader.h>\n"
     cpp += nsbegin
+
+    shader_info_bin_code = []
+    shader_info_cpp_code = []
+    shader_info_h_code = []
 
     for spvPath, srcPath in spvPaths.items():
         name = getName(spvPath)
-        name_len = name + "_len"
-        h += "extern const uint32_t {}[];\n".format(name)
-        h += "extern const uint32_t {};\n".format(name_len)
 
-        shader_info = getShaderInfo(srcPath)
-        name_layout = name + "_layout"
-        h += "extern const std::vector<VkDescriptorType> {};\n".format(name_layout)
-
-        cpp += "const uint32_t " + name + "[] = {\n"
-        sizeBytes = 0
         print("spvPath:{}".format(spvPath))
         with open(spvPath, 'rb') as f:
-            for word in array.array('I', f.read()):
-                cpp += "{},\n".format(word)
-                sizeBytes += 4
-            cpp += "};\n"
-        cpp += "const uint32_t {} = {};\n".format(name_len, sizeBytes)
+            next_bin = array.array('I', f.read())
+            sizeBytes = 4 * len(next_bin)
+            shader_info_bin_code.append(
+                "const uint32_t {}_bin[] = {{\n  {}\n}};".format(
+                    name,
+                    ",\n  ".join(str(x) for x in next_bin),
+                )
+            )
 
-        # Add layout
-        cpp += "const std::vector<VkDescriptorType> {} = {{\n".format(name_layout)
-        for descriptor in shader_info.layouts:
-            cpp += "  {},\n".format(descriptor)
-        cpp += "};\n"
+        shader_info = getShaderInfo(srcPath)
 
-        # Add tile size
-        if (len(shader_info.tile_size) > 0):
-            name_tile_size = name + "_tile_size"
-            h += "extern const std::vector<uint32_t> {};\n".format(name_tile_size)
-            cpp += "const std::vector<uint32_t> {} = {{\n".format(name_tile_size)
-            for s in shader_info.tile_size:
-                cpp += "  {},\n".format(s)
-            cpp += "};\n"
+        tile_size = (
+            "{{{}}}".format(", ".join(str(x) for x in shader_info.tile_size))
+            if (len(shader_info.tile_size) > 0)
+            else "std::vector<uint32_t>()"
+        )
 
-        # Add weight type
-        if (shader_info.weight_storage_type != ""):
-            name_weight_storage_type = name + "_weight_storage_type"
-            h += "extern const api::StorageType {};\n".format(name_weight_storage_type)
-            cpp += "const api::StorageType {} = \n".format(name_weight_storage_type)
-            cpp += "  {};\n".format(storageTypeToEnum[shader_info.weight_storage_type])
+        shader_info_args = [
+            "\"vulkan.{}\"".format(name.replace("_spv", "")),
+            "{}_bin".format(name),
+            str(sizeBytes),
+            "{{{}}}".format(", ".join(shader_info.layouts)),
+            tile_size,
+            storageTypeToEnum[shader_info.weight_storage_type],
+            storageTypeToEnum[shader_info.bias_storage_type],
+        ]
 
-        # Add bias type
-        if (shader_info.bias_storage_type != ""):
-            name_bias_storage_type = name + "_bias_storage_type"
-            h += "extern const api::StorageType {};\n".format(name_bias_storage_type)
-            cpp += "const api::StorageType {} = \n".format(name_bias_storage_type)
-            cpp += "  {};\n".format(storageTypeToEnum[shader_info.bias_storage_type])
+        shader_info_h_code.append("extern const api::ShaderInfo {};".format(name))
+        shader_info_cpp_code.append(
+            "const api::ShaderInfo {}(\n  {}\n);".format(
+                name,
+                ",\n  ".join(shader_info_args),
+            ),
+        )
+
+    cpp += "namespace {{\n{}\n}} // namespace\n".format("\n".join(shader_info_bin_code))
+    cpp += "{}\n".format("\n".join(shader_info_cpp_code))
+    h += "{}\n".format("\n".join(shader_info_h_code))
 
     cpp += nsend
     h += nsend

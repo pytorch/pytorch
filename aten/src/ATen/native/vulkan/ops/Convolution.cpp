@@ -296,13 +296,13 @@ static api::ShaderInfo get_shader(
 
     switch (method) {
       case Conv2dSlidingWindow:
-        shader = VK_SHADER(quantized_conv2d);
+        shader = VK_KERNEL(quantized_conv2d);
         break;
       case Conv2dDepthwise:
-        shader = VK_SHADER(quantized_conv2d_dw);
+        shader = VK_KERNEL(quantized_conv2d_dw);
         break;
       case Conv2dPointwise:
-        shader = VK_SHADER(quantized_conv2d_pw_2x2);
+        shader = VK_KERNEL(quantized_conv2d_pw_2x2);
         break;
         // todo fail for quantized transposed conv
     }
@@ -310,29 +310,29 @@ static api::ShaderInfo get_shader(
   }
 
   if (transposed) {
-    shader = VK_SHADER(conv_transpose2d);
+    shader = VK_KERNEL(conv_transpose2d);
     return shader;
   }
 
   switch (method) {
     case Conv2dSlidingWindow:
-      shader = VK_SHADER(conv2d);
+      shader = VK_KERNEL(conv2d);
       break;
     case Conv2dDepthwise:
-      shader = VK_SHADER(conv2d_dw);
+      shader = VK_KERNEL(conv2d_dw);
       if (kernel_size.size() == 4 && kernel_size[2] == 3 &&
           kernel_size[3] == 3) {
         // 1x1 refers to the output tile size
-        shader = VK_SHADER(conv2d_dw_3x3);
+        shader = VK_KERNEL(conv2d_dw_3x3);
       }
       if (kernel_size.size() == 4 && kernel_size[2] == 5 &&
           kernel_size[3] == 5) {
         // 1x1 refers to the output tile size
-        shader = VK_SHADER(conv2d_dw_5x5);
+        shader = VK_KERNEL(conv2d_dw_5x5);
       }
       break;
     case Conv2dPointwise:
-      shader = VK_SHADER(conv2d_pw_2x2);
+      shader = VK_KERNEL(conv2d_pw_2x2);
       break;
   }
   return shader;
