@@ -6314,7 +6314,7 @@ Tensor logsumexp_jvp(
   auto self_p_exp = [&self_p, &dim]() {
     if (self_p.numel() > 0) {
       return (self_p - at::amax(self_p, dim, true))
-                 .exp(); // Use the exp-normalize trick
+          .exp(); // Use the exp-normalize trick
     } else {
       // amax fails if numel() == 0, in which case it doesn't matter anyway
       return self_p.exp();
