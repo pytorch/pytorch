@@ -1040,6 +1040,7 @@ class TritonKernel(Kernel):
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
+        mutated_args = sorted(mutated_args)
 
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),

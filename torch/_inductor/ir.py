@@ -13,7 +13,6 @@ from inspect import signature
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
-import numpy
 import sympy
 from sympy import Expr, Integer
 
@@ -1176,7 +1175,8 @@ class PermuteView(BaseView):
 
     @classmethod
     def create(cls, x, dims):
-        assert set(cls._map_neg_dims(dims)) == set(range(len(dims)))
+        dims = cls._map_neg_dims(dims)
+        assert set(dims) == set(range(len(dims)))
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
@@ -2080,10 +2080,9 @@ class ComputedBuffer(Buffer):
             ]
 
             if reads:
-                stride_lengths = numpy.array(
-                    [V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads],
-                    dtype=numpy.int64,
-                )
+                stride_lengths = [
+                    V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads
+                ]
                 from .scheduler import pick_loop_order
 
                 return pick_loop_order(stride_lengths, self.get_size(), priority_idx)
@@ -2210,14 +2209,12 @@ class ComputedBuffer(Buffer):
             priority_idx = []
 
         try:
-            strides = numpy.array(
-                [
-                    V.graph.sizevars.stride_hints(expr, index_vars)
-                    for expr in memory_addrs
-                ],
-                dtype=numpy.int64,
+            strides = [
+                V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs
+            ]
+            assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
+                index_vars
             )
-            assert strides.shape == (len(memory_addrs), len(index_vars))
             # consider both layout(strides) and reordering(reordering_reindex)
             if reordering_reindex is not None:
                 for i in range(len(memory_addrs)):
