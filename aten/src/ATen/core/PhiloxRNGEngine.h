@@ -105,7 +105,6 @@ public:
     #ifdef __CUDA_ARCH__
     AT_ASSERT(false, "Unsupported invocation of randn on CUDA");
     #endif
-    reset_state(); // Reset state for randn - a little wasteful, but easier to ensure correctness.
     detail::UINT4 counter = counter_;
     detail::UINT2 key = key_;
     detail::UINT4 i = rand(counter, key, n_rounds);
@@ -211,8 +210,10 @@ private:
   }
 
   inline detail::FLOAT2 normalize_pair_uniform(detail::FLOAT2 in) {
+    // TODO(min-jean-cho) change to Polar method, a more efficient version of Box-Muller method
     // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
     float u1 = in[0];
+    float u2 = in[1];
 
     constexpr float two_pi = 2.0 * M_PI;
 
@@ -220,8 +221,8 @@ private:
 
     detail::FLOAT2 ret;
 
-    ret[0] = mag * std::cos(two_pi);
-    ret[1] = mag * std::sin(two_pi);
+    ret[0] = mag * std::cos(two_pi * u2);
+    ret[1] = mag * std::sin(two_pi * u2);
     return ret;
   }
 
