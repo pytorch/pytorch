@@ -126,14 +126,21 @@ class TORCH_API Tensor: public TensorBase {
       return *this;
     }
 
-    // Path for dense and nested.
-    // NOTE: conj() is not yet implemented for nested.
-    if (this->layout() == at::kStrided) {
-      return this->_conj();
+    switch (this->layout()) {
+      // Path for dense and nested.
+      // NOTE: conj() is not yet implemented for nested.
+      case at::kStrided:
+        return this->_conj();
+      case at::kSparse:
+      case at::kSparseCsr:
+      case at::kSparseCsc:
+      case at::kSparseBsr:
+      case at::kSparseBsc:
+        return this->conj_physical();
+      default:
+        TORCH_CHECK(false, "conj() is not supported for layout ", this->layout());
+        return Tensor {};
     }
-
-    // Path for sparse and sparse compressed layouts.
-    return this->conj_physical();
   }
 
   // Aliased by Dimname overloads, so need explicit using
