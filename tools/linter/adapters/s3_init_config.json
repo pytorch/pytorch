@@ -3,7 +3,8 @@
         "Upload the new file to S3 under a new folder with the version number embedded in (see actionlint for an example).",
         "(Don't override the old files, otherwise you'll break `lintrunner install` for anyone using an older commit of pytorch.)",
         "'Hash' is the sha256 of the uploaded file.",
-        "Validate the new download url and hash by running 'lintrunner init' to pull the new binaries and then run 'lintrunner' to try linting the files."
+        "Validate the new download url and hash by running 'lintrunner init' to pull the new binaries and then run 'lintrunner' to try linting the files.",
+        "Some binaries have custom builds; see https://github.com/pytorch/test-infra/blob/main/.github/workflows/clang-tidy-linux.yml and https://github.com/pytorch/test-infra/blob/main/.github/workflows/clang-tidy-macos.yml"
     ],
     "clang-format": {
         "Darwin": {
