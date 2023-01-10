@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import subprocess
+import textwrap
 import yaml
 from collections import OrderedDict
 from torchgen.code_template import CodeTemplate
@@ -285,40 +286,52 @@ def genCppH(
         spvPaths[spvPath] = templateSrcPath
 
     h = "#pragma once\n"
-    h += "#include <stdint.h>\n"
-    h += "#include <vector>\n"
-    h += "#include <string>\n"
     h += "#include <ATen/native/vulkan/api/Types.h>\n"
     h += "#include <ATen/native/vulkan/api/vk_api.h>\n"
+    h += "#include <c10/util/flat_hash_map.h>\n"
+    h += "#include <string>\n"
 
     nsbegin = "namespace at {\nnamespace native {\nnamespace vulkan {\n"
     nsend = "} // namespace vulkan\n} // namespace native\n} // namespace at\n"
+
+    anon_ns_begin = "namespace {\n"
+    anon_ns_end = "} // namespace\n"
 
     h += nsbegin
 
     # Forward declaration of ShaderInfo
     h += "namespace api {\nstruct ShaderInfo;\n} // namespace api\n"
+    h += "typedef ska::flat_hash_map<std::string, api::ShaderInfo> ShaderListing;\n"
+    h += "typedef ska::flat_hash_map<std::string, std::string> RegistryKeyMap;\n"
+    h += "typedef ska::flat_hash_map<std::string, RegistryKeyMap> ShaderRegistry;\n"
+    h += "extern const ShaderListing shader_infos;\n"
+    h += "extern ShaderRegistry shader_registry;\n"
+    h += "inline const ShaderListing& get_shader_infos() {\n  return shader_infos;\n}\n"
+    h += "inline ShaderRegistry& get_shader_registry() {\n  return shader_registry;\n}\n"
 
-    cpp = "#include <ATen/native/vulkan/{}>\n".format(H_NAME)
-    cpp += "#include <ATen/native/vulkan/api/Shader.h>\n"
+    h += nsend
+
+    cpp = "#include <ATen/native/vulkan/api/Shader.h>\n"
+    cpp += "#include <ATen/native/vulkan/{}>\n".format(H_NAME)
+    cpp += "#include <stdint.h>\n"
+    cpp += "#include <vector>\n"
     cpp += nsbegin
 
     shader_info_bin_code = []
     shader_info_cpp_code = []
-    shader_info_h_code = []
 
     for spvPath, srcPath in spvPaths.items():
-        name = getName(spvPath)
+        name = getName(spvPath).replace("_spv", "")
 
         print("spvPath:{}".format(spvPath))
         with open(spvPath, 'rb') as fr:
             next_bin = array.array('I', fr.read())
             sizeBytes = 4 * len(next_bin)
             shader_info_bin_code.append(
-                "const uint32_t {}_bin[] = {{\n  {}\n}};".format(
+                "const uint32_t {}_bin[] = {{\n{}\n}};".format(
                     name,
-                    ",\n  ".join(str(x) for x in next_bin),
-                )
+                    textwrap.indent(",\n".join(str(x) for x in next_bin), "  "),
+                ),
             )
 
         shader_info = getShaderInfo(srcPath)
@@ -329,30 +342,37 @@ def genCppH(
             else "std::vector<uint32_t>()"
         )
 
+        shader_info_layouts = "{{{}}}".format(",\n ".join(shader_info.layouts))
+
         shader_info_args = [
-            "\"vulkan.{}\"".format(name.replace("_spv", "")),
+            "\"vulkan.{}\"".format(name),
             "{}_bin".format(name),
             str(sizeBytes),
-            "{{{}}}".format(", ".join(shader_info.layouts)),
+            shader_info_layouts,
             tile_size,
             storageTypeToEnum[shader_info.weight_storage_type],
             storageTypeToEnum[shader_info.bias_storage_type],
         ]
 
-        shader_info_h_code.append("extern const api::ShaderInfo {};".format(name))
         shader_info_cpp_code.append(
-            "const api::ShaderInfo {}(\n  {}\n);".format(
-                name,
-                ",\n  ".join(shader_info_args),
+            textwrap.indent(
+                "{{\"{}\",\n api::ShaderInfo(\n{})}}".format(
+                    name,
+                    textwrap.indent(",\n".join(shader_info_args), "     "),
+                ),
+                "    ",
             ),
         )
 
-    cpp += "namespace {{\n{}\n}} // namespace\n".format("\n".join(shader_info_bin_code))
-    cpp += "{}\n".format("\n".join(shader_info_cpp_code))
-    h += "{}\n".format("\n".join(shader_info_h_code))
+    cpp += anon_ns_begin
+    cpp += "\n".join(shader_info_bin_code) + "\n"
+    cpp += anon_ns_end
 
+    cpp += "const ShaderListing shader_infos = {{\n{}}};\n".format(
+        ",\n".join(shader_info_cpp_code),
+    )
+    cpp += "ShaderRegistry shader_registry = {\n};\n"
     cpp += nsend
-    h += nsend
 
     with open(hFilePath, "w") as fw:
         fw.write(h)
