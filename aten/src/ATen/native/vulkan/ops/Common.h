@@ -6,18 +6,9 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Convert.h>
-
-#define CONCAT_LITERALS(a, b) #a #b
-#ifdef USE_VULKAN_SHADERC_RUNTIME
-#include <ATen/native/vulkan/glsl.h>
-#define VK_KERNEL(name)                          \
-  ::at::native::vulkan::api::ShaderInfo {        \
-    CONCAT_LITERALS(vulkan., name), name##_glsl, \
-  }
-#else
 #include <ATen/native/vulkan/spv.h>
+
 #define VK_KERNEL(name) ::at::native::vulkan::name##_spv
-#endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 namespace at {
 namespace native {
