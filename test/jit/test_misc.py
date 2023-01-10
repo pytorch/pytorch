@@ -11,6 +11,7 @@ import sys
 import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
+import unittest
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import RUN_CUDA_HALF
 
