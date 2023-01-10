@@ -316,7 +316,7 @@ static api::ShaderInfo get_shader(
 
   switch (method) {
     case Conv2dSlidingWindow:
-      shader = VK_KERNEL(conv2d);
+      shader = VK_LOOKUP_KERNEL(conv2d);
       break;
     case Conv2dDepthwise:
       shader = VK_KERNEL(conv2d_dw);
