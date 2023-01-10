@@ -1258,7 +1258,10 @@ def validate_revert(repo: GitRepo, pr: GitHubPR, *,
     msg = repo.commit_message(commit_sha)
     rc = RE_DIFF_REV.search(msg)
     if rc is not None and not skip_internal_checks:
-        raise PostCommentError(f"Can't revert PR that was landed via phabricator as {rc.group(1)}")
+        raise PostCommentError(
+            f"Can't revert PR that was landed via phabricator as {rc.group(1)}.  " +
+            "Please revert by going to the internal diff and clicking Unland."
+        )
     return (author_login, commit_sha)
 
 
