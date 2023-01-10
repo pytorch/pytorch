@@ -751,6 +751,9 @@ class clean(setuptools.Command):
                         break
                     # Ignore lines which begin with '#'.
                 else:
+                    # Don't remove absolute paths from the system
+                    wildcard = wildcard.lstrip('./')
+
                     for filename in glob.glob(wildcard):
                         try:
                             os.remove(filename)
