@@ -1795,7 +1795,7 @@ def verify_model_with_fx_to_onnx_exporter(
     rtol: float = 0.001,
     atol: float = 1e-7,
     acceptable_error_percentage: Optional[float] = None,
-    opset_version: Optional[int] = None,
+    opset_version: Optional[int] = GLOBALS.export_onnx_opset_version,
     **_,
 ):
     if input_kwargs is None:

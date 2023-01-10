@@ -73,6 +73,7 @@ __all__ = [
     "conv1d",
     "conv2d",
     "conv3d",
+    "convert_element_type",
     "convolution",
     "cos",
     "cosine_similarity",
