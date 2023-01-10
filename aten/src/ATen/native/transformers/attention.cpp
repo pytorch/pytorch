@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <utility>
 #include <c10/core/SymIntArrayRef.h>
+#include <c10/util/Logging.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -752,6 +753,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
         query_.is_contiguous() && key.is_contiguous() &&
