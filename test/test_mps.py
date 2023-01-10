@@ -441,6 +441,56 @@ class TestMPS(TestCase):
         D = torch.mm(B, C).cpu()
         torch.testing.assert_close(D, torch.full((5, 5), 6.0))
 
+    def test_linalg_cross(self):
+        def helper(dtype):
+            device = "mps"
+            if dtype is torch.int32 or dtype is torch.int64:
+                x = torch.randint(0, 99999, (100, 3, 100), dtype=dtype, device=device)
+                y = torch.randint(0, 99999, (100, 3, 100), dtype=dtype, device=device)
+            else:
+                x = torch.rand(100, 3, 100, dtype=dtype, device=device)
+                y = torch.rand(100, 3, 100, dtype=dtype, device=device)
+            x_cpu = x.to("cpu")
+            y_cpu = y.to("cpu")
+            res1 = torch.linalg.cross(x, y, dim=1)
+            res2 = torch.tensor((), dtype=dtype, device=device)
+            res1_cpu = torch.linalg.cross(x_cpu, y_cpu, dim=1)
+            res2_cpu = torch.tensor((), dtype=dtype, device="cpu")
+            torch.linalg.cross(x, y, dim=1, out=res2)
+            torch.linalg.cross(x_cpu, y_cpu, dim=1, out=res2_cpu)
+            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res1_cpu)
+            self.assertEqual(res2, res2_cpu)
+
+            # test for broadcastable inputs
+            if dtype is torch.int32 or dtype is torch.int64:
+                x = torch.randint(0, 99999, (1, 3, 2), dtype=dtype, device=device)
+                y = torch.randint(0, 99999, (4, 3, 1), dtype=dtype, device=device)
+            else:
+                x = torch.rand(1, 3, 2, dtype=dtype, device=device)
+                y = torch.rand(4, 3, 1, dtype=dtype, device=device)
+            x_cpu = x.to("cpu")
+            y_cpu = y.to("cpu")
+            res1 = torch.linalg.cross(x, y, dim=1)
+            res2 = torch.tensor((), dtype=dtype, device=device)
+            res1_cpu = torch.linalg.cross(x_cpu, y_cpu, dim=1)
+            res2_cpu = torch.tensor((), dtype=dtype, device="cpu")
+            torch.linalg.cross(x, y, dim=1, out=res2)
+            torch.linalg.cross(x_cpu, y_cpu, dim=1, out=res2_cpu)
+            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res1_cpu)
+            self.assertEqual(res2, res2_cpu)
+        [helper(dtype) for dtype in [torch.int32, torch.int64, torch.float32]]
+
+    def test_cross(self):
+        a = torch.randn(4, 3, device="mps")
+        b = torch.randn(4, 3, device="mps")
+        a_cpu = a.to("cpu")
+        b_cpu = b.to("cpu")
+        res = torch.cross(a, b, dim=1)
+        res_cpu = torch.cross(a_cpu, b_cpu, dim=1)
+        self.assertEqual(res, res_cpu)
+
     def test_addmm(self):
         A = torch.ones(5, 5).to("mps")
         B = torch.ones(5, 6).to("mps")
@@ -633,6 +683,40 @@ class TestMPS(TestCase):
         self.assertEqual(high.grad, rand)
         low.grad.zero_()
         high.grad.zero_()
+
+    def test_randperm(self, device="mps"):
+        rng_device = None
+        for n in (5, 100, 50000, 100000):
+            for dtype in (torch.long, torch.half, torch.float):
+                if n > 2049 and dtype == torch.half:  # Large n for torch.half will raise an exception, do not test here.
+                    continue
+                if n > 256 and dtype == torch.bfloat16:
+                    continue
+                with torch.random.fork_rng(devices=rng_device):
+                    res1 = torch.randperm(n, dtype=dtype, device=device)
+                res2 = torch.empty(0, dtype=dtype, device=device)
+                torch.randperm(n, out=res2, dtype=dtype, device=device)
+                self.assertEqual(res1.cpu().sort().values.long(), torch.arange(n, device=device))
+
+        # Default type is long
+        for n in (100, 10000):
+            self.assertEqual(torch.randperm(n, device=device).dtype, torch.long)
+
+        # randperm of 0 elements is an empty tensor
+        res1 = torch.randperm(0)
+        res2 = torch.tensor(5, dtype=dtype, device=device)
+        torch.randperm(0, out=res2)
+        self.assertEqual(res1.numel(), 0)
+        self.assertEqual(res2.numel(), 0)
+
+        # Test non-contiguous tensors
+        for n in (4, 5, 6, 10, 20):
+            non_contiguous_tensor = torch.zeros((2, 3), dtype=torch.long, device=device).t()
+            self.assertFalse(non_contiguous_tensor.is_contiguous())
+            with torch.random.fork_rng(devices=rng_device):
+                res = torch.randperm(n, dtype=torch.long, device=device)
+            torch.randperm(n, out=non_contiguous_tensor)
+            self.assertEqual(res.cpu().sort().values.long(), torch.arange(n, device=device))
 
     # Test forward maxpool2d
     def test_max_pool2d(self):
@@ -8077,8 +8161,8 @@ class TestConsistency(TestCase):
         '__ror__': ['b8', 'i16', 'i32', 'i64', 'u8'],
         '__rpow__': ['f16'],
         '__rxor__': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'masked.argmax': ['i16', 'i64', 'u8'],
-        'masked.argmin': ['i16', 'i64', 'u8'],
+        'masked.argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked.log_softmax': ['f32'],
         'masked.logaddexp': ['f32'],
         'masked.logsumexp': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8086,8 +8170,8 @@ class TestConsistency(TestCase):
         'masked.normalize': ['f16', 'f32'],
         'masked.softmax': ['f32'],
         'masked.softmin': ['f32'],
-        'masked.std': ['f32'],
-        'masked.var': ['f32'],
+        'masked.std': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.var': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'abs': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'acos': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'acosh': ['b8', 'f32', 'i16', 'i32', 'u8'],
@@ -8104,10 +8188,7 @@ class TestConsistency(TestCase):
         'arange': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'amax': ['f32'],
         'amix': ['f32'],
-        'mean': ['f32'],
-        'sum': ['f32'],
         'asin': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'asinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'atan': ['b8', 'f32', 'i16', 'i32', 'u8'],
@@ -8230,6 +8311,9 @@ class TestConsistency(TestCase):
         'nn.functional.linear': ['f32'],
         'nn.functional.local_response_norm': ['f32'],
         'nn.functional.margin_ranking_loss': ['f32', 'i16', 'i32'],
+        'nn.functional.max_pool1d': ['f32'],
+        'nn.functional.max_pool2d': ['f32'],
+        'max_pool2d_with_indices_backward': ['f32'],
         'nn.functional.mse_loss': ['f16', 'f32'],
         'nn.functional.pad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'nn.functional.padconstant': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8285,7 +8369,6 @@ class TestConsistency(TestCase):
         'square': ['f16', 'f32'],
         'squeeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'std': ['f32'],
         'sub': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'sum_to_size': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'svd': ['f32'],
@@ -8305,7 +8388,6 @@ class TestConsistency(TestCase):
         'unbind': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unflatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unsqueeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'var': ['f32'],
         'view': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'view_as': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'vsplit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8313,7 +8395,22 @@ class TestConsistency(TestCase):
         'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'nonzero': ['f32', 'i16', 'i32', 'i64'],
+        'cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'linalg.cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unique_consecutive': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'std': ['f16', 'f32'],
+        'var': ['f16', 'f32'],
+        'amax': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'amin': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'mean': ['f16', 'f32'],
+        'count_nonzero': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.amax': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.amin': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.mean': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
     }
 
 
@@ -8430,6 +8527,8 @@ class TestConsistency(TestCase):
         'nn.functional.leaky_relu': ['f32'],
         'nn.functional.local_response_norm': ['f32'],
         'nn.functional.margin_ranking_loss': ['f32'],
+        'nn.functional.max_pool1d': ['f32'],
+        'nn.functional.max_pool2d': ['f32'],
         'nn.functional.mse_loss': ['f32'],
         'nn.functional.pad': ['f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.pairwise_distance': ['f16', 'f32'],
@@ -8508,8 +8607,7 @@ class TestConsistency(TestCase):
         # + forward when requires_grad=True or running backward
         'nn.functional.embedding': [torch.float32, torch.float16],
         '__rpow__': [torch.int64],
-        'masked.std': [torch.int32],
-        'masked.var': [torch.int32],
+
         'as_strided_scatter': [torch.uint8],
         'atan2': [torch.int64],
         'bfloat16': None,
@@ -8521,8 +8619,6 @@ class TestConsistency(TestCase):
         'index_add': None,
         'linalg.inv': [torch.float32],
         'long': None,
-        'nn.functional.avg_pool1d': [torch.int64],
-        'nn.functional.avg_pool2d': [torch.int64],
         'nn.functional.conv1d': [torch.int64],
         'nn.functional.conv2d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
@@ -8536,6 +8632,12 @@ class TestConsistency(TestCase):
         'sigmoid': [torch.int64],
         'slice_scatter': [torch.uint8],
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8],  # moved from section below
+
+        # failure in average pooling when both ceilMode and includeZeroPadToAverage are True
+        'nn.functional.avg_pool1d': [torch.float32, torch.int64],
+        'nn.functional.avg_pool2d': [torch.float32, torch.int64],
+        'nn.functional.adaptive_avg_pool1d': [torch.float32],
+        'nn.functional.adaptive_avg_pool2d': [torch.float32],
         # count_nonzero returns wrong results for these dtypes
         'nonzero': [torch.uint8, torch.float16],
 
@@ -8691,7 +8793,8 @@ class TestConsistency(TestCase):
                 if op.name == "nn.functional.conv2d" and dtype == torch.float32:
                     atol = 1e-4
                     rtol = 3e-5
-                elif (op.name == "add" or op.name == "sub") and dtype == torch.float16:
+                elif (op.name == "add" or op.name == "sub" or
+                      op.name == "masked.sum" or op.name == "masked.std" or op.name == "masked.var") and dtype == torch.float16:
                     atol = 1e-2
                     rtol = 1e-2
                 else:
@@ -8812,7 +8915,7 @@ class TestCommon(TestCase):
         # does not support float64 Tensors.
         # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
         # get patched up and this workaround removed.
-        broken_on_ref_inputs = op.name in ['cat', 'clamp', 'where']
+        broken_on_ref_inputs = op.name in ['clamp', 'where']
         inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)

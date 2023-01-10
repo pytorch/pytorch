@@ -12,7 +12,7 @@ import torch
 import numpy as np
 from torch._six import inf, nan
 
-from typing import Any, Dict, List, Tuple, Union, Sequence
+from typing import Any, Dict, List, Tuple, Union
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
@@ -1251,6 +1251,21 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
                             low=low, high=high,
                             requires_grad=requires_grad)
             yield SampleInput(t, dim, keepdim)
+
+def reference_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs)
+
+    # https://github.com/pytorch/pytorch/issues/91843
+    t = torch.tensor([20, 30, 100], dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t, 0, False)
+
+    t = torch.tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t, 0, False)
+
+    # tests masking
+    # https://github.com/pytorch/pytorch/pull/91860#pullrequestreview-1241344073
+    t = torch.tensor(float("inf"))
+    yield SampleInput(t, 0, True)
 
 def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
     inputs = [
@@ -4666,7 +4681,6 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
     shapes_and_args = (
         ((S, 1, S, 1), ()),
         ((1, 1, 1, 1), ()),
-        ((1, 1, 1, 1), (0,)),
         ((S, 1, S, 1), (1,)),
         ((S, 1, S, 1), (-1,)),
         ((S, 1, S, 1), (2,)),
@@ -4680,37 +4694,6 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(tensor, args=args)
 
-
-def sample_inputs_squeeze_multiple(op_info, device, dtype, requires_grad, **kwargs):
-    shapes_and_args = (
-        ((1, 1, 1, 1), ()),
-        ((S, 1, S, 1), (1,)),
-        ((S, 1, S, 1), (-1,)),
-        ((S, 1, S, 1), (1, 3)),
-        ((S, 1, S, 1), (1, 2,)),
-        ((), (0,)),
-    )
-
-    for shape, dims in shapes_and_args:
-        tensor = make_tensor(shape, dtype=dtype, device=device, low=None, high=None,
-                             requires_grad=requires_grad)
-
-        yield SampleInput(tensor, dims)
-
-
-def _squeeze_ref(x, axis=None):
-    # NumPy doesn't allow squeezing scalars
-    if x.ndim == 0:
-        return x
-
-    if isinstance(axis, Sequence):
-        # Numpy doesn't allow specifying non-singular dimensions
-        axis = tuple(a for a in axis if x.shape[a] == 1)
-
-    if isinstance(axis, int) and x.shape[axis] != 1:
-        return x
-
-    return np.squeeze(x, axis)
 
 def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
     assert mode in ('constant', 'reflect', 'replicate', 'circular')
@@ -7888,6 +7871,30 @@ foreach_binary_op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.float16,)),
         )
     ),
+    ForeachFuncInfo(
+        "clamp_min",
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+    ),
+    ForeachFuncInfo(
+        "clamp_max",
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+    ),
+    ForeachFuncInfo(
+        "minimum",
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+    ),
+    ForeachFuncInfo(
+        "maximum",
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+    ),
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
@@ -7900,19 +7907,6 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
         "addcdiv",
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
-    ),
-]
-
-foreach_minmax_op_db: List[ForeachFuncInfo] = [
-    ForeachFuncInfo(
-        "maximum",
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
-    ),
-    ForeachFuncInfo(
-        "minimum",
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
     ),
 ]
 
@@ -10147,13 +10141,17 @@ op_db: List[OpInfo] = [
                             'TestCommon', device_type='cpu',
                         ),
                     ], ),
-    OpInfo('logaddexp',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.bfloat16),
-           dtypesIfROCM=floating_types_and(torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_logaddexp),
+    BinaryUfuncInfo('logaddexp',
+                    dtypes=floating_types_and(torch.bfloat16),
+                    dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+                    dtypesIfROCM=floating_types_and(torch.bfloat16, torch.float16),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    supports_rhs_python_scalar=False,
+                    skips=(
+                        # TODO: FIXME: RuntimeError: not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
+                    )),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16),
@@ -12698,7 +12696,7 @@ op_db: List[OpInfo] = [
                    backward_dtypes=all_types_and(torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.float16,
                                                    torch.bfloat16),
-                   backward_dtypesIfCUDA=floating_types_and(torch.float16),
+                   backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
                    sample_inputs_func=sample_inputs_hardtanh,
                    supports_out=False,
@@ -12730,7 +12728,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bfloat16),
                    backward_dtypes=floating_types_and(torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-                   backward_dtypesIfCUDA=floating_types_and(torch.float16),
+                   backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_out=False,
                    supports_forward_ad=True,
@@ -15327,7 +15325,6 @@ op_db: List[OpInfo] = [
                       DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                   )),
     OpInfo('squeeze',
-           ref=_squeeze_ref,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            assert_autodiffed=True,
@@ -15341,21 +15338,6 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_squeeze),
-    OpInfo('squeeze',
-           ref=_squeeze_ref,
-           variant_test_name="multiple",
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           supports_out=False,
-           assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           # https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_squeeze_multiple),
     UnaryUfuncInfo(
         'fill',
         ref=_fill_np,
@@ -15495,7 +15477,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_fast_mode=False,
-           sample_inputs_func=sample_inputs_logsumexp),
+           sample_inputs_func=sample_inputs_logsumexp,
+           reference_inputs_func=reference_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
@@ -16630,11 +16613,6 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.float16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=(torch.float16,)),
-            # TODO: Meta not implemented for out overloads
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
         ),
     ),
     ReductionOpInfo(
@@ -17981,6 +17959,11 @@ python_ref_db = [
         )
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.logaddexp",
+        torch_opinfo_name="logaddexp",
+        supports_nvfuser=False,
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.floor_divide",
         torch_opinfo_name="floor_divide",
         rhs_make_tensor_kwargs=dict(exclude_zero=True),
@@ -18702,11 +18685,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
-    ),
-    PythonRefInfo(
-        "_refs.squeeze",
-        torch_opinfo_name="squeeze",
-        torch_opinfo_variant_name="multiple",
     ),
     PythonRefInfo(
         "_refs.tensor_split",
