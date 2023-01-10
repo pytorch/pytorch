@@ -8096,24 +8096,28 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "clamp_max",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "minimum",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "maximum",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
 ]
 
@@ -8132,24 +8136,6 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
     ),
 ]
 
-<<<<<<< HEAD
-=======
-foreach_minmax_op_db: List[ForeachFuncInfo] = [
-    ForeachFuncInfo(
-        "maximum",
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
-        sample_inputs_func=foreach_inputs_sample_func(2, False, False),
-    ),
-    ForeachFuncInfo(
-        "minimum",
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
-        sample_inputs_func=foreach_inputs_sample_func(2, False, False),
-    ),
-]
-
->>>>>>> bdc5db8548... Use `SampleInput` for `test_foreach.py`
 foreach_reduce_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "norm",

@@ -145,6 +145,7 @@ class TestForeach(TestCase):
             kwargs = {} or sample.kwargs
             alpha = kwargs.pop("alpha", None)
             disable_fastpath = kwargs.pop("disable_fastpath") if is_fastpath else False
+
             n_expected_cudaLaunchKernels = len(sample.input) if disable_fastpath else 1
             # TODO(crcrpar): Look into why the following is needed
             if (
@@ -153,6 +154,14 @@ class TestForeach(TestCase):
                 (isinstance(rhs_arg, list) and not torch.is_tensor(rhs_arg[0]))
             ):
                 n_expected_cudaLaunchKernels -= 1
+            if (
+                disable_fastpath and op.ref in (torch.clamp_min, torch.clamp_max) and
+                (
+                    torch.result_type(sample.input[0], rhs_arg[0]) != dtype
+                    if isinstance(rhs_arg, list) else torch.result_type(sample.input[0], rhs_arg) != dtype
+                )
+            ):
+                n_expected_cudaLaunchKernels = len(sample.input) * 2  # fallback op launches 2 kernels on these cases
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op, n_expected_cudaLaunchKernels)
             self._binary_test(
                 dtype, wrapped_op, ref, [sample.input, rhs_arg], is_fastpath, False, alpha=alpha)
@@ -270,50 +279,6 @@ class TestForeach(TestCase):
             inputs = [sample.input]
             self.assertEqual(ref(inputs), wrapped_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath))
             self._inplace_unary_test(inplace_op, inplace_ref, [sample.input], is_fastpath and not disable_fastpath)
-
-    def _minmax_test(self, opinfo, inputs, is_fastpath, n_expected_cudaLaunchKernels):
-        op, ref, inplace_op, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
-        expected = ref(inputs)
-        self.assertEqual(expected, op(inputs, self.is_cuda, is_fastpath))
-
-        inplace_inputs = [[t.clone() for t in inputs[0]], inputs[1]]
-        inplace_op(inplace_inputs, self.is_cuda, is_fastpath)
-        self.assertEqual(expected, inplace_inputs[0])
-
-    # note(crcrpar): `torch.maximum` and `torch.minimum` support `out` arg but there seem to be no inplace versions.
-    # So, compare `inplace_op` results with `ref`'s outputs.
-    @ops(foreach_minmax_op_db)
-    @parametrize("is_fastpath", (True, False))
-    def test_minmax_op(self, device, dtype, op, is_fastpath):
-        for sample in op.sample_inputs(device, dtype):
-            if not is_fastpath:
-                sample = sample.noncontiguous()
-            inputs = (sample.input, sample.args[0])
-            if is_fastpath:
-                n_expected_cudaLaunchKernels = 1 if dtype != torch.bool else len(inputs[0])
-            else:
-                n_expected_cudaLaunchKernels = len(inputs[0]) - 1
-            self._minmax_test(op, inputs, is_fastpath, n_expected_cudaLaunchKernels)
-
-    # note(mkozuki): ForeachFuncInfo's of both `_foreach_maximum` and `_foreach_minimum` include integer types.
-    # so, manually limit dtypes to fp types for inf&nan tests.
-    @ops(foreach_minmax_op_db, dtypes=floating_types_and(torch.half, torch.bfloat16))
-    def test_minmax_float_inf_nan(self, device, dtype, op):
-        inputs = (
-            [
-                torch.tensor([float('inf')], device=device, dtype=dtype),
-                torch.tensor([-float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('nan')], device=device, dtype=dtype),
-                torch.tensor([float('nan')], device=device, dtype=dtype)
-            ],
-            [
-                torch.tensor([-float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('nan')], device=device, dtype=dtype)
-            ],
-        )
-        self._minmax_test(op, inputs, True, 1)
 
     @ops(foreach_reduce_op_db)
     @parametrize("is_fastpath", (True, False))
