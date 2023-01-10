@@ -322,6 +322,13 @@ def is_numpy_float_type(value):
         return False
 
 
+def is_numpy_ndarray(value):
+    if HAS_NUMPY:
+        return istype(value, np.ndarray)
+    else:
+        return False
+
+
 def istensor(obj):
     """Check of obj is a tensor"""
     tensor_list = (
@@ -856,6 +863,8 @@ def same(
         if relax_numpy_equality:
             ref = ref.item()
         return (type(ref) is type(res)) and (ref == res)
+    elif is_numpy_ndarray(ref):
+        return (type(ref) is type(res)) and (ref == res).all()
     elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
