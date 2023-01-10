@@ -25,21 +25,25 @@ from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, Dict, List
 
-import numpy as np
-import sympy
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+    HAS_NUMPY = False
 
 import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
 from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = (
-    "https://github.com/pytorch/torchdynamo/blob/main/TROUBLESHOOTING.md"
-)
+troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
@@ -286,30 +290,36 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
-    return istype(
-        value,
-        (
-            np.int8,
-            np.int16,
-            np.int32,
-            np.int64,
-            np.uint8,
-            np.uint16,
-            np.uint32,
-            np.uint64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            ),
+        )
+    else:
+        return False
 
 
 def is_numpy_float_type(value):
-    return istype(
-        value,
-        (
-            np.float16,
-            np.float32,
-            np.float64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.float16,
+                np.float32,
+                np.float64,
+            ),
+        )
+    else:
+        return False
 
 
 def istensor(obj):
@@ -348,13 +358,13 @@ def proxy_args_kwargs(args, kwargs):
         proxy_args = tuple(arg.as_proxy() for arg in args)
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
-    except NotImplementedError:
+    except NotImplementedError as e:
         from .exc import unimplemented
         from .variables.base import typestr
 
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
-        )
+        ) from e
 
 
 @dataclasses.dataclass
@@ -699,42 +709,6 @@ from torch._subclasses import (  # noqa: F401
 )
 
 
-def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
-    fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
-    if tx is not None:
-        from torch._dynamo.guards import TensorReference
-
-        def _record(tensor_ref):
-            if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
-                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
-            tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
-
-        def _extract(symbol):
-            if isinstance(symbol, int):
-                return None
-            sym_expr = symbol.get_pyobj().expr
-            if not isinstance(sym_expr, sympy.Symbol):
-                return None
-            return sym_expr
-
-        def _record_ref(e, index, symbol, kind):
-            sym_expr = _extract(symbol)
-            if sym_expr:
-                tensor_ref = TensorReference(id(e), kind, index, sym_expr)
-                _record(tensor_ref)
-
-        for index, symbol in enumerate(fake_tensor.size()):
-            _record_ref(e, index, symbol, "size")
-
-        for index, symbol in enumerate(fake_tensor.stride()):
-            _record_ref(e, index, symbol, "stride")
-
-        offset = fake_tensor.storage_offset()
-        _record_ref(e, None, offset, "storage_offset")
-
-    return fake_tensor
-
-
 def wrap_fake_exception(fn):
     try:
         return fn()
@@ -743,34 +717,7 @@ def wrap_fake_exception(fn):
 
         msg = f"Unsupported: {e.reason} with fake tensor propagation."
         log.warning(msg)
-        raise unimplemented(msg)
-
-
-def wrap_to_fake_tensor(e, fake_mode):
-    if type(e) in (torch.Tensor, torch.nn.Parameter):
-        return wrap_fake_exception(
-            lambda: make_fake_tensor(
-                e, fake_mode, static_shapes=config.dynamic_shapes is False
-            )
-        )
-    else:
-        return e
-
-
-def wrap_to_fake_tensor_and_record(e, tx):
-    # The not fake tensor check here is annoying - ideally, fake tensors never call this during wrapping.
-    # However, get_fake_value takes args and passes them through this, which may include fake tensors.
-    # see tree_map(fake_wrapper, args) in get_fake_value.
-    if isinstance(e, torch.Tensor) and not isinstance(e, torch._subclasses.FakeTensor):
-        static_shapes = config.dynamic_shapes is False
-        if type(e) is torch.nn.Parameter:
-            # Always static for params
-            static_shapes = True
-        return wrap_fake_exception(
-            lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
-        )
-    else:
-        return e
+        raise unimplemented(msg) from e
 
 
 def deepcopy_to_fake_tensor(obj, fake_mode):
@@ -793,6 +740,7 @@ def same(
     tol=1e-4,
     equal_nan=False,
     exact_dtype=True,
+    relax_numpy_equality=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -800,7 +748,16 @@ def same(
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
         return len(ref) == len(res) and all(
-            same(ai, bi, fp64_refi, cos_similarity, tol, equal_nan, exact_dtype)
+            same(
+                ai,
+                bi,
+                fp64_refi,
+                cos_similarity,
+                tol,
+                equal_nan,
+                exact_dtype,
+                relax_numpy_equality,
+            )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
     elif isinstance(ref, dict):
@@ -818,6 +775,7 @@ def same(
                     tol=tol,
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
+                    relax_numpy_equality=relax_numpy_equality,
                 )
             ):
                 log.error(f"Accuracy failed for key name {k}")
@@ -854,7 +812,6 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                breakpoint()
                 log.warning(f"Similarity score={score.cpu().detach().item()}")
             return score >= 0.99
         else:
@@ -871,15 +828,18 @@ def same(
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 2.0
 
-                if fp64_ref.numel() < 1000 or (
-                    ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1
+                if (
+                    fp64_ref.numel() < 1000
+                    or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
+                    # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
+                    or tol >= 2 * 1e-2
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.
                     # Similary, for 1x1 kenerls, there seems to be high noise with amp.
                     multiplier = 3.0
 
-                passes_test = res_error <= (multiplier * ref_error + 1e-4)
+                passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log.error(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
@@ -893,6 +853,8 @@ def same(
     elif isinstance(ref, float):
         return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
+        if relax_numpy_equality:
+            ref = ref.item()
         return (type(ref) is type(res)) and (ref == res)
     elif type(ref).__name__ in (
         "MaskedLMOutput",
@@ -917,6 +879,7 @@ def same(
                 tol=tol,
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
+                relax_numpy_equality=relax_numpy_equality,
             )
             for key in ref.__dict__.keys()
         )
@@ -1044,7 +1007,11 @@ def get_fake_value(node, tx):
     from .exc import TorchRuntimeError, unimplemented, Unsupported
 
     op = node.op
-    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+
+    def fake_wrapper(e):
+        if isinstance(e, torch.Tensor):
+            assert isinstance(e, FakeTensor)
+        return e
 
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
@@ -1116,6 +1083,9 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             return nnmodule(*args, **kwargs)
         elif op == "get_attr":
             return output_graph.get_submodule(node.target)
+        elif op == "placeholder":
+            assert "example_value" in node.meta
+            return node.meta["example_value"]
     except Exception as e:
         raise RuntimeError(
             f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
@@ -1158,14 +1128,24 @@ def get_real_value(node, output_graph):
 
 
 def assert_no_fake_params_or_buffers(gm):
+    from torch._subclasses.fake_tensor import FakeTensorConfig
+
+    def stack_or_hint(t):
+        if FakeTensorConfig.debug:
+            import traceback
+
+            return f"FAKE TENSOR CREATION TRACEBACK: \n {traceback.format_list(t._debug_trace)}"
+        else:
+            return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
+
     for name, buffer in gm.named_buffers():
         assert not isinstance(
             buffer, torch._subclasses.FakeTensor
-        ), f"Unexpected fake buffer {name}"
+        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
     for name, param in gm.named_parameters():
         assert not isinstance(
             param, torch._subclasses.FakeTensor
-        ), f"Unexpected fake param {name}"
+        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
 def fake_mode_from_tensors(inputs: List[Any]):

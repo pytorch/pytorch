@@ -321,6 +321,10 @@ class Vectorized<ComplexFlt> {
     return ret.elwise_mult(log10e_inv);
   }
 
+  Vectorized<ComplexFlt> log1p() const {
+    return map(std::log1p);
+  }
+
   Vectorized<ComplexFlt> el_swapped() const {
     vfloat32 v0 = vec_perm(_vec0, _vec0, swap_mask);
     vfloat32 v1 = vec_perm(_vec1, _vec1, swap_mask);
@@ -565,10 +569,6 @@ class Vectorized<ComplexFlt> {
     TORCH_CHECK(false,"not supported for complex numbers");
   }
   Vectorized<ComplexFlt> erfc() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> log1p() const {
     TORCH_CHECK(false,"not supported for complex numbers");
   }
 

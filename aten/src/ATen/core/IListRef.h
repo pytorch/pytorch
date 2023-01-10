@@ -359,7 +359,7 @@ using MaterializedIListRef = std::vector<MaterializedIListRefElem<T>>;
  *     than 0.
  */
 template <typename T>
-class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
+class IListRefIterator {
  private:
 #define DEFINE_FRIEND_CLASS(TAG, ...)                        \
   friend class detail::IListRefTagImpl<IListRefTag::TAG, T>; \
@@ -371,6 +371,13 @@ class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T
 #undef DEFINE_FRIEND_CLASS
 
  public:
+  // C++17 friendly std::iterator implementation
+  using iterator_category = std::bidirectional_iterator_tag;
+  using value_type = T;
+  using difference_type = std::ptrdiff_t;
+  using pointer = T*;
+  using reference = T&;
+
   using unboxed_iterator_type = typename detail::
       IListRefTagImpl<IListRefTag::Unboxed, T>::list_type::const_iterator;
   using boxed_iterator_type = typename detail::

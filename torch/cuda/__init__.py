@@ -141,8 +141,6 @@ def _check_capability():
             min_arch = min((int(arch.split("_")[1]) for arch in torch.cuda.get_arch_list()), default=35)
             if current_arch < min_arch:
                 warnings.warn(old_gpu_warn % (d, name, major, minor, min_arch // 10, min_arch % 10))
-            elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
-                warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
 def _check_cubins():
     incompatible_device_warn = """
@@ -669,13 +667,13 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     """
     try:
         import pynvml  # type: ignore[import]
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml")
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
     from pynvml import NVMLError_DriverNotLoaded
     try:
         pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded:
-        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?")
+    except NVMLError_DriverNotLoaded as e:
+        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
     device = _get_device_index(device, optional=True)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
@@ -695,13 +693,13 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     """
     try:
         import pynvml  # type: ignore[import]
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml")
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
     from pynvml import NVMLError_DriverNotLoaded
     try:
         pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded:
-        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?")
+    except NVMLError_DriverNotLoaded as e:
+        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
     device = _get_device_index(device, optional=True)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu

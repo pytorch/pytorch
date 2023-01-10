@@ -4785,12 +4785,7 @@ In-place version of :meth:`~Tensor.squeeze`
 add_docstr_all(
     "std",
     r"""
-std(dim, unbiased=True, keepdim=False) -> Tensor
-
-See :func:`torch.std`
-
-.. function:: std(unbiased=True) -> Tensor
-   :noindex:
+std(dim=None, *, correction=1, keepdim=False) -> Tensor
 
 See :func:`torch.std`
 """,
@@ -4812,6 +4807,15 @@ Example::
     >>> x[3:].storage_offset()
     3
 
+""",
+)
+
+add_docstr_all(
+    "untyped_storage",
+    r"""
+untyped_storage() -> torch.UntypedStorage
+
+Returns the underlying :class:`UntypedStorage`.
 """,
 )
 
@@ -5291,6 +5295,15 @@ See :func:`torch.tanh`
 )
 
 add_docstr_all(
+    "softmax",
+    r"""
+softmax(dim) -> Tensor
+
+Alias for :func:`torch.nn.functional.softmax`.
+""",
+)
+
+add_docstr_all(
     "tanh_",
     r"""
 tanh_() -> Tensor
@@ -5738,12 +5751,7 @@ In-place version of :meth:`~Tensor.unsqueeze`
 add_docstr_all(
     "var",
     r"""
-var(dim, unbiased=True, keepdim=False) -> Tensor
-
-See :func:`torch.var`
-
-.. function:: var(unbiased=True) -> Tensor
-   :noindex:
+var(dim=None, *, correction=1, keepdim=False) -> Tensor
 
 See :func:`torch.var`
 """,

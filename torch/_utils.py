@@ -772,3 +772,8 @@ def classproperty(func):
     if not isinstance(func, (classmethod, staticmethod)):
         func = classmethod(func)
     return _ClassPropertyDescriptor(func)
+
+
+# Whether we are compiling with torch.compile or not
+def is_compiling():
+    return False

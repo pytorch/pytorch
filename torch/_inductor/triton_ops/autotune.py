@@ -69,7 +69,6 @@ class CachingAutotuner(KernelInterface):
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
-
         if warm_cache_only_with_cc:
             triton.compile(
                 self.fn,
@@ -79,12 +78,14 @@ class CachingAutotuner(KernelInterface):
             )
             return
 
-        torch.cuda.set_device(torch.cuda.current_device())
-
-        binary = triton.compile(
-            self.fn,
-            **compile_meta,
-        )
+        # load binary to the correct device
+        with torch.cuda.device(compile_meta["device"]):
+            # need to initialize context
+            torch.cuda.synchronize(torch.cuda.current_device())
+            binary = triton.compile(
+                self.fn,
+                **compile_meta,
+            )
 
         call_args = [
             arg
@@ -184,7 +185,7 @@ class CachingAutotuner(KernelInterface):
                 raise RuntimeError(
                     """Consider updating Triton with
 `pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`"""
-                )
+                ) from e
             else:
                 raise e
 

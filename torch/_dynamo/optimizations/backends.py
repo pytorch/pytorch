@@ -8,8 +8,6 @@ import tempfile
 
 from typing import Dict
 
-import numpy as np
-
 import torch
 from ..output_graph import CompilerFn
 
@@ -18,17 +16,6 @@ from .subgraph import SubGraph
 
 log = logging.getLogger(__name__)
 BACKENDS: Dict[str, CompilerFn] = dict()
-_NP_DTYPE = {
-    torch.float16: np.float16,
-    torch.float32: np.float32,
-    torch.float64: np.float64,
-    torch.uint8: np.uint8,
-    torch.int8: np.int8,
-    torch.int16: np.int16,
-    torch.int32: np.int32,
-    torch.int64: np.longlong,
-    torch.bool: np.bool_,
-}
 
 
 def register_backend(fn):
@@ -133,7 +120,20 @@ def static_runtime(subgraph):
 
 
 def onnxrt_common(subgraph, provider, onnx_filename=None):
+    import numpy as np  # type: ignore[import]
     import onnxruntime  # type: ignore[import]
+
+    _np_dtype = {
+        torch.float16: np.float16,
+        torch.float32: np.float32,
+        torch.float64: np.float64,
+        torch.uint8: np.uint8,
+        torch.int8: np.int8,
+        torch.int16: np.int16,
+        torch.int32: np.int32,
+        torch.int64: np.longlong,
+        torch.bool: np.bool_,
+    }
 
     assert provider in onnxruntime.get_available_providers()
     session = onnxruntime.InferenceSession(
@@ -153,7 +153,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
                 name,
                 dev.type,
                 dev.index or 0,
-                _NP_DTYPE[value.dtype],
+                _np_dtype[value.dtype],
                 value.size(),
                 value.data_ptr(),
             )
@@ -164,7 +164,7 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
                 name,
                 dev.type,
                 dev.index or 0,
-                _NP_DTYPE[value.dtype],
+                _np_dtype[value.dtype],
                 value.size(),
                 value.data_ptr(),
             )
@@ -642,6 +642,12 @@ def tvm_compile_inner(
                         log_file
                     ), "TVM's meta_schedule requires a directory for storing log files."
                     work_dir = log_file
+                if not cuda:
+                    # meta_schedule needs num-cores to be specified
+                    # here we use the maximum core count
+                    target = tvm.target.Target(
+                        f"{llvm_target()} --num-cores {ms.utils.cpu_count(logical=False)}"
+                    )
                 # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
                 # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
                 database = ms.relay_integration.tune_relay(
@@ -680,6 +686,14 @@ def tvm_compile_inner(
                 return torch.from_numpy(nd_tensor.numpy())
             return torch.utils.dlpack.from_dlpack(nd_tensor.to_dlpack())
 
+        def to_tvm_tensor(torch_tensor):
+            """A helper function to transfer a torch.tensor to NDArray."""
+            if torch_tensor.dtype == torch.bool:
+                # same reason as above, fallback to numpy conversion which
+                # could introduce data copy overhead
+                return tvm.nd.array(torch_tensor.cpu().numpy())
+            return tvm.nd.from_dlpack(torch_tensor)
+
         def exec_tvm(*i_args):
             args = [a.contiguous() for a in i_args]
             for idx, arg in enumerate(args, 0):
@@ -688,7 +702,7 @@ def tvm_compile_inner(
                         arg = arg.detach()
                     m.set_input(
                         f"inp_{idx}",
-                        tvm.nd.array(arg.numpy(), dev),
+                        to_tvm_tensor(arg),
                     )
             m.run()
             return [

@@ -434,7 +434,8 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
 // correctly. For example, T = std::unique_ptr may evaluate to true and be
 // treated as POD. This can cause unexpected behavior.
-#if defined(__GNUG__) && __GNUC__ < 5
+#if defined(__GNUG__) && __GNUC__ < 5 && \
+    !(defined(__clang__) && defined(_LIBCPP_VERSION))
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
@@ -512,9 +513,10 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 #endif
 #endif // HAS_DEMANGLE
 
-#ifdef __clang__
 #define _C10_PRAGMA__(string) _Pragma(#string)
 #define _C10_PRAGMA_(string) _C10_PRAGMA__(string)
+
+#ifdef __clang__
 #define C10_CLANG_DIAGNOSTIC_PUSH() _Pragma("clang diagnostic push")
 #define C10_CLANG_DIAGNOSTIC_POP() _Pragma("clang diagnostic pop")
 #define C10_CLANG_DIAGNOSTIC_IGNORE(flag) \
@@ -525,6 +527,31 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 #define C10_CLANG_DIAGNOSTIC_POP()
 #define C10_CLANG_DIAGNOSTIC_IGNORE(flag)
 #define C10_CLANG_HAS_WARNING(flag) 0
+#endif
+
+#ifdef __clang__
+
+#define C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(warning)         \
+  _C10_PRAGMA_(clang diagnostic push)                               \
+  _C10_PRAGMA_(clang diagnostic ignored "-Wunknown-warning-option") \
+  _C10_PRAGMA_(clang diagnostic ignored warning)
+
+#define C10_DIAGNOSTIC_POP() _C10_PRAGMA_(clang diagnostic pop)
+
+#elif __GNUC__
+
+#define C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(warning) \
+  _C10_PRAGMA_(GCC diagnostic push)                         \
+  _C10_PRAGMA_(GCC diagnostic ignored "-Wpragmas")          \
+  _C10_PRAGMA_(GCC diagnostic ignored warning)
+
+#define C10_DIAGNOSTIC_POP() _C10_PRAGMA_(GCC diagnostic pop)
+
+#else
+
+#define C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(warning)
+#define C10_DIAGNOSTIC_POP()
+
 #endif
 
 #endif // C10_MACROS_MACROS_H_

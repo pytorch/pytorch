@@ -21,6 +21,8 @@ from time import sleep, time
 from typing import Any, Callable, Dict, List
 
 import torch
+
+from torch.hub import _Faketqdm, tqdm
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
 
@@ -53,7 +55,8 @@ logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else loggin
 @functools.lru_cache(None)
 def cache_dir():
     return os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR", f"/tmp/torchinductor_{getpass.getuser()}"
+        "TORCHINDUCTOR_CACHE_DIR",
+        f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
     )
 
 
@@ -329,7 +332,7 @@ def get_warning_all_flag(warning_all=True):
 
 
 def cpp_flags():
-    return "-std=c++14 -Wno-unused-variable"
+    return "-std=c++17 -Wno-unused-variable"
 
 
 def optimization_flags():
@@ -411,6 +414,13 @@ class CppCodeCache:
                 global _libgomp
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
                 return cdll.LoadLibrary(path)
+            if "failed to map segment from shared object" in str(e):
+                raise OSError(
+                    f"{e}.  The most common reason this may occur is if the {tempfile.gettempdir()} folder "
+                    "is mounted with noexec (e.g., by default Docker mounts tmp file systems "
+                    f"as noexec).  Please remount {tempfile.gettempdir()} with exec enabled, or set another "
+                    "temporary directory with TORCHINDUCTOR_CACHE_DIR environment variable."
+                ) from e
             raise
 
     @classmethod
@@ -435,7 +445,7 @@ class CppCodeCache:
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
-                        raise exc.CppCompileError(cmd, e.output)
+                        raise exc.CppCompileError(cmd, e.output) from e
 
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
@@ -524,7 +534,7 @@ class TritonFuture:
 
 class AsyncCompile:
     def __init__(self):
-        self._context_keepalive = None
+        pass
 
     @staticmethod
     @functools.lru_cache(1)
@@ -595,7 +605,7 @@ class AsyncCompile:
         if hasattr(pool, "_start_queue_management_thread"):
             pool._start_queue_management_thread()
         else:
-            for i in range(config.compile_threads):
+            for _ in range(config.compile_threads):
                 pool._adjust_process_count()
             pool._start_executor_manager_thread()
         _compile_end()
@@ -614,9 +624,6 @@ class AsyncCompile:
 
     def triton(self, source_code):
         _compile_start()
-        if self._context_keepalive is None:
-            # Workaround `CUDA: Error- context is destroyed`
-            self._context_keepalive = torch.tensor([1], device="cuda")
 
         if config.compile_threads > 1:
             major, minor = torch.cuda.get_device_capability()
@@ -636,10 +643,26 @@ class AsyncCompile:
         return self.submit(task)
 
     def wait(self, scope: Dict[str, Any]):
+        num_kernels = len(
+            [
+                value
+                for key, value in scope.items()
+                if isinstance(value, (Future, TritonFuture))
+            ]
+        )
+        pbar = tqdm(
+            total=num_kernels,
+            desc="Inductor Compilation",
+            disable=config.disable_progress,
+            delay=0,
+        )
         if config.compile_threads > 1:
-            for key, result in list(scope.items()):
+            for key, result in scope.items():
+                if config.verbose_progress and not isinstance(pbar, _Faketqdm):
+                    pbar.set_postfix_str(key)
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
+                    pbar.update(1)
 
         _compile_end()
 
