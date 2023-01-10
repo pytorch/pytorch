@@ -528,7 +528,93 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
   iter.cast_outputs();
 }
 
-void cpu_hflip_channels_last_uint8_ch3(at::TensorIterator& iter) {
+
+template<int size0>
+void vectorized_cpu_hflip_channels_last_uint8(int64_t & i, char * C10_RESTRICT *data, const int64_t size, const int64_t stride) {
+
+#ifdef CPU_CAPABILITY_AVX2
+
+  constexpr auto vec_size = 256 / (8 * sizeof(uint8_t));
+
+  if (size > vec_size) {
+
+    const auto proc_vec_size = 2 * ((vec_size / 2) / size0);
+    const auto delta = vec_size - proc_vec_size * size0;
+    __m256i data_vec, reversed_vec;
+
+    // Example for N=3
+    // Data: (1 2 3) (4 5 6) (7 8 9) (10 11 12) (13 14 15) (16 17 18) (19 20 21) (22 23 24) (25 26 27) (28 29 30) (31 32 33)
+    // load by 2 parts
+    // R = [ (1 2 3) (4 5 6) (7 8 9) (10 11 12) (13 14 15) (16 | (16 17 18) (19 20 21) (22 23 24) (25 26 27) (28 29 30) (31 ]
+    // flip(R) ->
+    // R = [ 31 (28 29 30) (25 26 27) (22 23 24) (19 20 21) (16 17 18) | 16 (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3) ]
+    // Write in 2 parts
+    // Output pointer:                                                                                                       v
+    //                (X X X)  (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X) (X X X) (X X X)
+
+    // Output part 1: (X X X)  (X X X)    (X X X)    (X X X)    (X X X)    (X X 16)   (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3)
+    // Output part 2: (X X 31) (28 29 30) (25 26 27) (22 23 24) (19 20 21) (16 17 18) (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3)
+
+    // Shuffle mask for N channels, N in [2, 8]
+    char mdata[16] = {};
+    for (int k=0; k<16; k++) {
+      int j = k / size0 + 1;
+      int v = (j * size0 - 1) - (k % size0);
+      v = std::min(v, (int) 15);
+      mdata[k] = v;
+    }
+    __m256i mask = _mm256_set_epi8(
+      mdata[0], mdata[1], mdata[2], mdata[3],
+      mdata[4], mdata[5], mdata[6], mdata[7],
+      mdata[8], mdata[9], mdata[10], mdata[11],
+      mdata[12], mdata[13], mdata[14], mdata[15], // first 128-bit lane
+
+      mdata[0], mdata[1], mdata[2], mdata[3],
+      mdata[4], mdata[5], mdata[6], mdata[7],
+      mdata[8], mdata[9], mdata[10], mdata[11],
+      mdata[12], mdata[13], mdata[14], mdata[15] // second 128-bit lane
+    );
+
+    // shift output pointer by size0
+    data[0] += size0 * stride;
+
+    for (; i < size - vec_size; i += proc_vec_size * size0) {
+
+      // load 256-bits by two 128-bits parts
+      auto a0 = _mm_loadu_si128((__m128i *) data[1]);
+      auto b0 = _mm256_castsi128_si256(a0);
+      auto a1 = _mm_loadu_si128((__m128i *) (data[1] + proc_vec_size / 2 * size0 * sizeof(uint8_t)));
+      data_vec = _mm256_inserti128_si256(b0, a1, 1);
+
+      data[1] += proc_vec_size * size0 * sizeof(uint8_t);
+
+      reversed_vec = _mm256_shuffle_epi8(data_vec, mask);
+      reversed_vec = _mm256_permute2x128_si256(reversed_vec, reversed_vec, 1);
+
+      // write output in two parts
+      data[0] -= vec_size / 2 * stride;
+      auto rev_vec_h = _mm256_extracti128_si256(reversed_vec, 1);
+      _mm_storeu_si128((__m128i *)data[0], rev_vec_h);
+
+      if (delta > 0) {
+        data[0] += (delta / 2) * stride;
+      }
+      data[0] -= vec_size / 2 * stride;
+      auto rev_vec_l = _mm256_extracti128_si256(reversed_vec, 0);
+      _mm_storeu_si128((__m128i *)data[0], rev_vec_l);
+
+      if (delta > 0) {
+        data[0] += (delta / 2) * stride;
+      }
+
+    }
+    data[0] -= size0 * stride;
+  }
+#endif
+
+}
+
+void cpu_hflip_channels_last_uint8_C(at::TensorIterator& iter) {
 
   auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
 
@@ -541,79 +627,30 @@ void cpu_hflip_channels_last_uint8_ch3(at::TensorIterator& iter) {
 
     TORCH_INTERNAL_ASSERT(strides[0] == strides[1]);
     TORCH_INTERNAL_ASSERT(stride == 1);
-    TORCH_INTERNAL_ASSERT(outer_strides[0] == -3);
-    TORCH_INTERNAL_ASSERT(outer_strides[1] == 3);
+
+    auto c = -outer_strides[0];
+    TORCH_INTERNAL_ASSERT(c == outer_strides[1]);
 
     char* C10_RESTRICT data[ntensors] = {base[0], base[1]};
     const int64_t size = size0 * size1;
 
     int64_t i = 0;
 
-#ifdef CPU_CAPABILITY_AVX2
-    constexpr auto vec_size = 256 / (8 * sizeof(uint8_t));
-
-    if (size0 == 3 && size > vec_size) {
-
-      const auto proc_vec_size = 2 * ((vec_size / 2) / size0);
-      const auto delta = vec_size - proc_vec_size * size0;
-      __m256i data_vec, reversed_vec;
-
-      // Data: (1 2 3) (4 5 6) (7 8 9) (10 11 12) (13 14 15) (16 17 18) (19 20 21) (22 23 24) (25 26 27) (28 29 30) (31 32 33)
-      // load by 2 parts
-      // R = [ (1 2 3) (4 5 6) (7 8 9) (10 11 12) (13 14 15) (16 | (16 17 18) (19 20 21) (22 23 24) (25 26 27) (28 29 30) (31 ]
-      // flip(R) ->
-      // R = [ 31 (28 29 30) (25 26 27) (22 23 24) (19 20 21) (16 17 18) | 16 (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3) ]
-      // Write in 2 parts
-
-      // Output pointer:                                                                                                       v
-      //                (X X X)  (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X) (X X X) (X X X)
-
-      // Output part 1: (X X X)  (X X X)    (X X X)    (X X X)    (X X X)    (X X 16)   (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3)
-      // Output part 2: (X X 31) (28 29 30) (25 26 27) (22 23 24) (19 20 21) (16 17 18) (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3)
-
-      // Shuffle mask for 3 channels
-      __m256i mask =_mm256_set_epi8(
-          2, 1, 0, 5, 4, 3, 8, 7, 6, 11, 10, 9, 14, 13, 12, 15, // first 128-bit lane
-          2, 1, 0, 5, 4, 3, 8, 7, 6, 11, 10, 9, 14, 13, 12, 15  // second 128-bit lane
-      );
-
-      // shift output pointer by size0
-      data[0] += size0 * stride;
-
-      for (; i < size - vec_size; i += proc_vec_size * size0) {
-
-        // load 256-bits by two 128-bits parts
-        auto a0 = _mm_loadu_si128((__m128i *) data[1]);
-        auto b0 = _mm256_castsi128_si256(a0);
-        auto a1 = _mm_loadu_si128((__m128i *) (data[1] + proc_vec_size / 2 * size0 * sizeof(uint8_t)));
-        data_vec = _mm256_inserti128_si256(b0, a1, 1);
-
-        data[1] += proc_vec_size * size0 * sizeof(uint8_t);
-
-        reversed_vec = _mm256_shuffle_epi8(data_vec, mask);
-        reversed_vec = _mm256_permute2x128_si256(reversed_vec, reversed_vec, 1);
-
-        // write output in two parts
-        data[0] -= vec_size / 2 * stride;
-        auto rev_vec_h = _mm256_extracti128_si256(reversed_vec, 1);
-        _mm_storeu_si128((__m128i *)data[0], rev_vec_h);
-
-        if (delta > 0) {
-            data[0] += (delta / 2) * stride;
-        }
-        data[0] -= vec_size / 2 * stride;
-        auto rev_vec_l = _mm256_extracti128_si256(reversed_vec, 0);
-        _mm_storeu_si128((__m128i *)data[0], rev_vec_l);
-
-        if (delta > 0) {
-            data[0] += (delta / 2) * stride;
-        }
-
-      }
-      data[0] -= size0 * stride;
+    if (c == 2) {
+      vectorized_cpu_hflip_channels_last_uint8<2>(i, data, size, stride);
+    } else if (c == 3) {
+      vectorized_cpu_hflip_channels_last_uint8<3>(i, data, size, stride);
+    } else if (c == 4) {
+      vectorized_cpu_hflip_channels_last_uint8<4>(i, data, size, stride);
+    } else if (c == 5) {
+      vectorized_cpu_hflip_channels_last_uint8<5>(i, data, size, stride);
+    } else if (c == 6) {
+      vectorized_cpu_hflip_channels_last_uint8<6>(i, data, size, stride);
+    } else if (c == 7) {
+      vectorized_cpu_hflip_channels_last_uint8<7>(i, data, size, stride);
+    } else if (c == 8) {
+      vectorized_cpu_hflip_channels_last_uint8<8>(i, data, size, stride);
     }
-
-#endif
 
     for (; i < size; i += size0) {
 
@@ -701,11 +738,12 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       // other dtypes (float16, bfloat16, complex) are handled by cpu_kernel_vec (see below)
     } else if (iter.has_contiguous_first_dim()) {
       // Special cases:
-      // a) channels last hflip on (N, 3, H, W) and dtype=kByte
-      // b) flip dim=-2 on (N, ..., M, 3) and dtype=kByte
+      // a) channels last hflip on (N, C, H, W) and dtype=kByte, C in [2, 8]
+      // b) flip dim=-2 on (N, ..., M, C) and dtype=kByte, C in [2, 8]
       auto output_strides = iter.strides(0);
-      if (iter.dtype() == at::kByte && output_strides[1] == -3 /* TODO: MORE CONDITIONS MISSING */) {
-        return cpu_hflip_channels_last_uint8_ch3(iter);
+      auto c = -output_strides[1];
+      if (iter.dtype() == at::kByte && (c >= 2 && c <= 8)) {
+        return cpu_hflip_channels_last_uint8_C(iter);
       }
       // Special case: vertical flip using memcpy (faster than generic cpu_kernel_vec)
       return cpu_vflip_memcpy(iter);

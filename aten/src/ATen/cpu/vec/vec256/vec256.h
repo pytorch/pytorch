@@ -275,45 +275,6 @@ inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
   return flip8(v);
 }
 
-// template<>
-// void flip_data<uint8>(char* output_ptr, char* input_ptr, int num_channels) {
-
-//   constexpr auto vec_size = Vectorized<uint8_t>::size();
-//   const auto proc_vec_size = 2 * ((vec_size / 2) / num_channels);
-//   const auto delta = vec_size - proc_vec_size * num_channels;
-//   __m256i data_vec, reversed_vec;
-
-
-
-//   auto a0 = _mm_loadu_si128((__m128i *) data[1]);
-//   auto b0 = _mm256_castsi128_si256(a0);
-//   auto a1 = _mm_loadu_si128((__m128i *) (data[1] + proc_vec_size / 2 * size0 * sizeof(uint8_t)));
-//   data_vec = _mm256_inserti128_si256(b0, a1, 1);
-
-//   data[1] += proc_vec_size * size0 * sizeof(uint8_t);
-
-//   reversed_vec = _mm256_shuffle_epi8(data_vec, mask);
-//   reversed_vec = _mm256_permute2x128_si256(reversed_vec, reversed_vec, 1);
-
-//   // write output in two parts
-//   data[0] -= vec_size / 2 * stride;
-//   auto rev_vec_h = _mm256_extracti128_si256(reversed_vec, 1);
-//   _mm_storeu_si128((__m128i *)data[0], rev_vec_h);
-
-//   if (delta > 0) {
-//       data[0] += (delta / 2) * stride;
-//   }
-//   data[0] -= vec_size / 2 * stride;
-//   auto rev_vec_l = _mm256_extracti128_si256(reversed_vec, 0);
-//   _mm_storeu_si128((__m128i *)data[0], rev_vec_l);
-
-//   if (delta > 0) {
-//       data[0] += (delta / 2) * stride;
-//   }
-
-// }
-
-
 #endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 }}}
