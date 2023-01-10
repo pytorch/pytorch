@@ -29,6 +29,7 @@
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
 #include <ATen/native/transformers/cuda/flash_attn/kernel_traits.h>
 #include <ATen/native/transformers/cuda/flash_attn/fmha_fprop_kernel_1xN.h>
+#include <ATen/native/transformers/cuda/flash_attn/fp16_switch.h>
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Return_softmax>
 __global__ void fmha_fprop_loop_kernel(FMHA_fprop_params params) {
@@ -90,8 +91,7 @@ void run_fmha_loop_(Launch_params<FMHA_fprop_params> &launch_params,
 
 void run_fmha_fprop(Launch_params<FMHA_fprop_params> &launch_params,
                     const bool configure) {
-    BOOL_SWITCH(launch_params.params.is_bf16, IsBf16Const, [&] {
-        using elem_type = std::conditional<IsBf16Const, cutlass::bfloat16_t, cutlass::half_t>::type;
+    FP16_SWITCH(launch_params.params.is_bf16, [&] {
         auto dprops = at::cuda::getCurrentDeviceProperties();
         if (launch_params.params.d <= 64) {
             if( launch_params.params.seqlen_k == 128 ) {
