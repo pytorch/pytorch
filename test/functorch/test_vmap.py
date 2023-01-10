@@ -3672,7 +3672,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('chalf', ''),
         xfail('clamp_max', ''),
         xfail('jiterator_binary_return_by_ref', device_type='cuda'),
-        xfail('special.spherical_bessel_j0'),
         xfail('jiterator_unary', device_type='cuda'),
         xfail('jiterator_2inputs_2outputs', device_type='cuda'),
         xfail('special.airy_ai'),
