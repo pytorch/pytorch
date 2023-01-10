@@ -77,15 +77,20 @@ def _create_tied_weights_map(module: 'torch.nn.Module', params_and_buffers: Dict
             weight_to_name_and_tied_names[t] = (n, set()) if n in names else (None, {n})
             return
 
+        # if the name is not used by the user, we add it to the tied set
+        if n not in names:
+            weight_to_name_and_tied_names[t][1].add(n)
+            return
+
         # check that the user didn't pass two different tensors for the same tied weight
         first_seen_name = weight_to_name_and_tied_names[t][0]
-        if n in names and first_seen_name and params_and_buffers[n] is not params_and_buffers[first_seen_name]:
-            raise ValueError(f"functional_call got values for both {n} and {first_seen_name}, which are tied.")
 
-        if n in names:
+        # if they didn't pass multiple names for tied weights or used the same tensor, we set the used name
+        if first_seen_name is None or params_and_buffers[n] is params_and_buffers[first_seen_name]:
             weight_to_name_and_tied_names[t] = (n, weight_to_name_and_tied_names[t][1])
-        else:
-            weight_to_name_and_tied_names[t][1].add(n)
+            return
+
+        raise ValueError(f"functional_call got values for both {n} and {first_seen_name}, which are tied.")
 
     tensor: Tensor
     for name, tensor in module.named_parameters(remove_duplicate=False):
