@@ -89,6 +89,95 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
   }
   return output;
 }
+MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
+  IntArrayRef src_base_shape = get_buffer_shape(src.storage().data());
+  std::vector<int64_t> src_view_shape;
+  bool hasMPSShape = (mpsShape != nil);
+  int src_ndim_base = src_base_shape.size();
+  int src_ndim_view = 0;
+  if (hasMPSShape) {
+    src_ndim_view = [mpsShape count];
+    src_view_shape.reserve(src_ndim_view);
+    for (const auto i : c10::irange(src_ndim_view)) {
+      src_view_shape[i] = [mpsShape[i] intValue];
+    }
+  } else {
+    src_ndim_view = src.dim();
+    src_view_shape = src.sizes().vec();
+  }
+
+  MPSNDArray *srcTensorNDArrayView = nil;
+  MPSNDArrayDescriptor *srcTensorNDArrayDesc = nil;
+  MPSNDArray *srcTensorNDArray = nil;
+  id<MTLCommandBuffer> commandBuffer = getCurrentMPSStream()->commandBuffer();
+
+  if (src_ndim_base == src_ndim_view) {
+    srcTensorNDArray = ndArrayFromTensor(src, getMPSShape(src_base_shape), mpsDataType);
+    srcTensorNDArrayDesc = srcTensorNDArray.descriptor;
+
+    int firstDimToSlice = 0;
+    while (src_base_shape[firstDimToSlice] == src_view_shape[firstDimToSlice]) {
+      firstDimToSlice++;
+    }
+
+    int view_numel = 1;
+    for (const auto i : c10::irange(firstDimToSlice + 1, src_base_shape.size())) {
+      view_numel *= src_base_shape[i];
+    }
+
+    int sliceOffset = src.storage_offset() / view_numel;
+    // There are cases where both dimensions of a view can shrink
+    // E.g: x = torch.randn((3,6))[1, 1:3]
+    int nextSliceOffset = src.storage_offset() % view_numel;
+
+    [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
+    if (nextSliceOffset) {
+      [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
+    }
+  }
+  else {
+    int src_view_numel = 1;
+    for (const auto i : c10::irange(src_ndim_view)) {
+      src_view_numel *= src_view_shape[i];
+    }
+
+    int idx = 0;
+    int finalShapeSize = (src_ndim_view == 0) ? 1 : src_ndim_view;
+    std::vector<NSNumber*> mpsFinalShape(finalShapeSize);
+
+    // When the shapes are different, we need to flatten the first slice in order to alias the memory without any copies
+    // E.g: base tensor [5, 7, 3], view tensor [7, 3] (storage_offset=21). We need to flatten [5, 7, 3] to [35, 3], then
+    // we can slice directly into the first dimension based on the storage_offset
+    uint32_t flattenedSlice = 1;
+    for (const auto i : c10::irange(src_ndim_base - finalShapeSize + 1)) {
+      flattenedSlice *= src_base_shape[i];
+    }
+    mpsFinalShape[idx++] = [NSNumber numberWithInteger:flattenedSlice];
+
+    for (const auto i : c10::irange(src_ndim_base - finalShapeSize + 1, src_ndim_base)) {
+      mpsFinalShape[idx++] = [NSNumber numberWithInteger:src_base_shape[i]];
+    }
+
+    mpsShape = [NSArray arrayWithObjects:mpsFinalShape.data() count:mpsFinalShape.size()];
+    srcTensorNDArray = ndArrayFromTensor(src, mpsShape, mpsDataType);
+    srcTensorNDArrayDesc = srcTensorNDArray.descriptor;
+
+    int dim0 = (src_ndim_view == 0) ? 1 : src_view_shape[0];
+    int totalSlices = dim0;
+
+    // For 1D arrays, the storage_offset gives directly the
+    // starting point from where the slice should start
+    int sliceOffset = src_ndim_view == 1 ? 1 : dim0;
+    int view_numel = src_ndim_view == 1 ? 1 : src_view_numel;
+    [srcTensorNDArrayDesc sliceDimension:finalShapeSize - 1 withSubrange:{static_cast<NSUInteger>((src.storage_offset() / view_numel) * sliceOffset), static_cast<NSUInteger>(totalSlices)}];
+  }
+
+  srcTensorNDArrayView = [srcTensorNDArray arrayViewWithCommandBuffer:commandBuffer
+                                                           descriptor:srcTensorNDArrayDesc
+                                                             aliasing:MPSAliasingStrategyShallAlias];
+
+  return [[[MPSGraphTensorData alloc] initWithMPSNDArray:srcTensorNDArrayView] autorelease];
+}
 
 MPSGraphTensor *permuteTensor(MPSGraph *graph, MPSGraphTensor *inputTensor, NSArray *permuteOrder) {
   NSUInteger srcRank = [[inputTensor shape] count];

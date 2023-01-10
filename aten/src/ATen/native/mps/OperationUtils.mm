@@ -218,6 +218,16 @@ void printTensorNDArray(const Tensor& t) {
   C10_CLANG_DIAGNOSTIC_POP()
 }
 
+MPSNDArray* ndArrayFromTensor(const Tensor& tensor, MPSShape *shape, MPSDataType mpsType)
+{
+  id<MTLBuffer> buffer = getMTLBufferStorage(tensor);
+  MPSGraphTensorData* tmpGraphTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:buffer
+                                                                                    shape:shape
+                                                                                 dataType:mpsType] autorelease];
+
+  return [tmpGraphTensorData mpsndarray];
+}
+
 Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape,
                          bool gatherTensorData, MPSDataType dataType) : _tensor(src)
 {
@@ -225,7 +235,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
   // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
   // a view tensor could be contiguous (e.g., slice ops) or non-contiguous (e.g., transpose())
-  if ((!src.is_contiguous() || src.is_view()) && gatherTensorData) {
+  if (!src.is_contiguous() && gatherTensorData) {
      Tensor emptyShell = Tensor();
     // use "_tensor" from Placeholder to retain view's output during its usage in other ops
     _tensor = gatherViewTensor(src, emptyShell);
@@ -236,18 +246,26 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
     }
     srcBuf = getMTLBufferStorage(_tensor);
   }
+
   // tensor.numel() could be zero, but tensor is valid as long as the buffer size is non-zero.
   // if buffer size is zero in here, it's not a user error. It could be a missing check for
   // tensor.numel() == 0 in our internal implementations of ops.
   TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!");
   const MPSDataType mpsDataType = dataType != MPSDataTypeInvalid ? dataType :
                       _tensor.dim() == 0 ? getMPSScalarType(_tensor.scalar_type()) : getMPSDataType(_tensor.scalar_type());
-  if (!mpsShape)
-    mpsShape = getMPSShape(_tensor);
 
-  _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
-                                                    shape:mpsShape
-                                                 dataType:mpsDataType] autorelease];
+  if (src.is_view() && src.is_contiguous() && src.storage_offset()) {
+    _value = getMPSGraphTensorDataForView(src, mpsShape, mpsDataType);
+  } else {
+    if (!mpsShape) {
+      mpsShape = getMPSShape(_tensor);
+    }
+
+    _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
+                                                      shape:mpsShape
+                                                   dataType:mpsDataType] autorelease];
+  }
+
   TORCH_INTERNAL_ASSERT(_value);
   _placeholder = mpsGraphTensor;
 }
