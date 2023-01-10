@@ -5116,9 +5116,9 @@ TEST_F(VulkanAPITest, querypool_flushed_shader_log) {
           ->querypool()
           .get_shader_name_and_execution_duration_ns(entry_count - 2);
 
-  ASSERT_TRUE(std::get<0>(add_shader_details) == "vulkan.add");
-  ASSERT_TRUE(std::get<0>(sub_shader_details) == "vulkan.sub");
-  ASSERT_TRUE(std::get<0>(mul_shader_details) == "vulkan.mul");
+  EXPECT_EQ(std::get<0>(add_shader_details), "vulkan.add");
+  EXPECT_EQ(std::get<0>(sub_shader_details), "vulkan.sub");
+  EXPECT_EQ(std::get<0>(mul_shader_details), "vulkan.mul");
 
   if (!op_profiling_enabled_initially) {
     at::native::vulkan::api::context()->reset_querypool();
