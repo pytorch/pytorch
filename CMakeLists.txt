@@ -779,10 +779,6 @@ if(USE_COREML_DELEGATE)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_COREML_DELEGATE")
 endif()
 
-if(BUILD_CAFFE2)
-  string(APPEND CMAKE_CXX_FLAGS " -DBUILD_CAFFE2")
-endif()
-
 # ---[ Allowlist file if allowlist is specified
 include(cmake/Allowlist.cmake)
 
