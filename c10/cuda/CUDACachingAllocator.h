@@ -190,6 +190,14 @@ class CUDAAllocator : public Allocator {
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
   virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
   virtual DeviceStats getDeviceStats(int device) = 0;
+  virtual std::unordered_map<cudaStream_t, DeviceStats> getDeviceStatsPerStream(
+      int device) {
+    TORCH_WARN_ONCE(
+        "getDeviceStatsPerStream is only implemented for CUDACachingAllocator");
+    std::unordered_map<cudaStream_t, DeviceStats> placeholder;
+
+    return placeholder;
+  }
   virtual void resetAccumulatedStats(int device) = 0;
   virtual void resetPeakStats(int device) = 0;
   virtual SnapshotInfo snapshot() = 0;
@@ -261,6 +269,11 @@ inline void recordStream(const DataPtr& dataPtr, CUDAStream stream) {
 
 inline DeviceStats getDeviceStats(int device) {
   return get()->getDeviceStats(device);
+}
+
+inline std::unordered_map<cudaStream_t, DeviceStats> getDeviceStatsPerStream(
+    int device) {
+  return get()->getDeviceStatsPerStream(device);
 }
 
 inline void resetAccumulatedStats(int device) {

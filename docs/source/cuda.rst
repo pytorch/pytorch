@@ -99,6 +99,7 @@ Memory management
      list_gpu_processes
      mem_get_info
      memory_stats
+     memory_stats_per_stream
      memory_summary
      memory_snapshot
      memory_allocated

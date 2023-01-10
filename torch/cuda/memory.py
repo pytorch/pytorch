@@ -2,28 +2,50 @@ import collections
 import contextlib
 import ctypes
 import warnings
-from typing import Any, Dict, Union, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import torch
-from . import is_initialized, _get_device_index, _lazy_init
-from ._utils import _dummy_type
-
-from ._memory_viz import segments as _segments, memory as _memory
-
-from torch.types import Device
 from torch import _C
 
-__all__ = ["caching_allocator_alloc", "caching_allocator_delete", "set_per_process_memory_fraction",
-           "empty_cache", "memory_stats", "memory_stats_as_nested_dict", "reset_accumulated_memory_stats",
-           "reset_peak_memory_stats", "reset_max_memory_allocated", "reset_max_memory_cached",
-           "memory_allocated", "max_memory_allocated", "memory_reserved", "max_memory_reserved",
-           "memory_cached", "max_memory_cached", "memory_snapshot", "memory_summary", "list_gpu_processes",
-           "mem_get_info", "get_allocator_backend", "CUDAPluggableAllocator", "change_current_allocator"]
+from torch.types import Device
+
+from . import _get_device_index, _lazy_init, is_initialized
+
+from ._memory_viz import memory as _memory, segments as _segments
+from ._utils import _dummy_type
+
+__all__ = [
+    "caching_allocator_alloc",
+    "caching_allocator_delete",
+    "set_per_process_memory_fraction",
+    "empty_cache",
+    "memory_stats",
+    "memory_stats_as_nested_dict",
+    "memory_stats_per_stream",
+    "memory_stats_per_stream_as_nested_dict",
+    "reset_accumulated_memory_stats",
+    "reset_peak_memory_stats",
+    "reset_max_memory_allocated",
+    "reset_max_memory_cached",
+    "memory_allocated",
+    "max_memory_allocated",
+    "memory_reserved",
+    "max_memory_reserved",
+    "memory_cached",
+    "max_memory_cached",
+    "memory_snapshot",
+    "memory_summary",
+    "list_gpu_processes",
+    "mem_get_info",
+    "get_allocator_backend",
+    "CUDAPluggableAllocator",
+    "change_current_allocator",
+]
 
 
-if not hasattr(torch._C, '_cuda_CUDAAllocator'):
+if not hasattr(torch._C, "_cuda_CUDAAllocator"):
     # Define dummy base classes
-    torch._C.__dict__['_cuda_CUDAAllocator'] = _dummy_type('_cuda_CUDAAllocator')
+    torch._C.__dict__["_cuda_CUDAAllocator"] = _dummy_type("_cuda_CUDAAllocator")
 
 
 def _host_allocator():
@@ -232,6 +254,43 @@ def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> Dict[str, 
     device = _get_device_index(device, optional=True)
     return torch._C._cuda_memoryStats(device)
 
+def memory_stats_per_stream(device: Union[Device, int] = None) -> Dict[str, Any]:
+    r"""Returns a dictionary of CUDA memory allocator statistics per stream
+    for a given device.
+
+    The return value of this function is a dictionary of statistics which is first
+    indexed by the stream ID and the second indexed by the key values described in
+    memory_stats function:
+
+    E.g. To access the current allocated memory for streamA use:
+    ``memory_stats_per_stream(device)[streamA][allocated.all.current]``
+    """
+    result: List[Any] = []
+
+    def _recurse_add_to_result(prefix, obj, flattened_stats):
+        if isinstance(obj, dict):
+            if len(prefix) > 0:
+                prefix += "."
+            for k, v in obj.items():
+                _recurse_add_to_result(prefix + k, v, flattened_stats)
+        else:
+            flattened_stats.append((prefix, obj))
+
+    stats = memory_stats_as_nested_dict(device=device)
+    for stream, per_stream_stats in stats.items():
+        flattened_stats: List[Any] = []
+        _recurse_add_to_result("", per_stream_stats, flattened_stats)
+        flattened_stats.sort()
+        result.append((stream, collections.OrderedDict(flattened_stats)))
+
+    return collections.OrderedDict(result)
+
+def memory_stats_per_stream_as_nested_dict(device: Union[Device, int] = None) -> Dict[str, Any]:
+    r"""Returns the result of :func:`~torch.cuda.memory_stats_per_stream` as a nested dictionary."""
+    if not is_initialized():
+        return {}
+    device = _get_device_index(device, optional=True)
+    return torch._C._cuda_memoryStatsPerStream(device)
 
 def reset_accumulated_memory_stats(device: Union[Device, int] = None) -> None:
     r"""Resets the "accumulated" (historical) stats tracked by the CUDA memory allocator.

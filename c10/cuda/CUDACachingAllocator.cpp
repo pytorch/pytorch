@@ -715,6 +715,7 @@ class DeviceCachingAllocator {
 
   // device statistics
   DeviceStats stats;
+  std::unordered_map<cudaStream_t, DeviceStats> stats_per_stream;
 
   // unallocated cached blocks larger than 1 MB
   BlockPool large_blocks;
@@ -890,6 +891,7 @@ class DeviceCachingAllocator {
             std::move(context));
       }
       stats.num_ooms += 1;
+      stats_per_stream[stream].num_ooms += 1;
 
       c10::reportOutOfMemoryToProfiler(
           size,
@@ -979,12 +981,21 @@ class DeviceCachingAllocator {
         // An already-split inactive block is being shrunk by size bytes.
         update_stat_array(
             stats.inactive_split_bytes, -block->size, params.stat_types);
+        update_stat_array(
+            stats_per_stream[stream].inactive_split_bytes,
+            -block->size,
+            params.stat_types);
       } else {
         // A new split inactive block is being created from a previously unsplit
         // block, size remaining->size bytes.
         for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
           update_stat(stats.inactive_split_bytes[stat_type], remaining->size);
           update_stat(stats.inactive_split[stat_type], 1);
+
+          update_stat(
+              stats_per_stream[stream].inactive_split_bytes[stat_type],
+              remaining->size);
+          update_stat(stats_per_stream[stream].inactive_split[stat_type], 1);
         });
       }
 
@@ -993,6 +1004,11 @@ class DeviceCachingAllocator {
       for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
         update_stat(stats.inactive_split_bytes[stat_type], -block->size);
         update_stat(stats.inactive_split[stat_type], -1);
+
+        update_stat(
+            stats_per_stream[stream].inactive_split_bytes[stat_type],
+            -block->size);
+        update_stat(stats_per_stream[stream].inactive_split[stat_type], -1);
       });
     }
 
@@ -1021,6 +1037,13 @@ class DeviceCachingAllocator {
       update_stat(stats.allocated_bytes[stat_type], block->size);
       update_stat(stats.active[stat_type], 1);
       update_stat(stats.active_bytes[stat_type], block->size);
+
+      update_stat(stats_per_stream[stream].allocation[stat_type], 1);
+      update_stat(
+          stats_per_stream[stream].allocated_bytes[stat_type], block->size);
+      update_stat(stats_per_stream[stream].active[stat_type], 1);
+      update_stat(
+          stats_per_stream[stream].active_bytes[stat_type], block->size);
     });
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, 1);
@@ -1044,6 +1067,7 @@ class DeviceCachingAllocator {
     // changed. We store ahead for reporting
     auto orig_block_ptr = block->ptr;
     auto orig_block_size = block->size;
+    cudaStream_t stream = block->stream;
 
     StatTypes stat_types = {false};
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
@@ -1052,6 +1076,10 @@ class DeviceCachingAllocator {
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.allocation[stat_type], -1);
       update_stat(stats.allocated_bytes[stat_type], -block->size);
+
+      update_stat(stats_per_stream[stream].allocation[stat_type], -1);
+      update_stat(
+          stats_per_stream[stream].allocated_bytes[stat_type], -block->size);
     });
     if (block->history) {
       record_trace(
@@ -1061,8 +1089,10 @@ class DeviceCachingAllocator {
           block->stream,
           block->history->h.context);
     }
-    if (block->size >= CachingAllocatorConfig::max_split_size())
+    if (block->size >= CachingAllocatorConfig::max_split_size()) {
       update_stat(stats.oversize_allocations, -1);
+      update_stat(stats_per_stream[stream].oversize_allocations, -1);
+    }
 
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(captures_underway)) {
@@ -1152,45 +1182,67 @@ class DeviceCachingAllocator {
     return stats;
   }
 
+  /** Returns a copy of the memory allocator stats per stream**/
+  std::unordered_map<cudaStream_t, DeviceStats> getStatsPerStream() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    return stats_per_stream;
+  }
+
+  void resetAccumulatedStatsHelper(DeviceStats& deviceStats) {
+    for (const auto statType :
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      reset_accumulated_stat(deviceStats.allocation[statType]);
+      reset_accumulated_stat(deviceStats.segment[statType]);
+      reset_accumulated_stat(deviceStats.active[statType]);
+      reset_accumulated_stat(deviceStats.inactive_split[statType]);
+      reset_accumulated_stat(deviceStats.allocated_bytes[statType]);
+      reset_accumulated_stat(deviceStats.reserved_bytes[statType]);
+      reset_accumulated_stat(deviceStats.active_bytes[statType]);
+      reset_accumulated_stat(deviceStats.inactive_split_bytes[statType]);
+    }
+
+    deviceStats.num_alloc_retries = 0;
+    deviceStats.num_ooms = 0;
+    reset_accumulated_stat(deviceStats.oversize_allocations);
+    reset_accumulated_stat(deviceStats.oversize_segments);
+  }
+
   /** Resets the historical accumulation stats for the device **/
   void resetAccumulatedStats() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
+    resetAccumulatedStatsHelper(stats);
+    for (auto& it : stats_per_stream) {
+      resetAccumulatedStatsHelper(it.second);
+    }
+  }
+
+  void resetPeakStatsHelper(DeviceStats& deviceStats) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
     for (const auto statType :
          c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
-      reset_accumulated_stat(stats.allocation[statType]);
-      reset_accumulated_stat(stats.segment[statType]);
-      reset_accumulated_stat(stats.active[statType]);
-      reset_accumulated_stat(stats.inactive_split[statType]);
-      reset_accumulated_stat(stats.allocated_bytes[statType]);
-      reset_accumulated_stat(stats.reserved_bytes[statType]);
-      reset_accumulated_stat(stats.active_bytes[statType]);
-      reset_accumulated_stat(stats.inactive_split_bytes[statType]);
+      reset_peak_stat(deviceStats.allocation[statType]);
+      reset_peak_stat(deviceStats.segment[statType]);
+      reset_peak_stat(deviceStats.active[statType]);
+      reset_peak_stat(deviceStats.inactive_split[statType]);
+      reset_peak_stat(deviceStats.allocated_bytes[statType]);
+      reset_peak_stat(deviceStats.reserved_bytes[statType]);
+      reset_peak_stat(deviceStats.active_bytes[statType]);
+      reset_peak_stat(deviceStats.inactive_split_bytes[statType]);
     }
-
-    stats.num_alloc_retries = 0;
-    stats.num_ooms = 0;
-    reset_accumulated_stat(stats.oversize_allocations);
-    reset_accumulated_stat(stats.oversize_segments);
+    reset_peak_stat(deviceStats.oversize_allocations);
+    reset_peak_stat(deviceStats.oversize_segments);
   }
 
   /** Resets the historical peak stats for the device **/
   void resetPeakStats() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
-    for (const auto statType :
-         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
-      reset_peak_stat(stats.allocation[statType]);
-      reset_peak_stat(stats.segment[statType]);
-      reset_peak_stat(stats.active[statType]);
-      reset_peak_stat(stats.inactive_split[statType]);
-      reset_peak_stat(stats.allocated_bytes[statType]);
-      reset_peak_stat(stats.reserved_bytes[statType]);
-      reset_peak_stat(stats.active_bytes[statType]);
-      reset_peak_stat(stats.inactive_split_bytes[statType]);
+    resetPeakStatsHelper(stats);
+    for (auto& it : stats_per_stream) {
+      resetPeakStatsHelper(it.second);
     }
-    reset_peak_stat(stats.oversize_allocations);
-    reset_peak_stat(stats.oversize_segments);
   }
 
   /** Dump a complete snapshot of the memory held by the allocator. Potentially
@@ -1407,6 +1459,7 @@ class DeviceCachingAllocator {
     auto& pool = *block->pool;
     int64_t net_change_inactive_split_blocks = 0;
     int64_t net_change_inactive_split_size = 0;
+    cudaStream_t stream = block->stream;
 
     const std::array<Block*, 2> merge_candidates = {block->prev, block->next};
     for (Block* merge_candidate : merge_candidates) {
@@ -1440,6 +1493,17 @@ class DeviceCachingAllocator {
           net_change_inactive_split_size);
       update_stat(stats.active[stat_type], -1);
       update_stat(stats.active_bytes[stat_type], -original_block_size);
+
+      update_stat(
+          stats_per_stream[stream].inactive_split[stat_type],
+          net_change_inactive_split_blocks);
+      update_stat(
+          stats_per_stream[stream].inactive_split_bytes[stat_type],
+          net_change_inactive_split_size);
+      update_stat(stats_per_stream[stream].active[stat_type], -1);
+      update_stat(
+          stats_per_stream[stream].active_bytes[stat_type],
+          -original_block_size);
     });
   }
 
@@ -1648,9 +1712,11 @@ class DeviceCachingAllocator {
 
     size_t size = p.alloc_size;
     void* ptr;
+    cudaStream_t stream = p.stream();
 
     if (isRetry) {
       stats.num_alloc_retries += 1;
+      stats_per_stream[stream].num_alloc_retries += 1;
     }
 
     if (set_fraction &&
@@ -1689,9 +1755,14 @@ class DeviceCachingAllocator {
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       update_stat(stats.segment[stat_type], 1);
       update_stat(stats.reserved_bytes[stat_type], size);
+
+      update_stat(stats_per_stream[stream].segment[stat_type], 1);
+      update_stat(stats_per_stream[stream].reserved_bytes[stat_type], size);
     });
-    if (size >= CachingAllocatorConfig::max_split_size())
+    if (size >= CachingAllocatorConfig::max_split_size()) {
       update_stat(stats.oversize_segments, 1);
+      update_stat(stats_per_stream[stream].oversize_segments, 1);
+    }
 
     // p.block came from new, not cudaMalloc. It should not be nullptr here.
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
@@ -1777,6 +1848,7 @@ class DeviceCachingAllocator {
   void release_block(Block* block) {
     C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     total_allocated_memory -= block->size;
+    cudaStream_t stream = block->stream;
 
     auto* pool = block->pool;
     if (pool->owner_PrivatePool) {
@@ -1791,9 +1863,15 @@ class DeviceCachingAllocator {
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.segment[stat_type], -1);
       update_stat(stats.reserved_bytes[stat_type], -block->size);
+
+      update_stat(stats_per_stream[stream].segment[stat_type], -1);
+      update_stat(
+          stats_per_stream[stream].reserved_bytes[stat_type], -block->size);
     });
-    if (block->size >= CachingAllocatorConfig::max_split_size())
+    if (block->size >= CachingAllocatorConfig::max_split_size()) {
       update_stat(stats.oversize_segments, -1);
+      update_stat(stats_per_stream[stream].oversize_segments, -1);
+    }
     if (block->history) {
       record_trace(
           TraceEntry::SEGMENT_FREE,
@@ -2179,6 +2257,12 @@ class NativeCachingAllocator : public CUDAAllocator {
   DeviceStats getDeviceStats(int device) override {
     assertValidDevice(device);
     return device_allocator[device]->getStats();
+  }
+
+  std::unordered_map<cudaStream_t, DeviceStats> getDeviceStatsPerStream(
+      int device) override {
+    assertValidDevice(device);
+    return device_allocator[device]->getStatsPerStream();
   }
 
   void resetAccumulatedStats(int device) override {

@@ -4885,6 +4885,23 @@ class TestCudaComm(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(False)
 
+    def test_allocator_stats_per_stream(self):
+        size_before = len(torch.cuda.memory_stats_per_stream())
+
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(s1):
+            A = torch.rand(1000, 1000, device='cuda')
+        with torch.cuda.stream(s2):
+            B = torch.rand(1000, 1000, device='cuda')
+        # Wait for C and D to be computed.
+        torch.cuda.synchronize()
+
+        size_after = len(torch.cuda.memory_stats_per_stream())
+
+        self.assertTrue(size_before + 2 == size_after)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
