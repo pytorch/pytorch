@@ -744,7 +744,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
 SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   TORCH_CHECK(
       mask.sizes().equals(t.sizes()),
-      "sparse_mask: operands have incompatible sizes; self has size ",
+      "sparse_mask(): operands have incompatible sizes; self has size ",
       t.sizes(),
       " but mask has size ",
       mask.sizes());
