@@ -1262,6 +1262,11 @@ def reference_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs):
     t = torch.tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
     yield SampleInput(t, 0, False)
 
+    # tests masking
+    # https://github.com/pytorch/pytorch/pull/91860#pullrequestreview-1241344073
+    t = torch.tensor(float("inf"))
+    yield SampleInput(t, 0, True)
+
 def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
     inputs = [
         ((), {}),
