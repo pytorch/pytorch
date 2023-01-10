@@ -2465,6 +2465,7 @@ class TestTEFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA_HALF, "half-precision NNC fusion requires CUDA")
     def test_pow_multiple_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/75476
         def fn(p: torch.Tensor, gamma: float = 2.0) -> torch.Tensor:
             p = torch.sigmoid(p)
             result = p ** gamma
