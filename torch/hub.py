@@ -269,7 +269,7 @@ def _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo,
         or repo_owner in _TRUSTED_REPO_OWNERS
     )
 
-    # TODO: Remove `None` option in 1.14 and change the default to "check"
+    # TODO: Remove `None` option in 2.0 and change the default to "check"
     if trust_repo is None:
         if not is_trusted:
             warnings.warn(
@@ -390,9 +390,9 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
             - If ``None``: this will raise a warning, inviting the user to set
               ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
               is only present for backward compatibility and will be removed in
-              v1.14.
+              v2.0.
 
-            Default is ``None`` and will eventually change to ``"check"`` in v1.14.
+            Default is ``None`` and will eventually change to ``"check"`` in v2.0.
 
     Returns:
         list: The available callables entrypoint
@@ -444,9 +444,9 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
             - If ``None``: this will raise a warning, inviting the user to set
               ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
               is only present for backward compatibility and will be removed in
-              v1.14.
+              v2.0.
 
-            Default is ``None`` and will eventually change to ``"check"`` in v1.14.
+            Default is ``None`` and will eventually change to ``"check"`` in v2.0.
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
@@ -504,9 +504,9 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
             - If ``None``: this will raise a warning, inviting the user to set
               ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
               is only present for backward compatibility and will be removed in
-              v1.14.
+              v2.0.
 
-            Default is ``None`` and will eventually change to ``"check"`` in v1.14.
+            Default is ``None`` and will eventually change to ``"check"`` in v2.0.
         force_reload (bool, optional): whether to force a fresh download of
             the github repo unconditionally. Does not have any effect if
             ``source = 'local'``. Default is ``False``.
