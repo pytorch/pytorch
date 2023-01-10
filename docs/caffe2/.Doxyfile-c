@@ -174,7 +174,7 @@ STRIP_FROM_PATH        =
 STRIP_FROM_INC_PATH    =
 
 # If the SHORT_NAMES tag is set to YES, doxygen will generate much shorter (but
-# less readable) file names. This can be useful is your file systems doesn't
+# less readable) file names. This can be useful if your file systems don't
 # support long names like on DOS, Mac, or CD-ROM.
 # The default value is: NO.
 
