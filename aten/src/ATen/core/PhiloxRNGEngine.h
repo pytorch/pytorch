@@ -108,11 +108,11 @@ public:
     detail::UINT4 counter = counter_;
     detail::UINT2 key = key_;
     detail::UINT4 i = rand(counter, key, n_rounds);
-    detail::FLOAT2 prenorm;
-    prenorm[0] = 1 - uint32_to_uniform_float(i[0]); // uint32_to_uniform_float returns [0,1), we need (0,1] to avoid passing 0 to log.
-    prenorm[1] = 1 - uint32_to_uniform_float(i[1]);
-    detail::FLOAT2 ret = normalize_pair_uniform(prenorm);
-    return ret[0];
+    // TODO(min-jean-cho) change to Polar method, a more efficient version of Box-Muller method
+    // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
+    float u1 = 1 - uint32_to_uniform_float(i[0]); // uint32_to_uniform_float returns [0,1), we need (0,1] to avoid passing 0 to log.
+    float u2 = 1 - uint32_to_uniform_float(i[1]);
+    return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2);
   }
 
   /**
@@ -207,23 +207,6 @@ private:
         key[0] += (kPhilox10A); key[1] += (kPhilox10B);
       }
     return single_round(counter, key);
-  }
-
-  inline detail::FLOAT2 normalize_pair_uniform(detail::FLOAT2 in) {
-    // TODO(min-jean-cho) change to Polar method, a more efficient version of Box-Muller method
-    // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
-    float u1 = in[0];
-    float u2 = in[1];
-
-    constexpr float two_pi = 2.0 * M_PI;
-
-    float mag = std::sqrt(-2.0 * std::log(u1));
-
-    detail::FLOAT2 ret;
-
-    ret[0] = mag * std::cos(two_pi * u2);
-    ret[1] = mag * std::sin(two_pi * u2);
-    return ret;
   }
 
 
