@@ -206,11 +206,11 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
     NSUInteger sourceOffset = 0;
 
     void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size_to_copy, &alignedLength);
+    sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
     id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                           length:alignedLength
                                          options:options
                                      deallocator:nil];
-    sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
 
     stream->copy_and_sync(sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking);
     [sourceBuffer release];
