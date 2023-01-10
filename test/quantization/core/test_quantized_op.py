@@ -6232,7 +6232,10 @@ class TestQuantizedConv(TestCase):
             qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
             # The following should pass when input shape is changed
             torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
-        # conv_transposed part
+
+    def test_conv_transpose_reorder_issue_onednn(self):
+        if 'onednn' not in supported_qengines:
+            return
         with override_quantized_engine('onednn'):
             bs = 1
             ic, oc = 16, 33
