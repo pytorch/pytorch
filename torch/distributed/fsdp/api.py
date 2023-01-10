@@ -162,7 +162,7 @@ class MixedPrecision:
         its ``cast_root_forward_inputs`` takes precedence over its
         ``cast_forward_inputs``. For non-root FSDP instances, their
         ``cast_root_forward_inputs`` values are ignored. The default setting is
-        sufficient for the typical case where each FSDP instasnce has the same
+        sufficient for the typical case where each FSDP instance has the same
         ``MixedPrecision`` configuration and only needs to cast inputs to the
         ``param_dtype`` at the beginning of the model's forward pass.
 
