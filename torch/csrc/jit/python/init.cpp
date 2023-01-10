@@ -644,9 +644,9 @@ void initJITBindings(PyObject* module) {
             std::vector<TypePtr> input_types;
             for (Value* v : g->inputs()) {
               if (auto tt = v->type()->cast<TensorType>()) {
-                input_types.push_back(tt);
+                input_types.emplace_back(tt);
               } else {
-                input_types.push_back(nullptr);
+                input_types.emplace_back(nullptr);
               }
             }
             EraseShapeInformation(g);
@@ -1701,6 +1701,11 @@ void initJITBindings(PyObject* module) {
           "__eq__",
           [](const FunctionSchema& self, const FunctionSchema& other) {
             return self == other;
+          })
+      .def(
+          "__hash__",
+          [](const FunctionSchema& self) {
+            return std::hash<FunctionSchema>{}(self);
           })
       .def(
           "__str__",

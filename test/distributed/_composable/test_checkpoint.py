@@ -56,6 +56,16 @@ class ToyModel(nn.Module):
         return self.seq(self.l1(x))
 
 
+class RandomModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.p = nn.Parameter(torch.randn(100, 100))
+
+    def forward(self, x):
+        y = torch.matmul(self.p, torch.randn(100, 100, device=self.p.device))
+        return torch.matmul(x, y)
+
+
 class TestCheckpoint(TestCase):
     def _get_graph_size(self, out: torch.Tensor) -> int:
         q = deque([out.grad_fn])
@@ -118,6 +128,20 @@ class TestCheckpoint(TestCase):
         net = ToyModel().to("cuda:0")
         self._test_tensor_only(net, x, use_reentrant)
 
+    def test_random_cpu(self):
+        x1 = torch.randn(20, 100, requires_grad=True)
+        x2 = x1.clone()
+
+        net1 = RandomModel()
+        net2 = deepcopy(net1)
+
+        cpu_rng_state = torch.get_rng_state()
+        net1(x1).sum().backward()
+        torch.set_rng_state(cpu_rng_state)
+        checkpoint(net2)(x2).sum().backward()
+
+        for p1, p2 in zip(net1.parameters(), net2.parameters()):
+            self.assertEqual(p1.grad, p2.grad)
 
 instantiate_parametrized_tests(TestCheckpoint)
 
