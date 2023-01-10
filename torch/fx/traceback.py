@@ -1,49 +1,66 @@
 import traceback
 from contextlib import contextmanager
-from typing import List, Any, Dict
+from typing import Optional, List, Any, Dict
 from ._compatibility import compatibility
 
-__all__ = ['preserve_node_meta', 'has_preserved_node_meta',
-           'set_stack_trace', 'format_stack',
-           'set_current_meta', 'get_current_meta']
+__all__ = ['override_stack_trace', 'set_stack_trace', 'append_stack_trace', 'format_stack',
+           'is_stack_trace_overridden', 'get_current_meta', 'set_current_meta']
 
+
+current_stack: List[str] = []
 current_meta: Dict[str, Any] = {}
-should_preserve_node_meta = False
+is_overridden = False
 
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def preserve_node_meta():
-    global should_preserve_node_meta
+def override_stack_trace():
+    global is_overridden
 
-    saved_should_preserve_node_meta = should_preserve_node_meta
+    saved_is_overridden = is_overridden
     try:
-        should_preserve_node_meta = True
+        is_overridden = True
         yield
     finally:
-        should_preserve_node_meta = saved_should_preserve_node_meta
-
+        is_overridden = saved_is_overridden
 
 @compatibility(is_backward_compatible=False)
 def set_stack_trace(stack : List[str]):
-    global current_meta
+    global current_stack
 
-    if should_preserve_node_meta and stack:
-        current_meta["stack_trace"] = "".join(stack)
+    if is_overridden and stack:
+        current_stack = stack
+
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def append_stack_trace(stack : Optional[str]):
+    """
+    The content of stack here is an entire stacktraces as a string
+    """
+    global current_stack
+
+    if is_overridden and stack:
+        try:
+            current_stack.append(stack)
+            yield
+        finally:
+            current_stack.pop()
+    else:
+        yield
 
 
 @compatibility(is_backward_compatible=False)
 def format_stack() -> List[str]:
-    if should_preserve_node_meta:
-        return [current_meta.get("stack_trace", "")]
+    if is_overridden:
+        return current_stack.copy()
     else:
         # fallback to traceback.format_stack()
         return traceback.format_list(traceback.extract_stack()[:-1])
 
 
 @compatibility(is_backward_compatible=False)
-def has_preserved_node_meta() -> bool:
-    return should_preserve_node_meta
+def is_stack_trace_overridden() -> bool:
+    return is_overridden
 
 
 @compatibility(is_backward_compatible=False)
@@ -51,13 +68,13 @@ def has_preserved_node_meta() -> bool:
 def set_current_meta(meta : Dict[str, Any]):
     global current_meta
 
-    if should_preserve_node_meta and meta:
-        saved_meta = current_meta
+    old_meta = current_meta
+    if is_overridden and meta:
         try:
             current_meta = meta
             yield
         finally:
-            current_meta = saved_meta
+            current_meta = old_meta
     else:
         yield
 
