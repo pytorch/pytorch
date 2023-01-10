@@ -624,14 +624,22 @@ class _PyTreeCodeGen(CodeGen):
     def gen_fn_def(self, free_vars, maybe_return_annotation):
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
+        # forward signature flattens *args and kwargs as positionals
         function_args = self.pytree_info.orig_args
         has_orig_self = (function_args[0] == 'self') if len(function_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, 'self')
         function_definition = super().gen_fn_def(function_args[:], maybe_return_annotation)
+
+        # but separate *args and **kwargs for `tree_flatten_spec` call
+        count_args = len(self.pytree_info.in_spec.children_specs[0].children_specs)
+        function_args = self.pytree_info.orig_args[:count_args]
+        function_kwargs = self.pytree_info.orig_args[count_args:]
         if len(free_vars) > 0:  # pytree has placeholders in it
+            function_args = ', '.join(function_args)
+            function_kwargs = '{' + ', '.join(f"'{k}':{v}" for k,v in zip(self.pytree_info.in_spec.children_specs[1].context, function_kwargs)) + '}'
             function_definition += f"""
-    {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(function_args)}], self._in_spec)"""
+    {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec((({function_args},), {function_kwargs}), self._in_spec)"""
         return function_definition
 
     def generate_output(self, output_args):
