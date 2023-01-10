@@ -34,8 +34,7 @@ static std::string getStridedKey(const ScalarType& self_dtype, const ScalarType&
 
 // initializes the MTLBuffers for tensor data and runs the MPSGraph for the view op
 static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output,
-                            bool needsScatter, bool requires_sync = false)
-{
+                            bool needsScatter, bool requires_sync = false) {
   const id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   const id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
 
@@ -721,8 +720,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
   return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false, requires_sync);
 }
 
-Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output)
-{
+Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
   ViewCachedGraph* cachedGraph = createViewGraph(output, src, output.sizes(), output.strides(),
                                                  output.storage_offset(), /*needsScatter*/ true);
   return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true, /*requires_sync*/  true);
@@ -731,8 +729,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output)
 } // namespace mps
 
 // implementation of as_strided() op
-Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset_)
-{
+Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = detail::make_tensor<TensorImpl>(c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
   setStrided(result, size, stride, storage_offset);
