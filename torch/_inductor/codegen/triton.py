@@ -452,8 +452,8 @@ class IterationRangesRoot(IterationRanges):
         return list(reversed(index_vars)), list(reversed(sizes))
 
     def ranges_code(self):
-        size = self.kernel.reshape_size_str(self.index, self.prefix)
-        return f"tl.reshape(tl.arange(0, {self.prefix.upper()}BLOCK), {size})"
+        size = self.kernel.indexing_size_str(self.index, self.prefix)
+        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}"
 
     def pid_cache_lookup(self, key):
         if key in self.pid_cache:
@@ -822,15 +822,13 @@ class TritonKernel(Kernel):
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask_vars, mask = self.indexing(index)
 
-        # Keep the variable in cache if we are going to reuse it
-        # TODO(lezcano) We could potentially do better
-        # https://github.com/pytorch/pytorch/pull/91316#issuecomment-1364680622
-        ep = (
-            ", eviction_policy='evict_last'"
-            if name not in self.current_node.last_usage
-            else ""
-        )
-
+        if "rmask" in mask:
+            # This eviction policy heuristic is untested.
+            # ptillet suggested we should try only doing this for
+            # the first N-1 loops and not for the final loop.
+            ep = ", eviction_policy='evict_last'"
+        else:
+            ep = ""
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
@@ -868,12 +866,6 @@ class TritonKernel(Kernel):
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
         index, mask_vars, mask = self.indexing(index, dense_indexing=True)
-
-        # Lezcano: This is not useful ATM and not supported by triton MLIR
-        # Revisit in the future in case it's supported and becomes useful
-        # Keep the variable in cache if we are going to reuse it
-        # ep_str = "first" if name in self.current_node.last_usage else "last"
-        # ep = "eviction_policy='evict_{}'".format(ep_str)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -890,11 +882,11 @@ class TritonKernel(Kernel):
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
-        sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
-        sizes[-1] = "1"
+        sizes = [":" for _ in self.range_trees]
+        sizes[-1] = "None"
         reduction_range_prefix = self.range_trees[-1].prefix
-        reduction_sizes = ["1" for _ in self.range_trees]
-        reduction_sizes[-1] = f"{reduction_range_prefix.upper()}BLOCK"
+        reduction_sizes = ["None" for _ in self.range_trees]
+        reduction_sizes[-1] = ":"
 
         if reduction_type == "any":
             reduction_type = "max"
@@ -941,17 +933,17 @@ class TritonKernel(Kernel):
                 # argmax, argmin
                 self.suffix.writelines(
                     [
-                        f"{accumulator_index}_reduce = tl.reshape(",
-                        f"\ttl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}]).to(tl.int32)",
-                        f"{accumulator_index}_mask = (tl.reshape(tl.arange(0, {reduction_range_prefix.upper()}BLOCK),",
-                        f"\t[{', '.join(reduction_sizes)}]) == {accumulator_index}_reduce)",
-                        f"{result_var} = tl.reshape(tl.sum(",
-                        f"\ttl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim}), [{', '.join(sizes)}])",
+                        f"{accumulator_index}_reduce = "
+                        f"tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}].to(tl.int32)",
+                        f"{accumulator_index}_mask = tl.arange(0, {reduction_range_prefix.upper()}BLOCK)"
+                        f"[{', '.join(reduction_sizes)}] == {accumulator_index}_reduce",
+                        f"{result_var} = tl.sum("
+                        f"tl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim})[{', '.join(sizes)}]",
                     ]
                 )
             else:
                 self.suffix.writeline(
-                    f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
+                    f"{result_var} = tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}]"
                 )
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
@@ -1048,6 +1040,7 @@ class TritonKernel(Kernel):
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
+        mutated_args = sorted(mutated_args)
 
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
@@ -1128,10 +1121,10 @@ class TritonKernel(Kernel):
                         f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}  # dynamic_shapes=False"
                     )
 
-    def reshape_size_str(self, i=None, x=None):
-        sizes = ["1"] * (len(self.range_trees) - int(self.numels[-1] == 1))
+    def indexing_size_str(self, i=None, x=None):
+        sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
         if i is not None:
-            sizes[i] = f"{x.upper()}BLOCK"
+            sizes[i] = ":"
         return f"[{', '.join(sizes)}]"
 
     def dense_size_str(self):
