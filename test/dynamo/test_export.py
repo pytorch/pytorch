@@ -1481,6 +1481,20 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(gm(*inp), f(*inp))
 
+    def test_export_symbolic_shape(self):
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty(x.shape[0] * 2)
+
+        inp = (torch.randn(6, 5),)
+        gm, _ = torch._dynamo.export(f, *inp, aten_graph=True, tracing_mode="symbolic")
+
+        has_sym_size = False
+        for node in gm.graph.nodes:
+            if node.target is torch.ops.aten.sym_size:
+                has_sym_size = True
+
+        self.assertTrue(has_sym_size)
+
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_dynamic_slicing(self):
         def f(x):
