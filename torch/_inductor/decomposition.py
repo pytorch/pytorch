@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 
 decompositions = get_decompositions(
     [
+        aten.linspace,
+        aten.logaddexp,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
@@ -44,6 +46,7 @@ decompositions = get_decompositions(
         aten.grid_sampler_2d,
         aten.hardsigmoid,
         aten.hardsigmoid_backward,
+        aten.upsample_bilinear2d,
         aten.hardswish,
         aten.hardswish_backward,
         aten.hardtanh,
@@ -162,14 +165,6 @@ def pad_dim(x, padded_length, dim):
 
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2, *, beta=1, alpha=1):
-    if config.triton.mm != "aten":
-        out = torch.mm(mat1, mat2)
-        if not isinstance(alpha, numbers.Number) or alpha != 1:
-            out = out * alpha
-        if not isinstance(beta, numbers.Number) or beta != 1:
-            input = input * beta
-        return input + out
-
     if (
         config.shape_padding
         and check_device(mat1, mat2)
