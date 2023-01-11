@@ -894,7 +894,7 @@ static variable_list call_function(
   auto& fn = *func;
   auto inputs =
       call_tensor_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
-  inputs = call_pre_hooks(*func, inputs);
+  inputs = call_pre_hooks(fn, std::move(inputs));
   if (!graph_task->keep_graph_) {
     fn.will_release_variables();
   }

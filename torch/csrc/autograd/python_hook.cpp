@@ -38,7 +38,7 @@ namespace {
 // args:
 // TensorPreHook    (Tensor,)
 // PreHook          ((Tensor, ...),)                (grad_outputs,)
-// PostHook         ((Tensor, ...), (Tensor, ...))  (grad_inputs, grad_outputs)
+// PostHook         ((Tensor, ...), (Tensor, ...))  (grad_outputs, grad_inputs)
 //
 // res:
 // TensorPreHook    Tensor
@@ -151,14 +151,14 @@ PyFunctionPostHook::~PyFunctionPostHook() {
 }
 
 auto PyFunctionPostHook::operator()(
-    const variable_list& _outputs, /* grad_inputs */
-    const variable_list& _inputs /* grad_outputs */) -> variable_list {
+    const variable_list& _outputs, /* grad_outputs */
+    const variable_list& _inputs /* grad_inputs */) -> variable_list {
   pybind11::gil_scoped_acquire gil;
-  THPObjectPtr grad_inputs(wrap_variables(_outputs));
-  THPObjectPtr grad_outputs(wrap_variables(_inputs));
+  THPObjectPtr grad_outputs(wrap_variables(_outputs));
+  THPObjectPtr grad_inputs(wrap_variables(_inputs));
   THPObjectPtr tup(PyTuple_New(2));
-  PyTuple_SET_ITEM(tup.get(), 0, grad_inputs.release());
-  PyTuple_SET_ITEM(tup.get(), 1, grad_outputs.release());
+  PyTuple_SET_ITEM(tup.get(), 0, grad_outputs.release());
+  PyTuple_SET_ITEM(tup.get(), 1, grad_inputs.release());
   _call_hooks(dict, tup.get());
   return unwrap_variables(PyTuple_GetItem(tup.get(), 0));
 }
