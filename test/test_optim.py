@@ -645,6 +645,68 @@ class TestOptim(TestCase):
                 )
             )
 
+
+    def _test_derived_optimizers_varying_tensors(self, optimizer_with_kwargs, kwarg):
+        if not torch.cuda.is_available():
+            return
+        assert kwarg in ("foreach", "fused")
+
+        torch.manual_seed(11012023)
+        params = [
+            torch.rand(2, 3, dtype=torch.float64, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float32, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float16, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.bfloat16, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float64, device='cuda:1', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float32, device='cuda:1', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float16, device='cuda:1', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.bfloat16, device='cuda:1', requires_grad=True),
+        ]
+
+        for p in params:
+            p.grad = torch.rand_like(p, device=p.device, dtype=p.dtype)
+
+        for optimizer_constructor, kwargs in optimizer_with_kwargs:
+            res, state = [], []
+            for enabled in (False, True):
+                kwargs_clone = deepcopy(kwargs)
+                kwargs_clone[kwarg] = enabled
+
+                params_clone = []
+                for p in params:
+                    p_clone = torch.clone(p).detach()
+                    p_clone.requires_grad = True
+                    p_clone.grad = torch.clone(p.grad).detach()
+                    params_clone.append(p_clone)
+
+                optimizer = optimizer_constructor(params_clone, **kwargs_clone)
+                optimizer.step()
+
+                state.append(optimizer.state)
+                res.append(params_clone)
+
+            st_state = state[0]
+            mt_state = state[1]
+            for st_p, mt_p in zip(res[0], res[1]):
+                self.assertEqual(st_p, mt_p)
+
+                # check that optimizer states are the same
+                st_p_state = st_state[st_p]
+                mt_p_state = mt_state[mt_p]
+
+                for k in st_p_state:
+                    actual = mt_p_state[k]
+                    # If `torch.optim.Adam` is `__init__`ed with either `fused=True` or `capturable=True`,
+                    # `step` Tensor is 1D while usually it's 0D.
+                    if (
+                        k == "step"
+                        and isinstance(actual, torch.Tensor)
+                        and actual.ndim == 1
+                    ):
+                        actual = actual[0]
+                    self.assertEqual(st_p_state[k], actual)
+
+
     def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
         if not torch.cuda.is_available():
             return
@@ -750,6 +812,15 @@ class TestOptim(TestCase):
         ]
         self._test_derived_optimizers(optimizer_pairs_with_flags, "foreach")
 
+    def test_multi_tensor_optimizers_with_varying_tensors(self):
+        optimizer_pairs_with_flags = [
+            (optim.Adadelta, dict(weight_decay=0)),
+            (optim.Adadelta, dict(weight_decay=1)),
+            (optim.Adagrad, dict(weight_decay=0)),
+            (optim.Adagrad, dict(weight_decay=1)),
+        ]
+        self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "foreach")
+
     def test_fused_optimizers(self):
         optimizer_pairs_with_flags = [
             (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
@@ -758,6 +829,15 @@ class TestOptim(TestCase):
             (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
         ]
         self._test_derived_optimizers(optimizer_pairs_with_flags, "fused")
+
+    def test_fused_optimizers_with_varying_tensors(self):
+        optimizer_pairs_with_flags = [
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=True)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=False)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
+        ]
+        self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "fused")
 
     def test_adam(self):
         self._test_basic_cases(
