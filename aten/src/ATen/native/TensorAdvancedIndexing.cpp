@@ -492,6 +492,9 @@ DEFINE_DISPATCH(scatter_reduce_stub);
 DEFINE_DISPATCH(scatter_scalar_reduce_stub);
 DEFINE_DISPATCH(scatter_reduce_two_stub);
 
+DEFINE_DISPATCH(scatter_add_expanded_index_stub);
+DEFINE_DISPATCH(scatter_reduce_expanded_index_stub);
+
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
   auto strides = tensors[0].strides();
@@ -1723,7 +1726,11 @@ TORCH_IMPL_FUNC(scatter_add)
       }
     }
   } else {
-    scatter_add_stub(self.device().type(), mut_out, dim, index, src);
+    if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
+      scatter_add_expanded_index_stub(self.device().type(), mut_out, index, src);
+    } else {
+      scatter_add_stub(self.device().type(), mut_out, dim, index, src);
+    }
   }
 }
 
@@ -1738,13 +1745,26 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
   // See issue https://github.com/pytorch/pytorch/issues/74770
   TORCH_WARN_ONCE("scatter_reduce() is in beta and the API may change at any time.");
 
+  dim = at::maybe_wrap_dim(dim, self.dim());
+
+  if (!self.is_same(out)) {
+    out.copy_(self);
+  }
+
+  const auto op = meta::get_operator_enum(reduce, true);
+
+  if (can_use_expanded_index_path(out, dim, index, src, /*is_scatter_like*/true)) {
+    scatter_reduce_expanded_index_stub(self.device().type(), out, index, src, op, include_self);
+    return;
+  }
+
   scatter_impl</*use_new_options=*/true>(self, dim, index, src, out,
                                          scatter_reduce_two_stub,
                                          scatter_stub,
                                          reduce,
                                          include_self);
 
-  if (meta::get_operator_enum(reduce, true) == SCATTER_GATHER_OP::REDUCE_MEAN) {
+  if (op == SCATTER_GATHER_OP::REDUCE_MEAN) {
     auto ones = at::ones_like(src);
     auto count = include_self ? at::ones_like(out) : at::zeros_like(out);
     count.scatter_add_(dim, index, ones);
