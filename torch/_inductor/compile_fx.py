@@ -128,7 +128,7 @@ def compile_fx_inner(
     shape_env = _shape_env_from_inputs(example_inputs)
     fake_mode = fake_mode_from_tensors(example_inputs)
 
-    pattern_matcher.fx_passes(gm)
+    pattern_matcher.fx_passes(gm, fake_mode)
     V.debug.fx_graph_transformed(gm, example_inputs)
 
     graph = GraphLowering(

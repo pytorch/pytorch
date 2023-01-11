@@ -5,8 +5,10 @@ import itertools
 import logging
 import operator
 import os
+import threading
 from collections import defaultdict
 from typing import Any, Callable, List, Union
+from unittest.mock import patch
 
 import torch
 import torch._inductor as inductor
@@ -21,6 +23,8 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+tls = threading.local()
+tls.fake_mode = None
 
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
@@ -275,9 +279,9 @@ class LoweringPatternEntry(PatternEntry):
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
         handler = functools.wraps(self.handler)(functools.partial(self.handler, match))
         with graph.inserting_before(node):
-            node.replace_all_uses_with(
-                graph.call_function(handler, tuple(match.args), match.kwargs)
-            )
+            replacement = graph.call_function(handler, tuple(match.args), match.kwargs)
+            replacement.meta.update(node.meta)
+            node.replace_all_uses_with(replacement)
         assert match.nodes[-1] is node
         match.erase_nodes(graph)
 
@@ -294,7 +298,14 @@ class ReplacementPatternEntry(PatternEntry):
             get_attr = None
 
             def call_function(self, target, args, kwargs):
-                return graph.call_function(target, args, kwargs)
+                result = graph.call_function(target, args, kwargs)
+                if tls.fake_mode:
+                    fargs, fkwargs = torch.fx.map_arg(
+                        (args, kwargs), lambda n: n.meta["val"]
+                    )
+                    with tls.fake_mode:
+                        result.meta["val"] = target(*fargs, **fkwargs)
+                return result
 
         norm_args = self.signature.bind(*match.args, **match.kwargs)
         with graph.inserting_before(node):
@@ -386,7 +397,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
-def fx_passes(gm: torch.fx.GraphModule):
+def fx_passes(gm: torch.fx.GraphModule, fake_mode):
     if config.dce:
         gm.graph.eliminate_dead_code()
 
@@ -394,7 +405,8 @@ def fx_passes(gm: torch.fx.GraphModule):
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
-        replace_matched_patterns(gm.graph)
+        with patch.object(tls, "fake_mode", fake_mode):
+            replace_matched_patterns(gm.graph)
 
     gm.graph.lint()
 
