@@ -309,6 +309,7 @@ CHECK_STRIDES_SKIPS = {
     aten.heaviside.default,
     aten.lerp.Scalar,
     aten.lerp.Tensor,
+    aten.logaddexp.default,
     aten.logical_and.default,
     aten.logical_or.default,
     aten.logical_xor.default,
