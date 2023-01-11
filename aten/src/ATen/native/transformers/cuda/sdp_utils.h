@@ -337,6 +337,27 @@ inline bool check_gpu_sm50_or_greater(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_use_deterministic_algorithms(sdp_params params, bool debug) {
+  auto& ctx = at::globalContext();
+  if (ctx.deterministicAlgorithms()) {
+    if (ctx.deterministicAlgorithmsWarnOnly()) {
+      TORCH_WARN_ONCE(
+          "Memory Efficient attention is a non-deterministic algorithm. ",
+          "To explicitly disable Memory Efficient attention call torch.use_deterministic_algorithms(True, warn_only=False).");
+      // Warn the user but don't disable the kernel.
+      return true;
+    } else {
+      if (debug) {
+        TORCH_WARN(
+            "Memory Efficient attention is a non-deterministic algorithm and torch.use_deterministic_algorithms(True) has been set.");
+      }
+      return false;
+    }
+  }
+  // Determinism is not set so we can use the kernel.
+  return true;
+}
+
 inline bool use_flash_attention(sdp_params params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
@@ -379,7 +400,7 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       at::kHalf, at::kFloat, at::kBFloat16};
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints{{
+  constexpr std::array<bool(*)(sdp_params, bool), 10> constraints{{
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
@@ -388,7 +409,8 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
       check_for_seq_len_1_nested_tensor,
-      check_for_non_zero_dropout}};
+      check_for_non_zero_dropout,
+      check_use_deterministic_algorithms}};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
