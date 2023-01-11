@@ -6311,8 +6311,16 @@ Tensor logsumexp_jvp(
     bool keepdim) {
   // NB: for simplicitly, we recompute some values that can be reused from
   // forward
-  auto self_p_exp = (self_p - at::amax(self_p, dim, true))
-                        .exp(); // Use the exp-normalize trick
+  auto self_p_exp = [&self_p, &dim]() {
+    if (self_p.numel() > 0) {
+      return (self_p - at::amax(self_p, dim, true))
+          .exp(); // Use the exp-normalize trick
+    } else {
+      // amax fails if numel() == 0, in which case it doesn't matter anyway
+      return self_p.exp();
+    }
+  }();
+
   auto sumexp_p = self_p_exp.sum(dim, keepdim);
 
   // NB: it's OK for logsumexp_jvp to be reused for formulas like
