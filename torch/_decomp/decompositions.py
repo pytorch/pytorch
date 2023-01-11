@@ -1903,6 +1903,12 @@ def uniform(
     )
 
 
+@register_decomposition(aten.uniform_)
+def uniform_(self, low=0, high=1, generator=None):
+    assert generator is None
+    return self.copy_((high - low) * torch.rand_like(self) + low)
+
+
 # aten/src/ATen/native/UpSample.cpp compute_output_size
 def upsample_compute_output_size(input_size, output_size, scale_factors):
     spatial_dimensions = len(input_size) - 2
