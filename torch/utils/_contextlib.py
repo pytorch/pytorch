@@ -120,13 +120,15 @@ def context_decorator(ctx, func):
 class _DecoratorContextManager:
     """Allow a context manager to be used as a decorator"""
 
-    def __call__(self, func: F) -> F:
-        if inspect.isclass(func):
+    def __call__(self, orig_func: F) -> F:
+        if inspect.isclass(orig_func):
             warnings.warn("Decorating classes is deprecated and will be disabled in "
                           "future versions. You should only decorate functions or methods. "
                           "To preserve the current behavior of class decoration, you can "
                           "directly decorate the `__init__` method and nothing else.")
-            func = cast(F, lambda *args, **kwargs: func(*args, **kwargs))
+            func = cast(F, lambda *args, **kwargs: orig_func(*args, **kwargs))
+        else:
+            func = orig_func
 
         return cast(F, context_decorator(self.clone, func))
 

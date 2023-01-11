@@ -513,6 +513,7 @@ class TestTorchDeviceType(TestCase):
 
     # collected tests of ops that used scalar_check in Declarations.cwrap for
     # correctness
+    @skipIfTorchInductor("segfaults")
     def test_scalar_check(self, device):
         zero_d = torch.randn((), device=device)
         one_d = torch.randn((1,), device=device)
@@ -2970,6 +2971,13 @@ else:
             sz = list(x.size())
             sz[d] = 0
             self.assertEqual(sz, y.size())
+
+    def test_narrow_copy_non_contiguous(self, device):
+        # see https://github.com/pytorch/pytorch/issues/91690.
+        inp = torch.randn(10, 2, device=device).movedim(-1, 0)
+        expected = torch.narrow_copy(inp.contiguous(), 1, 0, 10)
+        actual = torch.narrow_copy(inp, 1, 0, 10)
+        self.assertEqual(expected, actual)
 
     # FIXME: move to indexing test suite
     @parametrize("reduce", ['prod', 'amin', 'amax', 'mean'])
@@ -6313,7 +6321,7 @@ class TestTorch(TestCase):
                                "received an invalid combination of arguments",
                                lambda: torch.LongTensor((6, 0), 1, 1, 0))
         self.assertRaisesRegex(TypeError,
-                               r"tensor\(\) missing 1 required positional argument: \"data\"",
+                               "missing 1 required positional arguments",
                                lambda: torch.tensor().new_zeros((5, 5), 0))
 
     @skipIfTorchDynamo("will be re-enabled after #90892")
