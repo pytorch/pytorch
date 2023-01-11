@@ -9,7 +9,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
+    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, skipIfTorchInductor, \
     parametrize, subtest, is_coalesced_indices
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
@@ -347,6 +347,7 @@ class TestSparse(TestSparseBase):
             lambda: self.sparse_tensor(indices, values, torch.Size([2, 4, 2, 1])))
 
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
+    @skipIfTorchInductor()
     def test_to_dense(self, device, dtype):
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -479,6 +480,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(torch.empty((3, 0), dtype=dtype, device=device), self.safeToDense(x))
 
     @dtypes(torch.double, torch.cdouble)
+    @skipIfTorchInductor()
     def test_to_dense_hybrid(self, device, dtype):
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
@@ -832,6 +834,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @skipIfTorchInductor()
     def test_permute(self, device, dtype, coalesced):
         # trivial checks
         s = torch.rand(3, 3, 3, device=device, dtype=dtype).to_sparse()
@@ -1488,6 +1491,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double)
+    @skipIfTorchInductor()
     def test_sparse_mm(self, device, dtype, coalesced):
         def test_shape(d1, d2, d3, nnz, transposed):
             if transposed:
@@ -1509,6 +1513,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double)
+    @skipIfTorchInductor()
     def test_sparse_mul(self, device, dtype, coalesced):
         # https://github.com/pytorch/pytorch/issues/79914
         a = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
