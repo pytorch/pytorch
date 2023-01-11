@@ -230,7 +230,6 @@ jobs:
       test-matrix: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.test-matrix }}
 
   win-vs2019-cpu-py3-build:
-    if: false
     name: win-vs2019-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     with:
@@ -244,7 +243,6 @@ jobs:
         ]}
 
   win-vs2019-cpu-py3-test:
-    if: false
     name: win-vs2019-cpu-py3
     uses: ./.github/workflows/_win-test.yml
     needs: win-vs2019-cpu-py3-build
