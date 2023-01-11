@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import functools
 import sys
 import warnings
@@ -555,6 +556,27 @@ class TestFSDPMisc(FSDPTest):
         ):
             inp = fsdp_model.module.get_input(torch.device("cuda"))
             fsdp_model(*inp)
+
+    @skip_if_lt_x_gpu(2)
+    def test_current_device_mismatch(self):
+        torch.cuda.set_device(0)
+        error_context = (
+            (
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "FSDP expects the current CUDA device to be 1 but got 0",
+                )
+            )
+            if self.rank != 0
+            else contextlib.suppress()
+        )
+        with error_context:
+            model = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_BEFORE,
+                {},
+            )
 
 
 class TestFSDPMiscWorldSize1(FSDPTest):

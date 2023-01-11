@@ -836,6 +836,14 @@ def _get_compute_device(
     Precondition: ``_check_single_device_module()`` and
     ``_move_module_to_device()``.
     """
+    if torch.cuda.current_device() != rank:
+        raise RuntimeError(
+            f"FSDP expects the current CUDA device to be {rank} but got "
+            f"{torch.cuda.current_device()} on rank {rank}"
+        )
+    # TODO (awgu): If we go with the above, then we can greatly simplify
+    # `device_id` and this function since then `device_id` is either `None`,
+    # "cuda", or "cuda:rank" and the compute device is always "cuda:rank".
     # If the module is on GPU already, then that GPU device has priority
     # over the current device
     param = next(_get_orig_params(module, ignored_params), None)
