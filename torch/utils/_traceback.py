@@ -53,7 +53,7 @@ def report_compile_source_on_error():
 
             if filename == "<string>" and source is not None:
                 # Don't delete the temporary file so the user can inspect it
-                with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".py") as f:
                     f.write(source)
                 # Create a frame.  Python doesn't let you construct
                 # FrameType directly, so just make one with compile
@@ -87,27 +87,3 @@ def report_compile_source_on_error():
             tb_next = tb
 
         raise exc.with_traceback(tb_next)
-
-
-if __name__ == '__main__':
-    import unittest
-
-    class TestTraceback(unittest.TestCase):
-        def test_basic(self):
-            source = '''\
-def f(x):
-    x = x * 3
-    raise RuntimeError()  # HEYA
-'''
-
-            out: Dict[str, Any] = {}
-            scope = {"__compile_source__": source}
-            exec(source, scope, out)
-
-            try:
-                with report_compile_source_on_error():
-                    out["f"](1)
-            except RuntimeError as e:
-                self.assertIn("HEYA", ''.join(traceback.format_tb(e.__traceback__)))
-
-    unittest.main()

@@ -617,6 +617,7 @@ def export(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
+            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
@@ -674,6 +675,7 @@ def export(
             graph_with_interpreter,
             decomposition_table=decomposition_table,
             tracing_mode=tracing_mode,
+            _allow_non_fake_inputs=True,
         )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
@@ -779,8 +781,22 @@ class TorchPatcher:
                 DistributedDataParallel._inside_ddp_forward
             )
 
-        # disable profile hook
+        from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd
+
+        for opt_mod in adagrad, adam, adamax, adamw, asgd, nadam, sgd:
+            multi_tensor_fn_name = f"_multi_tensor_{opt_mod.__name__.split('.')[-1]}"
+            if hasattr(opt_mod, multi_tensor_fn_name):
+                setattr(
+                    opt_mod,
+                    multi_tensor_fn_name,
+                    disable(getattr(opt_mod, multi_tensor_fn_name)),
+                )
+
+        excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
         for opt in optimizers:
+            if opt in excluded_opts:
+                opt.step = disable(opt.step)
+
             opt._cuda_graph_capture_health_check = disable(
                 opt._cuda_graph_capture_health_check
             )

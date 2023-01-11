@@ -3115,8 +3115,7 @@ TEST(TestShapeGraphLinting, Basic) {
 // fusion parameters
 class Composed : public ::testing::Test {
  public:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  void SetUp() {
+  void SetUp() override {
     torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
   }
 };
