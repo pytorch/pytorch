@@ -748,12 +748,6 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
       " but mask has size ",
       mask.sizes());
 
-  if (!mask.is_coalesced()) {
-    TORCH_WARN_ONCE(
-        "sparse_mask(): uncoalesced mask may result in duplicate values in the result. "
-        "It is recommended to pass mask.coalesce() if such behavior is not expected.");
-  }
-
   if (!mask.numel()) {
     return mask.clone().to(t.device(), t.scalar_type());
   }
