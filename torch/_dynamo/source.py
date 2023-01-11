@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import enum
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from torch._guards import GuardSource, Source
 
@@ -115,6 +115,7 @@ class AttrSource(Source):
 
     def __init__(self, base, member):
         super().__init__()
+        assert base, "Can't construct an AttrSource without a valid base source"
         if "." in member:
             member_parts = member.split(".")
             self.base = AttrSource(base, ".".join(member_parts[:-1]))
@@ -189,6 +190,48 @@ class NegateSource(Source):
     def name(self):
         # NB: use method call so that function stripping regexes work
         return f"{self.base.name()}.__neg__()"
+
+
+@dataclasses.dataclass
+class DefaultsSource(Source):
+    base: Source
+    idx_key: Union[int, str]
+    is_kw: bool
+    field: str
+
+    def __init__(self, base, idx_key, is_kw=False):
+        super().__init__()
+        assert (
+            base
+        ), "Base must be a valid source in order to properly track and guard this Defaults to its origin."
+        self.base = base
+        self.idx_key = idx_key
+        self.is_kw = is_kw
+        if self.is_kw:
+            assert isinstance(idx_key, str)
+            self.field = "__kwdefaults__"
+            self._name = f"{self.base.name()}.{self.field}['{self.idx_key}']"
+        else:
+            assert isinstance(idx_key, int)
+            self.field = "__defaults__"
+            self._name = f"{self.base.name()}.{self.field}[{self.idx_key}]"
+
+    def reconstruct(self, codegen):
+        instrs = self.base.reconstruct(codegen)
+        instrs.extend(codegen.create_load_attrs(self.field))
+        instrs.extend(
+            [
+                codegen.create_load_const(self.idx_key),
+                create_instruction("BINARY_SUBSCR"),
+            ]
+        )
+        return instrs
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return self._name
 
 
 @dataclasses.dataclass
