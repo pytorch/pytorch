@@ -180,8 +180,9 @@ void update_cpp_hooks_on_new_gradfn(
     new_list->push_back(std::move((*meta->retains_grad_hooks_list_)[0]));
     (*meta->retains_grad_hooks_list_)[0] = nullptr;
     meta->retains_grad_hooks_list_ = new_list;
-    std::unique_ptr<FunctionPreHook> hook_ptr = std::make_unique<CppFunctionTensorPreHook>(
-        meta->retains_grad_hooks_list_, self.output_nr());
+    std::unique_ptr<FunctionPreHook> hook_ptr =
+        std::make_unique<CppFunctionTensorPreHook>(
+            meta->retains_grad_hooks_list_, self.output_nr());
     new_fn->add_retains_grad_hook(std::move(hook_ptr));
   }
 }

@@ -823,7 +823,7 @@ Backward Hooks execution
 
 This section will discuss when different hooks fire or don't fire.
 Then it will discuss the order in which they are fired.
-The hooks that will be covered are: Pre-hooks registered to Tensor via
+The hooks that will be covered are: hooks registered to Tensor via
 :meth:`torch.tensor.register_hook`,
 post-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
 pre-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_prehook`.
@@ -832,12 +832,14 @@ Whether a particular hook will be fired
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Hooks registered to a Tensor via :meth:`torch.tensor.register_hook`
-are executed when gradients are being computed for that Tensor. This does not require
-the Node corresponding to that Tensor to be executed.
+are executed when gradients are being computed for that Tensor. (Note that this does not require
+the Tensor's grad_fn to be executed. For example, if the Tensor is passed
+as part of the ``inputs`` argument to :func:`torch.autograd.grad`,
+the Tensor's grad_fn may not be executed, but the hook register to that Tensor will always be executed.)
 
 Hooks registered to :class:`torch.autograd.graph.Node` using
 :meth:`torch.autograd.graph.Node.register_hook` or
-:meth:`torch.autograd.graph.Node.register_prehook` on the other hand, are only fired if
+:meth:`torch.autograd.graph.Node.register_prehook` are only fired if
 the Node it was registered to is executed.
 
 Whether a particular Node is executed may depend on whether the backward pass was called with
@@ -850,21 +852,23 @@ If you are using :func:`torch.autograd.backward`, all of the above mentioned hoo
 whether or not you specified the ``inputs`` argument. This is because `.backward()` executes all
 Nodes, even if they correspond to a Tensor specified as an input.
 (Note that the execution of this additional Node corresponding to Tensors passed as  ``inputs``
-is usually unnecessary, but done anyway. This behavior is subject to change,
+is usually unnecessary, but done anyway. This behavior is subject to change;
 you should not depend on it.)
 
 On the other hand, if you are using :func:`torch.autograd.grad`, the backward hooks registered
 to Nodes that correspond to the Tensors passed to ``input`` may not be executed, because
-those Nodes may not be executed.
+those Nodes will not be executed unless there is another input that depends on the gradient
+result of this Node.
 
 The order in which the different hooks are fired
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The order in which things happen are:
-1. pre-hook registered to Tensor are executed
-2. pre-hook registered to Node are executed (if Node is executed)
-3. Node is executed (subject to rules above)
-3. post-hook registered to Node are executed (if Node is executed)
+1. hooks registered to Tensor are executed
+2. pre-hook registered to Node are executed (if Node is executed).
+3. The ``.grad`` field is updated for Tensors that retain_grad
+4. Node is executed (subject to rules above)
+5. post-hook registered to Node are executed (if Node is executed)
 
 If multiple hooks of the same type are registered on the same Tensor or Node
 they are executed in the order in which they are registered.
@@ -874,5 +878,7 @@ earlier hooks.
 Special hooks
 ^^^^^^^^^^^^^
 
-:meth:`torch.autograd.graph.register_multi_grad_hook` is implemented using pre-hooks registered
-to Tensors.
+:meth:`torch.autograd.graph.register_multi_grad_hook` is implemented using hooks registered
+to Tensors. Each individual Tensor hook is fired following the Tensor hook ordering
+defined above and the registered multi-grad hook is called when the last Tensor gradient
+is computed.
