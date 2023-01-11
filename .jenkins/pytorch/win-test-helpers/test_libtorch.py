@@ -23,14 +23,14 @@ def libtorch_check(file_name, file_full_path):
     # See https://github.com/pytorch/pytorch/issues/35651
     sys.exit(0) if file_name == "utility_ops_gpu_test" else None
 
-    subprocess.call('echo Running ' + file_full_path, shell=True)
+    subprocess.check_call('echo Running ' + file_full_path, shell=True)
     if file_name == "c10_intrusive_ptr_benchmark":
-        subprocess.call(file_full_path, shell=True)
+        subprocess.check_call(file_full_path, shell=True)
         sys.exit(0)
 
     # Differentiating the test report directories is crucial for test time reporting.
     os.mkdir(os.environ['TEST_OUT_DIR'] + '\\' + file_name + '.exe')
-    subprocess.call(file_full_path + ' --gtest_output=xml:' + os.environ['TEST_OUT_DIR'] +
+    subprocess.check_call(file_full_path + ' --gtest_output=xml:' + os.environ['TEST_OUT_DIR'] +
         '\\' + file_name + '.exe' + '\\' + file_name + '.xml', shell=True)
 
 
@@ -41,7 +41,7 @@ def libtorch_check(file_name, file_full_path):
 if os.environ['USE_CUDA'] == '0' and not os.environ['CUDA_VERSION'] == 'cpu':
     sys.exit(0)
 
-subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
+subprocess.check_call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
 
 os.chdir(os.environ['TMP_DIR_WIN'] + '\\build\\torch\\bin')
 os.environ['TMP_DIR_WIN'] = 'dp0\\..\\..\\..\\test\\test-reports\\cpp-unittest'
@@ -51,7 +51,7 @@ os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x6
 
 os.environ['TEST_API_OUT_DIR'] = os.environ['TEST_OUT_DIR'] + '\\test_api'
 os.mkdir(os.environ['TEST_API_OUT_DIR'])
-subprocess.call('test_api.exe --gtest_filter="-IntegrationTest.MNIST*" --gtest_output=xml:' +
+subprocess.check_call('test_api.exe --gtest_filter="-IntegrationTest.MNIST*" --gtest_output=xml:' +
     os.environ['TEST_API_OUT_DIR'] + '\\test_api.xml', shell=True)
 
 os.chdir(os.environ['TMP_DIR_WIN'] + '\\build\\torch\\test')

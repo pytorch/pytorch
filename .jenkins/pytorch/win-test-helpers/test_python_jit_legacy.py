@@ -14,16 +14,16 @@ def pushd(new_dir):
         os.chdir(previous_dir)
 
 
-subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + "\\setup_pytorch_env.py", shell=True)
+subprocess.check_call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + "\\setup_pytorch_env.py", shell=True)
 
-subprocess.call('echo Copying over test times file', shell=True)
+subprocess.check_call('echo Copying over test times file', shell=True)
 shutil.copy(str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) + "\\.pytorch-test-times.json",
     os.environ['PROJECT_DIR_WIN'])
 
 with pushd('test'):
     try:
-        subprocess.call('echo Run jit_profiling tests', shell=True)
-        subprocess.call('conda install -n test_env python run_test.py --include test_jit_legacy ' +
+        subprocess.check_call('echo Run jit_profiling tests', shell=True)
+        subprocess.check_call('conda install -n test_env python run_test.py --include test_jit_legacy ' +
             'test_jit_fuser_legacy --verbose', shell=True)
     except Exception as e:
         pass

@@ -67,9 +67,9 @@ os.environ['PATH'] = 'C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;' +
 os.environ['INSTALLER_DIR'] = os.environ['SCRIPT_HELPERS_DIR'] + '\\installation-helpers'
 
 
-subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
-subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
-subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
+subprocess.check_call('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
+subprocess.check_call('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
+subprocess.check_call('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
 
 # test vars
 os.environ['CMAKE_INCLUDE_PATH'] = os.environ['TMP_DIR_WIN'] + '\\mkl\\include'
@@ -94,30 +94,30 @@ os.environ['PATH'] = os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Library\\bi
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 '''
-subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
+subprocess.check_call('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
 
 try:
     os.environ['PATH'] = os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Library\\bin;' + os.environ['CONDA_PARENT_DIR'] +\
         '\\Miniconda3;' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts;' + os.environ['PATH']
 
-    subprocess.call('conda env list', shell=True)
+    subprocess.check_call('conda env list', shell=True)
 
 except Exception as e:
     None
 
 # Install ninja and other deps
 if 'REBUILD' not in os.environ:
-    subprocess.call('conda run -n test_env pip install -q ninja==1.10.0.post1 dataclasses typing_extensions expecttest==0.1.3', shell=True)
+    subprocess.check_call('conda run -n test_env pip install -q ninja==1.10.0.post1 dataclasses typing_extensions expecttest==0.1.3', shell=True)
 
 # Override VS env here
 with pushd('.'):
     if 'VC_VERSION' not in os.environ:
-        subprocess.call('\"C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
+        subprocess.check_call('\"C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
             os.environ['VC_YEAR'] + '\\' + os.environ['VC_PRODUCT'] + '\\' +
                 'VC\\Auxiliary\\Build\\vcvarsall.bat\" x64', shell=True)
 
     else:
-        subprocess.call('\"C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
+        subprocess.check_call('\"C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
             os.environ['VC_YEAR'] + '\\' + os.environ['VC_PRODUCT'] + '\\' +
                 'VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 -vcvars_ver=' + os.environ['VC_VERSION'], shell=True)
 
@@ -128,7 +128,7 @@ if os.environ['USE_CUDA'] == '1':
 
     # version transformer, for example 10.1 to 10_1.
     if '.' not in os.environ['CUDA_VERSION']:
-        subprocess.call('echo CUDA version ' + cuda_version +
+        subprocess.check_call('echo CUDA version ' + cuda_version +
             'format isn\'t correct, which doesn\'t contain \'.\'', shell=True)
 
         sys.exit(1)
@@ -168,9 +168,9 @@ if 'TORCH_CUDA_ARCH_LIST' not in os.environ:
 # The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
 os.environ['SCCACHE_IDLE_TIMEOUT'] = '0'
 os.environ['SCCACHE_IGNORE_SERVER_IO_ERROR'] = '1'
-subprocess.call('sccache --stop-server', shell=True)
-subprocess.call('sccache --start-server', shell=True)
-subprocess.call('sccache --zero-stats', shell=True)
+subprocess.check_call('sccache --stop-server', shell=True)
+subprocess.check_call('sccache --start-server', shell=True)
+subprocess.check_call('sccache --zero-stats', shell=True)
 os.environ['CC'] = 'sccache-cl'
 os.environ['CXX'] = 'sccache-cl'
 
@@ -187,14 +187,14 @@ if os.environ['USE_CUDA'] == '1':
     :: randomtemp.exe and sccache.exe into a batch file which CMake invokes.
     '''
 
-    subprocess.call('curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.4/randomtemp.exe --output ' +
+    subprocess.check_call('curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.4/randomtemp.exe --output ' +
         os.environ['TMP_DIR_WIN'] + '\\bin\\randomtemp.exe', shell=True)
 
-    subprocess.call('echo @\"' + os.environ['TMP_DIR_WIN'] + '\\bin\\randomtemp.exe\" \"' +
+    subprocess.check_call('echo @\"' + os.environ['TMP_DIR_WIN'] + '\\bin\\randomtemp.exe\" \"' +
         os.environ['TMP_DIR_WIN'] + '\\bin\\sccache.exe\" \"' + os.environ['CUDA_PATH'] +
             '\\bin\\nvcc.exe\" %%* > \"' + os.environ['TMP_DIR'] + '/bin/nvcc.bat\"', shell=True)
 
-    subprocess.call('cat ' + os.environ['TMP_DIR'] + '/bin/nvcc.bat', shell=True)
+    subprocess.check_call('cat ' + os.environ['TMP_DIR'] + '/bin/nvcc.bat', shell=True)
 
     os.environ['CUDA_NVCC_EXECUTABLE'] = os.environ['TMP_DIR'] + '/bin/nvcc.bat'
     os.environ['CMAKE_CUDA_COMPILER'] = (os.environ['CUDA_PATH'] + '\\bin\\nvcc.exe').replace('\\', '/')
@@ -202,7 +202,7 @@ if os.environ['USE_CUDA'] == '1':
         os.environ['TMP_DIR'] + '\\bin\\sccache.exe'
 
 
-subprocess.call('echo @echo off >> ' + os.environ['TMP_DIR_WIN'] +
+subprocess.check_call('echo @echo off >> ' + os.environ['TMP_DIR_WIN'] +
     '\\ci_scripts\\pytorch_env_restore.bat', shell=True)
 
 env_arr = []
@@ -216,40 +216,40 @@ append_multiple_lines(os.environ['TMP_DIR_WIN'] + '\\ci_scripts\\pytorch_env_res
 if 'REBUILD' not in os.environ and 'BUILD_ENVIRONMENT' in os.environ:
 
     # Create a shortcut to restore pytorch environment
-    subprocess.call('echo @echo off >> ' + os.environ['TMP_DIR_WIN'] +
+    subprocess.check_call('echo @echo off >> ' + os.environ['TMP_DIR_WIN'] +
         '/ci_scripts/pytorch_env_restore_helper.bat', shell=True)
 
-    subprocess.call('echo call \"' + os.environ['TMP_DIR_WIN'] + '/ci_scripts/pytorch_env_restore.bat\" >> ' +
+    subprocess.check_call('echo call \"' + os.environ['TMP_DIR_WIN'] + '/ci_scripts/pytorch_env_restore.bat\" >> ' +
         os.environ['TMP_DIR_WIN'] + '/ci_scripts/pytorch_env_restore_helper.bat', shell=True)
 
-    subprocess.call('echo cd /D \"%CD%\" >> ' + os.environ['TMP_DIR_WIN'] + '/ci_scripts/pytorch_env_restore_helper.bat', shell=True)
+    subprocess.check_call('echo cd /D \"%CD%\" >> ' + os.environ['TMP_DIR_WIN'] + '/ci_scripts/pytorch_env_restore_helper.bat', shell=True)
 
-    subprocess.call('aws s3 cp \"s3://ossci-windows/Restore PyTorch Environment.lnk\" \"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"', shell=True)
+    subprocess.check_call('aws s3 cp \"s3://ossci-windows/Restore PyTorch Environment.lnk\" \"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"', shell=True)
 
 
-subprocess.call('echo ' + str(os.environ), shell=True)
-subprocess.call('env', shell=True)
+subprocess.check_call('echo ' + str(os.environ), shell=True)
+subprocess.check_call('env', shell=True)
 
-subprocess.call('conda run -n test_env' + " python setup.py bdist_wheel", shell=True)
-subprocess.call("sccache --show-stats", shell=True)
-subprocess.call('conda run -n test_env' + ' python -c \"import os, glob; os.system(\'python -mpip install \'' +
+subprocess.check_call('conda run -n test_env' + " python setup.py bdist_wheel", shell=True)
+subprocess.check_call("sccache --show-stats", shell=True)
+subprocess.check_call('conda run -n test_env' + ' python -c \"import os, glob; os.system(\'python -mpip install \'' +
     ' + glob.glob(\'dist/*.whl\')[0] + \'[opt-einsum]\')\"', shell=True)
 
 
 if 'BUILD_ENVIRONMENT' not in os.environ:
-    subprocess.call('echo NOTE: To run \'import torch\', please make sure to activate the conda environment by running \'call ' +
+    subprocess.check_call('echo NOTE: To run \'import torch\', please make sure to activate the conda environment by running \'call ' +
         os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts\\activate.bat ' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\'' +
             ' in Command Prompt before running Git Bash.', shell=True)
 
 else:
-    subprocess.call('7z a ' + os.environ['TMP_DIR_WIN'] + '\\' + os.environ['IMAGE_COMMIT_TAG'] + '.7z ' +
+    subprocess.check_call('7z a ' + os.environ['TMP_DIR_WIN'] + '\\' + os.environ['IMAGE_COMMIT_TAG'] + '.7z ' +
         os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Lib\\site-packages\\torch ' + os.environ['CONDA_PARENT_DIR'] +
             '\\Miniconda3\\Lib\\site-packages\\torchgen ' + os.environ['CONDA_PARENT_DIR'] +
                 '\\Miniconda3\\Lib\\site-packages\\functorch && copy /Y \"' + os.environ['TMP_DIR_WIN'] +
                     '\\' + os.environ['IMAGE_COMMIT_TAG'] + '.7z\" \"' + os.environ['PYTORCH_FINAL_PACKAGE_DIR'] + '\\\"', shell=True)
 
     # export test times so that potential sharded tests that'll branch off this build will use consistent data
-    subprocess.call('conda run -n test_env' + ' python tools/stats/export_test_times.py', shell=True)
+    subprocess.check_call('conda run -n test_env python tools/stats/export_test_times.py', shell=True)
     shutil.copy(".pytorch-test-times.json", os.environ['PYTORCH_FINAL_PACKAGE_DIR'])
 
     # Also save build/.ninja_log as an artifact
@@ -257,7 +257,7 @@ else:
 
 
 
-subprocess.call('sccache --show-stats --stats-format json | jq .stats > sccache-stats-' +
+subprocess.check_call('sccache --show-stats --stats-format json | jq .stats > sccache-stats-' +
     os.environ['BUILD_ENVIRONMENT'] + '-' + os.environ['OUR_GITHUB_JOB_ID'] + '.json', shell=True)
 
-subprocess.call('sccache --stop-server', shell=True)
+subprocess.check_call('sccache --stop-server', shell=True)

@@ -11,20 +11,20 @@ if 'REBUILD' not in os.environ:
 
         if 'BUILD_ENVIRONMENT' not in os.environ:
 
-            subprocess.call('curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/mkl_2020.2.254.7z ' +
+            subprocess.check_call('curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/mkl_2020.2.254.7z ' +
                     '--output ' + tmp_win_dir + '\\mkl.7z', shell=True)
 
         else:
 
-            subprocess.call('aws s3 cp s3://ossci-windows/mkl_2020.2.254.7z ' +
+            subprocess.check_call('aws s3 cp s3://ossci-windows/mkl_2020.2.254.7z ' +
                 tmp_win_dir + '\\mkl.7z --quiet', shell=True)
 
-        subprocess.call('7z x -aoa ' + tmp_win_dir + '\\mkl.7z -o' + tmp_win_dir + '\\mkl', shell=True)
+        subprocess.check_call('7z x -aoa ' + tmp_win_dir + '\\mkl.7z -o' + tmp_win_dir + '\\mkl', shell=True)
 
     except Exception as e:
 
-        subprocess.call('echo install mkl failed', shell=True)
-        subprocess.call('echo ' + e, shell=True)
+        subprocess.check_call('echo install mkl failed', shell=True)
+        subprocess.check_call('echo ' + str(e), shell=True)
         sys.exit()
 
 

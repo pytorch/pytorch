@@ -10,7 +10,7 @@ build_type = os.environ['BUILD_TYPE']
 
 if cuda_version == "cpu":
 
-    subprocess.call('echo skip magma installation for cpu builds', shell=True)
+    subprocess.check_call('echo skip magma installation for cpu builds', shell=True)
     sys.exit(0)
 
 
@@ -24,7 +24,7 @@ if os.environ['USE_CUDA'] != "1":
 
 if '.' not in cuda_version:
 
-    subprocess.call('echo CUDA version ' + cuda_version +
+    subprocess.check_call('echo CUDA version ' + cuda_version +
         'format isn\'t correct, which doesn\'t contain \'.\'', shell=True)
 
     sys.exit(1)
@@ -37,7 +37,7 @@ os.environ['CUDA_SUFFIX'] = cuda_suffix
 
 if cuda_suffix == '':
 
-    subprocess.call('echo unknown CUDA version, please set \'CUDA_VERSION\' higher than 10.2', shell=True)
+    subprocess.check_call('echo unknown CUDA version, please set \'CUDA_VERSION\' higher than 10.2', shell=True)
 
     sys.exit(1)
 
@@ -48,23 +48,23 @@ if 'REBUILD' not in os.environ:
 
         if 'BUILD_ENVIRONMENT' not in os.environ:
 
-            subprocess.call('curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/magma_2.5.4_' +
+            subprocess.check_call('curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/magma_2.5.4_' +
                 cuda_suffix + '_' + build_type + '.7z --output ' + tmp_win_dir + '\\magma_2.5.4_' +
                     cuda_suffix + '_' + build_type + '.7z', shell=True)
 
         else:
 
-            subprocess.call('aws s3 cp s3://ossci-windows/magma_2.5.4_' +
+            subprocess.check_call('aws s3 cp s3://ossci-windows/magma_2.5.4_' +
                 cuda_suffix + '_' + build_type + '.7z ' + tmp_win_dir + '\\magma_2.5.4_'
                     + cuda_suffix + '_' + build_type + '.7z --quiet', shell=True)
 
-        subprocess.call('7z x -aoa ' + tmp_win_dir + '\\magma_2.5.4_' +
+        subprocess.check_call('7z x -aoa ' + tmp_win_dir + '\\magma_2.5.4_' +
             cuda_suffix + '_' + build_type + '.7z -o' + tmp_win_dir + '\\magma', shell=True)
 
     except Exception as e:
 
-        subprocess.call('echo install magma failed', shell=True)
-        subprocess.call('echo ' + e, shell=True)
+        subprocess.check_call('echo install magma failed', shell=True)
+        subprocess.check_call('echo ' + str(e), shell=True)
         sys.exit()
 
 

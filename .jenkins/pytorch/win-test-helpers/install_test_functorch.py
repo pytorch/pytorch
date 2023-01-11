@@ -16,37 +16,37 @@ def pushd(new_dir):
 
 try:
 
-    subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
+    subprocess.check_call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
 
 except Exception as e:
 
-    subprocess.call('echo setup pytorch env failed', shell=True)
-    subprocess.call('echo ' + e, shell=True)
+    subprocess.check_call('echo setup pytorch env failed', shell=True)
+    subprocess.check_call('echo ' + str(e), shell=True)
     sys.exit()
 
 
-subprocess.call('echo Installing test dependencies', shell=True)
+subprocess.check_call('echo Installing test dependencies', shell=True)
 
 try:
-    subprocess.call('conda install -n test_env pip install networkx', shell=True)
+    subprocess.check_call('conda install -n test_env pip install networkx', shell=True)
 
 except Exception as e:
 
-    subprocess.call('echo install networkx failed', shell=True)
-    subprocess.call('echo ' + e, shell=True)
+    subprocess.check_call('echo install networkx failed', shell=True)
+    subprocess.check_call('echo ' + str(e), shell=True)
     sys.exit()
 
 
-subprocess.call('echo Test functorch', shell=True)
+subprocess.check_call('echo Test functorch', shell=True)
 
 try:
 
     with pushd('test'):
-        subprocess.call('conda install -n test_env python run_test.py --functorch --shard ' +
+        subprocess.check_call('conda install -n test_env python run_test.py --functorch --shard ' +
             os.environ['SHARD_NUMBER'] + ' ' + os.environ['NUM_TEST_SHARDS'] + ' --verbose', shell=True)
 
 except Exception as e:
 
-    subprocess.call('echo run_test functorch shard failed', shell=True)
-    subprocess.call('echo ' + e, shell=True)
+    subprocess.check_call('echo run_test functorch shard failed', shell=True)
+    subprocess.check_call('echo ' + str(e), shell=True)
     sys.exit()
