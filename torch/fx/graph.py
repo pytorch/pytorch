@@ -622,22 +622,31 @@ class _PyTreeCodeGen(CodeGen):
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
 
     def gen_fn_def(self, free_vars, maybe_return_annotation):
+        # Given a user function/model:
+        # ```python
+        # myargs = [myargs0, myargs1]
+        # mykwargs = {'mykwargs0': ..., 'mykwargs1': ...}
+        # def forward(self, mypos, *myargs, mykey=None, **mykwargs):
+        #
+        # the generated code flattens all keywords into positional arguments for `forward()`
+        # e.g forward(self, mypos, myargs0, myargs1, mykey, mykwargs0, mykwargs1):
+        # However, within `forward`, `tree_flatten_spec``still needs to parse positionals and keywords separately
+        # e.g. tree_flatten_spec(((mypos, myargs0, myargs1), {'mykey':mykey, 'mykwargs0':mykwargs0, 'mykwargs1':mykwargs1}), self._in_spec)
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
-        # forward signature flattens *args and kwargs as positionals
+
         function_args = self.pytree_info.orig_args
         has_orig_self = (function_args[0] == 'self') if len(function_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, 'self')
         function_definition = super().gen_fn_def(function_args[:], maybe_return_annotation)
 
-        # but separate *args and **kwargs for `tree_flatten_spec` call
         count_args = len(self.pytree_info.in_spec.children_specs[0].children_specs)
         function_args = self.pytree_info.orig_args[:count_args]
         function_kwargs = self.pytree_info.orig_args[count_args:]
         if len(free_vars) > 0:  # pytree has placeholders in it
             function_args = ', '.join(function_args)
-            function_kwargs = '{' + ', '.join(f"'{k}':{v}" for k,v in zip(self.pytree_info.in_spec.children_specs[1].context, function_kwargs)) + '}'
+            function_kwargs = '{' + ', '.join(f"'{k}':{v}" for k, v in zip(self.pytree_info.in_spec.children_specs[1].context, function_kwargs)) + '}'
             function_definition += f"""
     {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec((({function_args},), {function_kwargs}), self._in_spec)"""
         return function_definition
