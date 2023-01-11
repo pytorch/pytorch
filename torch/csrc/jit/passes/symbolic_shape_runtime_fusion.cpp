@@ -358,7 +358,7 @@ void insertDynamicShapesGuard(
       continue;
     }
     inputs_to_check.push_back(node_input);
-    guard_types.push_back(
+    guard_types.emplace_back(
         subgraph->inputs().at(i)->type()->expect<TensorType>()->withStrides(
             c10::VaryingShape<c10::Stride>()));
   }

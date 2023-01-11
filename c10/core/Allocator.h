@@ -226,7 +226,7 @@ struct AllocatorRegisterer {
 // per device
 struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
   MemoryReportingInfoBase();
-  virtual ~MemoryReportingInfoBase() {}
+  ~MemoryReportingInfoBase() override = default;
 
   /**
    * alloc_size corresponds to the size of the ptr.
