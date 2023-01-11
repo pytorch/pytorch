@@ -106,9 +106,9 @@ class Adam(Optimizer):
             Passing True can impair ungraphed performance, so if you don't intend to
             graph capture this instance, leave it False (default: False)
         differentiable (bool, optional): whether autograd should occur through the optimizer step in training,
-            otherwise, the step() function runs in a torch.no_grad() context. 
-            Setting to True can impair performance, so leave it False if you don't intend to run autograd 
-            through this instance. (default: False) 
+            otherwise, the step() function runs in a torch.no_grad() context.
+            Setting to True can impair performance, so leave it False if you don't intend to run autograd
+            through this instance (default: False)
         fused (bool, optional): whether the fused implementation (CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. Since the fused implementation is usually significantly faster than
