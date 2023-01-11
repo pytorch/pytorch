@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import sys
 import tempfile
 from typing import Dict
 
@@ -107,11 +108,11 @@ class MyShardedModel3(torch.nn.Module):
 
 
 class TestDistributedStateDictSaveLoad(TestCase):
-    def test_read_write_only_tensor(self) -> None:
+    def _test_read_write_only_tensor(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
-            fs_writer = FileSystemWriter(path=path)
+            fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
             save_state_dict(
                 state_dict=state_dict_to_save,
                 storage_writer=fs_writer,
@@ -140,7 +141,9 @@ class TestDistributedStateDictSaveLoad(TestCase):
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
-            fs_writer = FileSystemWriter(path=path, single_file_per_rank=True)
+            fs_writer = FileSystemWriter(
+                path=path, single_file_per_rank=True, thread_count=thread_count
+            )
             save_state_dict(
                 state_dict=state_dict_to_save,
                 storage_writer=fs_writer,
@@ -165,6 +168,12 @@ class TestDistributedStateDictSaveLoad(TestCase):
             assert_state_dict_equal(
                 self, state_dict_to_load_to, state_dict_to_save
             )
+
+    def test_read_write_only_tensor_thread_count_1(self) -> None:
+        self._test_read_write_only_tensor(thread_count=1)
+
+    def test_read_write_only_tensor_thread_count_2(self) -> None:
+        self._test_read_write_only_tensor(thread_count=2)
 
 
 class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
@@ -172,10 +181,7 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
-    def test_read_write_shard_tensor(self) -> None:
+    def _test_read_write_shard_tensor(self, thread_count) -> None:
         paths = [tempfile.mkdtemp()]
         dist.broadcast_object_list(paths)
 
@@ -196,8 +202,11 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
-        fs_writer = FileSystemWriter(path=path)
-        save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
+        fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+        save_state_dict(
+            state_dict=state_dict_to_save,
+            storage_writer=fs_writer,
+        )
 
         dist.barrier()
 
@@ -221,8 +230,24 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
             state_dict=state_dict_to_load_to, storage_reader=fs_reader
         )
 
-        assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+        assert_state_dict_equal(
+            self,
+            state_dict_to_load_to,
+            state_dict_to_save,
+        )
         dist.barrier()
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_read_write_shard_tensor_thread_count_1(self) -> None:
+        self._test_read_write_shard_tensor(thread_count=1)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_read_write_shard_tensor_thread_count_2(self) -> None:
+        self._test_read_write_shard_tensor(thread_count=2)
 
 
 class TestDistributedReshardOnLoad(ShardedTensorTestBase):
@@ -244,10 +269,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         tensor.gather(out=res)
         return res
 
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
-    def test_load_with_different_shard_plan(self) -> None:
+    def _test_load_with_different_shard_plan(self, thread_count) -> None:
         path = self.get_file_path()
 
         # We hardcode the assumption of how many shards are around
@@ -333,7 +355,9 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 model_to_save._register_state_dict_hook(state_dict_hook)
                 state_dict_to_save = model_to_save.state_dict()
 
-                fs_writer = FileSystemWriter(path=path)
+                fs_writer = FileSystemWriter(
+                    path=path, thread_count=thread_count
+                )
                 save_state_dict(
                     state_dict=state_dict_to_save, storage_writer=fs_writer
                 )
@@ -364,7 +388,16 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    def test_load_rowwise_to_colwise(self) -> None:
+    def test_load_with_different_shard_plan_thread_count_1(self) -> None:
+        self._test_load_with_different_shard_plan(thread_count=1)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_load_with_different_shard_plan_thread_count_2(self) -> None:
+        self._test_load_with_different_shard_plan(thread_count=2)
+
+    def _test_load_rowwise_to_colwise(self, thread_count) -> None:
         path = self.get_file_path()
         self.assertEqual(self.world_size, dist.get_world_size())
 
@@ -394,8 +427,11 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
-        fs_writer = FileSystemWriter(path=path)
-        save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
+        fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+        save_state_dict(
+            state_dict=state_dict_to_save,
+            storage_writer=fs_writer,
+        )
 
         model_to_load = MyShardedModel3(dst_spec).cuda(dist.get_rank())
         model_to_load._register_state_dict_hook(state_dict_hook)
@@ -407,7 +443,8 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             state_dict=state_dict_to_load_to, storage_reader=fs_reader
         )
 
-        # We can't use torch.allclose since each ST has a different sharding spec
+        # We can't use torch.allclose
+        # since each ST has a different sharding spec
         store_tensor = self.load_tensor(model_to_save.sharded_tensor)
         load_tensor = self.load_tensor(model_to_load.sharded_tensor)
 
@@ -417,12 +454,21 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    def test_save_load_bytes(self) -> None:
+    def test_load_rowwise_to_colwise_thread_count_1(self) -> None:
+        self._test_load_rowwise_to_colwise(thread_count=1)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_load_rowwise_to_colwise_thread_count_2(self) -> None:
+        self._test_load_rowwise_to_colwise(thread_count=2)
+
+    def _test_save_load_bytes(self, thread_count) -> None:
         path = self.get_file_path()
 
         state_dict_to_save = {"bytes0": [1], "bytes1": "string"}
 
-        fs_writer = FileSystemWriter(path=path)
+        fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
         state_dict_to_load = {"bytes0": [2], "bytes1": "other"}
@@ -436,7 +482,18 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    def test_switch_between_sharded_tensor_to_tensor(self) -> None:
+    def test_save_load_bytes_thread_count_1(self) -> None:
+        self._test_save_load_bytes(thread_count=1)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_save_load_bytes_thread_count_2(self) -> None:
+        self._test_save_load_bytes(thread_count=2)
+
+    def _test_switch_between_sharded_tensor_to_tensor(
+        self, thread_count
+    ) -> None:
         path = self.get_file_path()
         tensor_size = 32
 
@@ -494,7 +551,9 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     "replicated": torch.rand(tensor_size, device=self.rank),
                 }
 
-                fs_writer = FileSystemWriter(path=path)
+                fs_writer = FileSystemWriter(
+                    path=path, thread_count=thread_count
+                )
                 save_state_dict(state_dict=save_dict, storage_writer=fs_writer)
 
                 # Freaky Friday the tensors
@@ -520,6 +579,22 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                         ),
                         f"save-spec {save_spec} load-spec {load_spec}",
                     )
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_switch_between_sharded_tensor_to_tensor_thread_count_1(
+        self,
+    ) -> None:
+        self._test_switch_between_sharded_tensor_to_tensor(thread_count=1)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_switch_between_sharded_tensor_to_tensor_thread_count_2(
+        self,
+    ) -> None:
+        self._test_switch_between_sharded_tensor_to_tensor(thread_count=2)
 
 
 if __name__ == "__main__":

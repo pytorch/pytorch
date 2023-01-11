@@ -33,7 +33,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TestCase,
 )
-from torch.testing._internal.distributed.multi_threaded_pg import run_with_threaded_pg
+from torch.testing._internal.distributed.multi_threaded_pg import (
+    run_with_threaded_pg,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -63,7 +65,8 @@ TEST_SKIPS = {
     "skipIfRocm": TestSkip(78, "Test skipped for ROCm"),
     "no_peer_access": TestSkip(79, "Test skipped because no GPU peer access"),
     "generic": TestSkip(
-        86, "Test skipped at subprocess level, look at subprocess log for skip reason"
+        86,
+        "Test skipped at subprocess level, look at subprocess log for skip reason",
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
 }
@@ -107,7 +110,9 @@ def skip_if_no_gpu(func):
 def skip_if_small_worldsize(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) <= 2:
+        if (os.environ["BACKEND"] != "mpi") and int(
+            os.environ["WORLD_SIZE"]
+        ) <= 2:
             sys.exit(TEST_SKIPS["small_worldsize"].exit_code)
 
         return func(*args, **kwargs)
@@ -118,7 +123,9 @@ def skip_if_small_worldsize(func):
 def skip_if_odd_worldsize(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) % 2 == 1:
+        if (os.environ["BACKEND"] != "mpi") and int(
+            os.environ["WORLD_SIZE"]
+        ) % 2 == 1:
             sys.exit(TEST_SKIPS["odd_worldsize"].exit_code)
 
         return func(*args, **kwargs)
@@ -305,11 +312,13 @@ def requires_nccl():
         "c10d was not compiled with the NCCL backend",
     )
 
+
 def requires_ucc():
     return sandcastle_skip_if(
         not c10d.is_ucc_available(),
         "c10d was not compiled with the UCC backend",
     )
+
 
 def requires_mpi():
     return sandcastle_skip_if(
@@ -366,8 +375,14 @@ if TEST_WITH_TSAN:
     # TSAN runs much slower.
     TIMEOUT_DEFAULT = 500
 else:
-    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
-TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+    TIMEOUT_DEFAULT = int(os.getenv("DISTRIBUTED_TESTS_DEFAULT_TIMEOUT", "300"))
+TIMEOUT_OVERRIDE = {
+    "test_ddp_uneven_inputs": 400,
+    "test_load_rowwise_to_colwise_thread_count_2": 900,
+    "test_load_with_different_shard_plan_thread_count_2": 900,
+    "test_switch_between_sharded_tensor_to_tensor_thread_count_2": 900,
+    "test_read_write_shard_tensor_thread_count_2": 900,
+}
 
 
 # https://github.com/pytorch/pytorch/issues/75665
@@ -404,7 +419,9 @@ def simple_sparse_reduce_tests(rank: int, world_size: int, num_inputs: int = 1):
     number of dense dimensions. The only reduction operation we support is sum.
     """
 
-    def generate(rank: int, world_size: int, sparse_dims: int = 1, dense_dims: int = 0):
+    def generate(
+        rank: int, world_size: int, sparse_dims: int = 1, dense_dims: int = 0
+    ):
         # First sparse dimension is [0..rank].
         # Subsequent dimensions are always 0, so we know there is
         # a non-empty intersection between any two sparse tensors.
@@ -418,7 +435,8 @@ def simple_sparse_reduce_tests(rank: int, world_size: int, num_inputs: int = 1):
 
     def compute_sum(fn, world_size: int):
         return reduce(
-            lambda a, b: a + b, [fn(rank, world_size) for rank in range(world_size)]
+            lambda a, b: a + b,
+            [fn(rank, world_size) for rank in range(world_size)],
         )
 
     return [
@@ -427,7 +445,10 @@ def simple_sparse_reduce_tests(rank: int, world_size: int, num_inputs: int = 1):
                 fn(num_inputs * rank + i, num_inputs * world_size)
                 for i in range(num_inputs)
             ],
-            [compute_sum(fn, num_inputs * world_size) for i in range(num_inputs)],
+            [
+                compute_sum(fn, num_inputs * world_size)
+                for i in range(num_inputs)
+            ],
         )
         for fn in [
             partial(generate, sparse_dims=1),
@@ -465,7 +486,9 @@ def init_multigpu_helper(world_size: int, backend: str):
     if world_size > nGPUs:
         nGPUs_per_process = nGPUs // world_size
     rank_to_GPU = {
-        i: list(visible_devices[i * nGPUs_per_process : (i + 1) * nGPUs_per_process])
+        i: list(
+            visible_devices[i * nGPUs_per_process : (i + 1) * nGPUs_per_process]
+        )
         for i in range(world_size)
     }
     return rank_to_GPU
@@ -576,7 +599,12 @@ class MultiProcessTestCase(TestCase):
             process = proc(
                 target=self.__class__._run,
                 name="process " + str(rank),
-                args=(rank, self._current_test_name(), self.file_name, child_conn),
+                args=(
+                    rank,
+                    self._current_test_name(),
+                    self.file_name,
+                    child_conn,
+                ),
             )
             process.start()
             logger.info(f"Started process {rank} with pid {process.pid}")
@@ -594,7 +622,9 @@ class MultiProcessTestCase(TestCase):
     def _event_listener(parent_pipe, signal_pipe, rank: int):
         logger.info(f"Starting event listener thread for rank {rank}")
         while True:
-            ready_pipes = multiprocessing.connection.wait([parent_pipe, signal_pipe])
+            ready_pipes = multiprocessing.connection.wait(
+                [parent_pipe, signal_pipe]
+            )
 
             if parent_pipe in ready_pipes:
 
@@ -622,7 +652,9 @@ class MultiProcessTestCase(TestCase):
                 return
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(
+        cls, rank: int, test_name: str, file_name: str, parent_pipe
+    ) -> None:
         # Enable DDP + ReplicatedTensor
         from torch.nn.parallel._replicated_tensor_ddp_utils import (
             _set_ddp_with_replicated_tensor,
@@ -638,7 +670,9 @@ class MultiProcessTestCase(TestCase):
 
     def run_test(self, test_name: str, parent_pipe) -> None:
         # Start event listener thread.
-        signal_recv_pipe, signal_send_pipe = torch.multiprocessing.Pipe(duplex=False)
+        signal_recv_pipe, signal_send_pipe = torch.multiprocessing.Pipe(
+            duplex=False
+        )
         event_listener_thread = threading.Thread(
             target=MultiProcessTestCase._event_listener,
             args=(parent_pipe, signal_recv_pipe, self.rank),
@@ -729,7 +763,9 @@ class MultiProcessTestCase(TestCase):
                         print(
                             f"Process {i} terminated with exit code {p.exitcode}, terminating remaining processes."
                         )
-                        active_children = torch.multiprocessing.active_children()
+                        active_children = (
+                            torch.multiprocessing.active_children()
+                        )
                         for ac in active_children:
                             ac.terminate()
                         subprocess_error = True
@@ -770,7 +806,9 @@ class MultiProcessTestCase(TestCase):
         for i, p in enumerate(self.processes):
             if p.exitcode is None:
                 raise RuntimeError(
-                    "Process {} timed out after {} seconds".format(i, elapsed_time)
+                    "Process {} timed out after {} seconds".format(
+                        i, elapsed_time
+                    )
                 )
             self.assertNotEqual(self.TEST_ERROR_EXIT_CODE, p.exitcode)
 
@@ -796,10 +834,8 @@ class MultiProcessTestCase(TestCase):
             for i, process in errored_processes:
                 # Get error from pipe.
                 error_message = self.pid_to_pipe[process.pid].recv()
-                error += (
-                    "Process {} exited with error code {} and exception:\n{}\n".format(
-                        i, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, error_message
-                    )
+                error += "Process {} exited with error code {} and exception:\n{}\n".format(
+                    i, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, error_message
                 )
 
             raise RuntimeError(error)
@@ -861,7 +897,10 @@ def has_efa() -> bool:
 
     try:
         EFA_PROBE_RESULT = (
-            subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"]).returncode == 0
+            subprocess.run(
+                ["fi_info", "-p", "efa", "-t", "FI_EP_RDM"]
+            ).returncode
+            == 0
         )
     except FileNotFoundError:
         EFA_PROBE_RESULT = False
