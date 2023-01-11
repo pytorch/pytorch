@@ -501,10 +501,11 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 
 // TODO(jgong5): rewrite with ATEN vectorized (need to add unpack and shuffle)
 // Used by Inductor CPP codegen
-// Code from FBGEMM:
+// Code referred to FBGEMM:
 // https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#LL19C6-L19C6
 // 16 * 6 = 96 instructions
-inline void transpose_kernel_16x16(
+template<>
+inline void transpose_mxn<float, 16, 16>(
     const float* src,
     int64_t ld_src,
     float* dst,

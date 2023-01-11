@@ -69,19 +69,3 @@ void flag_to_float(const T* src, float* dst, int64_t n) {
     dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
   }
 }
-
-#if defined(CPU_CAPABILITY_AVX512)
-
-#define TILE2D_COPY_TRANSPOSE(dst, src, ld_dst, ld_src)       \
-  do {                                                        \
-    at::vec::transpose_kernel_16x16(src, ld_src, dst, ld_dst);  \
-  } while (0);
-
-#elif defined(CPU_CAPABILITY_AVX2)
-
-#define TILE2D_COPY_TRANSPOSE(dst, src, ld_dst, ld_src)       \
-  do {                                                        \
-    at::vec::transpose_kernel_8x8(src, ld_src, dst, ld_dst);    \
-  } while (0);
-
-#endif

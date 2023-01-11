@@ -454,8 +454,8 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 }
 
 // Used by Inductor CPP codegen
-// similar implementation as transpose_kernel_16x16
-inline void transpose_kernel_8x8(
+template<>
+inline void transpose_mxn<float, 8, 8>(
     const float* src,
     int64_t ld_src,
     float* dst,
