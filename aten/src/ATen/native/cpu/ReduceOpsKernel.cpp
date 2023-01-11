@@ -122,10 +122,8 @@ c10::complex<scalar_t> _logcumsumexp_minmax(c10::complex<scalar_t> x, c10::compl
     return y;
   } else if (std::isnan(xr) || (std::isnan(std::imag(x)))) {
     return x;
-  } else if (min) { // min
-    return (xr < yr) ? x : y;
-  } else { // max
-    return (xr >= yr) ? x : y;
+  } else {
+    return ((xr < yr) == min) ? x : y;  // logical xnor
   }
 }
 

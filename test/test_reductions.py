@@ -511,7 +511,7 @@ class TestReductions(TestCase):
         # and faster than ``[log(sum(exp(a[:i]))) for i in range(a.shape[0])]``
         # the for-loop above should produce similar precision as logcumsumexp (it's just slower),
         # so it can be used as the expected values to check our computation
-        
+
         # using logsumexp from scipy because by the time of writing this test code,
         # torch.logsumexp has not been implemented for complex numbers
         from scipy.special import logsumexp
