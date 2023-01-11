@@ -8,7 +8,9 @@ from .module import Module
 from ..parameter import Parameter
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Dict, ItemsView, Iterable, Iterator, Mapping, MutableMapping, Optional, overload, Sequence, Tuple, TypeVar, Union, ValuesView
+from typing import (Any, Dict, ItemsView, Iterable, Iterator, KeysView,
+                    Mapping, MutableMapping, Optional, overload, Sequence,
+                    Tuple, TypeVar, Union, ValuesView)
 
 __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList', 'ParameterDict']
 
@@ -502,18 +504,8 @@ class ModuleDict(Module, MutableMapping[str, T]):
         """
         self._modules.clear()
 
-    def pop(self, key: str) -> T:
-        r"""Remove key from the ModuleDict and return its module.
-
-        Args:
-            key (str): key to pop from the ModuleDict
-        """
-        v = self[key]
-        del self[key]
-        return v
-
     @_copy_to_script_wrapper
-    def keys(self) -> Iterable[str]:
+    def keys(self) -> KeysView[str]:
         r"""Return an iterable of the ModuleDict keys.
         """
         return self._modules.keys()
