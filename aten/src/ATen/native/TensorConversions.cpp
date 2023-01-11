@@ -508,7 +508,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
       return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout);
     case kSparseBsr:
     case kSparseBsc: {
-      auto blocksize = at::DimVector(input_.values().sizes().slice(1, 2));
+      const auto blocksize = at::DimVector(input_.values().sizes().slice(1, 2));
       return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout, blocksize);
     }
     case kMkldnn:
