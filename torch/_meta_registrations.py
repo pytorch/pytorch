@@ -213,9 +213,13 @@ def checkFloatingOrComplex(
             lambda: f"{f_name} : Low precision dtypes not supported. Got {dtype}",
         )
 
+
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def checkIsMatrix(A: Tensor, f_name: str, arg_name: str = "A"):
-    check(A.dim() >= 2, f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.")
+    check(
+        A.dim() >= 2,
+        lambda: f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.",
+    )
 
 
 def checkUplo(uplo: str):
@@ -271,7 +275,9 @@ def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten._linalg_svd.default)
-def _linalg_svd_meta(A: Tensor, full_matrices: bool = True, compute_uv: bool = True, driver: str = None):
+def _linalg_svd_meta(
+    A: Tensor, full_matrices: bool = True, compute_uv: bool = True, driver: str = None
+):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
 
