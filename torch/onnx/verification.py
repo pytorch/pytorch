@@ -1768,7 +1768,7 @@ def find_mismatch(
     Experimental. The API is subject to change.
 
     This tool helps debug the mismatch between the original PyTorch model and exported
-    ONNX model. It runs binary search on the model graph to find the minimal subgraph that
+    ONNX model. It binary searches the model graph to find the minimal subgraph that
     exhibits the mismatch.
 
     Args:
