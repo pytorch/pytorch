@@ -1,4 +1,5 @@
 """This file exports ONNX ops for opset 11."""
+from __future__ import annotations
 
 import functools
 import sys
@@ -532,6 +533,7 @@ def Delete(g: jit_utils.GraphContext, tensor_list, dim):
 
 
 @_onnx_symbolic("aten::cat")
+@symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def cat(g: jit_utils.GraphContext, tensor_list, dim):
     if symbolic_helper._is_packed_list(tensor_list):

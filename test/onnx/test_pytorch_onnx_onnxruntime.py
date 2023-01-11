@@ -12245,6 +12245,30 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = _construct_tensor_for_quantization_test((4, 4), offset=-8)
         self.run_test(model, input)
 
+    @unittest.skip(
+        "ORT fails with Validating no unexpected access using an invalid node_index on torch converted model"
+    )
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_quantized_list_of_inputs_with_cat(self):
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = torch.cat([x, x], 1)
+                x = self.dequant(x)
+                return x
+
+        model = TestModel()
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model)
+        model = torch.quantization.convert(model)
+        x = torch.randn(2, 4, 6)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_relu(self):
         class M(torch.nn.Module):
