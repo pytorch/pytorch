@@ -2,6 +2,7 @@
 
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/complex.h>
@@ -59,7 +60,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   template <typename scalar_t>                                                    \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      using vecscalar_t = vec_scalar_t<scalar_t>;                                 \
+      using vecscalar_t = at::opmath_type<scalar_t>;                              \
       map([](const Vectorized<vecscalar_t>& x) { return x.op(); },                \
           out + begin,                                                            \
           in + begin,                                                             \
@@ -139,29 +140,29 @@ static_assert(
 
 // NB: abs, cosh and sinh were temporarily disabled due to issues with Apple
 // NB: expm1 is disabled because on some configs it produces expm1(nan)=-1
-// IMPLEMENT_VML_MKL(abs, Abs)
-// IMPLEMENT_VML_MKL(acos, Acos)
-// IMPLEMENT_VML_MKL(asin, Asin)
-// IMPLEMENT_VML_MKL(atan, Atan)
-// IMPLEMENT_VML_MKL(cos, Cos)
+IMPLEMENT_VML_MKL(abs, Abs)
+IMPLEMENT_VML_MKL(acos, Acos)
+IMPLEMENT_VML_MKL(asin, Asin)
+IMPLEMENT_VML_MKL(atan, Atan)
+IMPLEMENT_VML_MKL(cos, Cos)
 // IMPLEMENT_VML_MKL(cosh, Cosh)
-// IMPLEMENT_VML_MKL(erf, Erf)
+IMPLEMENT_VML_MKL(erf, Erf)
 IMPLEMENT_VML_MKL(erfc, Erfc)
 IMPLEMENT_VML_MKL(erfinv, ErfInv)
-// IMPLEMENT_VML_MKL(exp, Exp)
+IMPLEMENT_VML_MKL(exp, Exp)
 // IMPLEMENT_VML_MKL(expm1, Expm1)
-// IMPLEMENT_VML_MKL(log, Ln)
-// IMPLEMENT_VML_MKL(log10, Log10)
-// IMPLEMENT_VML_MKL(log1p, Log1p)
-// IMPLEMENT_VML_MKL(sin, Sin)
+IMPLEMENT_VML_MKL(log, Ln)
+IMPLEMENT_VML_MKL(log10, Log10)
+IMPLEMENT_VML_MKL(log1p, Log1p)
+IMPLEMENT_VML_MKL(sin, Sin)
 // IMPLEMENT_VML_MKL(sinh, Sinh)
-// IMPLEMENT_VML_MKL(sqrt, Sqrt)
+IMPLEMENT_VML_MKL(sqrt, Sqrt)
 IMPLEMENT_VML_MKL(tan, Tan)
-// IMPLEMENT_VML_MKL(tanh, Tanh)
-// IMPLEMENT_VML_MKL(trunc, Trunc)
+IMPLEMENT_VML_MKL(tanh, Tanh)
+IMPLEMENT_VML_MKL(trunc, Trunc)
 
 #if INTEL_MKL_VERSION >= 20180406
-// IMPLEMENT_VML_MKL(log2, Log2)
+IMPLEMENT_VML_MKL(log2, Log2)
 #endif
 
 #endif
