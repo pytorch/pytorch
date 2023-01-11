@@ -1338,6 +1338,7 @@ class TestTransformers(NNTestCase):
 
     @parametrize("device", device_list)
     def test_train_with_is_causal(self, device):
+        
         # training with is_causal
         S, L, E, H = 1, 2, 2, 1
         layer = nn.TransformerEncoderLayer(
@@ -1391,15 +1392,15 @@ class TestTransformers(NNTestCase):
     def is_causal_kernels(self, kernels, device):
         def ones_tensor(*shape):
             return torch.ones(shape, device=device, dtype=torch.float32).to(device)
-        S, L, E, H = 1, 2, 2, 1
+        S, L, E, H = 1, 2, 4, 1
         qkv = ones_tensor(S, L, E)
 
         mha = nn.MultiheadAttention(E, H).to(device)
         mha.in_proj_weight = Parameter(torch.ones((E * 3, E), device=device))
         mha.out_proj.weight = Parameter(torch.ones((E, E), device=device))
+        expected = torch.ones(size=(S, L, E)).to(device) * 16
 
-        expected = torch.ones(size=(S, L, E)).to(device) * 4
-        for kernel in ['math', 'meff']:
+        for kernel in kernels:
             with torch.backends.cuda.sdp_kernel(
                 enable_math=(kernel == 'math'),
                 enable_flash=(kernel == 'flash'),
@@ -1408,9 +1409,17 @@ class TestTransformers(NNTestCase):
                 actual, _ = mha(qkv, qkv, qkv, need_weights=False, is_causal=True)
                 self.assertTrue(torch.equal(actual, expected))
 
+                if kernel != 'math':
+                    # fails if need_weights=False
+                    with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                        _ = mha(qkv, qkv, qkv, is_causal=True)
+                    # fails with embedding size not multiple of 4
+                    with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                        qkv_f, mha_f = ones_tensor(S, L, 2), nn.MultiheadAttention(2, H).to(device)
+                        _ = mha_f(qkv_f, qkv_f, qkv_f, need_weights=False, is_causal=True)
+                        torch.cuda.synchronize()
 
     @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
-    @slowTest
     def test_is_causal_gpu(self):
         device = 'cuda'
         self.is_causal_kernels(["math", "meff"], device)
