@@ -12154,9 +12154,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             ),
         ],
     )
-    @unittest.skip(
-        "ONNX Runtime 1.11 does not support quantized cat. Enable after ORT 1.12 is enabled in CI."
-    )
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
     def test_quantized_cat(self, x: torch.Tensor, y: torch.Tensor):
