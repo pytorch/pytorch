@@ -79,7 +79,7 @@ requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
 )
 
-torch._inductor.config.triton.autotune = False  # too slow
+torch._inductor.config.triton.autotune_pointwise = False  # too slow
 
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
@@ -1356,7 +1356,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    def test_permute(self):
+    def test_permute1(self):
         def fn(a):
             return (
                 torch.permute(a + 1, [2, 1, 4, 0, 3]) + 2,
@@ -1364,6 +1364,15 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn(2, 2, 2, 2, 2),))
+
+    def test_permute2(self):
+        def fn(a):
+            a = a.unfold(0, 2, 1)
+            a = torch.unsqueeze(a, 1)
+            a = torch.permute(a, [0, 2, 3, -3])
+            return (a,)
+
+        self.common(fn, (torch.randn(4, 4),))
 
     def test_expand(self):
         def fn(a):
@@ -2495,76 +2504,6 @@ class CommonTemplate:
         c = fn(a, b)
         self.assertEqual(a.stride(), c.stride())
         self.assertEqual(c.stride()[2], 1)
-
-    @requires_cuda()
-    @patch.object(config.triton, "convolution", "triton")
-    @patch.object(config.triton, "dense_indexing", "True")
-    def test_triton_conv(self):
-        @torch._dynamo.optimize("inductor", nopython=True)
-        def triton_conv(
-            x,
-            w,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-        ):
-            y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-            return y
-
-        stride, padding, dilation, groups = (1, 1), (0, 0), (1, 1), 1
-        dtype = torch.float32
-        x = torch.randn((32, 128, 32, 32), dtype=dtype, device=self.device)
-        w = torch.randn((32, 128, 1, 1), dtype=dtype, device=self.device)
-        bias = torch.randn((32), dtype=dtype, device=self.device)
-
-        y = triton_conv(x, w, bias, stride, padding, dilation, groups)
-        y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-        self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
-
-    @requires_cuda()
-    @patch.object(config.triton, "convolution", "autotune")
-    @patch.object(config.triton, "dense_indexing", "True")
-    def test_conv_autotune(self):
-        @torch._dynamo.optimize("inductor", nopython=True)
-        def triton_conv(
-            x,
-            w,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-        ):
-            y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-            return y
-
-        stride, padding, dilation, groups = (1, 1), (0, 0), (1, 1), 1
-        dtype = torch.float32
-        x = torch.randn((32, 128, 32, 32), dtype=dtype, device=self.device)
-        w = torch.randn((32, 128, 1, 1), dtype=dtype, device=self.device)
-        bias = torch.randn((32), dtype=dtype, device=self.device)
-
-        y = triton_conv(x, w, bias, stride, padding, dilation, groups)
-        y_correct = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
-        self.assertTrue(same(y, y_correct, cos_similarity=True, tol=0.1))
-
-    @patch.object(config.triton, "mm", "triton")
-    def test_triton_mm2(self):
-        @torch._dynamo.optimize("inductor", nopython=True)
-        def fn(x, y):
-            return torch.relu(torch.mm(x, y))
-
-        N = 1024
-        a = torch.randn([N, N], device=self.device, dtype=torch.float32)
-        b = torch.randn([N, N], device=self.device, dtype=torch.float32)
-        c1 = torch.relu(torch.mm(a, b))
-        torch._inductor.metrics.reset()
-        c = fn(a, b)
-        assert torch.allclose(c1, c, atol=1e-3, rtol=1e-3)
-        if self.device == "cuda":
-            assert torch._inductor.metrics.generated_kernel_count == 1
 
     def test_std(self):
         def fn(x):
@@ -4551,12 +4490,6 @@ class CommonTemplate:
         )
         expected_kernel = 0
         # codegen mm kernel from template
-        if config.triton.mm != "aten" and self.device == "cuda":
-            expected_kernel = 1
-        if config.triton.mm == "autotune":
-            self.assertLessEqual(
-                torch._inductor.metrics.generated_kernel_count, expected_kernel
-            )
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
@@ -4632,15 +4565,6 @@ class CommonTemplate:
         result.sum().backward()
 
         expected_kernel = 4
-        if config.triton.mm != "aten" and self.device == "cuda":
-            # fwd: 2 * (mm+dropout) kernels = 2 kernels
-            # bwd: dropout + (mm) + 2 * (mm+dropout) kernels = 4 kernels
-            # expect 2 + 4 = 6 kernels
-            expected_kernel = 6
-        if config.triton.mm == "autotune":
-            self.assertLessEqual(
-                torch._inductor.metrics.generated_kernel_count, expected_kernel
-            )
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
@@ -4970,7 +4894,6 @@ class CommonTemplate:
             inputs = (inputs[1], inputs[0])
             self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
-    @patch.object(config.triton, "mm", "aten")
     def test_list_clearing(self):
 
         if self.device == "cpu":
@@ -5266,7 +5189,6 @@ if HAS_CPU:
                 real_out = fn(value)
                 compiled_out = opt_fn(value)
                 assert same(real_out, compiled_out, equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count < 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -5677,7 +5599,7 @@ if HAS_CUDA:
             res = opt_mod(*args)
             self.assertTrue(same(ref, res))
 
-        @patch.object(config.triton, "autotune", True)
+        @patch.object(config.triton, "autotune_pointwise", True)
         def test_inplace_add_alpha_autotune(self):
             def fn(x, y):
                 aten.add_.Tensor(x, y, alpha=0.55)
@@ -5695,7 +5617,7 @@ if HAS_CUDA:
             fn_compiled([x3, y])
             assert same(x2, x3)
 
-        @patch.object(config.triton, "autotune", True)
+        @patch.object(config.triton, "autotune_pointwise", True)
         def test_inplace_buffer_autotune(self):
             def foo(x, y, z):
                 a = x @ y

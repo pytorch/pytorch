@@ -1167,6 +1167,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "masked.logaddexp",
         dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,

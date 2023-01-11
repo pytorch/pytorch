@@ -571,8 +571,7 @@ Tensor sparse_compressed_to_dense(
       !dtype.has_value(),
       "dtype argument is not supported by sparse_csr_to_dense");
 
-  if (auto sizes = self.sizes();
-      std::find(sizes.cbegin(), sizes.cend(), 0) != sizes.cend()) {
+  if (self.numel() == 0) {
     return at::zeros(self.sizes(), self.options().layout(kStrided));
   }
 
