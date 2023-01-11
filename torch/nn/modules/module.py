@@ -2082,8 +2082,8 @@ class Module:
 
             >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, param in self.named_parameters():
-            >>>    if name in ['bias']:
-            >>>        print(param.size())
+            >>>     if name in ['bias']:
+            >>>         print(param.size())
 
         """
         gen = self._named_members(
@@ -2133,8 +2133,8 @@ class Module:
 
             >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, buf in self.named_buffers():
-            >>>    if name in ['running_var']:
-            >>>        print(buf.size())
+            >>>     if name in ['running_var']:
+            >>>         print(buf.size())
 
         """
         gen = self._named_members(
