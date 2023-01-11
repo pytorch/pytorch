@@ -124,11 +124,17 @@ class TORCH_API Tensor: public TensorBase {
   Tensor conj() const {
     if (!this->is_complex()) {
       return *this;
-    } else {
-      if (this->is_sparse()) {
+    }
+
+    switch (this->layout()) {
+      case at::kSparse:
+      case at::kSparseCsr:
+      case at::kSparseCsc:
+      case at::kSparseBsr:
+      case at::kSparseBsc:
         return this->conj_physical();
-      }
-      return this->_conj();
+      default:
+        return this->_conj();
     }
   }
 
