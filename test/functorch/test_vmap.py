@@ -3602,8 +3602,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
-        xfail('all'),
-        xfail('any'),
         xfail('count_nonzero'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional._scaled_dot_product_attention'),  # randomness

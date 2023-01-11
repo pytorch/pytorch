@@ -4067,6 +4067,113 @@ class TestSparseMeta(TestCase):
 
 class TestSparseAny(TestCase):
 
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=False)
+    @torch.sparse.check_sparse_tensor_invariants(enable=False)
+    def test_check_sparse_tensor_invariants(self, layout):
+
+        if layout is torch.sparse_coo:
+
+            def create_invalid_tensor(check_invariants=None):
+                shape = (2, 2)
+                invalid_indices = torch.tensor([[0], [3]])  # column index is out of range
+                values = torch.tensor([1])
+                if check_invariants is None:
+                    return torch.sparse_coo_tensor(invalid_indices, values, shape)
+                else:
+                    return torch.sparse_coo_tensor(invalid_indices, values, shape, check_invariants=check_invariants)
+
+            expected_exception_message = 'size is inconsistent with indices: for dim 1, size is 2 but found index 3'
+
+        elif layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+
+            def create_invalid_tensor(check_invariants=None):
+                shape = (2, 2)
+                compressed_indices = torch.tensor([0, 0, 1])
+                invalid_plain_indices = torch.tensor([3])  # index is out of range
+                if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                    values = torch.tensor([[[1]]])
+                else:
+                    values = torch.tensor([1])
+                if check_invariants is None:
+                    return torch.sparse_compressed_tensor(compressed_indices, invalid_plain_indices, values, shape, layout=layout)
+                else:
+                    return torch.sparse_compressed_tensor(compressed_indices, invalid_plain_indices, values, shape, layout=layout,
+                                                          check_invariants=check_invariants)
+
+            if layout in {torch.sparse_csr, torch.sparse_bsr}:
+                expected_exception_message = r'`0 <= col_indices < ncols` is not satisfied.'
+            else:
+                expected_exception_message = r'`0 <= row_indices < nrows` is not satisfied.'
+
+        else:
+            raise NotImplementedError(layout)
+
+        # First, consider the case where invariant checks are disabled
+        # "globally" (read: within the context of this test method
+        # caller) as defined by check_sparse_tensor_invariants(False)
+        # decorator:
+        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Enable the invariant checks in a local context:
+        with torch.sparse.check_sparse_tensor_invariants():
+            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Leaving the local context must restore the "global" state of
+        # the invariant check feature:
+        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Since invariant checks are disabled by default, we can
+        # create an invalid sparse tensor without raising an
+        # exception:
+        r = create_invalid_tensor()
+        self.assertEqual(r.layout, layout)
+
+        # Or, when disabling the invariants check explicitly:
+        r = create_invalid_tensor(check_invariants=False)
+        self.assertEqual(r.layout, layout)
+
+        # Enabling invariant check via constructor's optional argument
+        # will raise an exception when sparse tensor invariants are
+        # violated:
+        with self.assertRaisesRegex(RuntimeError, expected_exception_message):
+            create_invalid_tensor(check_invariants=True)
+
+        # Check that the global invariant check flag has been restored
+        # after raising the exception above:
+        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Next, consider the case where invariant checks are enabled
+        # within a local context:
+        with torch.sparse.check_sparse_tensor_invariants():
+            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+            # Since invariant checks are now enabled by default, an
+            # attempt to create an invalid sparse tensor will lead to
+            # an exception:
+            with self.assertRaisesRegex(RuntimeError, expected_exception_message):
+                create_invalid_tensor()
+
+            # Similarly, when enabling the invariant checks
+            # explicitly, invalid sparse tensor construction will lead
+            # to an exception:
+            with self.assertRaisesRegex(RuntimeError, expected_exception_message):
+                create_invalid_tensor(check_invariants=True)
+
+            # However, invariants check can be disabled via
+            # constructor's optional argument so that the invalid
+            # tensor is succesfully constructed:
+            r = create_invalid_tensor(check_invariants=False)
+            self.assertEqual(r.layout, layout)
+
+            # Check that the invariant check flag has been restored
+            # when leaving the constructor:
+            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Double-check restoring the global state when leaving the
+        # local context:
+        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
     def test_generate_simple_inputs(self):
         layouts = [torch.strided, torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc]
 
