@@ -120,6 +120,53 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   EXPECT_TRUE(reader.hasRecord("key1"));
 }
 
+TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
+  std::ostringstream oss;
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 127> data1;
+
+  for (auto i: c10::irange(data1.size())) {
+    data1[i] = data1.size() - i;
+  }
+  writer.writeRecord("key1.debug_pkl", data1.data(), data1.size());
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 64> data2;
+  for (auto i: c10::irange(data2.size())) {
+    data2[i] = data2.size() - i;
+  }
+  writer.writeRecord("key2.debug_pkl", data2.data(), data2.size());
+
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 2);
+  ASSERT_EQ(written_records.count("key1.debug_pkl"), 1);
+  ASSERT_EQ(written_records.count("key2.debug_pkl"), 1);
+  writer.writeEndOfFile();
+
+  std::string the_file = oss.str();
+  std::ofstream foo("output2.zip");
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+
+  std::istringstream iss(the_file);
+
+  // read records through readers
+  PyTorchStreamReader reader(&iss);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+
+  reader.setShouldLoadDebugSymbol(false);
+  EXPECT_FALSE(reader.hasRecord("key1.debug_pkl"));
+  at::DataPtr ptr;
+  size_t size;
+  std::tie(ptr, size) = reader.getRecord("key1.debug_pkl");
+  EXPECT_EQ(size, 0);
+}
+
 } // namespace
 } // namespace serialize
 } // namespace caffe2
