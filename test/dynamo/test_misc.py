@@ -39,6 +39,15 @@ def my_custom_function(x):
     return x + 1
 
 
+class MyPickledModule(torch.nn.Module):
+    def __init__(self, z):
+        super().__init__()
+        self.z = z
+
+    def forward(self, x, y):
+        return x * x * x + y + self.z
+
+
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
@@ -2912,6 +2921,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         gm = torch.fx.symbolic_trace(optimized)
         self.assertTrue(same(gm(input), real))
 
+    def test_not_dynamic_scope(self):
+        def f(y):
+            x = 1
+
+            def g():
+                x = 2
+                return lambda: x
+
+            return y + g()()
+
+        input = torch.zeros(1)
+        real = f(input)
+        optimized = torch._dynamo.optimize("eager")(f)
+        opt = optimized(input)
+        self.assertTrue(same(opt, real))
+
     def test_inference_mode(self):
         @torch.inference_mode()
         def func(x, y):
@@ -3223,6 +3248,51 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_builder_for_class_with_metaclass(self):
+        class ExampleMeta(type):
+            pass
+
+        class MyClass(metaclass=ExampleMeta):
+            pass
+
+        def fn(x, y):
+            if isinstance(y, MyClass):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand([4, 4])
+        y = MyClass()
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    def test_torch_package_working_with_inductor_trace(self):
+        inputs = [torch.randn([2, 2]), torch.randn([2, 2])]
+
+        optimized_model = torch._dynamo.optimize(backend="inductor")(
+            MyPickledModule(torch.randn([2, 2]))
+        )
+        from torch import package
+
+        path = "/tmp/MyPickledModule.pt"
+        package_name = "MyPickledModule"
+        resource_name = "MyPickledModule.pkl"
+
+        model = MyPickledModule(torch.randn([2, 2]))
+
+        with package.PackageExporter(path) as exp:
+            exp.extern("**")
+            exp.save_pickle(package_name, resource_name, model)
+
+        imp = package.PackageImporter(path)
+        loaded_model = imp.load_pickle(package_name, resource_name)
+
+        optimized_loaded_model = torch._dynamo.optimize(backend="inductor")(
+            loaded_model
+        )
 
 
 class CustomFunc1(torch.autograd.Function):
