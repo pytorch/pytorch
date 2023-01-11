@@ -617,7 +617,6 @@ __device__ __half print_impl(const char* name, __half value) {
   return value;
 }
 
-#if __CUDACC_VER_MAJOR__ >= 11
 __device__ __bfloat print_impl(const char* name, __bfloat value) {
   printf(
       "%s = %f @ threadIdx=(%d,%d,%d), blockIdx=(%d,%d,%d)\n",
@@ -631,7 +630,6 @@ __device__ __bfloat print_impl(const char* name, __bfloat value) {
       (int)blockIdx.z);
   return value;
 }
-#endif
 
 #define print(...) print_impl(#__VA_ARGS__, (__VA_ARGS__))
 
