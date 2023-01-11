@@ -195,6 +195,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
             autograd.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> import torch.nn as nn
         >>>
         >>> class MyModel(nn.Module):

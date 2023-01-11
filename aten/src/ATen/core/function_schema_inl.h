@@ -418,6 +418,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
   }
   if (consumed_kwargs != kwargs.size()) {
     std::vector<std::string> names;
+    names.reserve(kwargs.size());
     for(const auto& k : kwargs) {
       names.emplace_back(k.first);
     }

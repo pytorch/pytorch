@@ -617,6 +617,7 @@ def export(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
+            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
@@ -674,6 +675,7 @@ def export(
             graph_with_interpreter,
             decomposition_table=decomposition_table,
             tracing_mode=tracing_mode,
+            _allow_non_fake_inputs=True,
         )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
