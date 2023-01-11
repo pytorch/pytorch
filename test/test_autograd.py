@@ -122,22 +122,36 @@ class TestAutograd(TestCase):
         with self.assertWarnsRegex(UserWarning, "Decorating classes is deprecated"):
             @torch.no_grad()
             class Foo():
-                pass
+                def __init__(self):
+                    assert not torch.is_grad_enabled()
+
+                def foo(self):
+                    # Not applied to methods
+                    assert torch.is_grad_enabled()
+
+            # Show that we can actually construct the class
+            foo = Foo()
+            foo.foo()
 
         # Decorating functions or methods is fine though
         with warnings.catch_warnings(record=True) as w:
             @torch.no_grad()
             def foo():
-                pass
+                assert not torch.is_grad_enabled()
+
+            foo()
 
             class Foo2():
                 @torch.no_grad()
                 def __init__(self):
-                    pass
+                    assert not torch.is_grad_enabled()
 
                 @torch.no_grad()
                 def foo(self):
-                    pass
+                    assert not torch.is_grad_enabled()
+
+            foo2 = Foo2()
+            foo2.foo()
 
         self.assertEqual(len(w), 0)
 

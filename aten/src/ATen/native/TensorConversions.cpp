@@ -507,7 +507,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
     // TODO: implement sparse_compressed_mask
     switch(input_.layout()) {
     case kSparseCsr: return grad.sparse_mask(input_.to_sparse()).to_sparse_csr();
-    case kSparseCsc: return grad.sparse_mask(input_.to_sparse()).to_sparse_csc();
+    case kSparseCsc: return grad.sparse_mask(input_.to_sparse().coalesce()).to_sparse_csc();
     case kSparseBsr: {
       auto blocksize = DimVector(input_.values().sizes().slice(1, 2));
       return grad.sparse_mask(input_.to_sparse().coalesce()).to_sparse_bsr(blocksize);
@@ -1766,18 +1766,42 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
   Tensor values;
   Tensor indices = at::_convert_indices_from_csr_to_coo(compressed_indices, plain_indices,
                                                         false, (layout == kSparseCsc || layout == kSparseBsc));
-  bool coalesced = true;
+  // Only CSR is trivially coalesced
+  bool coalesced = layout == kSparseCsr || self.numel() == 0 || self._nnz() == 1;
   AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "sparse_compressed_to_sparse",
     [&] { values = self.values(); },
     [&] {
       auto size = DimVector(self.sizes().slice(0, 2));
       auto blocksize = DimVector(self.values().sizes().slice(1, 2));
-      auto nnz = indices.size(1);
-      indices = indices.repeat_interleave(blocksize[0] * blocksize[1], 1)
-        .mul_(at::tensor({blocksize[0], blocksize[1]}, indices.options()).reshape({2, 1}))
-        .add_(at::stack(at::where(at::ones(blocksize, indices.options()))).repeat({1, nnz}));
+
+      const auto max_blocksize = std::max(blocksize[0], blocksize[1]);
+      const auto max_blocksize_arange = at::arange(max_blocksize, indices.options());
+      const auto blocksize_arange_0 = max_blocksize_arange.narrow(-1, 0, blocksize[0]);
+      const auto blocksize_arange_1 = max_blocksize_arange.narrow(-1, 0, blocksize[1]);
+      const auto block_coo_indices = at::stack({
+          blocksize_arange_0.unsqueeze(-1).expand({-1, blocksize[1]}),
+          blocksize_arange_1.unsqueeze(0).expand({blocksize[0], -1})
+      }).flatten(-2, -1);
+
+      indices = indices
+        // Scale indices that identify blocks to element-wise coordinates that correspond
+        // to the top-left corner of each block.
+        .mul(at::tensor(blocksize, indices.options()).unsqueeze_(-1))
+        // Now that we know top-left block coordinates, we offset them with element-wise
+        // coordinates in the block to get the result.
+        // NOTE: indices is mapped from (dim, nnz) to (dim, nnz, 1),
+        // and block_coo_indices is mapped from (dim, block_numel) to
+        // (dim, 1, block_numel), so the result has shape
+        // (dim, nnz, block_numel).
+        .unsqueeze_(-1).add(block_coo_indices.unsqueeze_(1))
+        // Squash the nnz and the block_numel dimension
+        // to produce valid nnz dimension of a COO tensor.
+        .flatten(-2, -1);
+
       values = self.values().flatten(0, 2);
-      coalesced = nnz == 1;
+
+      // BSRs not spanning across several rows produces coalesced results.
+      coalesced |= (layout == kSparseBsr && blocksize[0] == 1);
     });
   return at::native::_sparse_coo_tensor_unsafe(indices, values, self.sizes())._coalesced_(coalesced);
 }
