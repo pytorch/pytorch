@@ -213,6 +213,10 @@ def checkFloatingOrComplex(
             lambda: f"{f_name} : Low precision dtypes not supported. Got {dtype}",
         )
 
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def checkIsMatrix(A: Tensor, f_name: str, arg_name: str = "A"):
+    check(A.dim() >= 2, f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.")
+
 
 def checkUplo(uplo: str):
     uplo_uppercase = uplo.upper()
@@ -263,6 +267,36 @@ def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
 
     infos = A.new_empty(A.shape[:-2], dtype=torch.int32)
     return L, infos
+
+
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
+@register_meta(aten._linalg_svd.default)
+def _linalg_svd_meta(A: Tensor, full_matrices: bool = True, compute_uv: bool = True, driver: str = None):
+    checkIsMatrix(A, "linalg.svd")
+    checkFloatingOrComplex(A, "linalg.svd")
+
+    batch_dims = list(A.shape[:-2])
+    m = A.shape[-2]
+    n = A.shape[-1]
+    k = min(m, n)
+
+    if compute_uv:
+        U_shape = batch_dims + [m, m if full_matrices else k]
+        U = A.new_empty(U_shape)
+        U.as_strided_(U_shape, make_contiguous_strides_for(U_shape, row_major=False))
+
+        V_shape = batch_dims + [n if full_matrices else k, n]
+        V = A.new_empty(V_shape)
+        # TODO: need to distinguish cuSOLVER case? (see original code)
+        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=False))
+    else:
+        # doesn't matter
+        U = A.new_empty([0])
+        V = A.new_empty([0])
+
+    # S is always real, even when A is complex.
+    S = A.new_empty(batch_dims + [k], dtype=toRealValueType(A.dtype))
+    return U, S, V
 
 
 # From aten/src/ATen/native/ReflectionPad.cpp
