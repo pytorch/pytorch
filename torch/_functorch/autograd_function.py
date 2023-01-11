@@ -299,10 +299,6 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
     def wrap_fn(output, out_dim):
         return output if out_dim is None else _add_batch_dim(output, out_dim, current_level)
 
-    # TODO: raise better error message to the user when they don't follow the API.
-    # Should probably mimic the logic of _process_batched_inputs,
-    # but that one is hyperspecialized on error messages.
-    # https://github.com/pytorch/pytorch/issues/90224
     return wrap_outputs_maintaining_identity(
         unwrapped_output,
         unwrapped_operands,
