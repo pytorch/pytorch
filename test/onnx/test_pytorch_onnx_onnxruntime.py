@@ -12098,9 +12098,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.quantize_per_tensor(torch.randn(1, 2, 3, 4), 1, 0, torch.quint8)
         self.run_test(FlattenModel(), x)
 
-    @unittest.skip(
-        "ONNX Runtime 1.11 does not support quantized cat. Enable after ORT 1.12 is enabled in CI."
-    )
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
     def test_quantized_cat_when_concatinating_the_same_tensor(self):
