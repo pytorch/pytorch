@@ -79,7 +79,7 @@ struct AttentionKernel {
       cutlass::sizeof_bits<scalar_t>::value == 16;
   static constexpr bool kKeepOutputInRF = kSingleValueIteration;
   static constexpr bool kNeedsOutputAccumulatorBuffer =
-      !kKeepOutputInRF && !std::is_same<output_accum_t, output_t>::value;
+      !kKeepOutputInRF && !cutlass::platform::is_same<output_accum_t, output_t>::value;
 
   static_assert(kQueriesPerBlock % 32 == 0, "");
   static_assert(kKeysPerBlock % 32 == 0, "");
