@@ -1523,6 +1523,17 @@ def parse_args(args=None):
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
+        "--dynamic-ci-skips-only",
+        action="store_true",
+        help=(
+            "Run only the models that would have been skipped in CI "
+            "if dynamic-shapes, compared to running without dynamic-shapes.  "
+            "This is useful for checking if more models are now "
+            "successfully passing with dynamic shapes.  "
+            "Implies --dynamic-shapes and --ci"
+        ),
+    )
+    parser.add_argument(
         "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
     )
     parser.add_argument(
@@ -1794,6 +1805,14 @@ def run(runner, args, original_dir=None):
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
+    if args.dynamic_ci_skips_only:
+        args.dynamic_shapes = True
+        args.ci = True
+        # We only have a CI skip list for aot_eager right now.  When inductor
+        # comes online, add that skip list too.
+        assert (
+            args.backend == "aot_eager"
+        ), "--dynamic-ci-skips only works with aot_eager backend at the moment"
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
@@ -1802,13 +1821,20 @@ def run(runner, args, original_dir=None):
         args.quiet = True
         args.repeat = 2
         if args.backend == "aot_eager":
-            args.exclude = (
-                CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
-                if args.training and args.dynamic_shapes
-                else CI_SKIP_AOT_EAGER_TRAINING
-                if args.training
-                else CI_SKIP_AOT_EAGER_INFERENCE
-            )
+            if args.dynamic_ci_skips_only:
+                assert args.training and args.dynamic_shapes
+                args.filter = list(
+                    set(CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING)
+                    - set(CI_SKIP_AOT_EAGER_TRAINING)
+                )
+            else:
+                args.exclude = (
+                    CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
+                    if args.training and args.dynamic_shapes
+                    else CI_SKIP_AOT_EAGER_TRAINING
+                    if args.training
+                    else CI_SKIP_AOT_EAGER_INFERENCE
+                )
         elif args.inductor:
             args.exclude = (
                 CI_SKIP_INDUCTOR_TRAINING
