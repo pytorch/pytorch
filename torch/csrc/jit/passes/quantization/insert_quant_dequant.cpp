@@ -522,8 +522,8 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
     Node* matched_quantize = match.nodes_map.at(pattern_quant);
     Node* matched_choose_qparam = match.nodes_map.at(pattern_choose_qparam);
     if (matched_dequantize->output()->uses().size() > 1) {
-      nodes_to_rewrite.emplace_back(std::make_tuple(
-          matched_choose_qparam, matched_quantize, matched_dequantize));
+      nodes_to_rewrite.emplace_back(
+          matched_choose_qparam, matched_quantize, matched_dequantize);
     }
   }
   for (const auto& nodes : nodes_to_rewrite) {
@@ -1077,12 +1077,11 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
     // get compute_dtype for dynamic quantization
     if (observer_module.hasattr("is_dynamic") &&
         observer_module.attr("is_dynamic").toBool()) {
-      qparams.push_back(
-          std::make_pair(kScalarType, observer_module.attr("dtype")));
+      qparams.emplace_back(kScalarType, observer_module.attr("dtype"));
     }
-    return std::make_tuple(qscheme, qparams);
+    return std::make_tuple(qscheme, std::move(qparams));
   } else if (scalar_type == at::ScalarType::Half) {
-    return std::make_tuple(qscheme, qparams);
+    return std::make_tuple(qscheme, std::move(qparams));
   }
   auto calculate_qparams = observer_module.get_method("calculate_qparams");
   IValue result = calculate_qparams(std::vector<IValue>());
@@ -1099,16 +1098,15 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   qscheme = observer_module.attr("qscheme").toQScheme();
   if (isPerChannel(qscheme)) {
     auto axis = observer_module.attr("ch_axis");
-    qparams.push_back(std::make_pair("_scale", scale));
-    qparams.push_back(std::make_pair("_zero_point", zero_point));
-    qparams.push_back(std::make_pair("_axis", axis.toInt()));
+    qparams.emplace_back("_scale", scale);
+    qparams.emplace_back("_zero_point", zero_point);
+    qparams.emplace_back("_axis", axis.toInt());
   } else {
-    qparams.push_back(std::make_pair("_scale", scale.item<double>()));
-    qparams.push_back(
-        std::make_pair("_zero_point", zero_point.item<int64_t>()));
+    qparams.emplace_back("_scale", scale.item<double>());
+    qparams.emplace_back("_zero_point", zero_point.item<int64_t>());
   }
-  qparams.push_back(std::make_pair(kScalarType, scalar_type));
-  return std::make_tuple(qscheme, qparams);
+  qparams.emplace_back(kScalarType, scalar_type);
+  return std::make_tuple(qscheme, std::move(qparams));
 }
 
 ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
@@ -1137,7 +1135,7 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
           m = getInvokedModuleOpt(module, n, graph->inputs()[0]);
         }
         if (m) {
-          invoked_methods.push_back({*m, module_method_name});
+          invoked_methods.emplace_back(*m, module_method_name);
         }
       }
 
