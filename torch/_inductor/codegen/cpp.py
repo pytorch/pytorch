@@ -298,11 +298,11 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
-    
+
     @staticmethod
     def tan(a):
         return f"{a}.tan()"
-        
+
     @staticmethod
     def tanh(a):
         vec_one = f"decltype({a})(1)"
@@ -446,12 +446,11 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def expm1(x):
         return f"std::expm1({x})"
-    
+
     @staticmethod
     def tan(x):
-        print("PR std::tan")
         return f"std::tan({x})"
-        
+
     @staticmethod
     def tanh(x):
         return f"std::tanh({x})"
