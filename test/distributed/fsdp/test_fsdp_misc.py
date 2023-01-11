@@ -274,9 +274,12 @@ class TestFSDPMisc(FSDPTest):
                 return self.lin(self.seq(x))
 
         model = MyModel()
+        # Choose a wrapping policy such that there are (1) nested FSDP
+        # instances and (2) the parent FSDP instance has managed parameters
+        auto_wrap_policy = ModuleWrapPolicy({nn.Sequential})
         fsdp_model = FSDP(
             model,
-            auto_wrap_policy=always_wrap_policy,  # ensure nested FSDP
+            auto_wrap_policy=auto_wrap_policy,
             cpu_offload=CPUOffload(offload_params=True),
             device_id=torch.cuda.current_device(),
             use_orig_params=use_orig_params,
