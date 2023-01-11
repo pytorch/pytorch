@@ -349,11 +349,14 @@ class TestVmapAPI(TestCase):
     def test_out_dims_normal_tensor(self):
 
         def foo(x):
-            return torch.zeros(3)
+            return torch.arange(3)
 
         tensor = torch.randn(2, 3)
-        vmap(foo)(tensor)
-        vmap(foo, out_dims=None)(tensor)
+        result = vmap(foo)(tensor)
+        self.assertEqual(result.shape, [2, 3])
+
+        result = vmap(foo, out_dims=None)(tensor)
+        self.assertEqual(result, torch.arange(3))
 
 
     def test_pytree_returns(self):
