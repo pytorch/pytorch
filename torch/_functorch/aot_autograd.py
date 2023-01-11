@@ -28,6 +28,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
+from torch._guards import TracingContext, DuplicateInputs
 
 log = logging.getLogger(__name__)
 
@@ -352,7 +353,7 @@ def run_functionalized_fw_and_collect_metadata(f):
                 #    _x_updated_metadata = CompiledFunction.fw_metadata.metadata_mutation_input_info[0]
                 #    x.as_strided_(_x_updated_metadata.size(), _x_updated_metadata.stride(), _x_updated_metadata.storage_offset())
                 #    return out
-                if StorageWeakRef(arg._storage()) == StorageWeakRef(new_arg._storage()):
+                if StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(new_arg.untyped_storage()):
                     # We can use the storage aliasing of the inputs and updated inputs
                     # to detect when an input was actually updated, or just inplace-viewed.
                     collect_mutated_input_info.append(MutationType.metadata_only)
@@ -428,8 +429,10 @@ def run_functionalized_fw_and_collect_metadata(f):
             # This will be more complicated when you have multiple _base tensors aliasing the same
             # underlying storage, when we eventually handle that.
             # We'll need to ensure that we generate the view off of the right base.
-            inp_storage_refs = {
-                StorageWeakRef(inpt._storage()): idx for idx, inpt in enumerate(flat_f_args) if isinstance(inpt, torch.Tensor)}
+            inp_storage_refs = {}
+            for idx, inpt in enumerate(flat_f_args):
+                if isinstance(inpt, torch.Tensor):
+                    inp_storage_refs[StorageWeakRef(inpt.untyped_storage())] = idx
             inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, torch.Tensor)}
             inp_storage_refs_set = set(inp_storage_refs)
 
@@ -452,8 +455,8 @@ def run_functionalized_fw_and_collect_metadata(f):
                 # Note: When detecting input/output aliasing, we NEED to do it using the outer FunctionalTensorWrapper objects.
                 # In the case where we mutate an input *and* return a view of it, the outer wrappers will still alias,
                 # but the inner tensors no longer alias.
-                if isinstance(o, torch.Tensor) and StorageWeakRef(o._storage()) in inp_storage_refs:
-                    aliased_inp_idx = inp_storage_refs[StorageWeakRef(o._storage())]
+                if isinstance(o, torch.Tensor) and StorageWeakRef(o.untyped_storage()) in inp_storage_refs:
+                    aliased_inp_idx = inp_storage_refs[StorageWeakRef(o.untyped_storage())]
                     is_exact_input = id(o) in inp_tensor_ids
                     aliases_intermediate_and_not_input = False
                     aliased_out_idx[o] = (
@@ -962,6 +965,13 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
+def assert_functional_graph(fx_g: torch.fx.Graph):
+    for n in fx_g.nodes:
+        if isinstance(n.target, torch._ops.OpOverload):
+            assert not n.target._schema.is_mutable, \
+                f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+
+
 @contextmanager
 def disable_autocast_manager():
     guard = torch._C._DisableAutocast()
@@ -1063,7 +1073,7 @@ def merge_view_inputs(
     other_args = []
     for i, inpt in enumerate(fwd_inputs):
         if isinstance(inpt, Tensor):
-            storage_ref = StorageWeakRef(inpt._storage())
+            storage_ref = StorageWeakRef(inpt.untyped_storage())
             storage_ref_to_idx[storage_ref].append(i)
         else:
             other_args.append(inpt)
@@ -1110,7 +1120,7 @@ def merge_view_inputs(
             if len(non_none_bases) == 0:
                 # Case where none of the aliases require gradients
                 example_idx = aliased_input_indices[0]
-                synthetic_base = torch.Tensor(fwd_inputs[example_idx]._storage())
+                synthetic_base = torch.Tensor(fwd_inputs[example_idx].untyped_storage())
             else:
                 # Case where all of the aliases require gradients, and have the same _base.
                 synthetic_base = non_none_bases[0]
@@ -1264,7 +1274,7 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
                 flat_fn
             )(*flat_args)
     except RuntimeError as e:
-        logging.warning(
+        log.warning(
             "Failed to collect metadata on function, produced code may be suboptimal.  "
             "Known situations this can occur are inference mode only compilation involving "
             "resize_ or prims (!schema.hasAnyAliasInfo() INTERNAL ASSERT FAILED); "
@@ -1360,6 +1370,16 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
         return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
 
     deduped_flat_args = remove_dupe_args(flat_args)
+
+    tracing_context = TracingContext.get()
+    if tracing_context:
+        # TODO(voz): This structure is 1:1, we could consider an alternate structure like
+        # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
+        # which feels like needless complexity for a tiny bit of efficiency at this point.
+        for dupe_arg_pos, kept_pos in add_dupe_map.items():
+            # Edge case, only happens for identity
+            if dupe_arg_pos != kept_pos:
+                tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_pos, dupe_arg_pos))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
@@ -1499,6 +1519,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 *joint_inputs
             )
 
+        # There should be *NO* mutating ops in the graph at this point.
+        assert_functional_graph(fx_g.graph)
         # Redudant with the check above, but worth having in case tracing introduced
         # a fake tensor. Unlikely.
         # See Note: [Fake Modules and AOTAutograd]
@@ -2349,6 +2371,7 @@ def aot_module_simplified(
     # Just for convenience
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
+    forward.named_buffers = mod.named_buffers
 
     return forward
 

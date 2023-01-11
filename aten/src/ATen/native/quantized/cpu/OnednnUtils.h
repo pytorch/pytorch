@@ -91,26 +91,40 @@ struct LinearPrimitiveCache : PrimitiveCache {
 struct ConvPrimitiveCache : PrimitiveCache {
   ConvPrimitiveCache() {}
 
-  ConvPrimitiveCache(
-      const PrimitiveCacheKey& key,
-      const ConvParams& params,
-      const ideep::tensor& bias) {
+  ConvPrimitiveCache(const PrimitiveCacheKey& key,
+                     const ConvDesc& conv_desc,
+                     const ideep::tensor& bias,
+                     const ideep::attr_t bias_attr) {
     this->key = key;
-    this->params = params;
-    if (!bias.is_empty()) {
-      this->expected_bias =
-          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
-    }
+    this->primitive_desc = conv_desc;
+    this->primitive = Conv(this->primitive_desc);
+    // Construct tensor of input zero point
+    ideep::tensor::desc input_zp_desc = {{1}, ideep::data_type::s32, {1}};
+    this->input_zp_tensor.init(input_zp_desc, ideep::engine::cpu_engine());
+    auto zp_data_ptr = reinterpret_cast<int32_t *>(this->input_zp_tensor.get_data_handle());
+    zp_data_ptr[0] = std::get<InputZeroPoint>(key);
+    // Construct expected bias
+    this->expected_bias = bias.reorder_if_differ_in(conv_desc.bias_desc(), bias_attr);
   }
 
+  ConvDesc primitive_desc;
+  Conv primitive;
+  ideep::tensor input_zp_tensor;
   ideep::tensor expected_bias;
-  ConvParams params;
 
-  ConvParams& get_params() {
-    return params;
+  inline ConvDesc& get_primitive_desc() {
+    return primitive_desc;
   }
 
-  ideep::tensor& get_bias() {
+  inline Conv& get_primitive() {
+    return primitive;
+  }
+
+  inline ideep::tensor& get_src_zp_tensor() {
+    return input_zp_tensor;
+  }
+
+  inline ideep::tensor& get_bias() {
     return expected_bias;
   }
 };
@@ -118,26 +132,37 @@ struct ConvPrimitiveCache : PrimitiveCache {
 struct DeconvPrimitiveCache : PrimitiveCache {
   DeconvPrimitiveCache() {}
 
-  DeconvPrimitiveCache(
-      const PrimitiveCacheKey& key,
-      const DeconvParams& params,
-      const ideep::tensor& bias) {
+  DeconvPrimitiveCache(const PrimitiveCacheKey& key,
+                       const DeconvDesc& deconv_desc,
+                       const ideep::tensor& bias,
+                       const ideep::attr_t bias_attr,
+                       const ideep::tensor& input_zero_point) {
     this->key = key;
-    this->params = params;
-    if (!bias.is_empty()) {
-      this->expected_bias =
-          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
-    }
+    this->primitive_desc = deconv_desc;
+    this->primitive = Deconv(this->primitive_desc);
+    this->input_zp_tensor = std::move(input_zero_point);
+    // Construct expected bias
+    this->expected_bias = bias.reorder_if_differ_in(deconv_desc.bias_desc(), bias_attr);
   }
 
-  DeconvParams params;
+  DeconvDesc primitive_desc;
+  Deconv primitive;
+  ideep::tensor input_zp_tensor;
   ideep::tensor expected_bias;
 
-  DeconvParams& get_params() {
-    return params;
+  inline DeconvDesc& get_primitive_desc() {
+    return primitive_desc;
   }
 
-  ideep::tensor& get_bias() {
+  inline Deconv& get_primitive() {
+    return primitive;
+  }
+
+  inline ideep::tensor& get_src_zp_tensor() {
+    return input_zp_tensor;
+  }
+
+  inline ideep::tensor& get_bias() {
     return expected_bias;
   }
 };
@@ -146,6 +171,7 @@ enum PostOps {
   NoPostOp,
   Relu,
   LeakyRelu,
+  Tanh,
 };
 
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
@@ -182,6 +208,11 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
       double output_scale,
       int64_t output_zero_point,
       double negative_slope);
+
+  at::Tensor apply_tanh(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point);
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 

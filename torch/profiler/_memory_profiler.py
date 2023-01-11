@@ -32,6 +32,7 @@ from torch.profiler import _utils
 
 TensorAndID = Tuple["TensorKey", int]
 
+log = logging.getLogger(__name__)
 
 class Category(enum.Enum):
     INPUT = enum.auto()
@@ -348,7 +349,7 @@ class SizeMap:
                     # the core PyTorch codebase.
                     if prior_size != new_size:
                         delta = f"{prior_size} vs. {new_size}"
-                        logging.warn(f"Mismatch between allocation and free: {delta}")
+                        log.warn(f"Mismatch between allocation and free: {delta}")
 
         self._values.update(allocations)
 
