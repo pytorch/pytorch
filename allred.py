@@ -35,7 +35,7 @@ if __name__ == '__main__':
     correct_out = matmul_cat_col(*inputs, all_reduce=eager_all_reduce)
 
     compiled_matmul_cat_col = compile(
-        functools.partial(matmul_cat_col, all_reduce=torch.ops.c10d.traceable_allreduce),
+        functools.partial(matmul_cat_col, all_reduce=torch.ops.aten.allreduce),
         inputs
     )
     inductor_out = compiled_matmul_cat_col(*inputs)
