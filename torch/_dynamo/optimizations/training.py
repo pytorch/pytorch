@@ -363,6 +363,14 @@ def cudagraphs(model, inputs):
 
 aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
 
+aot_torchxla_trivial = aot_autograd(
+    fw_compiler=BACKENDS["torchxla_trivial"],
+)
+
+aot_torchxla_trace_once = aot_autograd(
+    fw_compiler=BACKENDS["torchxla_trace_once"],
+)
+
 
 def create_aot_backends():
     """
@@ -399,3 +407,6 @@ def create_aot_backends():
     # aot_inductor_debug just replaces the inductor compiler with nop to help
     # isolate inductor vs aot_eager errors
     BACKENDS["aot_inductor_debug"] = aot_inductor_debug
+
+    BACKENDS["aot_torchxla_trivial"] = aot_torchxla_trivial
+    BACKENDS["aot_torchxla_trace_once"] = aot_torchxla_trace_once

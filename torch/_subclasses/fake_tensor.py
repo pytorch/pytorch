@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 from weakref import ReferenceType
 
 import torch
+from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch._subclasses.meta_utils import MetaConverter
@@ -215,7 +216,7 @@ class FakeTensorConverter(object):
         shape_env=None,
         ignore_subclass=False,
         *,
-        sname=None,
+        source=None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -248,7 +249,7 @@ class FakeTensorConverter(object):
             shape_env=shape_env,
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
-            sname=sname,
+            source=source,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -284,7 +285,7 @@ class FakeTensorConverter(object):
         make_constant=False,
         shape_env=None,
         ignore_subclass=False,
-        sname=None,
+        source=None,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -292,7 +293,7 @@ class FakeTensorConverter(object):
             make_constant,
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
-            sname=sname,
+            source=source,
         )
 
 
@@ -634,6 +635,13 @@ class FakeTensor(torch.Tensor):
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
         assert fake_mode is not None
+
+        # if we've hit this instead of the mode, then a higher pri mode must
+        # have returned NotImplemented. Redispatching will cause an infinite
+        # loop but one of the other args may be a supported subclass
+        if hasattr(fake_mode, "tracking") and fake_mode.tracking.on_stack:
+            return NotImplemented
+
         with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
@@ -1058,18 +1066,18 @@ class FakeTensorMode(TorchDispatchMode):
         tensor,
         static_shapes=False,
         ignore_subclass=False,
-        sname: Optional[str] = None,
+        source: Optional[Source] = None,
     ):
         if static_shapes:
             return self.fake_tensor_converter(
-                self, tensor, ignore_subclass=ignore_subclass, sname=sname
+                self, tensor, ignore_subclass=ignore_subclass, source=source
             )
         return self.fake_tensor_converter(
             self,
             tensor,
             shape_env=self.shape_env,
             ignore_subclass=ignore_subclass,
-            sname=sname,
+            source=source,
         )
 
 
@@ -1158,5 +1166,5 @@ class FakeCopyMode(TorchFunctionMode):
             memo[id(tensor)] = out
             return out
         else:
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)
