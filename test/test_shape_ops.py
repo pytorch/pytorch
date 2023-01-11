@@ -406,6 +406,19 @@ class TestShapeOps(TestCase):
             out_t = make_from_data([[3, 2, 1], [6, 5, 4]])
             yield in_t, dims, out_t
 
+            # N3HW case (images)
+            if device == "cpu" and dtype != torch.bfloat16:
+                in_t = make_from_size((2, 3, 8, 9))
+                np_in_t = in_t.numpy()
+
+                np_out_t = np_in_t[:, :, :, ::-1].copy()
+                out_t = torch.from_numpy(np_out_t)
+                yield in_t, 3, out_t
+
+                np_out_t = np_in_t[:, :, ::-1, :].copy()
+                out_t = torch.from_numpy(np_out_t)
+                yield in_t, 2, out_t
+
             # Noops (edge cases)
 
             # Size 0
