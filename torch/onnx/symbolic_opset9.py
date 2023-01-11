@@ -282,6 +282,7 @@ __all__ = [
     "wrap_logical_op_with_negation",
     "zeros_like",
     "zeros",
+    "zero",
 ]
 
 
@@ -3452,7 +3453,7 @@ def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_co
 
 @_onnx_symbolic("aten::_cast_Byte")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3463,7 +3464,7 @@ def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Char")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3474,7 +3475,7 @@ def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Short")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3485,7 +3486,7 @@ def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Int")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3496,7 +3497,7 @@ def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Long")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3507,7 +3508,7 @@ def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Half")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3518,7 +3519,7 @@ def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Float")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3529,7 +3530,7 @@ def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Double")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3540,7 +3541,7 @@ def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Bool")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3687,6 +3688,13 @@ def new_zeros(
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
     return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
+@_onnx_symbolic("aten::zero")
+@_beartype.beartype
+def zero(g: jit_utils.GraphContext, self):
+    self_dtype = symbolic_helper._try_get_scalar_type(self)
+    return zeros_like(g, self, self_dtype)
 
 
 @_onnx_symbolic("aten::ones")
