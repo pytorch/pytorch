@@ -629,7 +629,12 @@ class BuiltinVariable(VariableTracker):
         return variables.ConstantVariable(val)
 
     def call_super(self, tx, a, b):
-        return variables.SuperVariable(a, b, source=SuperSource(a.source, b.source))
+        source = (
+            None
+            if a.source is None or b.source is None
+            else SuperSource(a.source, b.source)
+        )
+        return variables.SuperVariable(a, b, source=source)
 
     def call_next(self, tx, arg):
         if isinstance(arg, variables.ListIteratorVariable):

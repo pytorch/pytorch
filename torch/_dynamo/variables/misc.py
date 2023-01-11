@@ -68,7 +68,7 @@ class SuperVariable(VariableTracker):
             self, args, kwargs.values(), self.objvar, self.typevar
         )
         inner_fn = self.const_getattr(self, name)
-        source = AttrSource(self.source, name)
+        source = None if self.source is None else AttrSource(self.source, name)
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
         elif isinstance(inner_fn, types.FunctionType):
