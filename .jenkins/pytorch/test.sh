@@ -302,9 +302,19 @@ test_inductor_benchmark_perf() {
   # Check training with --amp
   # Not checking accuracy for perf test for now
   # shellcheck disable=SC2086
-  python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
-    --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+  if [[ "$1" == *smoketest* ]]; then
+    python benchmarks/dynamo/torchbench.py --performance --backend inductor --float16 --training \
+      --batch-size-file $(realpath benchmarks/dynamo/torchbench_models_list.txt) --only hf_Bert
+  else
+    python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
+      --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+  fi
 }
+
+test_inductor_smoketest_perf(){
+  test_inductor_benchmark_perf smoketest
+}
+
 test_inductor_huggingface() {
   test_inductor_benchmark huggingface
 }
