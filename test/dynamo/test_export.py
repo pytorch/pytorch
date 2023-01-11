@@ -1426,11 +1426,13 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.linear = torch.nn.Linear(3, 3)
 
             def forward(self, pred, x):
+                y = x + x
+
                 def true_fn(val):
-                    return self.linear(val) * torch.tensor(2)
+                    return self.linear(val) * (x + y)
 
                 def false_fn(val):
-                    return self.linear(val) * torch.tensor(-1)
+                    return val * (y - x)
 
                 return cond(pred, true_fn, false_fn, [x])
 

@@ -1,3 +1,4 @@
+import inspect
 import logging
 
 import math
@@ -765,7 +766,11 @@ class TorchPyOperator(VariableTracker):
                 state = tx.copy_graphstate()
 
                 guards = state.output.guards
-                nn_modules = state.output.nn_modules
+                # Create attributes to store closure variables.
+                # See compiling and calling convention for closure variables in the implementation of InliningInstructionTranslator.LOAD_REF
+                closure_values = [(tx.symbolic_locals[item.name], list(tx.symbolic_locals.keys()).index(item.name)) for item in args[ix].closure.items]
+                closure_vars = {f"closure_{i}": v for (v, i) in closure_values if isinstance(v, TensorVariable)}
+                nn_modules = {**closure_vars, **state.output.nn_modules}
 
                 # Nub out bits of state that we don't require to be
                 # equal

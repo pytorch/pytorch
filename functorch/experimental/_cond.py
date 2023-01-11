@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import inspect
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -15,6 +16,7 @@ from torch.fx.experimental.proxy_tensor import (
     make_fx,
     track_tensor_tree,
 )
+from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
@@ -108,10 +110,34 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 def cond_dense(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert (mode is None), "Mode should never be enabled for CPU key"
-    if pred:
-        return true_fn(*operands)
+    # Determine which fn to call based on pred.
+    fn = true_fn if pred else false_fn
+    if isinstance(fn, GraphModule):
+        # It is possible that fn was defined in the current scope (i.e. scope of this call)
+        # and as such, it captured variables of the current scope in their closures.
+        # We need to look up the values of these variables and set them in its closure environment.
+        # Python does this automatically for functions, but here, fn is a graph module.
+        # When compiling, we expect captured variables of fn to be in special attributes of the graph module.
+        # By convention, fn.closure_{i} refers to the ith local of the scope containing fn.
+        current_frameinfo = next(frameinfo for frameinfo in inspect.stack() if frameinfo.function == "forward")
+        # NOTE: For indexing of locals to line up, we must filter out artificial local variables
+        # such as those created after compilation to handle flattening of inputs.
+        # TODO: This is an ugly hack and needs a more stable fix.
+        current_locals = [v for k, v in current_frameinfo.frame.f_locals.items() if not k.startswith("orig_arg_")]
+        saved_values = {}
+        for i, v in enumerate(current_locals):
+            closure_var = f"closure_{i}"
+            # We expect that the closure variables exist as attributes on fn after compilation, but with abstract values.
+            # We update them with concrete values at run time and restore the abstract values after calling.
+            if closure_var in fn.__dict__:
+                saved_values[closure_var] = getattr(fn, closure_var)
+                setattr(fn, closure_var, v)
+        result = fn(*operands)
+        for closure_var, v in saved_values.items():
+            setattr(fn, closure_var, v)
     else:
-        return false_fn(*operands)
+        result = fn(*operands)
+    return result
 
 
 @cond.py_impl(DispatchKey.AutogradCPU)

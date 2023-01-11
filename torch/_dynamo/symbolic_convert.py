@@ -1,4 +1,5 @@
 import collections
+import copy
 import dataclasses
 import dis
 import functools
@@ -18,6 +19,7 @@ from unittest.mock import patch
 
 import torch
 from torch._guards import Checkpointable
+from torch.fx import Proxy
 
 from . import (
     allowed_functions,
@@ -79,6 +81,8 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import DynamicShapeVariable, TensorVariable
+from torch._dynamo.variables.tensor import TensorVariable
+
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
@@ -1916,7 +1920,25 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if inst.argval in self.closure_cells:
             cell = self.closure_cells[inst.argval]
             if isinstance(cell, ClosureVariable):
-                self.push(self.output.root_tx.symbolic_locals[cell.name])
+                # Look up the value of the closure variable originally named cell.name
+                orig_var = self.output.root_tx.symbolic_locals[cell.name]
+                # Because closure variables might be renamed, we need an invariant naming convention.
+                # By convention we refer to the local in the original scope by index rather than by name.
+                i = list(self.output.root_tx.symbolic_locals.keys()).index(cell.name)
+                if isinstance(orig_var, TensorVariable):
+                    # Emit an instruction to look up the value of the closure variable in a self attribute.
+                    # NOTE: This requires the caller to set that value in that attribute at call time.
+                    node = self.output.create_node("get_attr", f"closure_{i}", (), {})
+                    # We push the original value but with the name of the node just created.
+                    # TODO: There is probably a better way to do this than copy / update.
+                    new_node = copy.copy(orig_var.proxy.node)
+                    new_node.name = node.name
+                    new_proxy = Proxy(new_node, orig_var.proxy.tracer)
+                    new_var = copy.copy(orig_var)
+                    new_var.proxy = new_proxy
+                    self.push(new_var)
+                else:
+                    self.push(orig_var)
             else:
                 self.push(self.output.side_effects.load_cell(cell))
         else:
