@@ -34,7 +34,7 @@ class Node(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def next_functions(self) -> Tuple[Tuple[Any, int], ...]:
+    def next_functions(self) -> Tuple[Tuple['Node', int], ...]:
         ...
 
     @abc.abstractmethod
@@ -91,10 +91,10 @@ class Node(abc.ABC):
         The hook will be called every time a gradient with respect to the
         Node is computed. The hook should have the following signature::
 
-            hook(grad_inputs: Tuple[Tensor]) -> Tuple[Tensor] or None
+            hook(grad_outputs: Tuple[Tensor]) -> Tuple[Tensor] or None
 
         The hook should not modify its argument, but it can optionally return
-        a new gradient which will be used in place of :attr:`grad_inputs`.
+        a new gradient which will be used in place of :attr:`grad_outputs`.
 
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.
