@@ -52,7 +52,7 @@ static inline bool can_use_expanded_index_path(
   }
 
   const auto st = self.scalar_type();
-  if (!(c10::isFloatingType(st) || st == ScalarType::Half)) {
+  if (!(c10::isFloatingType(st)) || st == ScalarType::Half) {
     return false;
   }
 
