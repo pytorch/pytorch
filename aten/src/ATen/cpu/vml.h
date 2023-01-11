@@ -2,6 +2,7 @@
 
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/complex.h>
@@ -55,17 +56,12 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
 
 // NB: We ignore numerical errors by convention and leave them to the user
 
-#define IMPLEMENT_VML(op)                                                         \
-  template <typename scalar_t>                                                    \
-  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      using vecscalar_t = vec_scalar_t<scalar_t>;                                 \
-      map([](const Vectorized<vecscalar_t>& x) { return x.op(); },                \
-          out + begin,                                                            \
-          in + begin,                                                             \
-          end - begin);                                                           \
-    });                                                                           \
-  }
+#define IMPLEMENT_VML(op)                                               \
+  template <typename scalar_t>                                          \
+  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
+    using vec_t = Vectorized<vec_scalar_t<scalar_t>>;                   \
+    vec::map([](vec_t x) { return x.op(); }, out, in, size);            \
+  }                                                                     \
 
 IMPLEMENT_VML(abs)
 IMPLEMENT_VML(acos)
@@ -101,15 +97,27 @@ IMPLEMENT_VML(lgamma)
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
+class MklThreadGuard {
+  int old_threads_;
+public:
+  MklThreadGuard(int num_threads):
+    old_threads_(mkl_set_num_threads_local(num_threads)) {
+  }
+  ~MklThreadGuard(){
+    mkl_set_num_threads_local(old_threads_);
+  }
+}
+
 // NB: LP64 MKL is the most commonly used and thus we assume it here. That means
 // we need to expect MKL_INT to be of type int, which implies int32_t in most
 // cases.
 static_assert(
     std::is_same<MKL_INT, int32_t>::value,
     "MKL_INT is assumed to be int32_t");
-#define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                    \
+#define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                \
   template <>                                                           \
-  inline void v##op(type * out, const type * in, int64_t size) {          \
+  inline void v##op(type * out, const type * in, int64_t size) {        \
+    MklThreadGuard guard(1);                                            \
     int64_t max_mkl_ind = std::numeric_limits<MKL_INT>::max();          \
     if (size <= static_cast<int64_t>(max_mkl_ind)) {                    \
       vm##mkltype##mklop(                                               \
