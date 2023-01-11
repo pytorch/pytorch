@@ -9,7 +9,7 @@ from ..parameter import Parameter
 from torch._jit_internal import _copy_to_script_wrapper
 
 from typing import (Any, Dict, ItemsView, Iterable, Iterator, KeysView,
-                    Mapping, MutableMapping, Optional, overload, Sequence,
+                    Mapping, Optional, overload, Sequence,
                     Tuple, TypeVar, Union, ValuesView)
 
 __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList', 'ParameterDict']
@@ -425,8 +425,9 @@ class ModuleList(Module, Sequence[T]):
 
     # remove forward alltogether to fallback on Module's _forward_unimplemented
 
-
-class ModuleDict(Module, MutableMapping[str, T]):
+# `Mapping` but not a `MutableMapping` since as currently implemented, the signatures
+# of the mutable methods are incompatible, e.g. `update` acts very differently.
+class ModuleDict(Module, Mapping[str, T]):
     r"""Holds submodules in a dictionary.
 
     :class:`~torch.nn.ModuleDict` can be indexed like a regular Python dictionary,
@@ -503,6 +504,15 @@ class ModuleDict(Module, MutableMapping[str, T]):
         """Remove all items from the ModuleDict.
         """
         self._modules.clear()
+
+    def pop(self, key: str) -> T:
+        r"""Remove key from the ModuleDict and return its module.
+        Args:
+            key (str): key to pop from the ModuleDict
+        """
+        v = self[key]
+        del self[key]
+        return v
 
     @_copy_to_script_wrapper
     def keys(self) -> KeysView[str]:
