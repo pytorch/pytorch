@@ -143,8 +143,11 @@ def _conv_add_extra_inputs_getter_left(pattern):
 
 def _fuse_conv_bn_add_left(is_qat, add, bn_conv, _):
     bn, conv = bn_conv
-    fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
-    return nni.ConvAdd2d(add, fused_conv)
+    if is_qat:
+        raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn, add)))
+    else:
+        fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
+        return nni.ConvAdd2d(add, fused_conv)
 
 def _conv_bn_add_root_node_getter_left(add_pattern):
     _, bn_conv, _ = add_pattern
@@ -212,8 +215,11 @@ def _conv_add_extra_inputs_getter_right(pattern):
 
 def _fuse_conv_bn_add_right(is_qat, add, _, bn_conv):
     bn, conv = bn_conv
-    fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
-    return nni.ConvAdd2d(add, fused_conv)
+    if is_qat:
+        raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn, add)))
+    else:
+        fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
+        return nni.ConvAdd2d(add, fused_conv)
 
 def _conv_bn_add_root_node_getter_right(pattern):
     add, _, bn_conv = pattern
