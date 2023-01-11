@@ -565,31 +565,6 @@ def _multi_tensor_adam(params: List[Tensor],
         torch._foreach_addcdiv_(params_, exp_avgs, denom, step_size)
 
 
-# TODO(crcrpar): Move this to another place when adding another fused optimizer.
-# TODO(crcrpar): Make this generic when there's more fused optimizers.
-# TODO(crcrpar): Think of rewriting this in C++.
-@torch.no_grad()
-def _group_params_by_device_and_dtype(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    max_exp_avg_sqs: List[Tensor],
-    state_steps: List[Tensor],
-) -> Dict[Tuple[str, torch.dtype], List[List[Tensor]]]:
-    per_device_and_dtype_tensors = defaultdict(lambda: [[] for _ in range(6)])
-    for i, (p, step) in enumerate(zip(params, state_steps)):
-        key = (str(p.device), p.dtype)
-        per_device_and_dtype_tensors[key][0].append(p)
-        per_device_and_dtype_tensors[key][1].append(grads[i])
-        per_device_and_dtype_tensors[key][2].append(exp_avgs[i])
-        per_device_and_dtype_tensors[key][3].append(exp_avg_sqs[i])
-        if max_exp_avg_sqs:
-            per_device_and_dtype_tensors[key][4].append(max_exp_avg_sqs[i])
-        per_device_and_dtype_tensors[key][5].append(step)
-    return per_device_and_dtype_tensors
-
-
 def _fused_adam(
     params: List[Tensor],
     grads: List[Tensor],
