@@ -74,7 +74,7 @@ template <typename T>
 void VmlLog(int64_t N, const T* X, T* Y) {
   constexpr int64_t K = Vectorized<T>::size();
   at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
-    using VT = vec::vec_scalar_t<T>;
+    using VT = at::opmath_type<T>;
     vec::map(
         [](Vectorized<VT> x_vec) { return x_vec.log(); },
         Y + begin,
