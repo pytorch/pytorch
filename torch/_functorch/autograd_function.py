@@ -169,6 +169,7 @@ def wrap_outputs_maintaining_identity(
     if out_dims_specified:
         flat_out_dims = _broadcast_to_and_flatten(out_dims, spec)
         # _broadcast_to_and_flatten returns None if it is unable to broadcast.
+        # TODO: update following link from master to stable once that's out
         if flat_out_dims is None:
             raise RuntimeError(
                 f"The autograd.Function's vmap staticmethod returned an "
@@ -176,7 +177,9 @@ def wrap_outputs_maintaining_identity(
                 f"Expected out_dims={out_dims} "
                 f"to be compatible with the structure of `output`. "
                 f"out_dims has structure {pytree.tree_flatten(out_dims)[1]} "
-                f"but output has structure {spec}."
+                f"but output has structure {spec}. "
+                f"For more details, please see "
+                f"https://pytorch.org/docs/master/notes/extending.func.html"
             )
 
     for i, output in enumerate(flat_outputs):
@@ -259,22 +262,26 @@ def validate_vmap_returns_two(result):
 def custom_function_call_vmap(interpreter, autograd_function, *operands):
     if autograd_function.generate_vmap_rule:
         if has_overriden_vmap_rule(autograd_function):
-            # TODO: link docs when they're ready.
-            # https://github.com/pytorch/pytorch/issues/90224
+            # TODO: Update link to stable once that's out
+            # https://github.com/pytorch/pytorch/issues/92029
             raise RuntimeError(
                 f"You tried to vmap over {autograd_function.__name__}, but "
                 f"it has both generate_vmap_rule=True and an overriden vmap "
                 f"staticmethod. Please set generate_vmap_rule=False or delete "
-                f"the overriden vmap staticmethod to avoid ambiguity.")
+                f"the overriden vmap staticmethod to avoid ambiguity. "
+                f"For more details, please see "
+                f"https://pytorch.org/docs/master/notes/extending.func.html")
         return custom_function_call_vmap_generate_rule(interpreter, autograd_function, *operands)
 
     if not has_overriden_vmap_rule(autograd_function):
-        # TODO: link docs when they're ready.
-        # https://github.com/pytorch/pytorch/issues/90224
+        # TODO: Update link to stable once that's out
+        # https://github.com/pytorch/pytorch/issues/92029
         raise RuntimeError(
             f"You tried to vmap over {autograd_function.__name__}, but "
             f"it does not have vmap support. Please override and implement the "
-            f"vmap staticmethod or set generate_vmap_rule=True.")
+            f"vmap staticmethod or set generate_vmap_rule=True. "
+            f"For more details, please see "
+            f"https://pytorch.org/docs/master/notes/extending.func.html")
 
     current_level = interpreter.level()
     info = VmapInfo(
