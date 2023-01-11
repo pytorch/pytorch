@@ -1523,10 +1523,13 @@ def parse_args(args=None):
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
-        "--dynamic-ci-skips",
+        "--dynamic-ci-skips-only",
         action="store_true",
         help=(
-            "Run models that would have been skipped in CI if dynamic-shapes.  "
+            "Run only the models that would have been skipped in CI "
+            "if dynamic-shapes, compared to running without dynamic-shapes.  "
+            "This is useful for checking if more models are now "
+            "successfully passing with dynamic shapes.  "
             "Implies --dynamic-shapes and --ci"
         ),
     )
@@ -1802,7 +1805,7 @@ def run(runner, args, original_dir=None):
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
-    if args.dynamic_ci_skips:
+    if args.dynamic_ci_skips_only:
         args.dynamic_shapes = True
         args.ci = True
         # We only have a CI skip list for aot_eager right now.  When inductor
@@ -1818,7 +1821,7 @@ def run(runner, args, original_dir=None):
         args.quiet = True
         args.repeat = 2
         if args.backend == "aot_eager":
-            if args.dynamic_ci_skips:
+            if args.dynamic_ci_skips_only:
                 assert args.training and args.dynamic_shapes
                 args.filter = list(
                     set(CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING)
