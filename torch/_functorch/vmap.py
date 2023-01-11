@@ -20,6 +20,7 @@ from torch._C._functorch import (
     _remove_batch_dim,
     _vmap_decrement_nesting,
     _vmap_increment_nesting,
+    is_batchedtensor,
 )
 from torch._functorch.utils import exposed_in
 
@@ -132,17 +133,20 @@ def _create_batched_inputs(
 
 
 def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_dim):
+
     if out_dim is None:
-        if isinstance(batched_output, torch.Tensor):
+        if isinstance(batched_output, torch.Tensor) and is_batchedtensor(batched_output):
             raise ValueError(
                 f'vmap({name}, ...): `{name}` can not return a '
-                f'Tensor when out_dim is None'
+                f'BatchedTensor when out_dim is None'
             )
         return batched_output
 
+    # out_dim is non None
     if not isinstance(batched_output, torch.Tensor):
         raise ValueError(f'vmap({name}, ...): `{name}` must only return '
-                         f'Tensors, got type {type(batched_output)} as a return.')
+                         f'Tensors, got type {type(batched_output)} as a return. '
+                         'Did you mean to set out_dim= to None for output?')
 
     return _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)
 
@@ -174,9 +178,7 @@ def _unwrap_batched(
             incompatible_error()
     else:
         flat_out_dims = _broadcast_to_and_flatten(out_dims, output_spec)
-        print("flat_out_dims", flat_out_dims)
         if flat_out_dims is None:
-            print("out_dims, output_spec", out_dims, output_spec)
             incompatible_error()
 
     flat_outputs = [
