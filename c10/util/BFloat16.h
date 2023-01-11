@@ -11,7 +11,7 @@
 #include <cuda_bf16.h>
 #endif
 
-#if defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+#if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
 #if defined(CL_SYCL_LANGUAGE_VERSION)
 #include <CL/sycl.hpp> // for SYCL 1.2.1
 #else
@@ -104,7 +104,7 @@ struct alignas(2) BFloat16 {
   explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
 #endif
 
-#if defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+#if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
   inline C10_HOST_DEVICE BFloat16(const sycl::ext::oneapi::bfloat16& value);
   explicit inline C10_HOST_DEVICE operator sycl::ext::oneapi::bfloat16() const;
 #endif
