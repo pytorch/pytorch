@@ -252,6 +252,30 @@ class TypeSource(Source):
 
 
 @dataclasses.dataclass
+class SuperSource(Source):
+    type: Source
+    obj: Source
+
+    def __post_init__(self):
+        assert self.type is not None
+        assert self.obj is not None
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", "super")
+        return (
+            self.type.reconstruct(codegen)
+            + self.obj.reconstruct(codegen)
+            + [create_instruction("CALL_FUNCTION", 2)]
+        )
+
+    def guard_source(self):
+        return self.obj.guard_source()
+
+    def name(self):
+        return f"super({self.type.name()}, {self.obj.name()})"
+
+
+@dataclasses.dataclass
 class ODictGetItemSource(Source):
     base: Source
     index: Any
