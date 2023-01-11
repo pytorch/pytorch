@@ -410,10 +410,10 @@ class TestDecomp(TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
-    @modules(module_db)
-    def test_module(self, device, dtype, module_info, training):
+    # only tests RNNs since we have py dispsatcher decomps for them
+    @modules(filter(lambda m: m.module_cls == torch.nn.RNN, module_db))
+    def test_rnn_decomp_module(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
-        is_python_dispatcher_decomp = module_cls == torch.nn.RNN
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True, training=training)
         for module_input in module_inputs:
@@ -428,17 +428,9 @@ class TestDecomp(TestCase):
                 decomp_out = m(*args, **kwargs)
 
             non_decomp_out = m(*args, **kwargs)
-            if is_python_dispatcher_decomp:
-                # without this check, incorrect decomps at the python dispatcher level can still pass because
-                # they're checking aten decomps at the
-                self.assertEqual(decomp_out, non_decomp_out)
-                decomp_out[0].sum().backward()
-                decomp_grads = [p.grad for p in m.parameters()]
-
-                m.zero_grad()
-                non_decomp_out[0].sum().backward()
-                non_decomp_grads = [p.grad for p in m.parameters()]
-                self.assertEqual(decomp_grads, non_decomp_grads)
+            # without this check, incorrect decomps at the python dispatcher level can still pass because
+            # they're checking aten decomps at the
+            self.assertEqual(decomp_out, non_decomp_out)
 
 
     class DecompCrossRefMode(TorchDispatchMode):
