@@ -254,6 +254,7 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/passes/concat_opt.cpp",
     "torch/csrc/jit/passes/constant_pooling.cpp",
     "torch/csrc/jit/passes/constant_propagation.cpp",
+    "torch/csrc/jit/passes/convert_scalar_implicit.cpp",
     "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/cuda_graph_fuser.cpp",

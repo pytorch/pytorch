@@ -11209,6 +11209,20 @@ dedent """
         self.run_pass("erase_number_types", graph)
         FileCheck().check_not("int = prim::Constant").run(str(graph))
 
+
+    def test_convert_scalar_implicit():
+        graph_str = """
+        graph(%a : Float(), %b : Int()):
+            %c : Scalar = aten::ScalarImplicit(%a)
+            %d : Scalar = aten::ScalarImplicit(%b)
+            return (%c, %d)
+        """
+        graph = parse_ir(graph_str)
+        torch._C._jit_pass_convert_scalar_implicit(graph)
+        FileCheck().check("aten::FloatImplicit").run(graph)
+        FileCheck().check("aten::IntImplicit").run(graph)
+
+
     def test_refine_tuple_types(self):
         # TupleConstruct output type is not correct here.
         graph_str = """

@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/convert_scalar_implicit.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
@@ -632,6 +633,7 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_constant_propagation",
           [](std::shared_ptr<Graph>& g) { return ConstantPropagation(g); },
           py::arg("graph"))
+      .def("_jit_pass_convert_scalar_implicit", ConvertScalarImplicit)
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
       .def(
           "_jit_object_is_non_holding",
