@@ -9241,7 +9241,6 @@
     CPU, CUDA: max
     MPS: max_mps
     QuantizedCPU: max_quantized_cpu
-  tags: canonical
 
 - func: fmax(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmax.out
