@@ -262,7 +262,7 @@ class PatternEntry:
 
     def register(self, pass_number, target):
         if isinstance(pass_number, int):
-            pass_patterns[pass_number][target] = self
+            pass_patterns[pass_number][target].append(self)
         else:
             for x in pass_number:
                 self.register(x, target)
