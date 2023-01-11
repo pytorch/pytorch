@@ -14,6 +14,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 #include <cstdint>
@@ -290,7 +291,9 @@ class TORCH_API Context {
   bool benchmark_cudnn = false;
 #endif
   Float32MatmulPrecision float32_matmul_precision =
-      at::Float32MatmulPrecision::HIGHEST;
+      c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
+      ? at::Float32MatmulPrecision::HIGH
+      : at::Float32MatmulPrecision::HIGHEST;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
