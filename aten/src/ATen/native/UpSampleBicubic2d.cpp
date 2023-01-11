@@ -157,7 +157,7 @@ static void upsample_bicubic2d_backward_out_frame(
 
       const opmath_t real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
       int64_t input_y = std::min(static_cast<int64_t>(floorf(real_y)), input_height - 1);
-      opmath_t t_x = std::min(
+      opmath_t t_y = std::min(
             std::max(real_y - input_y, static_cast<opmath_t>(0)),
             static_cast<opmath_t>(1)
           );
