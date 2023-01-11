@@ -82,7 +82,6 @@ decompositions = get_decompositions(
         aten.nll_loss_backward,
         aten.nll_loss_forward,
         aten.norm,
-        aten.reflection_pad2d_backward,
         aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
@@ -107,8 +106,6 @@ decompositions = get_decompositions(
         aten.unfold_backward,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
-        aten.softplus,
-        aten.softplus_backward,
         aten.bucketize,
     ]
 )
