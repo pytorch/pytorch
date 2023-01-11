@@ -97,5 +97,8 @@ class ExpandedWeight(torch.Tensor):
     def shape(self):
         return self.orig_weight.shape
 
+    def data_ptr(self):
+        return self.orig_weight.data_ptr()
+
     def set_batch_first(self, is_batch_first=True):
         self.batch_first = is_batch_first
