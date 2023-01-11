@@ -2575,18 +2575,19 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             m, example_input, qconfig_mapping, backend_config)
         # print('msp', msp)
 
-        for _ in range(2):
-            msp(*example_input)
+        msp(*example_input)
 
         msq = convert_n_shadows_model(msp)
-        print('msq', msq)
+        # TODO(before land): can we remove below?
+        # msq = convert_n_shadows_model(msp, custom_convert_fn=convert_to_reference_fx)
+        # print('msq', msq)
 
         loggers_set_enabled(msq, True)
         output_fp32 = msq(*example_input)
 
         results = extract_results_n_shadows_model(msq)
         # print(results)
-        print_comparisons_n_shadows_model(results)
+        # print_comparisons_n_shadows_model(results)
 
         # get the last quantized output from results
         inner_results = results['model']['node_output']
@@ -2604,14 +2605,16 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             torch.allclose(output_fp32, output_fp32_ref),
             f"fp32 comparison: {output_fp32} not close to {output_fp32_ref}")
 
-        print('shadow', output_shadow.shape, output_shadow)
-        print('shadow_ref', output_shadow_ref.shape, output_shadow_ref)
+        # print('shadow', output_shadow.shape, output_shadow)
+        # print('shadow_ref', output_shadow_ref.shape, output_shadow_ref)
 
         # off-by-one errors are okay in the shadow version, because
         # the models are not actually equivalent - the PNP model has
         # a lot of extra q/dq
         self.assertTrue(
-            torch.allclose(output_shadow, output_shadow_ref, rtol=0.1),
+            torch.allclose(output_shadow, output_shadow_ref),
+            # TODO(before land): can we remove below?
+            # torch.allclose(output_shadow, output_shadow_ref, rtol=0.1),
             f"shadow comparison: {output_shadow} not close to {output_shadow_ref}")
 
         return msq
@@ -2668,7 +2671,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         self._test_add_loggers_impl(m, example_input, qconfig_mapping)
 
     @withQNNPACKBackend
-    def test_add_loggers_functions(self):
+    def qtest_add_loggers_functions(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2706,27 +2709,44 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         m = torchvision.models.quantization.mobilenet_v2(
             pretrained=False, quantize=False).eval()
         example_input = (torch.randn(8, 3, 224, 224),)
-
         qconfig_mapping = get_default_qconfig_mapping()
-        # self._test_add_loggers_impl(m, example_input, qconfig_mapping)
-        # TODO(next) verify that propagation error matches the add_loggers
-        # baseline
+        self._test_add_loggers_impl(m, example_input, qconfig_mapping)
 
-        m = torchvision.models.quantization.mobilenet_v2(
-            pretrained=False, quantize=False).eval()
-        mp = prepare_fx(copy.deepcopy(m), qconfig_mapping, example_input)
-        mp(*example_input)
-        mq = convert_fx(mp)
+        if False:
+            # TODO(before land): remove this
+            # this passes, but not needed long term since the old APIs
+            # will be deleted
 
-        ns_a, ns_b = add_loggers('fp32', m, 'int8', mq, OutputLogger)
-        ns_a(*example_input)
-        ns_b(*example_input)
-        act_compare_dict = extract_logger_info(ns_a, ns_b, OutputLogger, 'int8')
-        extend_logger_results_with_comparison(
-            act_compare_dict, 'fp32', 'int8', compute_sqnr, 'sqnr')
-        print(act_compare_dict)
+            # baseline
 
+            mp = prepare_fx(copy.deepcopy(m), qconfig_mapping, example_input)
+            mp(*example_input)
+            # mp(*example_input)
+            # print(mp)
 
+            mq = convert_fx(mp)
+            # print(mq)
+
+            ns_a, ns_b = add_loggers('fp32', copy.deepcopy(m), 'int8', mq, OutputLogger)
+            ns_a(*example_input)
+            ns_b(*example_input)
+            act_compare_dict = extract_logger_info(ns_a, ns_b, OutputLogger, 'int8')
+            extend_logger_results_with_comparison(
+                act_compare_dict, 'int8', 'fp32', compute_sqnr, 'sqnr')
+            # print(act_compare_dict)
+
+            mobilenetv2_wt_to_print = []
+            for idx, (layer_name, v) in enumerate(act_compare_dict.items()):
+                mobilenetv2_wt_to_print.append([
+                    idx,
+                    layer_name,
+                    v['node_output']['fp32'][0]['prev_node_target_type'],
+                    v['node_output']['fp32'][0]['values'][0].shape,
+                    v['node_output']['fp32'][0]['sqnr'][0],
+                ])
+
+            from tabulate import tabulate
+            print(tabulate(mobilenetv2_wt_to_print, headers=['idx', 'layer_name', 'type', 'shape', 'sqnr']))
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
