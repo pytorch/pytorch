@@ -36,12 +36,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from .builder import VariableBuilder
 
         options = VariableTracker.propagate(self)
-        source = AttrSource(self.source, name) if self.source else None
+        source = AttrSource(self.source, name) if self.source is not None else None
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
-        source = AttrSource(self.source, name)
         if isinstance(obj, staticmethod):
             return variables.UserFunctionVariable(
                 obj.__get__(self.value), source=source, **options
@@ -183,7 +182,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:
                 method = None
-            source = AttrSource(AttrSource(self.source, "__class__"), name)
             if method is object.__init__:
                 return ConstantVariable(None, **options)
 
@@ -220,6 +218,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
+                source = (
+                    None
+                    if self.source is None
+                    else AttrSource(AttrSource(self.source, "__class__"), name)
+                )
                 # TODO(jansel): add a guard to check for monkey patching?
                 return UserMethodVariable(
                     method, self, source=source, **options
