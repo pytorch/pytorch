@@ -881,8 +881,8 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   if (functorch_tls) {
     // autograd.Function support for functorch is handled in Python.
     // If we have gotten here, then either we are dealing with a
-    // torch.autograd.function._SingleLevelFunction, or something
-    // in the implementation went wrong.
+    // torch.autograd.function._SingleLevelFunction, or something in
+    // the implementation went wrong.
     // The following code is useful for debugging when something goes wrong
     // because it'll raise a loud error (instead of being silently incorrect).
     functorch_tls->checkSupportsSingleLevelAutogradFunction();
