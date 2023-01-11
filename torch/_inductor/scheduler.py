@@ -8,7 +8,6 @@ import pprint
 import textwrap
 from typing import Dict, List, Optional, Set, Union
 
-import numpy as np
 import sympy
 
 import torch
@@ -110,13 +109,6 @@ class BaseSchedulerNode:
             else:
                 result[id(use.node)] = use
         self.users = list(result.values())
-
-    def set_last_usage(
-        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
-    ):
-        used_buffers = self.used_buffer_names()
-        used_buffers = {mutation_real_name.get(k, k) for k in used_buffers}
-        self.last_usage = used_buffers - future_used_buffers
 
     def get_aliases(self):
         return self.node.get_alias_names()
@@ -469,19 +461,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
             f"{self.get_name()}.snodes = {pformat([x.get_name() for x in self.snodes])}"
         )
 
-    def set_last_usage(
-        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
-    ):
-        # Set self.last_usage using the global information
-        # This will be used for inter-kernel optimisations
-        super().set_last_usage(future_used_buffers, mutation_real_name)
-        # Set self.last_usage on the snodes
-        # This will be used for optimisations within the kernel
-        future_used_buffers = set()
-        for node in reversed(self.snodes):
-            node.set_last_usage(future_used_buffers, mutation_real_name)
-            future_used_buffers.update(node.last_usage)
-
     @cache_on_self
     def used_buffer_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.used_buffer_names() for x in self.snodes])
@@ -542,13 +521,17 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
 
-        a_first = np.logical_or(
-            stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
-        ).all()
-        b_first = np.logical_or(
-            stride_lengths[:, a] == 0, stride_lengths[:, a] > stride_lengths[:, b]
-        ).all()
+        stride_len_a = [sl[a] for sl in stride_lengths]
+        stride_len_b = [sl[b] for sl in stride_lengths]
 
+        # equivalent to
+        # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
+        a_first = all(
+            sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+        )
+        b_first = all(
+            sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+        )
         if a_first and not b_first:
             return -1
         if b_first and not a_first:
@@ -557,10 +540,10 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
         # otherwise contiguous
         return cmp(b, a)
 
-    order = list(reversed(range(stride_lengths.shape[1])))
+    order = list(reversed(range(len(stride_lengths[0]))))
     if len(priority_idx) > 0:
         # if we have priority node, only use that node's order
-        stride_lengths = stride_lengths[priority_idx]
+        stride_lengths = [stride_lengths[pi] for pi in priority_idx]
     if config.pick_loop_orders:
         order.sort(key=index_cmp)
     return order
@@ -1021,7 +1004,7 @@ class Scheduler:
 
     def compute_last_usage(self):
         """
-        Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
+        Populate node.last_usage
         """
 
         future_used_buffers = set()
@@ -1029,8 +1012,10 @@ class Scheduler:
             future_used_buffers.add(node_name)
 
         for node in reversed(self.nodes):
-            node.set_last_usage(future_used_buffers, self.mutation_real_name)
-            future_used_buffers.update(node.last_usage)
+            used_buffers = node.used_buffer_names()
+            used_buffers = {self.mutation_real_name.get(k, k) for k in used_buffers}
+            node.last_usage = used_buffers - future_used_buffers
+            future_used_buffers.update(used_buffers)
 
     def free_buffers(self):
         """Free any buffers that are no longer needed"""

@@ -2,15 +2,13 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/core/Tensor.h>
-#include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
-#include <ATen/native/vulkan/api/api.h>
+#include <ATen/native/vulkan/api/Context.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
-namespace ops {
 
 struct LastAccess {
   api::PipelineStageFlags stage;
@@ -89,17 +87,19 @@ class vTensor final {
   vTensor(
       api::Context* context,
       IntArrayRef sizes,
-      const TensorOptions& options,
-      const api::StorageType storage_type = api::StorageType::TEXTURE_3D);
+      const c10::ScalarType dtype = c10::kFloat,
+      const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
+      const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
 
   // Default constructor with quantization parameters
   vTensor(
       api::Context* const context,
       const IntArrayRef sizes,
-      const TensorOptions& options,
       double q_scale,
       int64_t q_zero_point,
-      const api::StorageType storage_type = api::StorageType::TEXTURE_3D);
+      const c10::ScalarType dtype = c10::kQUInt8,
+      const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
+      const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
 
   // Used for passing buffer sizes and strides data to shaders
   struct BufferMetadata {
@@ -111,8 +111,8 @@ class vTensor final {
 
  private:
   // Tensor Options
-  TensorOptions options_;
-  at::MemoryFormat memory_format_;
+  c10::ScalarType dtype_;
+  c10::MemoryFormat memory_format_;
 
   // Sizes and Strides
   c10::SmallVector<int64_t, 6u> sizes_;
@@ -189,7 +189,7 @@ class vTensor final {
    * Extract a ScalarType from the TensorOptions member
    */
   inline c10::ScalarType dtype() const {
-    return c10::typeMetaToScalarType(options_.dtype());
+    return dtype_;
   }
 
   /*
@@ -199,12 +199,8 @@ class vTensor final {
     return api::c10_scalartype(view_->texture_format());
   }
 
-  inline at::MemoryFormat memory_format() const {
+  inline c10::MemoryFormat memory_format() const {
     return memory_format_;
-  }
-
-  inline const TensorOptions& options() const {
-    return options_;
   }
 
   inline IntArrayRef sizes() const {
@@ -300,39 +296,6 @@ void add_buffer_barrier(
     const api::PipelineStageFlags,
     const api::MemoryAccessFlags);
 
-using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
-void verify(const TensorOptions& options);
-
-inline vTensor& convert(const Tensor& tensor) {
-  TORCH_INTERNAL_ASSERT(tensor.is_vulkan(), "Vulkan tensor expected!");
-
-  vTensorImpl* const impl =
-      static_cast<vTensorImpl*>(tensor.unsafeGetTensorImpl());
-
-  return impl->unsafe_opaque_handle();
-}
-
-inline Tensor convert(const vTensor& tensor) {
-  return at::detail::make_tensor<vTensorImpl>(
-      DispatchKeySet(DispatchKey::Vulkan),
-      tensor.options().dtype(),
-      at::Device(at::kVulkan),
-      tensor,
-      tensor.sizes(),
-      tensor.strides());
-}
-
-inline Tensor convert_quantized(const vTensor& tensor) {
-  TORCH_CHECK(tensor.is_quantized(), "Not a Quantized Tensor");
-  return at::detail::make_tensor<vTensorImpl>(
-      DispatchKeySet(DispatchKey::Vulkan),
-      tensor.options().dtype(),
-      at::Device(at::kVulkan),
-      tensor,
-      tensor.sizes(),
-      tensor.strides());
-}
-} // namespace ops
 } // namespace vulkan
 } // namespace native
 } // namespace at

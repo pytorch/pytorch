@@ -630,7 +630,7 @@ class optional : private OptionalBase<T> {
   typedef T value_type;
 
   // 20.5.5.1, constructors
-  constexpr optional() noexcept : OptionalBase<T>(){};
+  constexpr optional() noexcept = default;
   constexpr optional(nullopt_t) noexcept : OptionalBase<T>(){};
 
   optional(const optional& rhs) = default;
