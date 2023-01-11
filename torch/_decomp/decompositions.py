@@ -1516,6 +1516,7 @@ def _native_batch_norm_legit_functional(
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
+    assert generator is None
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
@@ -1546,9 +1547,7 @@ def _to_copy(
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
     if memory_format is not None:  # no ref/prim for memory format
-        out = torch.empty_like(x, memory_format=memory_format)
-        out = aten.copy.default(out, x)
-        return out  # type: ignore[call-overload]
+        return torch.clone(x, memory_format=memory_format)
     return x
 
 
