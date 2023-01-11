@@ -881,8 +881,8 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   if (functorch_tls) {
     // autograd.Function support for functorch is handled in Python.
     // If we have gotten here, then either we are dealing with a
-    // torch.autograd._SingleLevelFunction, or something in the implementation
-    // went wrong.
+    // torch.autograd.function._SingleLevelFunction, or something
+    // in the implementation went wrong.
     // The following code is useful for debugging when something goes wrong
     // because it'll raise a loud error (instead of being silently incorrect).
     functorch_tls->checkSupportsSingleLevelAutogradFunction();
@@ -911,9 +911,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
 
   // autograd.Function may optionally contain a setup_context staticmethod.
   // In this case, autograd.Function.forward does NOT accept a ctx object.
-  bool has_separate_setup_context_fn =
-      (isAutogradFunctionExtensionEnabled() &&
-       PyObject_HasAttrString(cls, "setup_context"));
+  bool has_separate_setup_context_fn = PyObject_HasAttrString(cls, "setup_context");
 
   auto num_args = PyTuple_GET_SIZE(inputs);
 

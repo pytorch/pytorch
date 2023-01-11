@@ -486,9 +486,6 @@ class Function(_SingleLevelFunction):
 
     @classmethod
     def apply(cls, *args, **kwargs):
-        if not torch._C._is_autograd_function_extension_enabled():
-            return super().apply(*args, **kwargs)
-
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
             args = _functorch.utils.unwrap_dead_wrappers(args)
@@ -561,19 +558,6 @@ def traceable(fn_cls):
     """
     fn_cls.is_traceable = True
     return fn_cls
-
-
-# Private feature flag. Not user-facing.
-class _set_autograd_function_extension_enabled(_DecoratorContextManager):
-    def __init__(self, enabled=True):
-        self.enabled = enabled
-
-    def __enter__(self):
-        self.prev_state = torch._C._is_autograd_function_extension_enabled()
-        torch._C._set_autograd_function_extension_enabled(self.enabled)
-
-    def __exit__(self, *args, **kwargs):
-        torch._C._set_autograd_function_extension_enabled(self.prev_state)
 
 
 class InplaceFunction(Function):
