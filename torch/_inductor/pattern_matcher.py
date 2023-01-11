@@ -5,10 +5,8 @@ import itertools
 import logging
 import operator
 import os
-import threading
 from collections import defaultdict
 from typing import Any, Callable, List, Union
-from unittest.mock import patch
 
 import torch
 import torch._inductor as inductor
@@ -23,8 +21,6 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
-tls = threading.local()
-tls.fake_mode = None
 
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
@@ -299,11 +295,11 @@ class ReplacementPatternEntry(PatternEntry):
 
             def call_function(self, target, args, kwargs):
                 result = graph.call_function(target, args, kwargs)
-                if tls.fake_mode:
+                if V.fake_mode:
                     fargs, fkwargs = torch.fx.map_arg(
                         (args, kwargs), lambda n: n.meta["val"]
                     )
-                    with tls.fake_mode:
+                    with V.fake_mode:
                         result.meta["val"] = target(*fargs, **fkwargs)
                 return result
 
@@ -397,16 +393,17 @@ def reorder_for_locality(graph: torch.fx.Graph):
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
-def fx_passes(gm: torch.fx.GraphModule, fake_mode):
+def fx_passes(gm: torch.fx.GraphModule):
     if config.dce:
+        # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
     if config.reordering:
+        # has some issues with mutation in inference mode
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
-        with patch.object(tls, "fake_mode", fake_mode):
-            replace_matched_patterns(gm.graph)
+        replace_matched_patterns(gm.graph)
 
     gm.graph.lint()
 

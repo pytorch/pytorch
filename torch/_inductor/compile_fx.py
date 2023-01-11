@@ -126,21 +126,23 @@ def compile_fx_inner(
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
-    fake_mode = fake_mode_from_tensors(example_inputs)
-
-    pattern_matcher.fx_passes(gm, fake_mode)
-    V.debug.fx_graph_transformed(gm, example_inputs)
-
-    graph = GraphLowering(
-        gm,
-        shape_env=shape_env,
-        num_static_inputs=num_fixed,
-        graph_id=graph_id,
-        fake_mode=fake_mode,
+    fake_mode = (
+        fake_mode_from_tensors(example_inputs) or torch._subclasses.FakeTensorMode()
     )
-    with V.set_graph_handler(graph):
-        graph.run(*example_inputs)
-        compiled_fn = graph.compile_to_fn()
+
+    with V.set_fake_mode(fake_mode):
+        pattern_matcher.fx_passes(gm)
+        V.debug.fx_graph_transformed(gm, example_inputs)
+
+        graph = GraphLowering(
+            gm,
+            shape_env=shape_env,
+            num_static_inputs=num_fixed,
+            graph_id=graph_id,
+        )
+        with V.set_graph_handler(graph):
+            graph.run(*example_inputs)
+            compiled_fn = graph.compile_to_fn()
 
     if cudagraphs:
         complex_memory_overlap_inputs = any(
