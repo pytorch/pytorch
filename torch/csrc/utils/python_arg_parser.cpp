@@ -292,12 +292,12 @@ auto handle_torch_function_no_python_arg_parser(
 
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  auto get_stack_len = [&]() {
-    return is_torch_function ? at::impl::PythonTorchFunctionTLS::stack_len()
-                             : c10::impl::TorchDispatchModeTLS::stack_len();
+  const auto is_mode_active = [&]() {
+    return is_torch_function ? at::impl::torch_function_mode_enabled()
+                             : c10::impl::dispatch_mode_enabled();
   };
 
-  if (get_stack_len() > 0) {
+  if (is_mode_active()) {
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
     at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
