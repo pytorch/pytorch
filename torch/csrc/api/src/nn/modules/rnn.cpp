@@ -167,7 +167,7 @@ void RNNImplBase<Derived>::reset() {
     if (named_parameters.contains(wn)) {
       flat_weights_.emplace_back(named_parameters[wn]);
     } else {
-      flat_weights_.emplace_back(Tensor());
+      flat_weights_.emplace_back();
     }
   }
 
@@ -246,7 +246,7 @@ void RNNImplBase<Derived>::reset_flat_weights() {
     if (named_parameters.contains(wn)) {
       flat_weights_.emplace_back(named_parameters[wn]);
     } else {
-      flat_weights_.emplace_back(Tensor());
+      flat_weights_.emplace_back();
     }
   }
 }

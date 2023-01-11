@@ -1069,6 +1069,7 @@
   dispatch:
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
+    MPS: _bincount_mps
   tags: dynamic_output_shape
   autogen: bincount.out
 
@@ -2571,6 +2572,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: floor_divide
+    MPS: floor_divide_mps
     SparseCPU, SparseCUDA: floor_divide_sparse
 
 - func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -2578,12 +2580,14 @@
   variants: method
   dispatch:
     CPU, CUDA: floor_divide_
+    MPS: floor_divide_mps_
     SparseCPU, SparseCUDA: floor_divide_sparse_
 
 - func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: floor_divide_out
+    MPS: floor_divide_out_mps
     SparseCPU, SparseCUDA: floor_divide_out_sparse_zerodim
 
 - func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
@@ -4086,6 +4090,7 @@
 - func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   dispatch:
     CPU, CUDA: _cdist_forward
+    MPS: _cdist_forward_mps
   autogen: _cdist_forward.out
 
 - func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
@@ -4651,22 +4656,20 @@
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
-  dispatch:
-    MkldnnCPU: mkldnn_prelu
-    CPU: prelu_cpu
-    CUDA: prelu_cuda
-    MPS: prelu_mps
-    QuantizedCPU: prelu_quantized_cpu
   autogen: prelu.out
 
-- func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
-  variants: function, method
+- func: _prelu_kernel(Tensor self, Tensor weight) -> Tensor
   dispatch:
+    CPU, CUDA: _prelu_kernel
+    QuantizedCPU: _prelu_kernel_quantized_cpu
+    MkldnnCPU: mkldnn_prelu
+    MPS: prelu_mps
+
+- func: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
+  dispatch:
+    CPU, CUDA: _prelu_kernel_backward
     MkldnnCPU: mkldnn_prelu_backward
-    CPU: prelu_backward_cpu
-    CUDA: prelu_backward_cuda
     MPS: prelu_backward_mps
-  autogen: prelu_backward.out
 
 - func: gelu.out(Tensor self, *, str approximate='none', Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -5184,6 +5187,17 @@
   device_check: NoCheck
   device_guard: False
 
+
+- func: squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: squeeze
+    QuantizedCPU, QuantizedCUDA: squeeze_quantized
+    NestedTensorCPU, NestedTensorCUDA: squeeze_dim_nested
+  tags: canonical
+
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
   variants: method
   device_check: NoCheck
@@ -5193,6 +5207,14 @@
     CompositeExplicitAutograd: squeeze_
 
 - func: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  tags: inplace_view
+  dispatch:
+    CompositeExplicitAutograd: squeeze_
+
+- func: squeeze_.dims(Tensor(a!) self, int[] dim) -> Tensor(a!)
   variants: method
   device_check: NoCheck
   device_guard: False
@@ -6172,6 +6194,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: norm_dtype_out
+    MPS: norm_dtype_out_mps
 
 - func: norm.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -6205,10 +6228,6 @@
   dispatch:
     CPU, CUDA: frexp_out
   tags: pointwise
-# Deprecated (v.1.12)
-
-- func: frobenius_norm(Tensor self) -> Tensor
-  variants: function
 
 # Deprecated (v.1.12)
 - func: frobenius_norm.dim(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
@@ -8523,6 +8542,7 @@
   dispatch:
     CPU: nonzero_out_cpu
     CUDA: nonzero_out_cuda
+    MPS: nonzero_out_mps
   tags: dynamic_output_shape
 
 - func: nonzero(Tensor self) -> Tensor
@@ -8530,6 +8550,7 @@
   dispatch:
     CPU: nonzero_cpu
     CUDA: nonzero_cuda
+    MPS: nonzero_mps
   tags: [dynamic_output_shape, canonical]
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
@@ -9436,7 +9457,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta: unfold
+    CPU, CUDA, Meta, MPS: unfold
     QuantizedCPU, QuantizedCUDA: unfold
 
 - func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor
@@ -12897,6 +12918,7 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_inv_ex_out
+    MPS: linalg_inv_ex_out_mps
 
 - func: linalg_inv(Tensor A) -> Tensor
   python_module: linalg
@@ -13367,6 +13389,12 @@
     CompositeExplicitAutogradNonFunctional: squeeze_copy_dim
   tags: view_copy
 
+- func: squeeze_copy.dims(Tensor self, int[] dim) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: squeeze_copy_dims
+  tags: view_copy
+
 - func: t_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
@@ -13577,6 +13605,12 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: squeeze_copy_dim_out
+
+
+- func: squeeze_copy.dims_out(Tensor self, int[] dim, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: squeeze_copy_dims_out
 
 
 - func: t_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
