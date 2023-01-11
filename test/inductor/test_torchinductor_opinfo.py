@@ -274,6 +274,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
+    "as_strided.partial_views" {b8, f16, f32, f64, i32, i64},
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
