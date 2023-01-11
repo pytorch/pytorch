@@ -14,6 +14,7 @@ __all__ = ['Threshold', 'ReLU', 'RReLU', 'Hardtanh', 'ReLU6', 'Sigmoid', 'Hardsi
            'LogSigmoid', 'Softplus', 'Softshrink', 'MultiheadAttention', 'PReLU', 'Softsign', 'Tanhshrink',
            'Softmin', 'Softmax', 'Softmax2d', 'LogSoftmax']
 
+
 class Threshold(Module):
     r"""Thresholds each element of the input Tensor.
 
@@ -89,7 +90,7 @@ class ReLU(Module):
 
         >>> m = nn.ReLU()
         >>> input = torch.randn(2).unsqueeze(0)
-        >>> output = torch.cat((m(input),m(-input)))
+        >>> output = torch.cat((m(input), m(-input)))
     """
     __constants__ = ['inplace']
     inplace: bool
