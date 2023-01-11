@@ -1,5 +1,6 @@
 # Owner(s): ["module: nvfuser"]
 
+from copy import deepcopy
 from functools import partial
 import re
 from typing import List
@@ -33,6 +34,7 @@ class TestNvFuserFrontend(TestCase):
     # definition based on the FusionDefinition is executable and matches the
     # original definition
     def exec_nvfuser(self, fusion_func, inputs, new_fusion_expected=True) :
+        inputs_cap = deepcopy(inputs)
         fc = FusionCache.get()
         before_fusions = fc.num_fusions()
 
@@ -42,7 +44,7 @@ class TestNvFuserFrontend(TestCase):
         with fd:
             fusion_func(fd)
         fd_str = fd.__repr__()
-        out = fs.execute(inputs)[0]
+        out = fs.execute(inputs)
 
         # Execute the python definition that was captured
         func_name = re.findall('(nvfuser_fusion_id\\d+)', fd_str.split('\n')[1])[0]
@@ -50,10 +52,12 @@ class TestNvFuserFrontend(TestCase):
         fs_cap = Fusion()
         with FusionDefinition(fs_cap) as fd_cap:
             eval(func_name)(fd_cap)
-        out_cap = fs_cap.execute(inputs)[0]
+        out_cap = fs_cap.execute(inputs_cap)
 
         # Make sure the original and captured definitions match
-        self.assertEqual(out, out_cap)
+        for idx in range(len(out)) :
+            self.assertEqual(out[idx], out_cap[idx])
+
         self.assertEqual(fc.num_fusions() - before_fusions, int(new_fusion_expected))
         return out, fs
 
@@ -82,12 +86,12 @@ class TestNvFuserFrontend(TestCase):
 
         # Create a fusion from a fusion id and make sure it executes!
         fs3 = Fusion(fs2.id())
-        nvf_out3 = fs3.execute(inputs)[0]
+        nvf_out3 = fs3.execute(inputs)
 
         eager_out = torch.sum((inputs[0] + inputs[1]) * 3.0, dim=-1)
-        self.assertEqual(eager_out, nvf_out1)
-        self.assertEqual(eager_out, nvf_out2)
-        self.assertEqual(eager_out, nvf_out3)
+        self.assertEqual(eager_out, nvf_out1[0])
+        self.assertEqual(eager_out, nvf_out2[0])
+        self.assertEqual(eager_out, nvf_out3[0])
 
     def test_basic_fp16(self) :
         inputs = [
@@ -110,7 +114,7 @@ class TestNvFuserFrontend(TestCase):
         # Expected Output is a tensor of 48's
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = torch.sum((inputs[0] + inputs[1]) * 3.0, dim=-1)
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     def test_cast_double_to_half(self) :
         inputs = [
@@ -132,7 +136,7 @@ class TestNvFuserFrontend(TestCase):
 
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = torch.relu(inputs[0].to(torch.half) + inputs[1].to(torch.half))
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     def test_promote_to_double(self) :
         inputs = [
@@ -151,7 +155,7 @@ class TestNvFuserFrontend(TestCase):
 
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = torch.relu(inputs[0] + inputs[1])
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     def test_implicit_broadcast_input(self) :
         inputs = [
@@ -170,7 +174,7 @@ class TestNvFuserFrontend(TestCase):
 
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = refs.add(prims.broadcast_in_dim(inputs[0], inputs[1].size(), [1]), inputs[1])
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     def test_explicit_broadcast_input(self) :
         inputs = [
@@ -189,7 +193,7 @@ class TestNvFuserFrontend(TestCase):
 
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = refs.add(prims.broadcast_in_dim(inputs[0], inputs[1].size(), [0, 1, 2]), inputs[1])
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     def test_broadcast_mixing(self) :
         inputs = [
@@ -208,7 +212,7 @@ class TestNvFuserFrontend(TestCase):
 
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = refs.add(inputs[0], prims.broadcast_in_dim(inputs[1], [3, 3], [0]))
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     def test_ops_broadcast(self) :
         inputs = [
@@ -227,7 +231,7 @@ class TestNvFuserFrontend(TestCase):
 
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = refs.add(prims.broadcast_in_dim(inputs[0], inputs[1].size(), [1]), inputs[1])
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     def test_prim_layer_norm_fwd(self) :
         input_size = [64, 128, 1024]
@@ -327,8 +331,8 @@ class TestNvFuserFrontend(TestCase):
 
         eager_out = primitive_definition(inputs[0], inputs[1], inputs[2], 2, True)
 
-        self.assertEqual(eager_out, nvf_out)
-        self.assertEqual(eager_out, nvf_var_mean_out)
+        self.assertEqual(eager_out, nvf_out[0])
+        self.assertEqual(eager_out, nvf_var_mean_out[0])
 
     def test_prim_rms_norm_fwd(self) :
         input_size = [64, 128, 1024]
@@ -383,7 +387,7 @@ class TestNvFuserFrontend(TestCase):
 
         eager_out = primitive_definition(inputs[0], inputs[1], 2, True)
 
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     # Testing a scenario where a broadcast requires a symbolic output shape
     def test_tensor_sizes(self) :
@@ -405,7 +409,7 @@ class TestNvFuserFrontend(TestCase):
 
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = refs.add(inputs[0], prims.broadcast_in_dim(inputs[1], inputs[0].size(), [2]))
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     # Testing a scenario where no broadcast is needed
     def test_tensor_sizes_nobcast(self) :
@@ -427,7 +431,7 @@ class TestNvFuserFrontend(TestCase):
 
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = refs.add(inputs[0], prims.broadcast_in_dim(inputs[1], inputs[0].size(), [0, 1]))
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     # Testing a scenario where each arg of a binary op has broadcast.
     def test_tensor_sizes_both_args_bcast(self) :
@@ -452,7 +456,7 @@ class TestNvFuserFrontend(TestCase):
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = refs.add(prims.broadcast_in_dim(inputs[0], [inputs[1].size()[0], inputs[0].size()[1]], [0, 1]),
                              prims.broadcast_in_dim(inputs[1], [inputs[1].size()[0], inputs[0].size()[1]], [0, 1]))
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     def test_broadcast_in_dim_with_dynamic_shapes(self) :
         inputs_1 = [
@@ -500,13 +504,13 @@ class TestNvFuserFrontend(TestCase):
         inputs = inputs_1
         nvf_out, _ = self.exec_nvfuser(fusion_func_1, inputs)
         eager_out = refs.add(inputs[0], prims.broadcast_in_dim(inputs[1], inputs[0].size(), [2]))
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
         # Test 2
         inputs = inputs_2
         nvf_out, _ = self.exec_nvfuser(fusion_func_1, inputs, new_fusion_expected=False)
         eager_out = refs.add(inputs[0], prims.broadcast_in_dim(inputs[1], inputs[0].size(), [2]))
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
         # Func_2 and Func_3 are nearly identical except that have a different
         # concrete output shape for their broadcast_in_dim.  Therefore, test 4
@@ -518,13 +522,13 @@ class TestNvFuserFrontend(TestCase):
         inputs = inputs_1
         nvf_out, _ = self.exec_nvfuser(fusion_func_2, inputs)
         eager_out = refs.add(inputs[0], prims.broadcast_in_dim(inputs[1], inputs[0].size(), [2]))
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
         # Test 4
         inputs = inputs_2
         nvf_out, _ = self.exec_nvfuser(fusion_func_3, inputs)
         eager_out = refs.add(inputs[0], prims.broadcast_in_dim(inputs[1], inputs[0].size(), [2]))
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     # Testing a scenario where the broadcast is necessary to realize the output
     def test_tensor_sizes_with_output_bcast(self) :
@@ -548,13 +552,13 @@ class TestNvFuserFrontend(TestCase):
         inputs = inputs_1
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out = prims.broadcast_in_dim(torch.sum(inputs[0], dim=-1), inputs[0].size(), [0, 1])
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
         # Testing Dynamic usage of same Fusion
         inputs = inputs_2
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs, new_fusion_expected=False)
         eager_out = prims.broadcast_in_dim(torch.sum(inputs[0], dim=-1), inputs[0].size(), [0, 1])
-        self.assertEqual(eager_out, nvf_out)
+        self.assertEqual(eager_out, nvf_out[0])
 
     # Testing an expand followed by a  broadcast
     def test_tensor_sizes_expand_bcast(self) :
@@ -579,7 +583,33 @@ class TestNvFuserFrontend(TestCase):
         nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
         eager_out1 = prims.broadcast_in_dim(inputs[1], inputs[0].size(), [0, 1, 2])
         eager_out2 = prims.broadcast_in_dim(inputs[2], eager_out1.size(), [0, 1, 2])
-        self.assertEqual(eager_out2, nvf_out)
+        self.assertEqual(eager_out2, nvf_out[0])
+
+    def test_alias_output_to_input(self) :
+        def fusion_func(fd : FusionDefinition) :
+            t0 = fd.define_tensor(2)
+            s0 = fd.define_constant(1.0)
+            s1 = fd.define_constant(2.0)
+            s2 = fd.define_constant(3.0)
+            t1 = fd.ops.add(t0, s0)
+            t2 = fd.ops.add(t0, s1)
+            t3 = fd.ops.add(t2, s2)
+            fd.add_output(t1)
+            fd.add_output(t2, alias_input=t0)
+            fd.add_output(t3)
+
+        inputs = [
+            torch.ones(4, 4, device='cuda'),
+        ]
+
+        nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
+
+        eager_out1 = torch.add(torch.ones(4, 4, device='cuda'), 1.0)
+        eager_out2 = torch.add(torch.ones(4, 4, device='cuda'), 2.0)
+        eager_out3 = torch.add(eager_out2, 3.0)
+        self.assertEqual(eager_out1, nvf_out[0])
+        self.assertEqual(eager_out2, inputs[0])
+        self.assertEqual(eager_out3, nvf_out[1])
 
 if __name__ == '__main__':
     run_tests()

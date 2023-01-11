@@ -18,26 +18,26 @@ namespace nvfuser {
 //! each set of template arguments.
 enum class RecordType {
   Base = 0,
-  Op,
   BatchNormOp,
   BroadcastOp,
   BroadcastInDimOp,
   CastOp,
   Constant,
   End,
-  Tensor,
+  FullOp,
+  IndexSelectOp,
+  Op,
   Output,
+  PermuteOp,
   ReductionOp,
   Scalar,
   SqueezeOp,
   Start,
+  Tensor,
   TensorSizes,
   VarianceOp,
   VarianceMeanOp,
-  ViewOp,
-  PermuteOp,
-  IndexSelectOp,
-  FullOp
+  ViewOp
 };
 
 //! RecordFunctor is the base class record for operations recorded by
@@ -1166,13 +1166,25 @@ struct OutputRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto input = fd.getFusionState(args_.at(0).index);
+    auto output = fd.getFusionState(args_.at(0).index);
+    Nvf::Val* alias_input = nullptr;
+    if (args_.size() == 2) {
+      alias_input = fd.getFusionState(args_.at(1).index);
+    }
 
-    // With C++17, this statement should be "if constexpr"
-    if (std::is_same<OutputType, Nvf::TensorView>::value) {
-      fd.addOutput(input->template as<Nvf::TensorView>());
+    if (alias_input) {
+      if (std::is_same<OutputType, Nvf::TensorView>::value) {
+        fd.aliasOutputToInput(output, alias_input);
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Scalar outputs should not alias inputs.");
+      }
     } else {
-      fd.addOutput(input);
+      // With C++17, this statement should be "if constexpr"
+      if (std::is_same<OutputType, Nvf::TensorView>::value) {
+        fd.addOutput(output->template as<Nvf::TensorView>());
+      } else {
+        fd.addOutput(output);
+      }
     }
   }
 };

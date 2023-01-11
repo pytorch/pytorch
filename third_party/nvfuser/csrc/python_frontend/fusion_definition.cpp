@@ -191,6 +191,9 @@ void FusionDefinition::addInput(Nvf::Val* input) {
 void FusionDefinition::addOutput(Nvf::Val* output) {
   fusionInterfacePtr()->addOutput(output);
 }
+void FusionDefinition::aliasOutputToInput(Nvf::Val* output, Nvf::Val* input) {
+  fusionInterfacePtr()->aliasOutputToInput(output, input);
+}
 
 Nvf::Val* FusionDefinition::getFusionState(size_t index) const {
   return fusion_state_.at(index);

@@ -51,6 +51,8 @@ class TORCH_CUDA_CU_API FusionInterface {
   void addInput(Nvf::Val* input) const;
   //! Adds an Output to the represented Fusion IR.
   void addOutput(Nvf::Val* output) const;
+  //! Aliases an Output to an Input in the represented Fusion IR.
+  void aliasOutputToInput(Nvf::Val* output, Nvf::Val* input) const;
   //! Executes a fusion if the current cache pointer points at a terminal node
   std::vector<at::Tensor> execute(
       const at::ArrayRef<c10::IValue>& inputs) const;

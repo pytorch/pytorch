@@ -30,14 +30,14 @@ void FusionInterface::addOutput(Nvf::Val* output) const {
   fusionPtr()->addOutput(output);
 }
 
+void FusionInterface::aliasOutputToInput(Nvf::Val* output, Nvf::Val* input) const {
+  fusionPtr()->aliasOutputToInput(output, input);
+}
+
 std::vector<at::Tensor> FusionInterface::execute(
     const at::ArrayRef<c10::IValue>& inputs) const {
-  // aliasOutputToInput always adds Tensors as outputs that we don't want
-  // to return to the user. We need to remove them.
-  auto count_output_aliases = fusionPtr()->getOutputAliasIndices().size();
-  auto result = fusionExecutorCachePtr()->runFusionWithInputs(inputs);
-  result.erase(result.begin(), result.begin() + count_output_aliases);
-  return result;
+  // aliasOutputToInput is already removed inside `runFusionWithInputs`
+  return fusionExecutorCachePtr()->runFusionWithInputs(inputs);
 }
 
 Nvf::FusionGuard FusionInterface::guard() const {

@@ -120,6 +120,8 @@ class TORCH_CUDA_CU_API FusionDefinition {
   void addInput(Nvf::Val* input);
   //! Adds a Tensor/Scalar output to the Fusion object
   void addOutput(Nvf::Val* output);
+  //! Alias an Output to Input in the Fusion object
+  void aliasOutputToInput(Nvf::Val* output, Nvf::Val* input);
   //! Gets a Fusion IR Tensor/Scalar object
   Nvf::Val* getFusionState(size_t index) const;
   //! Sets a Fusion IR Tensor/Scalar object

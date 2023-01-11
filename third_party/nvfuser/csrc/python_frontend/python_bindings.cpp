@@ -144,14 +144,22 @@ void initNvFuserPythonBindings(PyObject* module) {
             FUSER_PERF_SCOPE("FusionDefinition.add_output (scalar)");
             self.defineRecord(new nvfuser::OutputRecord<Nvf::Val>(
                 {self.recordingState(output())}));
-          })
+          },
+          py::arg("output"))
       .def(
           "add_output",
-          [](nvfuser::FusionDefinition& self, nvfuser::Tensor output) {
+          [](nvfuser::FusionDefinition& self, nvfuser::Tensor output, c10::optional<nvfuser::Tensor> alias_input = c10::nullopt) {
             FUSER_PERF_SCOPE("FusionDefinition.add_output (tensor)");
-            self.defineRecord(new nvfuser::OutputRecord<Nvf::TensorView>(
-                {self.recordingState(output())}));
-          })
+            if (alias_input.has_value()) {
+              self.defineRecord(new nvfuser::OutputRecord<Nvf::TensorView>(
+                  {self.recordingState(output()), self.recordingState(alias_input.value()())}));
+            } else {
+              self.defineRecord(new nvfuser::OutputRecord<Nvf::TensorView>(
+                  {self.recordingState(output())}));
+            }
+          },
+          py::arg("output"),
+          py::arg("alias_input") = py::none())
       .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,

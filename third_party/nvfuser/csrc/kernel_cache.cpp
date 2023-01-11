@@ -103,9 +103,6 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
 
 FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
     : fusion_(std::move(fusion)) {
-  for (const auto& indices : fusion_->getOutputAliasIndices()) {
-    aliased_output_indices_.insert(indices);
-  }
 }
 
 KernelArgumentHolder FusionExecutorCache::prepareInputs(
@@ -218,7 +215,7 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   // by fusion. It is not semantically correct to actually return them as
   // outputs from fusion.
   int offset = 0;
-  for (const auto& v : aliased_output_indices_) {
+  for (const auto& v : fusion_->getOutputAliasIndices()) {
     outputs.erase(outputs.begin() + v - offset);
     offset++;
   }
