@@ -986,6 +986,43 @@ class CppTile2DKernel(CppVecKernel):
             self.itervars[self.outer_tiling_idx], index
         ) and not self.is_invariant_under(self.itervars[-1], index)
 
+    def gen_transposed_tile_load_store(self, name, var, index, is_store):
+        # transposed tile load/store outside the kernel inner loop
+        factor = self.tiling_factor
+        new_index = self.scale_index_with_offset(index, factor, itervar_idx=-1)
+        new_index = self.scale_index_with_offset(
+            new_index, factor, itervar_idx=self.outer_tiling_idx
+        )
+
+        src = f"{var} + {cexpr(new_index)}"
+        dst = "__place_holder__"
+        ld_src = f"{cexpr(self.stride_at(self.itervars[-1], index))}"
+        ld_dst = f"{factor}"
+        if is_store:
+            src, dst = dst, src
+            ld_src, ld_dst = ld_dst, ld_src
+
+        load_or_store = f"at::vec::transpose_mxn<float,{factor},{factor}>({src}, {ld_src}, {dst}, {ld_dst});"
+        if is_store:
+            tile_var = self.cse.newvar()
+        elif load_or_store not in self.cse.cache:
+            tile_var = self.cse.generate(self.preloads, load_or_store, write=False)
+        else:
+            tile_var = self.cse.cache[load_or_store]
+
+        define_line = (
+            f"float {tile_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
+        )
+        self.preloads.writeline(define_line)
+
+        load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
+        if is_store:
+            self.poststores.writeline(name, load_or_store)
+        else:
+            self.preloads.writeline(load_or_store)
+
+        return tile_var
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
@@ -993,27 +1030,11 @@ class CppTile2DKernel(CppVecKernel):
         inner = self.inner_itervar()
         expanded_index = sympy.expand(index)
         if self.need_vec_transpose(expanded_index):
-            # transposed tile load outside the kernel inner loop
-            factor = self.tiling_factor
-            ld_src = f"{cexpr(self.stride_at(self.itervars[-1], expanded_index))}"
-            ld_dst = f"{factor}"
-            new_index = self.scale_index_with_offset(
-                expanded_index, factor, itervar_idx=-1
+            tile_var = self.gen_transposed_tile_load_store(
+                name, var, expanded_index, is_store=False
             )
-            new_index = self.scale_index_with_offset(
-                new_index, factor, itervar_idx=self.outer_tiling_idx
-            )
-            expr = f"at::vec::transpose_mxn<float,{factor},{factor}>({var} + {cexpr(new_index)}, {ld_src}, __place_holder__, {ld_dst})"
-            if expr not in self.cse.cache:
-                cse_var = self.cse.generate(self.preloads, expr, write=False)
-                expr = expr.replace("__place_holder__", str(cse_var))
-                # TODO(jgong5): support data types other than float
-                line = f"float {cse_var}[{factor}*{factor}] __attribute__ ((aligned ({factor}))); {expr};"
-                self.preloads.writeline(line)
-            else:
-                cse_var = self.cse.cache[expr]
             # vector load inside the kernel inner loop
-            line = f"at::vec::Vectorized<float>::loadu({cse_var} + {cexpr(inner * factor)})"
+            line = f"at::vec::Vectorized<float>::loadu({tile_var} + {cexpr(inner * self.tiling_factor)})"
             return self.cse.generate(self.loads, line)
         else:
             new_index = self.scale_index_with_offset(
@@ -1034,23 +1055,11 @@ class CppTile2DKernel(CppVecKernel):
         # TODO(jgong5): assert the index is an affine expression on the itervars in concern
         expanded_index = sympy.expand(index)
         if self.need_vec_transpose(expanded_index):
-            # transposed tile store outside the kernel inner loop
-            factor = self.tiling_factor
-            ld_dst = f"{cexpr(self.stride_at(self.itervars[-1], expanded_index))}"
-            ld_src = f"{factor}"
-            new_index = self.scale_index_with_offset(
-                expanded_index, factor, itervar_idx=-1
+            tile_var = self.gen_transposed_tile_load_store(
+                name, var, expanded_index, is_store=True
             )
-            new_index = self.scale_index_with_offset(
-                new_index, factor, itervar_idx=self.outer_tiling_idx
-            )
-            cse_var = self.cse.newvar()
-            line = f"float {cse_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
-            self.preloads.writeline(line)
-            line = f"at::vec::transpose_mxn<float,{factor},{factor}>({cse_var}, {ld_src}, {var} + {cexpr(new_index)}, {ld_dst});"
-            self.poststores.writeline(name, line)
             # vector store inside the kernel inner loop
-            line = f"{value}.store({cse_var} + {cexpr(inner * factor)});"
+            line = f"{value}.store({tile_var} + {cexpr(inner * self.tiling_factor)});"
             self.stores.writeline(name, line)
         else:
             new_index = self.scale_index_with_offset(
