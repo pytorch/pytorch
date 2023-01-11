@@ -356,7 +356,7 @@ void Engine::thread_init(
 
   // Wait for the ready queue to be used before setting the device to ensure we
   // don't initialize the context spuriously (especially on CUDA 12)
-  // ready_queue->waitForWork();
+  ready_queue->waitForWork();
   set_device(device);
 
   // initialize each device thread's thread local ready queue with the ready
