@@ -1002,18 +1002,19 @@ class CppTile2DKernel(CppVecKernel):
             src, dst = dst, src
             ld_src, ld_dst = ld_dst, ld_src
 
+        need_define = True
         load_or_store = f"at::vec::transpose_mxn<float,{factor},{factor}>({src}, {ld_src}, {dst}, {ld_dst});"
         if is_store:
             tile_var = self.cse.newvar()
         elif load_or_store not in self.cse.cache:
             tile_var = self.cse.generate(self.preloads, load_or_store, write=False)
         else:
+            need_define = False
             tile_var = self.cse.cache[load_or_store]
 
-        define_line = (
-            f"float {tile_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
-        )
-        self.preloads.writeline(define_line)
+        if need_define:
+            define_line = f"float {tile_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
+            self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
         if is_store:
