@@ -258,7 +258,8 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //!  as the only group.
   static std::unique_ptr<SegmentedFusion> fromCompleteFusion(
       std::unique_ptr<Fusion> fusion,
-      ScheduleHeuristic heuristic);
+      ScheduleHeuristic heuristic,
+      const KernelArgumentHolder& runtime_inputs);
 
   //! Is the fusion segmented?
   bool isSegmented() const {

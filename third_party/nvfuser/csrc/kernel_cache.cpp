@@ -308,7 +308,7 @@ FusionKernelRuntime::FusionKernelRuntime(
         SegmentCandidateFinder::segment(std::move(fusion_copy), args);
   } else {
     segmented_fusion_ = SegmentedFusion::fromCompleteFusion(
-        std::move(fusion_copy), maybe_complete_fusion_heuristic.value());
+        std::move(fusion_copy), maybe_complete_fusion_heuristic.value(), args);
   }
 
   heuristics_ = segmented_fusion_->makeInitialHeuristics(args);
