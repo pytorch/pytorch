@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -1857,10 +1859,10 @@ ExprPtr polyGCD(PolynomialPtr poly) {
 class ModRound {
  public:
   ModRound(ExprPtr scalar, ExprPtr denom, ExprPtr divisor, ExprPtr mod_divisor)
-      : scalar(scalar),
-        denom(denom),
-        divisor(divisor),
-        mod_divisor(mod_divisor) {}
+      : scalar(std::move(scalar)),
+        denom(std::move(denom)),
+        divisor(std::move(divisor)),
+        mod_divisor(std::move(mod_divisor)) {}
   ExprPtr scalar;
   ExprPtr denom;
   ExprPtr divisor;

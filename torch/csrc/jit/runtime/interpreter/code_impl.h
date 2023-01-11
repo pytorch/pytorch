@@ -241,7 +241,7 @@ struct CodeImpl {
   }
 
   void createBailoutBlock(size_t jf_index) {
-    bailout_blocks_.emplace_back(BailoutBlock{jf_index});
+    bailout_blocks_.emplace_back(jf_index);
     auto& bailout_instructions = bailout_blocks_.back().instructions;
 
     bailout_instructions.insert(

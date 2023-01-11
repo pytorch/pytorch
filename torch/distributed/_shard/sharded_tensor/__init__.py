@@ -427,6 +427,7 @@ def custom_sharded_op_impl(func):
     parameters, the function provided will be invoked for that operator.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> @custom_sharded_op_impl(torch.nn.functional.linear)
         >>> def my_custom_sharded_linear(types, args, kwargs, process_group):
         >>>     ...
