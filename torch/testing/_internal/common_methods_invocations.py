@@ -1252,6 +1252,16 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
                             requires_grad=requires_grad)
             yield SampleInput(t, dim, keepdim)
 
+def reference_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs)
+
+    # https://github.com/pytorch/pytorch/issues/91843
+    t = torch.tensor([20, 30, 100], dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t, 0, False)
+
+    t = torch.tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t, 0, False)
+
 def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
     inputs = [
         ((), {}),
@@ -2392,6 +2402,17 @@ def error_inputs_masked_select(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(mask.clone(), args=(mask,), kwargs=dict(out=mask)),
                      error_type=RuntimeError,
                      error_regex='unsupported operation')
+
+def error_inputs_median(op_info, device, **kwargs):
+    x = torch.tensor([[[[[[[[[[[[[[[[[[[[[[[[[nan],
+                               [nan]]]]]]]]]]]]]]]]]]]]]]]]], device=device)
+    if device == 'cuda':
+        yield ErrorInput(SampleInput(x, kwargs=dict(dim=(-1))),
+                         error_type=RuntimeError,
+                         error_regex='CUDA Tensors cannot have more than 25 dimensions')
+    else:
+        return
+
 
 def error_inputs_index_select(op_info, device, **kwargs):
     x = torch.rand((1, 6), device=device).expand((2, 6))
@@ -7845,6 +7866,30 @@ foreach_binary_op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.float16,)),
         )
     ),
+    ForeachFuncInfo(
+        "clamp_min",
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+    ),
+    ForeachFuncInfo(
+        "clamp_max",
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+    ),
+    ForeachFuncInfo(
+        "minimum",
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+    ),
+    ForeachFuncInfo(
+        "maximum",
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_alpha_param=False,
+    ),
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
@@ -7857,19 +7902,6 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
         "addcdiv",
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
-    ),
-]
-
-foreach_minmax_op_db: List[ForeachFuncInfo] = [
-    ForeachFuncInfo(
-        "maximum",
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
-    ),
-    ForeachFuncInfo(
-        "minimum",
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
     ),
 ]
 
@@ -10104,13 +10136,17 @@ op_db: List[OpInfo] = [
                             'TestCommon', device_type='cpu',
                         ),
                     ], ),
-    OpInfo('logaddexp',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.bfloat16),
-           dtypesIfROCM=floating_types_and(torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_logaddexp),
+    BinaryUfuncInfo('logaddexp',
+                    dtypes=floating_types_and(torch.bfloat16),
+                    dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+                    dtypesIfROCM=floating_types_and(torch.bfloat16, torch.float16),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    supports_rhs_python_scalar=False,
+                    skips=(
+                        # TODO: FIXME: RuntimeError: not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
+                    )),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16),
@@ -10322,6 +10358,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           error_inputs_func=error_inputs_median,
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16),
@@ -12022,14 +12059,16 @@ op_db: List[OpInfo] = [
                 'TestUnaryUfuncs', device_type='cuda',
             ), ],
     ),
+    # Marked as a Unary function because it has some rather odd broadcasting semantics in its
+    # second argument
     UnaryUfuncInfo(
         'nn.functional.prelu',
-        aten_backward_name='prelu_backward',
+        aten_backward_name='_prelu_kernel_backward',
         ref=lambda x, weight:
             np.maximum(0., x) + np.minimum(0., x) *
             (weight if x.ndim == 1 else weight.reshape([weight.size if i == 1 else 1 for i in range(0, x.ndim)])),
         dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -12042,12 +12081,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_prelu,
         reference_inputs_func=reference_inputs_prelu,
         decorators=[
-            # https://github.com/pytorch/pytorch/issues/89895
-            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-            # FIXME: second derivative is implemented but seems to be incorrect
-            # https://github.com/pytorch/pytorch/issues/68760
-            DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_gradgrad'),
             # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
             # Consider making it a parameter or input, or detaching the gradient
             # https://github.com/pytorch/pytorch/issues/68752
@@ -12658,7 +12691,7 @@ op_db: List[OpInfo] = [
                    backward_dtypes=all_types_and(torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.float16,
                                                    torch.bfloat16),
-                   backward_dtypesIfCUDA=floating_types_and(torch.float16),
+                   backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
                    sample_inputs_func=sample_inputs_hardtanh,
                    supports_out=False,
@@ -12690,7 +12723,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bfloat16),
                    backward_dtypes=floating_types_and(torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-                   backward_dtypesIfCUDA=floating_types_and(torch.float16),
+                   backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_out=False,
                    supports_forward_ad=True,
@@ -15433,7 +15466,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_fast_mode=False,
-           sample_inputs_func=sample_inputs_logsumexp),
+           sample_inputs_func=sample_inputs_logsumexp,
+           reference_inputs_func=reference_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
@@ -16567,11 +16601,6 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.float16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=(torch.float16,)),
-            # TODO: Meta not implemented for out overloads
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
         ),
     ),
     ReductionOpInfo(
@@ -17916,6 +17945,11 @@ python_ref_db = [
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
         )
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.logaddexp",
+        torch_opinfo_name="logaddexp",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.floor_divide",

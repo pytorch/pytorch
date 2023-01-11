@@ -1338,27 +1338,6 @@ def arange(
     )
 
 
-@register_lowering([torch.linspace, aten.linspace])
-def linspace(start, end, steps, *, dtype=None, device=None, pin_memory=False):
-    assert not pin_memory
-    dtype = dtype or torch.get_default_dtype()
-
-    step_size = (end - start) / (steps - 1)
-
-    def inner_fn(index):
-        return ops.add(
-            ops.mul(ops.constant(step_size, dtype), ops.index_expr(index[0], dtype)),
-            ops.constant(start, dtype),
-        )
-
-    return Pointwise.create(
-        device=decode_device(device),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=[sympy.Integer(steps)],
-    )
-
-
 @register_lowering(aten.triu)
 def triu(x, diagonal=0):
     x_loader = x.make_loader()
@@ -1619,9 +1598,28 @@ def tensor_constructor(fill_value):
     return inner
 
 
-empty = register_lowering([torch.empty, aten.empty])(tensor_constructor(0))
 zeros = register_lowering([torch.zeros, aten.zeros])(tensor_constructor(0))
 ones = register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
+
+
+@register_lowering([torch.empty, aten.empty])
+def empty(
+    *size,
+    names=None,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    memory_format=None,
+):
+    assert names is None
+    assert memory_format in (None, torch.contiguous_format)
+    device = decode_device(device)
+    if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
+        size = list(size[0])
+    return empty_strided(
+        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 def create_tensor_like(creation_fn):
@@ -1675,9 +1673,19 @@ def new_constant(fill_value):
     return _new_constant
 
 
-register_lowering(aten.new_empty)(new_constant(0))
 register_lowering(aten.new_zeros)(new_constant(0))
 register_lowering(aten.new_ones)(new_constant(1))
+
+
+@register_lowering(aten.new_empty)
+def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None):
+    if dtype is None:
+        dtype = x.get_dtype()
+    if device is None:
+        device = x.get_device()
+    return empty_strided(
+        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_lowering(aten.empty_strided)
@@ -1685,23 +1693,28 @@ def empty_strided(
     size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
 ):
     assert isinstance(size, (list, type))
-    assert isinstance(stride, (list, type))
+    assert isinstance(stride, (list, type, type(None)))
     assert not pin_memory
     assert not layout or layout == torch.strided
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
-    if tuple(ir.FlexibleLayout.contiguous_strides(size)) == tuple(stride):
-        # fast path, no need to realize it
-        return pointwise
     pointwise.realize()
     buffer = pointwise.data.data
+    # explicitly set ranges to zeros in order to make a NopKernelSchedulerNode
+    buffer.data.ranges = [0] * len(size)
     assert isinstance(buffer, ir.ComputedBuffer)
+    size = [sympy.expand(s) for s in size]
+    stride = (
+        [sympy.expand(s) for s in stride]
+        if stride
+        else ir.FlexibleLayout.contiguous_strides(size)
+    )
     buffer.layout = ir.FixedLayout(
         device=device,
         dtype=dtype,
-        size=[sympy.expand(s) for s in size],
-        stride=[sympy.expand(s) for s in stride],
+        size=size,
+        stride=stride,
     )
     return pointwise
 
@@ -1853,41 +1866,17 @@ def index(x, indices):
     )
 
 
-# Note [Decompositions as Inductor Lowerings]
-# This is moved from decomposition to lowering because this decomp introduced
+# All the indexing decompositions are written in terms of index, index_put, and index_put_
+# We cannot have this lowering as a decomposition as it introduces
 # mutation in the graph, which is bad for Aot Autograd. Aot Autograd runs dead
 # code elimination and common subexpression elimination optimizations, which
 # assume graphs to be side-effect free. More details at
-# https://github.com/pytorch/torchdynamo/issues/1235.
-# Moving such reinplacing type of decomps to lowering ensures that AotAutograd
-# gets good graphs.
-# A better long term solution would be to functionalize all decompositions.
-# That would let us use these decompositions "normally",
-# instead of forcing them to be lowerings.
+# https://github.com/pytorch/torchdynamo/issues/1235
+# and
+# https://github.com/pytorch/torchdynamo/issues/1863
 @register_lowering([aten.index_put])
 def index_put(x, indices, values, accumulate=False):
     return index_put_(clone(x), indices, values, accumulate)
-
-
-# See Note [Decompositions as Inductor Lowerings]
-# We don't want the decomp to do type promotion implicitly;
-# It will try to convert index (int64) to a float-like type.
-@register_lowering([aten.index_add], type_promotion_kind=None)
-def index_add(x, dim, index, tensor, *, alpha=1):
-    return index_add_(clone(x), dim, index, tensor, alpha=alpha)
-
-
-# See Note [Decompositions as Inductor Lowerings]
-# We don't want the decomp to do type promotion implicitly;
-# It will try to convert index (int64) to a float-like type.
-@register_lowering([aten.index_add_], type_promotion_kind=None)
-def index_add_(x, dim, index, tensor, *, alpha=1):
-    dim = _prims_common.canonicalize_dims(len(x.get_size()), dim)
-    if alpha != 1:
-        tensor = mul(tensor, alpha)
-    idx = (None,) * dim + (index,)
-    index_put_(x, idx, tensor, accumulate=True)
-    return x
 
 
 def index_put_as_masked_fill(self, indices, value, accumulate):

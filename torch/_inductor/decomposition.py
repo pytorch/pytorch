@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 
 decompositions = get_decompositions(
     [
+        aten.linspace,
+        aten.logaddexp,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
@@ -51,6 +53,12 @@ decompositions = get_decompositions(
         aten.hardtanh_backward,
         aten.im2col,
         aten.index_select,
+        aten.index_add,
+        aten.index_add_,
+        aten.index_copy,
+        aten.index_copy_,
+        aten.index_fill,
+        aten.index_fill_,
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
