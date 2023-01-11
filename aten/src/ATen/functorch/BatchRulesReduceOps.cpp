@@ -25,11 +25,6 @@ Tensor mean_decomp(
   return at::mean(self, range(0, self.dim()), false, dtype);
 }
 
-Tensor nansum_decomp(
-    const Tensor& self, optional<ScalarType> dtype) {
-  return at::nansum(self, range(0, self.dim()), false, dtype);
-}
-
 Tensor prod_decomp(
     const Tensor& self, optional<ScalarType> dtype) {
   return at::prod(self.flatten(), 0, false, dtype);
@@ -58,6 +53,14 @@ Tensor nanmedian_decomp(
 Tensor median_decomp(
     const Tensor& self) {
   return std::get<0>(at::median(self.flatten(), 0, false));
+}
+
+Tensor all_decomp(const Tensor& self) {
+  return at::all(self.flatten(), 0, false);
+}
+
+Tensor any_decomp(const Tensor& self) {
+  return at::any(self.flatten(), 0, false);
 }
 
 enum ReductionCase { DimArray, Dim };
@@ -451,6 +454,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_NO_KEEPDIM_ARG(_fft_c2c);
   REDUCTION_WITH_KEEPDIM_ARG(amax);
   REDUCTION_WITH_KEEPDIM_ARG(amin);
+  m.impl("all", all_decomp);
+  REDUCTION_WITH_KEEPDIM_ARG(all.dim);
+  m.impl("any", any_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(any.dim);
   REDUCTION_WITH_KEEPDIM_ARG(argmax);
   REDUCTION_WITH_KEEPDIM_ARG(argmin);
@@ -476,9 +482,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_WITH_KEEPDIM_ARG(mode);
   m.impl("nanmedian", nanmedian_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(nanmedian.dim);
-  // TODO: re-enable these
-  // m.impl("nansum", nansum_decomp);
-  // REDUCTION_BOXED(nansum.dim_IntList);
+  REDUCTION_WITH_KEEPDIM_ARG(nansum);
   m.impl("norm.Scalar", norm_scalar_decomp);
   REDUCTION_BOXED_ARGS(norm.ScalarOpt_dim, 2, KEEPDIM_CASE_VARIABLE, 3);
   m.impl("prod", prod_decomp);
