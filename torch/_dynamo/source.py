@@ -36,6 +36,15 @@ def is_constant_source(source):
     return False
 
 
+def is_input_source(source):
+    return source.guard_source() in [
+        GuardSource.LOCAL,
+        GuardSource.GLOBAL,
+        GuardSource.LOCAL_NN_MODULE,
+        GuardSource.GLOBAL_NN_MODULE,
+    ]
+
+
 @dataclasses.dataclass
 class LocalSource(Source):
     local_name: str
@@ -113,6 +122,7 @@ class AttrSource(Source):
         else:
             self.base = base
             self.member = member
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return self.base.reconstruct(codegen) + codegen.create_load_attrs(self.member)
@@ -167,6 +177,9 @@ class TensorPropertySource(Source):
 class NegateSource(Source):
     base: Source
 
+    def __post_init__(self):
+        assert self.base is not None
+
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
@@ -182,6 +195,9 @@ class NegateSource(Source):
 class GetItemSource(Source):
     base: Source
     index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
@@ -221,6 +237,9 @@ class TupleIteratorGetItemSource(GetItemSource):
 class TypeSource(Source):
     base: Source
 
+    def __post_init__(self):
+        assert self.base is not None
+
     def reconstruct(self, codegen):
         codegen.load_import_from("builtins", "type")
         return self.base.reconstruct(codegen) + [create_instruction("CALL_FUNCTION", 1)]
@@ -236,6 +255,9 @@ class TypeSource(Source):
 class ODictGetItemSource(Source):
     base: Source
     index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return (

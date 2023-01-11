@@ -18,8 +18,6 @@
 #include <ATen/ops/gelu_native.h>
 #include <ATen/ops/glu_backward_native.h>
 #include <ATen/ops/log_sigmoid_forward_native.h>
-#include <ATen/ops/prelu_backward_native.h>
-#include <ATen/ops/prelu_native.h>
 #endif
 
 namespace at { namespace native {
@@ -93,89 +91,6 @@ std::tuple<Tensor, Tensor> log_sigmoid_forward_cuda(const Tensor& input) {
   auto buffer = at::empty({0}, input.options());
   log_sigmoid_forward_out_cuda(input, result, buffer);
   return std::forward_as_tuple(result, buffer);
-}
-
-// -----------------------------------
-// prelu forward
-// -----------------------------------
-
-Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
-  TORCH_CHECK(self.is_cuda());
-  TORCH_CHECK(weight_.is_cuda());
-
-  auto input = self.contiguous();
-  auto weight = weight_.contiguous();
-
-  TORCH_CHECK(input.is_contiguous());
-  TORCH_CHECK(weight.is_contiguous());
-
-  int64_t weight_num = weight.numel();
-  int64_t weight_dim = weight.dim();
-  Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  TORCH_CHECK(weight_dim == 0 || weight_dim == 1,
-      "prelu: Expected `weight` to be a scalar or 1D tensor, but got: ndim = ",
-      weight_dim);
-
-  // case1: shared weight for all channels
-  if (weight_num == 1) {
-    auto iter = TensorIterator::unary_op(result, input);
-    launch_prelu_cuda_kernel_share_weights(iter, weight);
-  }
-  else { // case2: multiple weights, one for each channel
-    launch_prelu_cuda_kernel_multi_weights(result, input, weight);
-  }
-  return result;
-}
-
-// -----------------------------------
-// prelu backward
-// -----------------------------------
-
-std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Tensor& self, const Tensor& weight_) {
-  TORCH_CHECK(grad_out_.is_cuda());
-  TORCH_CHECK(self.is_cuda());
-  TORCH_CHECK(weight_.is_cuda());
-
-  auto input = self.contiguous();
-  auto grad_out = grad_out_.contiguous();
-  auto weight = weight_.contiguous();
-
-  TORCH_CHECK(input.is_contiguous());
-  TORCH_CHECK(weight.is_contiguous());
-  TORCH_CHECK(grad_out.is_contiguous());
-
-  int64_t weight_num = weight.numel();
-  auto dims = input.dim();
-  Tensor input_grad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor weight_grad = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor weight_grad_collector = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  // case1: shared parameter for all channels
-  if (weight_num == 1) {
-    at::TensorIterator iter = TensorIteratorConfig()
-        .add_output(input_grad)
-        .add_output(weight_grad_collector)
-        .add_input(input)
-        .add_input(grad_out)
-        .build();
-
-    launch_prelu_cuda_backward_kernel_share_weights(iter, weight);
-    weight_grad.fill_(weight_grad_collector.sum());
-  }
-  else { // case2: multiple parameters, one for each channel
-    launch_prelu_cuda_backward_kernel_multi_weights(
-        input, weight, grad_out, input_grad, weight_grad_collector);
-    // update weight_grad
-    std::vector<int64_t> reduce_dims;
-    reduce_dims.push_back(0);
-    if (dims > 2) {
-      for (const auto i : c10::irange(2, dims)) {
-        reduce_dims.push_back(i);
-      }
-    }
-    weight_grad = weight_grad_collector.sum(reduce_dims);
-  }
-  return std::tuple<Tensor, Tensor>{input_grad, weight_grad};
 }
 
 TORCH_IMPL_FUNC(gelu_out_cuda) (
