@@ -98,7 +98,7 @@ bool mkldnn_gemm(
 
   auto dtype = ideep::tensor::data_type::bf16;
   if (std::is_same<float, scalar_t>::value) {
-    dtype = ideep::tensor::data_type::f32
+    dtype = ideep::tensor::data_type::f32;
   }
 
   ideep::tensor a(
@@ -187,7 +187,7 @@ void mkldnn_matmul(
   TensorArg mat1_arg{mat1, "mat1", 1}, mat2_arg{mat2, "mat2", 2},
       result_arg{result, "result", 3};
   checkScalarTypes("mkldnn_matmul", mat1_arg, {kFloat, kBFloat16});
-  checkAllSameType(mat1_arg, {mat2_arg, result_arg});
+  checkAllSameType("mkldnn_matmul", {mat1_arg, mat2_arg, result_arg});
 
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
