@@ -81,7 +81,6 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import DynamicShapeVariable, TensorVariable
-from torch._dynamo.variables.tensor import TensorVariable
 
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
