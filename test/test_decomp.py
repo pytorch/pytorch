@@ -429,7 +429,7 @@ class TestDecomp(TestCase):
 
             non_decomp_out = m(*args, **kwargs)
             # without this check, incorrect decomps at the python dispatcher level can still pass because
-            # they're checking aten decomps at the
+            # they're checking aten decomps at the torch_dispatch level
             self.assertEqual(decomp_out, non_decomp_out)
 
     class DecompCrossRefMode(TorchDispatchMode):
