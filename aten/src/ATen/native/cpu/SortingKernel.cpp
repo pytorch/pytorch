@@ -92,6 +92,11 @@ static void sort_kernel(
     bool stable) {
   dim = maybe_wrap_dim(dim, values.dim());
   _fill_indices(indices, dim);
+  if (self.stride(dim) == 0) {
+    // check if stride is zero
+    // https://github.com/pytorch/pytorch/issues/91420
+    return;
+  }
   _dim_apply(
     values, indices, dim,
     "sort_cpu", [&](
