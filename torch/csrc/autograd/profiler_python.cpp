@@ -848,7 +848,7 @@ class PostProcess {
       std::deque<ThreadLocalResults>& tls,
       const ValueCache& value_cache,
       time_t end_time_ns)
-      : end_time_{end_time_ns}, time_converter_{time_converter} {
+      : end_time_{end_time_ns}, time_converter_{std::move(time_converter)} {
     for (size_t python_tid : c10::irange(tls.size())) {
       CallTypeHelper<TraceKeyCacheState>::map(
           tls[python_tid].trace_keys_, *this, value_cache, python_tid);

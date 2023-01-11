@@ -22,6 +22,9 @@ import torch._prims as prims
 import contextlib
 import weakref
 import copy
+
+from torch.utils._mode_utils import no_dispatch
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 
 class FakeTensorTest(TestCase):
@@ -739,6 +742,24 @@ class FakeTensorOperatorInvariants(TestCase):
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
                 self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
+
+    def test_no_dispatch_with_like_function(self):
+        class CountingMode(TorchDispatchMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.count += 1
+                return func(*args, **kwargs)
+
+        with FakeTensorMode():
+            x = torch.randn(2)
+            with CountingMode() as mode:
+                with no_dispatch():
+                    torch.zeros_like(x)
+
+        self.assertEqual(mode.count, 0)
+
 
 class FakeTensorPropTest(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):
