@@ -1,9 +1,7 @@
-import traceback
 from types import TracebackType
 import tempfile
 import contextlib
 import inspect
-from typing import Any, Dict
 
 # This file contains utilities for ensuring dynamically compile()'d
 # code fragments display their line numbers in backtraces.

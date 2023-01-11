@@ -10,7 +10,7 @@ import tempfile
 import traceback
 import textwrap
 import unittest
-from typing import List
+from typing import List, Dict
 import torch
 import torch.nn as nn
 import torch.utils.data
