@@ -4,6 +4,7 @@
 #include <list>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -87,57 +88,61 @@ class TORCH_API Block : public StmtNode<Block> {
 
   void prepend_stmt(StmtPtr s) {
     if (s->get_parent()) {
-      throw malformed_input("Block prepend Stmt with existing parent", s);
+      throw malformed_input(
+          "Block prepend Stmt with existing parent", std::move(s));
     }
 
     stmts_.push_front(s);
-    set_parent(s, this);
+    set_parent(std::move(s), this);
   }
   void append_stmt(StmtPtr s) {
     if (s->get_parent()) {
-      throw malformed_input("Block append Stmt with existing parent", s);
+      throw malformed_input(
+          "Block append Stmt with existing parent", std::move(s));
     }
 
     stmts_.push_back(s);
-    set_parent(s, this);
+    set_parent(std::move(s), this);
   }
 
   void insert_stmt_before(StmtPtr s, StmtPtr before) {
     if (s->get_parent()) {
-      throw malformed_input("Block append Stmt with existing parent", s);
+      throw malformed_input(
+          "Block append Stmt with existing parent", std::move(s));
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), before);
     if (pos == stmts_.end()) {
       throw malformed_input(
-          "Inserting after statement that is not in block", s);
+          "Inserting after statement that is not in block", std::move(s));
     }
 
     stmts_.insert(pos, s);
-    set_parent(s, this);
+    set_parent(std::move(s), this);
   }
 
   void insert_stmt_after(StmtPtr s, StmtPtr after) {
     if (s->get_parent()) {
-      throw malformed_input("Block append Stmt with existing parent", s);
+      throw malformed_input(
+          "Block append Stmt with existing parent", std::move(s));
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), after);
     if (pos == stmts_.end()) {
       throw malformed_input(
-          "Inserting after statement that is not in block", s);
+          "Inserting after statement that is not in block", std::move(s));
     }
 
     ++pos;
 
     stmts_.insert(pos, s);
-    set_parent(s, this);
+    set_parent(std::move(s), this);
   }
 
   bool replace_stmt(StmtPtr old_stmt, StmtPtr new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
-          "Block replace Stmt with existing parent", new_stmt);
+          "Block replace Stmt with existing parent", std::move(new_stmt));
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
@@ -146,8 +151,8 @@ class TORCH_API Block : public StmtNode<Block> {
     }
     stmts_.insert(pos, new_stmt);
     stmts_.erase(pos);
-    set_parent(old_stmt, nullptr);
-    set_parent(new_stmt, this);
+    set_parent(std::move(old_stmt), nullptr);
+    set_parent(std::move(new_stmt), this);
     return true;
   }
 
@@ -157,7 +162,7 @@ class TORCH_API Block : public StmtNode<Block> {
   BlockPtr clone_and_replace(StmtPtr old_stmt, StmtPtr new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
-          "Block replace Stmt with existing parent", new_stmt);
+          "Block replace Stmt with existing parent", std::move(new_stmt));
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -185,7 +190,7 @@ class TORCH_API Block : public StmtNode<Block> {
       return false;
     }
 
-    set_parent(stmt, nullptr);
+    set_parent(std::move(stmt), nullptr);
     stmts_.erase(pos);
     return true;
   }
@@ -195,7 +200,7 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   void clear() {
-    for (auto s : stmts_) {
+    for (const auto& s : stmts_) {
       set_parent(s, nullptr);
     }
     stmts_.clear();
@@ -247,7 +252,7 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   void splice(Block::iterator it, BlockPtr other) {
-    for (StmtPtr s : *other) {
+    for (const StmtPtr& s : *other) {
       set_parent(s, this);
     }
 
@@ -258,7 +263,7 @@ class TORCH_API Block : public StmtNode<Block> {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::unordered_set<BlockPtr> enclosing;
 
-    StmtPtr p1_p = p1;
+    StmtPtr p1_p = std::move(p1);
     while (p1_p) {
       if (BlockPtr b = to<Block>(p1_p)) {
         if (b) {
@@ -268,7 +273,7 @@ class TORCH_API Block : public StmtNode<Block> {
       p1_p = p1_p->get_parent();
     }
 
-    StmtPtr p2_p = p2;
+    StmtPtr p2_p = std::move(p2);
     while (p2_p) {
       if (BlockPtr b = to<Block>(p2_p)) {
         if (enclosing.count(b) != 0) {
@@ -293,7 +298,7 @@ class TORCH_API Block : public StmtNode<Block> {
   std::list<StmtPtr> stmts_;
 
   void init(const std::vector<StmtPtr>& stmts) {
-    for (StmtPtr s : stmts) {
+    for (const StmtPtr& s : stmts) {
       if (!s) {
         continue;
       }
@@ -328,7 +333,7 @@ class TORCH_API Store : public StmtNode<Store> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   void set_indices(std::vector<ExprPtr> indices) {
@@ -336,7 +341,7 @@ class TORCH_API Store : public StmtNode<Store> {
   }
 
   void set_value(ExprPtr value) {
-    value_ = value;
+    value_ = std::move(value);
   }
 
   static StorePtr make(
@@ -378,10 +383,10 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
-  explicit Allocate(BufPtr buf) : buf_(buf) {}
+  explicit Allocate(BufPtr buf) : buf_(std::move(buf)) {}
 
  private:
   BufPtr buf_;
@@ -409,15 +414,15 @@ class TORCH_API PlacementAllocate : public StmtNode<PlacementAllocate> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   void set_buf_to_reuse(BufPtr buf) {
-    buf_to_reuse_ = buf;
+    buf_to_reuse_ = std::move(buf);
   }
 
   explicit PlacementAllocate(BufPtr buf, BufPtr buf_to_reuse)
-      : buf_(buf), buf_to_reuse_(buf_to_reuse) {}
+      : buf_(std::move(buf)), buf_to_reuse_(std::move(buf_to_reuse)) {}
 
  private:
   BufPtr buf_;
@@ -440,10 +445,10 @@ class TORCH_API Free : public StmtNode<Free> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
-  explicit Free(BufPtr buf) : buf_(buf) {}
+  explicit Free(BufPtr buf) : buf_(std::move(buf)) {}
 
  private:
   BufPtr buf_;
@@ -473,7 +478,7 @@ class TORCH_API Let : public StmtNode<Let> {
     return alloc<Let>(var.node(), val.node());
   }
 
-  Let(VarPtr var, ExprPtr val) : var_(var), val_(val) {}
+  Let(VarPtr var, ExprPtr val) : var_(std::move(var)), val_(std::move(val)) {}
 
   VarPtr var() const {
     return var_;
@@ -484,11 +489,11 @@ class TORCH_API Let : public StmtNode<Let> {
   }
 
   void set_var(VarPtr var) {
-    var_ = var;
+    var_ = std::move(var);
   }
 
   void set_val(ExprPtr val) {
-    val_ = val;
+    val_ = std::move(val);
   }
 
  private:
@@ -518,14 +523,14 @@ class TORCH_API Cond : public StmtNode<Cond> {
   }
 
   void set_condition(ExprPtr condition) {
-    condition_ = condition;
+    condition_ = std::move(condition);
   }
 
   void set_true_stmt(StmtPtr true_stmt) {
     if (true_stmt) {
       BlockPtr b = to<Block>(true_stmt);
       if (!b) {
-        b = alloc<Block>(std::vector<StmtPtr>({true_stmt}));
+        b = alloc<Block>(std::vector<StmtPtr>({std::move(true_stmt)}));
       }
       true_stmt_ = b;
       set_parent(true_stmt_, this);
@@ -536,7 +541,7 @@ class TORCH_API Cond : public StmtNode<Cond> {
     if (false_stmt) {
       BlockPtr b = to<Block>(false_stmt);
       if (!b) {
-        b = alloc<Block>(std::vector<StmtPtr>({false_stmt}));
+        b = alloc<Block>(std::vector<StmtPtr>({std::move(false_stmt)}));
       }
       false_stmt_ = b;
       set_parent(false_stmt_, this);
@@ -544,9 +549,9 @@ class TORCH_API Cond : public StmtNode<Cond> {
   }
 
   Cond(ExprPtr condition, StmtPtr true_stmt, StmtPtr false_stmt)
-      : condition_(condition) {
-    set_true_stmt(true_stmt);
-    set_false_stmt(false_stmt);
+      : condition_(std::move(condition)) {
+    set_true_stmt(std::move(true_stmt));
+    set_false_stmt(std::move(false_stmt));
   }
 
   CondPtr cloneWithNewBodies(StmtPtr true_stmt, StmtPtr false_stmt) {
@@ -735,10 +740,10 @@ class TORCH_API For : public StmtNode<For> {
   }
 
   For(VarPtr var, ExprPtr start, ExprPtr stop, StmtPtr body)
-      : var_(var), start_(start), stop_(stop) {
+      : var_(std::move(var)), start_(std::move(start)), stop_(std::move(stop)) {
     BlockPtr b = to<Block>(body);
     if (!b) {
-      b = alloc<Block>(std::vector<StmtPtr>({body}));
+      b = alloc<Block>(std::vector<StmtPtr>({std::move(body)}));
     }
     body_ = b;
     set_parent(body_, this);
@@ -765,7 +770,7 @@ class TORCH_API For : public StmtNode<For> {
 
     BlockPtr b = to<Block>(body);
     if (!b) {
-      b = alloc<Block>(std::vector<StmtPtr>({body}));
+      b = alloc<Block>(std::vector<StmtPtr>({std::move(body)}));
     }
     body_ = b;
     set_parent(body_, this);
@@ -805,22 +810,22 @@ class TORCH_API For : public StmtNode<For> {
   void set_body(StmtPtr body) {
     BlockPtr b = to<Block>(body);
     if (!b) {
-      b = alloc<Block>(std::vector<StmtPtr>({body}));
+      b = alloc<Block>(std::vector<StmtPtr>({std::move(body)}));
     }
     body_ = b;
     set_parent(body_, this);
   }
 
   void set_start(ExprPtr start) {
-    start_ = start;
+    start_ = std::move(start);
   }
 
   void set_stop(ExprPtr stop) {
-    stop_ = stop;
+    stop_ = std::move(stop);
   }
 
   void set_var(VarPtr var) {
-    var_ = var;
+    var_ = std::move(var);
   }
 
  private:
@@ -839,7 +844,9 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AtomicAdd(BufPtr buf, std::vector<ExprPtr> indices, ExprPtr value)
-      : buf_(buf), indices_(std::move(indices)), value_(value) {}
+      : buf_(std::move(buf)),
+        indices_(std::move(indices)),
+        value_(std::move(value)) {}
 
   VarPtr base_handle() const {
     return buf_->base_handle();
@@ -863,7 +870,7 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   void set_indices(std::vector<ExprPtr> indices) {
@@ -871,7 +878,7 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
   }
 
   void set_value(ExprPtr value) {
-    value_ = value;
+    value_ = std::move(value);
   }
 
  private:
@@ -929,7 +936,7 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
   }
 
   void set_buf(BufPtr buf) {
-    buf_ = buf;
+    buf_ = std::move(buf);
   }
 
   void set_buf_args(std::vector<BufPtr> buf_args) {
@@ -946,7 +953,7 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
       std::string func_name,
       std::vector<BufPtr> buf_args,
       std::vector<ExprPtr> args)
-      : buf_(buf),
+      : buf_(std::move(buf)),
         func_name_(std::move(func_name)),
         buf_args_(std::move(buf_args)),
         args_(std::move(args)) {}

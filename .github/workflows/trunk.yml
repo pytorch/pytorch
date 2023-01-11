@@ -78,7 +78,7 @@ jobs:
       test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-build.outputs.test-matrix }}
 
   linux-bionic-cuda11_6-py3_10-gcc7-sm86-build:
-    name: cuda11.6-py3.10-gcc7-sm86
+    name: linux-bionic-cuda11.6-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
@@ -96,7 +96,7 @@ jobs:
         ]}
 
   linux-bionic-cuda11_6-py3_10-gcc7-sm86-test:
-    name: cuda11.6-py3.10-gcc7-sm86
+    name: linux-bionic-cuda11.6-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_6-py3_10-gcc7-sm86-build
     with:
