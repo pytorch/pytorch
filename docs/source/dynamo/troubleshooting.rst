@@ -60,7 +60,7 @@ tools and their typical usage. For additional help see
    * - TorchInductor Tracing
      - Show time taken in each TorchInductor stage + output code and graph
        visualization
-     - set the environment variable TORCHINDUCTOR_TRACE=1 or
+     - set the environment variable TORCH_COMPILE_DEBUG=1 or
        ``torch._inductor.config.trace.enabled = True``
 
 Diagnosing Runtime Errors
@@ -378,7 +378,7 @@ through an example.
    test_backend_error()
 
 In order to run the code after TorchDynamo has traced the forward graph,
-you can use the ``TORCHDYNAMO_REPRO_AFTER`` enviornment variable. Running
+you can use the ``TORCHDYNAMO_REPRO_AFTER`` environment variable. Running
 this program with ``TORCHDYNAMO_REPRO_AFTER=“dynamo”`` (or
 ``torch._dynamo.config.repro_after="dynamo"``) should produce `this
 output <https://gist.github.com/mlazos/244e3d5b53667e44078e194762c0c92b>`__\ and
@@ -449,12 +449,12 @@ spent in each compilation phase, output code, output graph visualization
 and IR dump. This is a debugging tool designed to make it easier to
 understand and troubleshoot the internals of TorchInductor.
 
-Setting the environment variable ``TORCHINDUCTOR_TRACE=1`` will cause a
+Setting the environment variable ``TORCH_COMPILE_DEBUG=1`` will cause a
 debug trace directory to be created and printed:
 
 ::
 
-   $ env TORCHINDUCTOR_TRACE=1 python repro.py
+   $ env TORCH_COMPILE_DEBUG=1 python repro.py
    torch._inductor.debug: [WARNING] model_forward_0 debug trace: /tmp/torchinductor_jansel/rh/crhwqgmbqtchqt3v3wdeeszjb352m4vbjbvdovaaeqpzi7tdjxqr.debug
 
 Here is an `example debug directory

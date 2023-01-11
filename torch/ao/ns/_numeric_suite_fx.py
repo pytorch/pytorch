@@ -193,7 +193,7 @@ class OutputLogger(nn.Module):
         self.ref_name = ref_name
         # type of the target of the node whose output this logger is logging
         self.prev_node_target_type = prev_node_target_type
-        # type of the target of the node which was respondible for adding this
+        # type of the target of the node which was responsible for adding this
         # logger
         self.ref_node_target_type = ref_node_target_type
         # what kind of values are inside of stats
@@ -711,7 +711,7 @@ def extend_logger_results_with_comparison(
         model_name_1: string name of model 1
         model_name_2: string name of model 2
         comparison_fn: function to compare two Tensors
-        model_name_to_use_for_layer_names: string name of model to use for
+        comparison_name: string name of model to use for
           layer names in the output
     """
     for _, results_type_to_results in results.items():
