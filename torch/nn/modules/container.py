@@ -301,7 +301,8 @@ class ModuleList(Module, Sequence[T]):
         ...
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[int, slice]) -> Union[T, 'ModuleList[T]']:
+    # The ignore below is working around a bug: https://github.com/python/mypy/issues/8393
+    def __getitem__(self, idx: Union[int, slice]) -> Union[T, 'ModuleList[T]']:  # type: ignore[override]
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
