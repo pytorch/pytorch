@@ -987,11 +987,12 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    if x.numel() == 0:
-        return torch.zeros_like(x, dtype=result_dtype)
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    unnormalized = torch.exp(x - x_max)
+    if x.numel() == 0:
+        unnormalized = torch.exp(x)
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
@@ -1009,11 +1010,12 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    if x.numel() == 0:
-        return torch.zeros_like(x, dtype=result_dtype)
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    shifted = x - x_max
+    if x.numel() == 0:
+        shifted = x
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
     if not half_to_float:
