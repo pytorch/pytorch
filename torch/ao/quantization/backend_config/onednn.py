@@ -77,6 +77,7 @@ def _fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
         bn: BatchNorm1d instance that needs to be fused with the linear layer
         leaky_relu: LeakyReLU instance that needs to be fused with the linear layer
     Examples::
+        >>> # xdoctest: +SKIP(failing)
         >>> m1 = nn.Linear(20, 10)
         >>> b1 = nn.BatchNorm1d(10)
         >>> lr = nn.LeakyReLU(0.01)

@@ -12,8 +12,8 @@
 namespace at { namespace native {
 
 void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16,
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half,
       iter.dtype(), "logaddexp_cuda",
       [&]() {
         using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
