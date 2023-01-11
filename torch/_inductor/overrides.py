@@ -61,6 +61,18 @@ def replace_fx(gm: torch.fx.GraphModule):
     return gm
 
 
+def replace_view_with_reshape(gm: torch.fx.GraphModule):
+    for node in reversed(list(gm.graph.nodes)):
+        if node.target in {"view"}:
+            with gm.graph.inserting_before(node):
+                new_node = gm.graph.call_method("reshape", node.args, node.kwargs)
+                node.replace_all_uses_with(new_node)
+            gm.graph.erase_node(node)
+        gm.graph.lint()
+        gm.recompile()
+    return gm
+
+
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
         example_input.device == torch.device("cpu") for example_input in example_inputs
@@ -86,6 +98,8 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     gm = fuse_conv_bn(gm)
     # do mkldnn fusion(conv(linear)+unary(binary)
     gm = mkldnn_fuse_fx(gm, example_inputs)
+    # replace view with reshape to support inputs with channels_last memory format
+    gm = replace_view_with_reshape(gm)
     return gm
 
 

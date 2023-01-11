@@ -5525,6 +5525,26 @@ if HAS_CPU:
                     kernel_profile_events.append(e.name)
             assert len(kernel_profile_events) > 0
 
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_conv_view(self):
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super(M, self).__init__()
+                    self.conv = torch.nn.Conv2d(
+                        27, 32, kernel_size=(3, 3), stride=(2, 2)
+                    )
+
+                def forward(self, a):
+                    conv = self.conv(a)
+                    return conv.view(conv.size(0), -1)
+
+            x_shape = (1, 27, 84, 84)
+            mod = M().eval()
+            v = torch.randn(x_shape, dtype=torch.float32)
+            opt_mod = torch._dynamo.optimize("inductor")(mod)
+            with torch.no_grad():
+                opt_mod(v)
+
 
 if HAS_CUDA:
     import triton
