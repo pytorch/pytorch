@@ -208,7 +208,7 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
     // Note that we cannot implement the same behavior as the vectorized code
     // using std::round because it does rounding away from zero in halfway
     // cases.
-    transformed = zero_point + nearbyint(transformed);
+    transformed = zero_point + std::nearbyint(transformed);
     float clipped =
         std::min(std::max(transformed, float(min_val)), float(max_val));
     dst[i] = clipped;
