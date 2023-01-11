@@ -40,10 +40,8 @@ Scope::Scope() {
   name_ = Symbol::scope("");
 }
 
-Scope::Scope(ScopePtr parent, Symbol name) {
-  name_ = name;
-  parent_ = std::move(parent);
-}
+Scope::Scope(ScopePtr parent, Symbol name)
+    : name_(name), parent_(std::move(parent)) {}
 
 ScopePtr Scope::push(Symbol name) {
   return c10::make_intrusive<Scope>(intrusive_from_this(), name);

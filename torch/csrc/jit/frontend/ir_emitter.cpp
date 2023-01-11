@@ -625,9 +625,8 @@ struct DefContext {
 enum class LoopStatus { NOT_IN_LOOP, IN_LOOP, IN_UNROLLED_LOOP };
 
 struct WithLoopStatus {
-  WithLoopStatus(LoopStatus* prev, LoopStatus new_status) {
-    prev_value_ = *prev;
-    prev_ptr_ = prev;
+  WithLoopStatus(LoopStatus* prev, LoopStatus new_status)
+      : prev_value_(*prev), prev_ptr_(prev) {
     *prev = new_status;
   }
   ~WithLoopStatus() {
