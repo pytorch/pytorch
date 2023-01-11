@@ -1,5 +1,4 @@
-from collections import defaultdict
-from typing import cast, List, Optional, Dict, Tuple
+from typing import cast, List, Optional, Dict
 
 import torch
 from torch import Tensor
