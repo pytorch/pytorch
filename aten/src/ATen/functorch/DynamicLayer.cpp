@@ -93,8 +93,9 @@ class FuncTorchTLS : public FuncTorchTLSBase {
 
   int64_t checkSupportsSingleLevelAutogradFunction() const override {
     TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() == 0 || getSingleLevelAutogradFunctionAllowed(),
-        "functorch functions (vmap, grad, vjp, etc.) incorrectly used with "
-        "torch.autograd._SingleLevelFunction. This is not expected, please file a bug.");
+        "functorch functions (vmap, grad, vjp, etc.) incorrectly used with ",
+        "torch.autograd.function._SingleLevelFunction. ",
+        "This is not expected, please file a bug.");
     return 0;
   }
 

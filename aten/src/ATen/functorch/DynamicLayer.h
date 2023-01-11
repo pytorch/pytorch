@@ -108,7 +108,7 @@ TORCH_API bool isDeadTensorWrapper(const Tensor& tensor);
 TORCH_API std::ostream& operator<<(std::ostream& os, const DynamicLayer& layer);
 TORCH_API std::ostream& operator<<(std::ostream& os, const std::vector<DynamicLayer>& dynamicLayerStack);
 
-// While a functorch transform is active, torch.autograd._SingleLevelFunction
+// While a functorch transform is active, torch.autograd.function._SingleLevelFunction
 // is disabled by default. The following two APIs are APIs for enabling
 // it. These are not user-facing APIs. We can delete this in the future, but
 // it is useful for debugging when something goes wrong with the
