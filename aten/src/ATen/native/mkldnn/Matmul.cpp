@@ -181,20 +181,11 @@ void mkldnn_matmul(
   TORCH_CHECK(mkldnn_bf16_device_check(),
     "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq, or AWS Graviton3");
 
-#if defined(__aarch64__)
-  if (mkldnn_bf16_device_check_arm()) {
-     //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
-     //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
-     TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
-                 ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
-                 "mkldnn_matmul:  only enabled for fp32 and bf16 path");
-  } else
-#endif
-  {
-     TORCH_CHECK(mat1.scalar_type() == at::kBFloat16 &&
-                 mat2.scalar_type() == at::kBFloat16 &&
-                 result.scalar_type() == at::kBFloat16, "mkldnn_matmul:  only enabled for bf16 path");
-  }
+  //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
+  //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
+  TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
+              ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
+              "mkldnn_matmul:  only enabled for fp32 and bf16 path");
 
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
