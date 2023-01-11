@@ -1171,9 +1171,6 @@ module_db: List[ModuleInfo] = [
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # Ref: https://github.com/pytorch/pytorch/issues/73502
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
-                   # "slow_conv_transpose1d_out_cpu" not implemented for 'Half'
-                   DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_module',
-                                dtypes=(torch.complex32,), device_type='cpu'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1212,9 +1209,6 @@ module_db: List[ModuleInfo] = [
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # Ref: https://github.com/pytorch/pytorch/issues/73502
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
-                   # "slow_conv_transpose2d_out_cpu" not implemented for 'Half'
-                   DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_module',
-                                dtypes=(torch.complex32,), device_type='cpu'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1251,9 +1245,6 @@ module_db: List[ModuleInfo] = [
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # Ref: https://github.com/pytorch/pytorch/issues/73502
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
-                   # "slow_conv_transpose3d_out_cpu" not implemented for 'Half'
-                   DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_module',
-                                dtypes=(torch.complex32,), device_type='cpu'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
