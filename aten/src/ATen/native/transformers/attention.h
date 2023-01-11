@@ -1,9 +1,16 @@
 #pragma once
 #include <ATen/ATen.h>
 #include <c10/macros/Export.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/transformers/attention.h>
 
 namespace at {
 namespace native {
+
+using fused_sdp_choice_fn = int64_t (*)(const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal);
+
+DECLARE_DISPATCH(fused_sdp_choice_fn, _fused_sdp_choice_stub);
 
 TORCH_API Tensor bmm_nt(const Tensor& a, const Tensor& b);
 TORCH_API Tensor masked_softmax(

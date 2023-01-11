@@ -1029,6 +1029,110 @@ void cuComputeGradGammaBeta(
     }
 }
 
+template<typename T, typename T_ACC> __global__
+void cuComputeGradInput(
+    const T* __restrict__ dout,
+    const T* __restrict__ input,
+    const int64_t M,
+    const int64_t N,
+    const T_ACC* __restrict__ mean,
+    const T_ACC* __restrict__ rstd,
+    const T* gamma,
+    T* grad_input)
+{
+  for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
+    T_ACC sum_loss1 = T_ACC(0);
+    T_ACC sum_loss2 = T_ACC(0);
+    T_ACC c_mean = mean[i1];
+    const T_ACC c_rstd = rstd[i1];
+    const T* k_input = input + i1*N;
+    const T* k_dout = dout + i1*N;
+    const int numx = blockDim.x * blockDim.y;
+    const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+    if (gamma != NULL) {
+      // Optimization for ROCm MI100
+      for( int l = 0; l < N ; l += numx) {
+        int idx = l + thrx;
+        const T_ACC gamma_idx = static_cast<T_ACC>((idx<N) ? gamma[idx] : T(0));
+        const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
+        const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
+        sum_loss1 += c_loss * gamma_idx;
+        sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_rstd;
+      }
+    } else {
+      for( int l = 0; l < N ; l += numx) {
+        int idx = l + thrx;
+        const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
+        const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
+        sum_loss1 += c_loss;
+        sum_loss2 += c_loss * (c_h - c_mean) * c_rstd;
+      }
+    }
+    // intra-warp reductions
+    for (int mask = blockDim.x/2;  mask > 0;  mask /= 2) {
+      sum_loss1 += WARP_SHFL_XOR(sum_loss1, mask);
+      sum_loss2 += WARP_SHFL_XOR(sum_loss2, mask);
+    }
+    // inter-warp reductions
+    if (blockDim.y > 1) {
+      alignas(sizeof(double)) extern __shared__ char shared[];
+      T_ACC * buf = reinterpret_cast<T_ACC*>(&shared);
+      for (int offset = blockDim.y/2;  offset > 0;  offset /= 2) {
+        // upper half of warps write to shared
+        if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
+          const int wrt_i = (threadIdx.y - offset) * blockDim.x + threadIdx.x;
+          buf[2*wrt_i] = sum_loss1;
+          buf[2*wrt_i+1] = sum_loss2;
+        }
+        __syncthreads();
+        // lower half merges
+        if (threadIdx.y < offset) {
+          const int read_i = threadIdx.y * blockDim.x + threadIdx.x;
+          sum_loss1 += buf[2*read_i];
+          sum_loss2 += buf[2*read_i+1];
+        }
+        __syncthreads();
+      }
+      if (threadIdx.y == 0) {
+        buf[2*threadIdx.x] = sum_loss1;
+        buf[2*threadIdx.x+1] = sum_loss2;
+      }
+      __syncthreads();
+      if (threadIdx.y !=0) {
+        sum_loss1 = buf[2*threadIdx.x];
+        sum_loss2 = buf[2*threadIdx.x+1];
+      }
+    }
+    // all threads now have the two sums over l
+    T_ACC fH = (T_ACC)N;
+    T_ACC term1 = (T_ACC(1) / fH) * c_rstd;
+    T* k_grad_input = grad_input + i1*N;
+    if (gamma != NULL) {
+      for (int l = thrx;  l < N;  l+=numx) {
+        const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
+        const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
+        T_ACC f_grad_input = fH * c_loss * gamma[l];
+        f_grad_input -= sum_loss1;
+        f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
+        f_grad_input *= term1;
+        k_grad_input[l] = static_cast<T>(f_grad_input);
+      }
+    } else {
+      for (int l = thrx;  l < N;  l+=numx) {
+        const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
+        const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
+        T_ACC f_grad_input = fH * c_loss;
+        f_grad_input -= sum_loss1;
+        f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
+        f_grad_input *= term1;
+        k_grad_input[l] = static_cast<T>(f_grad_input);
+      }
+    }
+    // prevent race where buf is written again before reads are done
+    __syncthreads();
+  }
+}
+
 template <typename T>
 void LayerNormBackwardKernelImplInternal(
     const Tensor& dY,
@@ -1059,11 +1163,39 @@ void LayerNormBackwardKernelImplInternal(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();
   if (dX_data != nullptr) {
+#if defined __HIP_PLATFORM_HCC__
+    if (M >= 32768) {
+      const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+      const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);
+      dim3 threads1(warp_size, 4, 1);
+      threads1.y = 2; // Optimization for ROCm
+      int nshared =
+              threads1.y > 1 ?
+              threads1.y*threads1.x*sizeof(T_ACC) :
+              0;
+      cuComputeGradInput<<<blocks1, threads1, nshared, cuda_stream>>>(
+              dY_data,
+              X_data,
+              M, N,
+              mean_data,
+              rstd_data,
+              gamma_data,
+              dX_data);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      const dim3 blocks(M);
+      int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
+      layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+      X_data, mean_data, rstd_data, gamma_data, dX_data, N);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+#else
     const dim3 blocks(M);
     int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
     layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
     X_data, mean_data, rstd_data, gamma_data, dX_data, N);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+#endif
   }
 
   if (dgamma->defined() || dbeta->defined()) {

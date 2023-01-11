@@ -2,7 +2,8 @@ import gc
 import torch
 
 from ._utils import _dummy_type
-
+from torch.utils._pytree import tree_flatten as _tree_flatten
+from torch.utils._pytree import tree_unflatten as _tree_unflatten
 
 if not hasattr(torch._C, '_CudaStreamBase'):
     # Define dummy base classes
@@ -100,6 +101,22 @@ class CUDAGraph(torch._C._CUDAGraph):
         """
         return super(CUDAGraph, self).pool()
 
+    def enable_debug_mode(self):
+        r"""
+        Enables debugging mode for CUDAGraph.debug_dump.
+        """
+        return super(CUDAGraph, self).enable_debug_mode()
+
+    def debug_dump(self, debug_path):
+        r"""
+        Arguments:
+            debug_path (required): Path to dump the graph to.
+
+        Calls a debugging function to dump the graph if the debugging is
+        enabled via CUDAGraph.enable_debug_mode()
+        """
+        return super(CUDAGraph, self).debug_dump(debug_path)
+
 
 class graph(object):
     r"""
@@ -161,7 +178,7 @@ class graph(object):
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 
-def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
+def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unused_input=False):
     r"""
     Accepts callables (functions or :class:`nn.Module<torch.nn.Module>`\ s)
     and returns graphed versions.
@@ -191,6 +208,8 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
             If a tuple of callables was passed, ``sample_args`` must be tuple of tuples of argument Tensors.
         num_warmup_iters (int): The number of warmup iterations. Currently, ``DataDistributedParallel`` needs
             11 iterations for warm up. Default: ``3``.
+        allow_unused_input (bool): If False, specifying inputs that were not used when computing outputs
+            (and therefore their grad is always zero) is an error. Defaults to False.
 
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
@@ -200,8 +219,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
         This API is in beta and may change in future releases.
 
     .. warning::
-        ``sample_args`` for each callable must be a tuple of Tensors. Other types and keyword args
-        are not allowed.
+        ``sample_args`` for each callable must contain only Tensors. Other types are not allowed.
 
     .. warning::
         Returned callables do not support higher order differentiation (e.g., double backward).
@@ -226,9 +244,6 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
     .. warning::
         The automatic mixed precision is supported in :func:`~torch.cuda.make_graphed_callables` only with disabled
         caching. The context manager `torch.cuda.amp.autocast()` must have `cache_enabled=False`.
-
-    .. warning::
-        All Tensor outputs of graphed callables must require grad.
     """
     if torch.is_autocast_enabled() and torch.is_autocast_cache_enabled():
         raise RuntimeError("make_graphed_callables does not support the autocast caching. Please set `cache_enabled=False`.")
@@ -240,6 +255,8 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
         callables = (callables,)
         sample_args = (sample_args,)
 
+    flatten_sample_args = []
+
     for c, args in zip(callables, sample_args):
         if isinstance(c, torch.nn.Module):
             assert len(c._backward_hooks) == 0 and len(c._forward_hooks) == 0 and len(c._forward_pre_hooks) == 0, \
@@ -248,16 +265,18 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
             assert all(b.requires_grad is False for b in c.buffers()), "In any :class:`~torch.nn.Module` passed to " + \
                 ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have " + \
                 "``requires_grad=False``."
-        assert all(isinstance(arg, torch.Tensor) for arg in args), "In the beta API, sample_args " + \
-            "for each callable must be a tuple of Tensors. Other types and keyword args are not allowed."
+        flatten_arg, _ = _tree_flatten(args)
+        flatten_sample_args.append(tuple(flatten_arg))
+        assert all(isinstance(arg, torch.Tensor) for arg in flatten_arg), "In the beta API, sample_args " + \
+            "for each callable must contain only Tensors. Other types are not allowed."
 
 
     # If a callable is an nn.Module, its graph's full input surface is the args the user explicitly
     # passes to forward (ie, its sample_args) AND the module's parameter attributes.
-    per_callable_len_user_args = [len(args) for args in sample_args]
+    per_callable_len_user_args = [len(args) for args in flatten_sample_args]
     per_callable_module_params = [tuple(c.parameters()) if isinstance(c, torch.nn.Module) else ()
                                   for c in callables]
-    per_callable_static_input_surfaces = [sample_args[i] + per_callable_module_params[i]
+    per_callable_static_input_surfaces = [flatten_sample_args[i] + per_callable_module_params[i]
                                           for i in range(len(callables))]
 
     fwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
@@ -274,13 +293,12 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
                                                     sample_args,
                                                     per_callable_static_input_surfaces):
             for _ in range(num_warmup_iters):
-                outputs = func(*args)
-                outputs = (outputs,) if isinstance(outputs, torch.Tensor) else outputs
-                grad_inputs = torch.autograd.grad(outputs=outputs,
+                outputs, _ = _tree_flatten(func(*args))
+                grad_inputs = torch.autograd.grad(outputs=tuple(o for o in outputs if o.requires_grad),
                                                   inputs=tuple(i for i in static_input_surface if i.requires_grad),
-                                                  grad_outputs=tuple(torch.empty_like(o) for o in outputs),
+                                                  grad_outputs=tuple(torch.empty_like(o) for o in outputs if o.requires_grad),
                                                   only_inputs=True,
-                                                  allow_unused=False)
+                                                  allow_unused=allow_unused_input)
             del outputs, grad_inputs
     torch.cuda.synchronize()
 
@@ -290,21 +308,17 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
 
     # Capture forward graphs
     per_callable_static_outputs = []
-    per_callable_output_was_tensor = []
+    per_callable_output_unflatten_spec = []
     for func, args, fwd_graph in zip(callables,
                                      sample_args,
                                      fwd_graphs):
         with torch.cuda.graph(fwd_graph, pool=mempool):
             outputs = func(*args)
 
-        # Assumes model output is a tensor or tuple of tensors
-        if isinstance(outputs, torch.Tensor):
-            per_callable_output_was_tensor.append(True)
-            outputs = (outputs,)
-        else:
-            per_callable_output_was_tensor.append(False)
+        flatten_outputs, spec = _tree_flatten(outputs)
+        per_callable_static_outputs.append(tuple(flatten_outputs))
+        per_callable_output_unflatten_spec.append(spec)
 
-        per_callable_static_outputs.append(outputs)
 
     # Capture backward graphs in reverse order
     per_callable_static_grad_outputs = []
@@ -316,15 +330,15 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
                 reversed(per_callable_module_params)):
 
         # For now, assumes all static_outputs require grad
-        assert all(o.requires_grad for o in static_outputs), "Outputs of graphed callables must require grad."
-        static_grad_outputs = tuple(torch.empty_like(o) for o in static_outputs)
+        # assert all(o.requires_grad for o in static_outputs), "Outputs of graphed callables must require grad."
+        static_grad_outputs = tuple(torch.empty_like(o) if o.requires_grad else None for o in static_outputs)
 
         with torch.cuda.graph(bwd_graph, pool=mempool):
-            grad_inputs = torch.autograd.grad(outputs=static_outputs,
+            grad_inputs = torch.autograd.grad(outputs=tuple(o for o in static_outputs if o.requires_grad),
                                               inputs=tuple(i for i in static_input_surface if i.requires_grad),
-                                              grad_outputs=static_grad_outputs,
+                                              grad_outputs=tuple(o for o in static_grad_outputs if o is not None),
                                               only_inputs=True,
-                                              allow_unused=False)
+                                              allow_unused=allow_unused_input)
 
         # Constructs a tuple suitable for returning from Graphed.backward:
         # Pads out the actually-needed grads with Nones in gradient slots for inputs that don't require grad.
@@ -351,7 +365,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
                                        bwd_graph,
                                        module_params,
                                        len_user_args,
-                                       output_was_tensor,
+                                       output_unflatten_spec,
                                        static_input_surface,
                                        static_outputs,
                                        static_grad_outputs,
@@ -370,10 +384,9 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
             @staticmethod
             @torch.autograd.function.once_differentiable
             def backward(ctx, *grads):
+                assert len(grads) == len(static_grad_outputs)
                 for g, grad in zip(static_grad_outputs, grads):
-                    if g is None:
-                        assert grad is None
-                    else:
+                    if g is not None:
                         # don't copy if autograd gods have been kind and the
                         # incoming grad is already in the right place
                         if g.data_ptr() != grad.data_ptr():
@@ -388,8 +401,9 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
             # Runs the autograd function with inputs == all inputs to the graph that might require grad
             # (explicit user args + module parameters)
             # Assumes module params didn't change since capture.
-            out = Graphed.apply(*(user_args + module_params))
-            return out[0] if output_was_tensor else out
+            flatten_user_args, _ = _tree_flatten(user_args)
+            out = Graphed.apply(*(tuple(flatten_user_args) + module_params))
+            return _tree_unflatten(out, output_unflatten_spec)
 
         return functionalized
 
@@ -400,7 +414,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
                                                  bwd_graphs[i],
                                                  per_callable_module_params[i],
                                                  per_callable_len_user_args[i],
-                                                 per_callable_output_was_tensor[i],
+                                                 per_callable_output_unflatten_spec[i],
                                                  per_callable_static_input_surfaces[i],
                                                  per_callable_static_outputs[i],
                                                  per_callable_static_grad_outputs[i],

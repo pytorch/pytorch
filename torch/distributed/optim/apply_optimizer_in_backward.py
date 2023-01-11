@@ -1,8 +1,9 @@
-from typing import Any, Dict, Iterable, Type, List, no_type_check
+from typing import Any, Dict, Iterable, List, no_type_check, Type
 
 import torch
 
 __all__: List[str] = []
+
 
 @no_type_check
 def _apply_optimizer_in_backward(
@@ -44,7 +45,7 @@ def _apply_optimizer_in_backward(
 
         # Don't create a new acc_grad if we already have one
         # i.e.f or shared parameters or attaching multiple optimizers to a param.
-        if not hasattr(param, 'acc_grad'):
+        if not hasattr(param, "acc_grad"):
             acc_grad = param.view_as(param).grad_fn.next_functions[0][0]
         else:
             acc_grad = param._acc_grad
@@ -53,10 +54,10 @@ def _apply_optimizer_in_backward(
 
         # Keep the grad accumulator around for the lifetime of the Tensor,
         # store it on the param to avoid uncollectable ref-cycle
-        if not hasattr(param, 'acc_grad'):
+        if not hasattr(param, "acc_grad"):
             param._acc_grad = acc_grad  # type: ignore[attr-defined]
 
-        if not hasattr(param, '_in_backward_optimizers'):
+        if not hasattr(param, "_in_backward_optimizers"):
             param._in_backward_optimizers = []  # type: ignore[attr-defined]
             # TODO: investigate whether we really need these attributes.
             param._optimizer_classes = []  # type: ignore[attr-defined]
@@ -72,7 +73,10 @@ def _apply_optimizer_in_backward(
 
             param.grad = None
 
-        param._acc_grad.register_hook(optimizer_hook)  # type: ignore[attr-defined]
+        handle = param._acc_grad.register_hook(optimizer_hook)  # type: ignore[attr-defined]
+        if not hasattr(param, '_optimizer_hook_handles'):
+            param._optimizer_hook_handles = []  # type: ignore[attr-defined]
+        param._optimizer_hook_handles.append(handle)  # type: ignore[attr-defined]
 
     for param in params:
         _apply_optimizer_in_backward_to_param(param)

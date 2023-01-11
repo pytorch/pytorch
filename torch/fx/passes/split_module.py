@@ -1,5 +1,4 @@
 import inspect
-import operator
 from typing import Any, Callable, Dict, List, Optional
 
 import torch
@@ -160,25 +159,6 @@ def split_module(
 
     # split nodes into parititons
     for node in m.graph.nodes:
-        # Annotations on local names within function are lost during FX transforms.
-        # Adding back known type annotation for getitem nodes for jit scriptability.
-        if node.target == operator.getitem:
-            sequence_node, index_node = node.args
-            # only support type Tuple for now
-            if (
-                hasattr(sequence_node.type, "_name")
-                and sequence_node.type._name == "Tuple"
-            ):
-                parameterized_types = sequence_node.type.__args__
-                if len(parameterized_types) == 2 and isinstance(
-                    parameterized_types[1], type(...)
-                ):
-                    node.type = parameterized_types[0]
-                else:
-                    assert len(parameterized_types) > index_node
-                    node_type = parameterized_types[index_node]
-                    node.type = node_type
-
         orig_nodes[node.name] = node
 
         # TODO currently placeholders/parameters aren't put into random partitions,

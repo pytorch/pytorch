@@ -157,13 +157,15 @@ if [ -n "${USE_VULKAN}" ]; then
   if [ -n "${USE_VULKAN_RELAXED_PRECISION}" ]; then
     CMAKE_ARGS+=("-DUSE_VULKAN_RELAXED_PRECISION=ON")
   fi
-  if [ -n "${USE_VULKAN_SHADERC_RUNTIME}" ]; then
-    CMAKE_ARGS+=("-DUSE_VULKAN_SHADERC_RUNTIME=ON")
-  fi
 fi
 
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
+
+# Patch pocketfft (as Android does not have aligned_alloc even if compiled with c++17
+if [ -f third_party/pocketfft/pocketfft_hdronly.h ]; then
+  sed -i -e "s/#if __cplusplus >= 201703L/#if 0/" third_party/pocketfft/pocketfft_hdronly.h
+fi
 
 # Now, actually build the Android target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}

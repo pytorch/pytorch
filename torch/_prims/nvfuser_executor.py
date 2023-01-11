@@ -352,25 +352,23 @@ def _remove_empty_like_fill(gm: GraphModule):
     # This is a workaround for nonoptimal traces of C++ code `(1 - tensor)`
     # https://github.com/pytorch/pytorch/issues/86612
 
-    # Here when we see a `sub` node, we check if the first input is a result of
-    # filling a tensor with a scalar
-    # If so, we replace the first argument of the `sub` node with a scalar
-    for node in gm.graph.nodes:
-        if node.op == "call_function":
-            if node.target == torch.ops.nvprims.sub.default:
-                # check if the first argument is a fill
-                if (
-                    isinstance(node.args[0], torch.fx.Node)
-                    and node.args[0].op == "call_function"
-                    and node.args[0].target == torch.ops.aten.fill.Scalar
-                ):
-                    # Replace the first argument with the second argument of fill
-                    # aten.fill.Scalar(tensor, scalar)
-                    fill_node = node.args[0]
-                    scalar = fill_node.args[1]
-                    node.args = (scalar, *node.args[1:])
-    gm.graph.eliminate_dead_code()
-    gm.recompile()
+    def pattern(scalar, tensor):
+        # pattern for C++ trace of `scalar - tensor`. We are looking for the
+        # pattern of aten and nvprims.sub specifically because we want to remove
+        # the empty_like + fill nodes after lowering of AOT Autograd trace to
+        # nvprims In the future, nvFuser might support fill, and empty_like and
+        # this workaround can be removed.
+        empty_like = torch.ops.aten.empty_like.default(
+            tensor, memory_format=torch.preserve_format
+        )
+        fill = torch.ops.aten.fill.Scalar(empty_like, scalar)
+        sub = torch.ops.nvprims.sub.default(fill, tensor)
+        return sub
+
+    def replacement(scalar, tensor):
+        return torch.ops.nvprims.sub.default(scalar, tensor)
+
+    torch.fx.replace_pattern(gm, pattern, replacement)
     return gm
 
 

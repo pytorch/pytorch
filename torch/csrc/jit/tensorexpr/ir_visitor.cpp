@@ -97,7 +97,7 @@ void IRVisitor::visit(RampPtr v) {
 
 void IRVisitor::visit(LoadPtr v) {
   v->buf()->accept(this);
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ind->accept(this);
   }
 }
@@ -114,7 +114,7 @@ void IRVisitor::visit(BufPtr v) {
 
 void IRVisitor::visit(StorePtr v) {
   v->buf()->accept(this);
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ind->accept(this);
   }
   v->value()->accept(this);
@@ -122,7 +122,7 @@ void IRVisitor::visit(StorePtr v) {
 
 void IRVisitor::visit(AtomicAddPtr v) {
   v->buf()->accept(this);
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ind->accept(this);
   }
   v->value()->accept(this);
@@ -132,10 +132,10 @@ void IRVisitor::visit(SyncThreadsPtr v) {}
 
 void IRVisitor::visit(ExternalCallPtr v) {
   v->buf()->accept(this);
-  for (BufPtr buf_arg : v->buf_args()) {
+  for (const BufPtr& buf_arg : v->buf_args()) {
     buf_arg->accept(this);
   }
-  for (ExprPtr arg : v->args()) {
+  for (const ExprPtr& arg : v->args()) {
     arg->accept(this);
   }
 }
@@ -159,7 +159,7 @@ void IRVisitor::visit(FreeExtPtr v) {
 }
 
 void IRVisitor::visit(BlockPtr v) {
-  for (StmtPtr s : *v) {
+  for (const StmtPtr& s : *v) {
     s->accept(this);
   }
 }
@@ -192,7 +192,7 @@ void IRVisitor::visit(IntrinsicsPtr v) {
 void IRVisitor::visit(AllocatePtr v) {
   v->buffer_var()->accept(this);
   std::vector<ExprPtr> dims = v->dims();
-  for (ExprPtr dim : dims) {
+  for (const ExprPtr& dim : dims) {
     dim->accept(this);
   }
 }
@@ -226,14 +226,14 @@ void IRVisitor::visit(CondPtr v) {
 
 void IRVisitor::visit(TermPtr v) {
   v->scalar()->accept(this);
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     t->accept(this);
   }
 }
 
 void IRVisitor::visit(PolynomialPtr v) {
   v->scalar()->accept(this);
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     t->accept(this);
   }
 }
@@ -247,7 +247,7 @@ void IRVisitor::visit(MaxTermPtr v) {
   if (v->scalar()) {
     v->scalar()->accept(this);
   }
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     t->accept(this);
   }
 }
@@ -256,7 +256,7 @@ void IRVisitor::visit(MinTermPtr v) {
   if (v->scalar()) {
     v->scalar()->accept(this);
   }
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     t->accept(this);
   }
 }
@@ -264,7 +264,7 @@ void IRVisitor::visit(MinTermPtr v) {
 void IRVisitor::visit(ReduceOpPtr v) {
   v->body()->accept(this);
 
-  for (auto r : v->reduce_args()) {
+  for (const auto& r : v->reduce_args()) {
     r->accept(this);
   }
 }

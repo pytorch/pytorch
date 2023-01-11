@@ -296,6 +296,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_cholesky_ex",
     "linalg_eig",
     "diagonal_copy",
+    "diagonal_scatter",
     "select_backward",
     "diagonal_backward",
     "slice_backward",

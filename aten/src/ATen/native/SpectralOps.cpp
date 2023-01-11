@@ -80,7 +80,13 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     type = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
-  if (device.is_cuda() && !at::detail::getCUDAHooks().hasROCM()) {
+  const bool maybe_support_half = (
+    // Only CUDA supports half precision, but since meta tensors don't have a
+    // device we err on the side of accepting it
+    (device.is_cuda() || device.is_meta()) &&
+    !at::detail::getCUDAHooks().hasROCM()
+  );
+  if (maybe_support_half) {
     TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
   } else {
     TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
@@ -199,7 +205,7 @@ Tensor fft_c2r(c10::string_view function_name,
               " expects a floating point output tensor, but got ", out.scalar_type());
   input = promote_tensor_fft(input, /*require_complex=*/true);
   const auto input_dim = input.dim();
-  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
+  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
   const auto n = n_opt.value_or(2*(input.sizes()[dim] - 1));
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
@@ -225,7 +231,7 @@ Tensor fft_r2c(c10::string_view function_name,
               " expects a complex output tensor, but got ", out.scalar_type());
   input = promote_tensor_fft(input);
   const auto input_dim = input.dim();
-  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
+  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
   const auto n = n_opt.value_or(input.sizes()[dim]);
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
@@ -257,7 +263,7 @@ Tensor fft_c2c(c10::string_view function_name,
   TORCH_CHECK(input.is_complex(), function_name,
               " expects a complex input tensor, but got ", input.scalar_type());
   const auto input_dim = input.dim();
-  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
+  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
   const auto n = n_opt.value_or(input.sizes()[dim]);
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
@@ -284,7 +290,7 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
   if (dim) {
     ret.dim.resize(dim->size());
     std::copy(dim->begin(), dim->end(), ret.dim.begin());
-    maybe_wrap_dims(ret.dim, input_dim);
+    maybe_wrap_dims(ret.dim, input_dim, /*wrap_scalars=*/false);
 
     // Check dims are unique
     DimVector copy = ret.dim;
@@ -750,7 +756,7 @@ DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
     IntArrayRef dim_unwrapped = *dim_opt;
     dim.resize(dim_unwrapped.size());
     for (const auto i : c10::irange(dim.size())) {
-      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim());
+      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim(), /*wrap_scalars=*/false);
     }
   } else {
     dim.resize(self.dim());
@@ -1182,7 +1188,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   const auto input_strides = input.strides();
   TORCH_CHECK(dim_.size() > 0);
   DimVector dim(dim_.begin(), dim_.end());
-  at::maybe_wrap_dims(dim, input_strides.size());
+  at::maybe_wrap_dims(dim, input_strides.size(), /*wrap_scalars=*/false);
 
   if (input.numel() == 0 || input_sizes[dim.back()] <= 2) {
     return;  // No elements need writing

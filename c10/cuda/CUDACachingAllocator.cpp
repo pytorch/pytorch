@@ -371,6 +371,10 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
+// TODO: ideally we'd replace this with something like
+// !defined(TORCH_HIP_VERSION) as CUDA <= 10 support was dropped and really
+// this is only a workaround for TORCH_HIP_VERSION not being a sufficient guard
+// to prevent ROCM build breakage.
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
@@ -2006,6 +2010,10 @@ class NativeCachingAllocator : public CUDAAllocator {
         device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
       }
     }
+  }
+
+  bool initialized() override {
+    return device_allocator.size() > 0;
   }
 
   /** allocates a block which is safe to use from the provided stream */
