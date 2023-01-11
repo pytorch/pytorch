@@ -506,7 +506,7 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
   return self;
 }
 
-SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize) {
+SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   if (layout.has_value()) {
     if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not use specified blocksize");
@@ -518,20 +518,20 @@ SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layo
     case kStrided:
       return self;
     case kSparse:
-      return dense_to_sparse(self, self.dim());
+      return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
     case kSparseCsr:
-      return self.to_sparse_csr();
+      return self.to_sparse_csr(dense_dim_opt);
     case kSparseCsc:
-      return self.to_sparse_csc();
+      return self.to_sparse_csc(dense_dim_opt);
     case kSparseBsr:
       if (blocksize.has_value()) {
-        return self.to_sparse_bsr(*blocksize);
+        return self.to_sparse_bsr(*blocksize, dense_dim_opt);
       }
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
       break;
     case kSparseBsc:
       if (blocksize.has_value()) {
-        return self.to_sparse_bsc(*blocksize);
+        return self.to_sparse_bsc(*blocksize, dense_dim_opt);
       }
       break;
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
@@ -540,7 +540,7 @@ SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layo
     }
     AT_ERROR("to_sparse not implemented for ", self.layout(), " to ", *layout, " conversion");
   }
-  return dense_to_sparse(self, self.dim());
+  return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
 }
 
 SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
