@@ -836,13 +836,9 @@ endif()
 
 # Pass path to PocketFFT
 if(AT_POCKETFFT_ENABLED)
-  if(CMAKE_VERSION VERSION_LESS "3.11")
-    target_include_directories(torch_cpu PRIVATE "${POCKETFFT_INCLUDE_DIR}")
-  else()
-    set_source_files_properties(
-        "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
-        PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
-  endif()
+  set_source_files_properties(
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
+      PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND BUILD_LIBTORCH_CPU_WITH_DEBUG)
