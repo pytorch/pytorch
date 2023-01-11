@@ -98,14 +98,12 @@ CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     "resnet50_quantized_qat",  # setStorage
     "soft_actor_critic",  # assert type(inner_out) == type(user_out)
     "tacotron2",  # aten._thnn_fused_lstm_cell.default
-    "tts_angular",  # _VF.lstm
     "AllenaiLongformerBase",  # assert type(inner_out) == type(user_out)
-    "DebertaV2ForQuestionAnswering",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOMs (but on CI only; graph breaks?)
     "botnet26t_256",  # assert type(inner_out) == type(user_out)
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
     "eca_botnext26ts_256",  # assert type(inner_out) == type(user_out)
     "eca_halonext26ts",  # assert type(inner_out) == type(user_out)
-    "hrnet_w18",  # torch._C._nn.upsample_nearest2d
     "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
     "sebotnet33ts_256",  # assert type(inner_out) == type(user_out)
     "twins_pcpvt_base",  # timeout
