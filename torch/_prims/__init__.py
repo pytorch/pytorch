@@ -1293,10 +1293,10 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> Tuple[int, ...]:
     shape = (1,) if len(shape) == 0 else tuple(shape)
 
     dim_length = 1
-    for s in shape[start:end + 1]:
+    for s in shape[start : end + 1]:
         dim_length = dim_length * s
 
-    return shape[0:start] + (dim_length,) + shape[end + 1:]
+    return shape[0:start] + (dim_length,) + shape[end + 1 :]
 
 
 def _collapse_view_helper(
@@ -1338,8 +1338,8 @@ def _collapse_view_helper(
         ):
             return None, None
 
-    new_shape = shape[:start] + (length,) + shape[end + 1:]
-    new_strides = strides[:start] + (stride,) + strides[end + 1:]
+    new_shape = shape[:start] + (length,) + shape[end + 1 :]
+    new_strides = strides[:start] + (stride,) + strides[end + 1 :]
 
     # NOTE: when the input has no elements it's restrided as if it were contiguous
     if a.numel() == 0:
