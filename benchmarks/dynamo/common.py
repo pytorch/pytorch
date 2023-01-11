@@ -98,14 +98,12 @@ CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     "resnet50_quantized_qat",  # setStorage
     "soft_actor_critic",  # assert type(inner_out) == type(user_out)
     "tacotron2",  # aten._thnn_fused_lstm_cell.default
-    "tts_angular",  # _VF.lstm
     "AllenaiLongformerBase",  # assert type(inner_out) == type(user_out)
-    "DebertaV2ForQuestionAnswering",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOMs (but on CI only; graph breaks?)
     "botnet26t_256",  # assert type(inner_out) == type(user_out)
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
     "eca_botnext26ts_256",  # assert type(inner_out) == type(user_out)
     "eca_halonext26ts",  # assert type(inner_out) == type(user_out)
-    "hrnet_w18",  # torch._C._nn.upsample_nearest2d
     "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
     "sebotnet33ts_256",  # assert type(inner_out) == type(user_out)
     "twins_pcpvt_base",  # timeout
@@ -1525,11 +1523,12 @@ def parse_args(args=None):
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
-        "--dynamic-ci-skips", action="store_true",
+        "--dynamic-ci-skips",
+        action="store_true",
         help=(
             "Run models that would have been skipped in CI if dynamic-shapes.  "
             "Implies --dynamic-shapes and --ci"
-        )
+        ),
     )
     parser.add_argument(
         "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
@@ -1808,8 +1807,9 @@ def run(runner, args, original_dir=None):
         args.ci = True
         # We only have a CI skip list for aot_eager right now.  When inductor
         # comes online, add that skip list too.
-        assert args.backend == "aot_eager", \
-            "--dynamic-ci-skips only works with aot_eager backend at the moment"
+        assert (
+            args.backend == "aot_eager"
+        ), "--dynamic-ci-skips only works with aot_eager backend at the moment"
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
@@ -1820,7 +1820,10 @@ def run(runner, args, original_dir=None):
         if args.backend == "aot_eager":
             if args.dynamic_ci_skips:
                 assert args.training and args.dynamic_shapes
-                args.filter = list(set(CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING) - set(CI_SKIP_AOT_EAGER_TRAINING))
+                args.filter = list(
+                    set(CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING)
+                    - set(CI_SKIP_AOT_EAGER_TRAINING)
+                )
             else:
                 args.exclude = (
                     CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
