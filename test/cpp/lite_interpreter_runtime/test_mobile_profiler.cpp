@@ -61,7 +61,9 @@ TEST(MobileProfiler, ModuleHierarchy) {
         false, // profile memory
         true, // record callstack
         false, // record flops
-        true); // record module hierarchy
+        true, // record module hierarchy
+        {}, // events
+        false); // adjust_vulkan_timestamps
     bc.forward(inputs);
   } // End of profiler
   std::ifstream trace_file(trace_file_name);

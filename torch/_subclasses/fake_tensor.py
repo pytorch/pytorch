@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 from weakref import ReferenceType
 
 import torch
+from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch._subclasses.meta_utils import MetaConverter
@@ -25,7 +26,7 @@ pytree = torch.utils._pytree
 T = TypeVar("T")
 TensorWeakRef = Any
 
-aten = torch.ops.aten
+aten = torch._ops.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -215,7 +216,7 @@ class FakeTensorConverter(object):
         shape_env=None,
         ignore_subclass=False,
         *,
-        sname=None,
+        source=None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -248,7 +249,7 @@ class FakeTensorConverter(object):
             shape_env=shape_env,
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
-            sname=sname,
+            source=source,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -284,7 +285,7 @@ class FakeTensorConverter(object):
         make_constant=False,
         shape_env=None,
         ignore_subclass=False,
-        sname=None,
+        source=None,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -292,7 +293,7 @@ class FakeTensorConverter(object):
             make_constant,
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
-            sname=sname,
+            source=source,
         )
 
 
@@ -372,7 +373,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
-    and func != aten.index.Tensor
+    and func not in [aten.index.Tensor, aten.nonzero.default]
 )
 def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
@@ -389,6 +390,28 @@ def local_scalar_dense(fake_mode, func, arg):
         return fake_mode.shape_env.create_unbacked_symint()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
+
+
+@register_op_impl(lambda func: func is torch.ops.aten.nonzero.default)
+def nonzero(fake_mode, func, arg):
+    if fake_mode.shape_env is None:
+        # Without symints/symfloats, cannot handle this
+        raise DataDependentOutputException(func)
+    nnz = fake_mode.shape_env.create_unbacked_symint()
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz >= 0).node.expr, True))
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz < 0).node.expr, False))
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz == -1).node.expr, False))
+    # TODO: the dumb substitution here may not work well
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz < arg.numel()).node.expr, False))
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((arg.numel() * nnz == 0).node.expr, False))
+    # TODO: the substitutions below are unsound
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz == 0).node.expr, False))
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz == 1).node.expr, False))
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz * arg.dim() == 0).node.expr, False))
+    # TODO: these are just hacks for the example
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz < 2).node.expr, False))
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((9216 * nnz).node.expr, False))
+    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -426,10 +449,16 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
 # index tensors with cuda self
 @register_op_impl(aten.index.Tensor)
 def index_tensor(fake_mode, func, *args, **kwargs):
-    # dynamic shape op if indices are bool/uint8
-    check_no_bool_index_tensors(func, *args, **kwargs)
+    from torch._meta_registrations import meta_index_Tensor
 
-    return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    out_device = new_kwargs["input"].device
+    # ensure nonzero call goes to fake tensor
+    out = meta_index_Tensor(*args, **kwargs)
+    return out.to(out_device)
 
 
 # takes in multiple-devices, dont default to default device handling
@@ -1058,18 +1087,18 @@ class FakeTensorMode(TorchDispatchMode):
         tensor,
         static_shapes=False,
         ignore_subclass=False,
-        sname: Optional[str] = None,
+        source: Optional[Source] = None,
     ):
         if static_shapes:
             return self.fake_tensor_converter(
-                self, tensor, ignore_subclass=ignore_subclass, sname=sname
+                self, tensor, ignore_subclass=ignore_subclass, source=source
             )
         return self.fake_tensor_converter(
             self,
             tensor,
             shape_env=self.shape_env,
             ignore_subclass=ignore_subclass,
-            sname=sname,
+            source=source,
         )
 
 
@@ -1158,5 +1187,5 @@ class FakeCopyMode(TorchFunctionMode):
             memo[id(tensor)] = out
             return out
         else:
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)

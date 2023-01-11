@@ -65,7 +65,6 @@ class C10_API SmallVectorBase {
     return std::numeric_limits<Size_T>::max();
   }
 
-  SmallVectorBase() = delete;
   SmallVectorBase(void* FirstEl, size_t TotalCapacity)
       : BeginX(FirstEl), Capacity(TotalCapacity) {}
 
@@ -80,6 +79,7 @@ class C10_API SmallVectorBase {
   void grow_pod(void* FirstEl, size_t MinSize, size_t TSize);
 
  public:
+  SmallVectorBase() = delete;
   size_t size() const {
     return Size;
   }
@@ -451,7 +451,7 @@ class SmallVectorTemplateBase : public SmallVectorTemplateCommon<T> {
 
   void growAndAssign(size_t NumElts, const T& Elt) {
     // Grow manually in case Elt is an internal reference.
-    size_t NewCapacity;
+    size_t NewCapacity = 0;
     T* NewElts = mallocForGrow(NumElts, NewCapacity);
     std::uninitialized_fill_n(NewElts, NumElts, Elt);
     this->destroy_range(this->begin(), this->end());
@@ -462,7 +462,7 @@ class SmallVectorTemplateBase : public SmallVectorTemplateCommon<T> {
   template <typename... ArgTypes>
   T& growAndEmplaceBack(ArgTypes&&... Args) {
     // Grow manually in case one of Args is an internal reference.
-    size_t NewCapacity;
+    size_t NewCapacity = 0;
     T* NewElts = mallocForGrow(0, NewCapacity);
     ::new ((void*)(NewElts + this->size())) T(std::forward<ArgTypes>(Args)...);
     moveElementsForGrow(NewElts);
@@ -493,7 +493,7 @@ class SmallVectorTemplateBase : public SmallVectorTemplateCommon<T> {
 // Define this out-of-line to dissuade the C++ compiler from inlining it.
 template <typename T, bool TriviallyCopyable>
 void SmallVectorTemplateBase<T, TriviallyCopyable>::grow(size_t MinSize) {
-  size_t NewCapacity;
+  size_t NewCapacity = 0;
   T* NewElts = mallocForGrow(MinSize, NewCapacity);
   moveElementsForGrow(NewElts);
   takeAllocationForGrow(NewElts, NewCapacity);
