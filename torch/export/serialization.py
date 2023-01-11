@@ -11,7 +11,7 @@ should_export_buffer = False
 should_export_parameters_buffer = False
 should_export_node_meta = False
 
-def export_stroage(storage: torch.Storage) -> ex.Storage:
+def export_storage(storage: torch.Storage) -> ex.Storage:
     return ex.Storage(
         data_location = ex.Storage.DataLocation.Internal,
 
@@ -25,24 +25,23 @@ def export_stroage(storage: torch.Storage) -> ex.Storage:
     )
 
 def export_tensor_meta(t: torch.Tensor) -> ex.TensorMeta:
-    # TODO: Do I need to treat FakeTensor differently?
-    # is_fake = isinstance(t, FakeTensor)
+    # t can be a real Tensor or a FakeTensor, they share the same format for ex.TensorMeta
 
     return ex.TensorMeta(
         dtype = t.dtype,
-        sizes = t.size(),
+        sizes = t.size(),    # TODO: need to store as ex.SymInt
 
         requires_grad = t.requires_grad,
 
         device = t.device,
-        strides = t.stride(),
-        storage_offset = t.storage_offset(),
+        strides = t.stride(),   # TODO: need to store as ex.SymInt
+        storage_offset = t.storage_offset(),    # TODO: need to store as ex.SymInt
         layout = t.layout,
     )
 
 def export_tensor(t: torch.Tensor) -> ex.Tensor:
     return ex.Tensor(
-        storage = export_stroage(t.storage()),
+        storage = export_storage(t.storage()),
         meta = export_tensor_meta(t)
     )
 

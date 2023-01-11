@@ -7,21 +7,20 @@ from typing import List, Union, Dict
 # Following section is the defining the permissible argument types for operators
 
 # Copied from torchgen/model.py
-# !!! Consider if we want to add aliased dtypes, e.g float == float32. (Sherlock: No!)
 class ScalarType(Enum):
-    Byte = auto()
-    Char = auto()
-    Short = auto()
-    Int = auto()
-    Long = auto()
-    Half = auto()
-    Float = auto()
-    Double = auto()
-    ComplexHalf = auto()
-    ComplexFloat = auto()
-    ComplexDouble = auto()
-    Bool = auto()
-    BFloat16 = auto()
+    u8 = auto()     # torch.uint8
+    i8 = auto()     # torch.int8
+    i16 = auto()    # torch.int16 or torch.short
+    i32 = auto()    # torch.int32 or torch.int
+    i64 = auto()    # torch.int64 or torch.long
+    f16 = auto()    # torch.float16 or torch.half
+    f32 = auto()    # torch.float32 or torch.float
+    f64 = auto()    # torch.float64 or torch.double
+    c32 = auto()    # torch.complex32
+    c64 = auto()    # torch.complex64 or torch.cfloat
+    c128 = auto()   # torch.complex128 or torch.cdouble
+    b8 = auto()     # torch.bool
+    bf16 = auto()   # torch.bfloat16
 
 # Copied from torch/_C/__init__.pyi.in
 # !!! Consider if we want to keep all of them, as we figures out what to do with SparseTensor
@@ -159,7 +158,7 @@ class TensorMeta:
     # !!! see description above, there are subtle difference on how these fields should be interpreted
     device: Device
     strides: List[SymInt]
-    storage_offset: int
+    storage_offset: SymInt
     layout: Layout
 
 
@@ -287,11 +286,13 @@ class GraphModule:
 
     metadata : Dict[str, str]   # maps to GraphModule's meta, which is a Dict[str, Any], but we only support string key and string value.
 
-    # Need to store stateful information
+    # Stateful fields of the graph module
 
     # The name of the tensor will be used to bind to the IValues of Graph Inputs
-    # !!! Consider storing them in the GraphModule, or in the Graph.
-    # !!! Do we needs to store parameters and buffers separately? (Sherlock: Ideally no.)
+    # !!! Consider storing them in the Graph.
+    # There are functional difference between buffers and parameters, so they are stored separately. See:
+    #   - https://discuss.pytorch.org/t/what-is-the-difference-between-register-buffer-and-register-parameter-of-nn-module/32723
+    #   - https://stackoverflow.com/questions/57540745/what-is-the-difference-between-register-parameter-and-register-buffer-in-pytorch
     parameters: Dict[str, Tensor]
     buffers: Dict[str, Tensor]
 
