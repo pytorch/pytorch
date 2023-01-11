@@ -23,7 +23,7 @@ def libtorch_check(file_name, file_full_path):
     # See https://github.com/pytorch/pytorch/issues/35651
     sys.exit(0) if file_name == "utility_ops_gpu_test" else None
 
-    subprocess.run(['echo', 'Running ' + file_full_path])
+    subprocess.call('echo Running ' + file_full_path, shell=True)
     if file_name == "c10_intrusive_ptr_benchmark":
         subprocess.call(file_full_path, shell=True)
         sys.exit(0)
@@ -51,8 +51,8 @@ os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x6
 
 os.environ['TEST_API_OUT_DIR'] = os.environ['TEST_OUT_DIR'] + '\\test_api'
 os.mkdir(os.environ['TEST_API_OUT_DIR'])
-subprocess.run(['test_api.exe', '--gtest_filter="-IntegrationTest.MNIST*"',
-    '--gtest_output=xml:' + os.environ['TEST_API_OUT_DIR'] + '\\test_api.xml'])
+subprocess.call('test_api.exe --gtest_filter="-IntegrationTest.MNIST*" --gtest_output=xml:' +
+    os.environ['TEST_API_OUT_DIR'] + '\\test_api.xml', shell=True)
 
 os.chdir(os.environ['TMP_DIR_WIN'] + '\\build\\torch\\test')
 

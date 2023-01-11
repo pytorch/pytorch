@@ -16,8 +16,7 @@ def pushd(new_dir):
 
 subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
 
-subprocess.run(['git', 'submodule', 'update', '--init', '--recursive', '--jobs',
-    '0', 'third_party/pybind11'])
+subprocess.call('git submodule update --init --recursive --jobs 0 third_party/pybind11', shell=True)
 
 os.chdir('test\\custom_backend')
 
@@ -26,40 +25,40 @@ os.mkdir('build')
 
 with pushd('build'):
 
-    subprocess.run(['echo', 'Executing CMake for custom_backend test...'])
+    subprocess.call('echo Executing CMake for custom_backend test...', shell=True)
 
     # Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
     try:
-        subprocess.run(['cmake', '-DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
-            '\\build\\torch', '-DCMAKE_BUILD_TYPE=Release', '-GNinja', '..'])
+        subprocess.call('cmake -DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
+            '\\build\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..', shell=True)
 
-        subprocess.run(['echo', 'Executing Ninja for custom_backend test...'])
-        subprocess.run(['ninja', '-v'])
+        subprocess.call('echo Executing Ninja for custom_backend test...', shell=True)
+        subprocess.call('ninja -v', shell=True)
 
-        subprocess.run(['echo', 'Ninja succeeded for custom_backend test.'])
+        subprocess.call('echo Ninja succeeded for custom_backend test.', shell=True)
 
     except Exception as e:
 
-        subprocess.run(['echo', 'custom_backend cmake test failed'])
-        subprocess.run(['echo', e])
+        subprocess.call('echo custom_backend cmake test failed', shell=True)
+        subprocess.call('echo ' + e, shell=True)
         sys.exit()
 
 
 try:
 
     # Run tests Python-side and export a script module.
-    subprocess.run(['conda', 'install', '-n', 'test_env', 'python', 'test_custom_backend.py', '-v'])
-    subprocess.run(['conda', 'install', '-n', 'test_env', 'python', 'backend.py', '--export-module-to="build/model.pt"'])
+    subprocess.call('conda install -n test_env python test_custom_backend.py -v', shell=True)
+    subprocess.call('conda install -n test_env python backend.py --export-module-to="build/model.pt"', shell=True)
 
     # Run tests C++-side and load the exported script module.
     os.chdir('build')
     os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;'\
         + str(os.environ['TMP_DIR_WIN']) + '\\build\\torch\\lib;' + str(os.environ['PATH'])
 
-    subprocess.run(['test_custom_backend.exe', 'model.pt'])
+    subprocess.call('test_custom_backend.exe model.pt', shell=True)
 
 except Exception as e:
 
-    subprocess.run(['echo', 'test_custom_backend failed'])
-    subprocess.run(['echo', e])
+    subprocess.call('echo test_custom_backend failed', shell=True)
+    subprocess.call('echo ' + e, shell=True)
     sys.exit()

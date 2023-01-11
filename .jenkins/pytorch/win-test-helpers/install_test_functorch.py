@@ -20,33 +20,33 @@ try:
 
 except Exception as e:
 
-    subprocess.run(['echo', 'setup pytorch env failed'])
-    subprocess.run(['echo', e])
+    subprocess.call('echo setup pytorch env failed', shell=True)
+    subprocess.call('echo ' + e, shell=True)
     sys.exit()
 
 
-subprocess.run(['echo', 'Installing test dependencies'])
+subprocess.call('echo Installing test dependencies', shell=True)
 
 try:
-    subprocess.run(['conda', 'install', '-n', 'test_env', 'pip', 'install', 'networkx'])
+    subprocess.call('conda install -n test_env pip install networkx', shell=True)
 
 except Exception as e:
 
-    subprocess.run(['echo', 'install networkx failed'])
-    subprocess.run(['echo', e])
+    subprocess.call('echo install networkx failed', shell=True)
+    subprocess.call('echo ' + e, shell=True)
     sys.exit()
 
 
-subprocess.run(['echo', 'Test functorch'])
+subprocess.call('echo Test functorch', shell=True)
 
 try:
 
     with pushd('test'):
-        subprocess.run(['conda', 'install', '-n', 'test_env', 'python', 'run_test.py', '--functorch', '--shard',
-            os.environ['SHARD_NUMBER'], os.environ['NUM_TEST_SHARDS'], '--verbose'])
+        subprocess.call('conda install -n test_env python run_test.py --functorch --shard ' +
+            os.environ['SHARD_NUMBER'] + ' ' + os.environ['NUM_TEST_SHARDS'] + ' --verbose', shell=True)
 
 except Exception as e:
 
-    subprocess.run(['echo', 'run_test functorch shard failed'])
-    subprocess.run(['echo', e])
+    subprocess.call('echo run_test functorch shard failed', shell=True)
+    subprocess.call('echo ' + e, shell=True)
     sys.exit()

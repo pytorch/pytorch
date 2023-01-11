@@ -60,20 +60,20 @@ try:
 
 except Exception as e:
 
-    subprocess.run(['echo', 'activate conda failed'])
-    subprocess.run(['echo', e])
+    subprocess.call('echo activate conda failed', shell=True)
+    subprocess.call('echo ' + e, shell=True)
     sys.exit()
 
 # extra conda dependencies for testing purposes
 if 'BUILD_ENVIRONMENT' in os.environ:
 
     try:
-        subprocess.run(['conda', 'install', '-n', 'test_env', '-y', '-q', 'mkl', 'protobuf',
-            'numba', 'scipy=1.6.2', 'typing_extensions', 'dataclasses'])
+        subprocess.call('conda install -n test_env -y -q mkl protobuf numba scipy=1.6.2 ' +
+            'typing_extensions dataclasses', shell=True)
     except Exception as e:
 
-        subprocess.run(['echo', 'conda install failed'])
-        subprocess.run(['echo', e])
+        subprocess.call('echo conda install failed', shell=True)
+        subprocess.call('echo ' + e, shell=True)
         sys.exit()
 
 
@@ -81,20 +81,20 @@ with pushd('.'):
 
     try:
         if 'VC_VERSION' not in os.environ:
-            subprocess.run(['C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
+            subprocess.call('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
                 os.environ['VC_YEAT'] + '\\' + os.environ['VC_VERSION'] +
-                    '\\VC\\Auxiliary\\Build\\vcvarsall.bat', 'x64'])
+                    '\\VC\\Auxiliary\\Build\\vcvarsall.bat x64', shell=True)
 
         else:
-            subprocess.run(['C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
+            subprocess.call('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
                 os.environ['VC_YEAT'] + '\\' + os.environ['VC_VERSION'] +
-                    '\\VC\\Auxiliary\\Build\\vcvarsall.bat', 'x64', '-vcvars_ver=' + os.environ['VC_VERSION']])
+                    '\\VC\\Auxiliary\\Build\\vcvarsall.bat x64 -vcvars_ver=' + os.environ['VC_VERSION'], shell=True)
 
 
     except Exception as e:
 
-        subprocess.run(['echo', 'vcvarsall failed'])
-        subprocess.run(['echo', e])
+        subprocess.call('echo vcvarsall failed', shell=True)
+        subprocess.call('echo ' + e, shell=True)
         sys.exit()
 
 
@@ -103,16 +103,15 @@ with pushd('.'):
 # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
 
 try:
-    subprocess.run(['conda', 'install', '-n', 'test_env', 'pip', 'install', "ninja==1.10.0.post1", 'future',
-        "hypothesis==5.35.1", "expecttest==0.1.3", "librosa>=0.6.2", "scipy==1.6.3",
-            'psutil', 'pillow', "unittest-xml-reporting<=3.2.0,>=2.0.0", 'pytest',
-                'pytest-xdist', 'pytest-shard', 'pytest-rerunfailures', 'sympy',
-                    "xdoctest==1.0.2", "pygments==2.12.0", "opt-einsum>=3.3"])
+    subprocess.call('conda install -n test_env pip install ninja==1.10.0.post1 future ' +
+        'hypothesis==5.35.1 expecttest==0.1.3 librosa>=0.6.2 scipy==1.6.3 psutil pillow ' +
+            'unittest-xml-reporting<=3.2.0,>=2.0.0 pytest pytest-xdist pytest-shard pytest-rerunfailures ' +
+                'sympy xdoctest==1.0.2 pygments==2.12.0 opt-einsum>=3.3', shell=True)
 
 except Exception as e:
 
-    subprocess.run(['echo', 'install dependencies failed'])
-    subprocess.run(['echo', e])
+    subprocess.call('echo install dependencies failed', shell=True)
+    subprocess.call('echo ' + e, shell=True)
     sys.exit()
 
 
@@ -144,22 +143,22 @@ if 'BUILD_ENVIRONMENT' in os.environ:
 
     with pushd(str(os.environ['TMP_DIR_WIN']) + '\\build'):
 
-        subprocess.run(['copy', '/Y', str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) +
-            '\\' + str(os.environ['IMAGE_COMMIT_TAG']) + '.7z', str(os.environ['TMP_DIR_WIN']) + '\\'])
+        subprocess.call('copy /Y ' + str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) +
+            '\\' + str(os.environ['IMAGE_COMMIT_TAG']) + '.7z ' + str(os.environ['TMP_DIR_WIN']) + '\\', shell=True)
 
         # 7z: -aos skips if exists because this .bat can be called multiple times
 
-        subprocess.run(['7z', 'x', str(os.environ['TMP_DIR_WIN']) + '\\' +
-            str(os.environ['IMAGE_COMMIT_TAG']) + '.7z', '-aos'])
+        subprocess.call('7z x ' + str(os.environ['TMP_DIR_WIN']) + '\\' +
+            str(os.environ['IMAGE_COMMIT_TAG']) + '.7z -aos', shell=True)
 
 else:
 
-    subprocess.run(['xcopy', '/s', str(os.environ['CONDA_PARENT_DIR']) +
-        '\\Miniconda3\\Lib\\site-packages\\torch', str(os.environ['TMP_DIR_WIN']) +
-            '\\build\\torch\\'])
+    subprocess.call('xcopy /s ' + str(os.environ['CONDA_PARENT_DIR']) +
+        '\\Miniconda3\\Lib\\site-packages\\torch ' + str(os.environ['TMP_DIR_WIN']) +
+            '\\build\\torch\\', shell=True)
 
-subprocess.run(['echo', '@echo', 'off', '>>', str(os.environ['TMP_DIR_WIN']) +
-    '/ci_scripts/pytorch_env_restore.bat'])
+subprocess.call('echo @echo off >> ' + str(os.environ['TMP_DIR_WIN']) +
+    '/ci_scripts/pytorch_env_restore.bat', shell=True)
 
 env_arr = []
 
@@ -172,12 +171,12 @@ append_multiple_lines(os.environ['TMP_DIR_WIN'] + '/ci_scripts/pytorch_env_resto
 if 'BUILD_ENVIRONMENT' in os.environ:
 
     # Create a shortcut to restore pytorch environment
-    subprocess.run(['echo', '@echo', 'off', '>>', str(os.environ['TMP_DIR_WIN']) +
-        '/ci_scripts/pytorch_env_restore_helper.bat'])
-    subprocess.run(['echo', 'call', '\"%TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat\"',
-        '>>', str(os.environ['TMP_DIR_WIN']) + '/ci_scripts/pytorch_env_restore_helper.bat'])
-    subprocess.run(['echo', 'cd', '/D', '\"%CD%\"', '>>', str(os.environ['TMP_DIR_WIN']) +
-        '/ci_scripts/pytorch_env_restore_helper.bat'])
+    subprocess.call('echo @echo off >> ' + str(os.environ['TMP_DIR_WIN']) +
+        '/ci_scripts/pytorch_env_restore_helper.bat', shell=True)
+    subprocess.call('echo call \"%TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat\" >> ' +
+        str(os.environ['TMP_DIR_WIN']) + '/ci_scripts/pytorch_env_restore_helper.bat', shell=True)
+    subprocess.call('echo cd /D \"%CD%\" >> ' + str(os.environ['TMP_DIR_WIN']) +
+        '/ci_scripts/pytorch_env_restore_helper.bat', shell=True)
 
-    subprocess.run(['aws', 's3', 'cp', '\"s3://ossci-windows/Restore PyTorch Environment.lnk\"',
-        '\"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"'])
+    subprocess.call('aws s3 cp \"s3://ossci-windows/Restore PyTorch Environment.lnk\" ' +
+        '\"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"', shell=True)

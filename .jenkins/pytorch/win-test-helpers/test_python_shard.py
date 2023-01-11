@@ -24,8 +24,8 @@ try:
 
 except Exception as e:
 
-    subprocess.run(['echo', 'setup pytorch env failed'])
-    subprocess.run(['echo', e])
+    subprocess.call('echo setup pytorch env failed', shell=True)
+    subprocess.call('echo ' + e, shell=True)
     sys.exit()
 
 
@@ -37,34 +37,34 @@ with pushd('test'):
 
     if shard_number == "1" and exists(gflags_exe):
 
-        subprocess.run(['echo', 'Some smoke tests'])
+        subprocess.call('echo Some smoke tests', shell=True)
 
         try:
-            subprocess.run([gflags_exe, '/i', 'python.exe', '+sls'])
+            subprocess.call(gflags_exe + ' /i python.exe +sls', shell=True)
             subprocess.call('conda run -n test_env' + ' python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\run_python_nn_smoketests.py', shell=True)
-            subprocess.run([gflags_exe, '/i', 'python.exe', '-sls'])
+            subprocess.call(gflags_exe + ' /i python.exe -sls', shell=True)
 
         except Exception as e:
 
-            subprocess.run(['echo', 'shard dmoke test failed'])
-            subprocess.run(['echo', e])
+            subprocess.call('echo shard dmoke test failed', shell=True)
+            subprocess.call('echo ' + e, shell=True)
             sys.exit()
 
 
-    subprocess.run(['echo', 'Copying over test times file'])
-    subprocess.run(['copy', '/Y', str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) +
-        '\\.pytorch-test-times.json', str(os.environ['PROJECT_DIR_WIN'])])
+    subprocess.call('echo Copying over test times file', shell=True)
+    subprocess.call('copy /Y ' + str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) +
+        '\\.pytorch-test-times.json ' + str(os.environ['PROJECT_DIR_WIN']), shell=True)
 
 
-    subprocess.run(['echo', 'Run nn tests'])
+    subprocess.call('echo Run nn tests', shell=True)
 
     try:
-        subprocess.run(['conda', 'install', '-n', 'test_env', 'python', 'run_test.py', '--exclude-jit-executor',
-            '--exclude-distributed-tests', '--shard', shard_number, str(os.environ['NUM_TEST_SHARDS']),
-                '--verbose'])
+        subprocess.call('conda install -n test_env python run_test.py --exclude-jit-executor ' +
+            '--exclude-distributed-tests --shard ' + shard_number + ' ' + str(os.environ['NUM_TEST_SHARDS']) +
+                ' --verbose', shell=True)
 
     except Exception as e:
 
-        subprocess.run(['echo', 'shard nn tests failed'])
-        subprocess.run(['echo', e])
+        subprocess.call('echo shard nn tests failed', shell=True)
+        subprocess.call('echo ' + e, shell=True)
         sys.exit()
