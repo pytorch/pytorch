@@ -40,7 +40,7 @@ if install_fresh_conda == '1':
                 '--output ' + tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe', shell=True)
 
         subprocess.check_call(tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe ' +
-            '/InstallationType=JustMe /RegisterPython=0 /S /AddToPath=1 /D=' + conda_parent_dir + '\\Miniconda3', shell=True)
+            '/InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=' + conda_parent_dir + '\\Miniconda3', shell=True)
 
         subprocess.check_call('echo Installed conda to: ' + conda_parent_dir + '\\Miniconda3', shell=True)
 
