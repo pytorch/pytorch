@@ -2585,6 +2585,12 @@ shape.
 
 .. note::
 
+  The returned sparse tensor might contain duplicate values if :attr:`mask`
+  is not coalesced. It is therefore advisable to pass ``mask.coalesce()``
+  if such behavior is not desired.
+
+.. note::
+
   The returned sparse tensor has the same indices as the sparse tensor
   :attr:`mask`, even when the corresponding values in :attr:`self` are
   zeros.
