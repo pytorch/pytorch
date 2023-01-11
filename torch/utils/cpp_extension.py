@@ -1083,7 +1083,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
         for source in sources:
             s_abs = os.path.abspath(source)
             hipified_s_abs = (hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
-                                hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
+                              hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
             # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
             # *never* absolute paths
             hipified_sources.add(os.path.relpath(hipified_s_abs, build_dir))
