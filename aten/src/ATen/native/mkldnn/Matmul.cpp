@@ -18,10 +18,10 @@ void mkldnn_matmul(
   TORCH_CHECK(false, "mkldnn_matmul: ATen not compiled with MKLDNN support");
 }
 
-bool use_mkldnn_bf16_matmul(
+bool use_mkldnn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const Tensor& result_opt){
+    const Tensor& result_opt) {
   return false;
 }
 
@@ -55,7 +55,7 @@ bool mkldnn_gemm(
 namespace at {
 namespace native {
 
-static bool use_mkldnn_bf16_matmul() {
+static bool use_mkldnn_matmul() {
   return (
       at::globalContext().userEnabledMkldnn() &&
       mkldnn_bf16_device_check());
@@ -76,9 +76,7 @@ bool mkldnn_gemm(
     float beta,
     scalar_t* c_data,
     int64_t ldc) {
-  if (!use_mkldnn_bf16_matmul() ||
-      (m * n * k <= 16 * 16 * 16) ||
-      (alpha == 0.0f)) {
+  if (!use_mkldnn_matmul() || (m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
     return false;
   }
 
@@ -98,21 +96,26 @@ bool mkldnn_gemm(
     std::swap(b_strides[0], b_strides[1]);
   }
 
+  auto dtype = ideep::tensor::data_type::bf16;
+  if (std::is_same<float, scalar_t>::value) {
+    dtype = ideep::tensor::data_type::f32
+  }
+
   ideep::tensor a(
       {/*sizes=*/{k, m},
-       ideep::tensor::data_type::bf16,
+       dtype,
        /*strides=*/a_strides},
       const_cast<scalar_t*>(a_data));
   ideep::tensor b(
       {/*sizes=*/{n, k},
-       ideep::tensor::data_type::bf16,
+       dtype,
        /*strides=*/b_strides},
       const_cast<scalar_t*>(b_data));
-  ideep::tensor c({
-      /*sizes=*/{n, m},
-      ideep::tensor::data_type::bf16,
-      /*strides=*/c_strides},
-    c_data);
+  ideep::tensor c(
+      {/*sizes=*/{n, m},
+       dtype,
+       /*strides=*/c_strides},
+      c_data);
   if (at::globalContext().float32MatmulPrecision() ==
       at::Float32MatmulPrecision::MEDIUM) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
@@ -181,11 +184,10 @@ void mkldnn_matmul(
   TORCH_CHECK(mkldnn_bf16_device_check(),
     "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq, or AWS Graviton3");
 
-  //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
-  //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
-  TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
-              ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
-              "mkldnn_matmul:  only enabled for fp32 and bf16 path");
+  TensorArg mat1_arg{mat1, "mat1", 1}, mat2_arg{mat2, "mat2", 2},
+      result_arg{result, "result", 3};
+  checkScalarTypes("mkldnn_matmul", mat1_arg, {kFloat, kBFloat16});
+  checkAllSameType(mat1_arg, {mat2_arg, result_arg});
 
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
@@ -264,7 +266,7 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   }
 }
 
-bool use_mkldnn_bf16_matmul(
+bool use_mkldnn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
@@ -272,26 +274,24 @@ bool use_mkldnn_bf16_matmul(
   if (mkldnn_bf16_device_check_arm()) {
      //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
      //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
-     return (
-        use_mkldnn_bf16_matmul() &&
-        (mat1.scalar_type() == mat2.scalar_type()) && (!result.defined() || (mat1.scalar_type() == result.scalar_type())) &&
+    return (
+        use_mkldnn_matmul() && (mat1.scalar_type() == mat2.scalar_type()) &&
+        (!result.defined() || (mat1.scalar_type() == result.scalar_type())) &&
         ((mat1.scalar_type() == kFloat) || (mat1.scalar_type() == kBFloat16)) &&
-        mat1.numel() != 0 &&
-        mat2.numel() != 0 &&
-        checksize(mat1, mat2));
+        mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2));
   } else
 #endif
   {
-    bool all_args_are_bf16 = mat1.scalar_type() == kFloat &&
-        mat2.scalar_type() == kFloat &&
-        (!result.defined() || result.scalar_type() == kFloat);
+    bool all_args_are_bf16 = mat1.scalar_type() == kBFloat16 &&
+        mat2.scalar_type() == kBFloat16 &&
+        (!result.defined() || result.scalar_type() == kBFloat16);
     bool all_args_are_fp32 = mat1.scalar_type() == kFloat &&
         mat2.scalar_type() == kFloat &&
         (!result.defined() || result.scalar_type() == kFloat);
     bool allow_low_precision = at::globalContext().float32MatmulPrecision() ==
         at::Float32MatmulPrecision::MEDIUM;
     return (
-        use_mkldnn_bf16_matmul() &&
+        use_mkldnn_matmul() &&
         (all_args_are_bf16 || (all_args_are_fp32 && allow_low_precision)) &&
         mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2));
   }

@@ -14,7 +14,7 @@ TORCH_API void mkldnn_matmul(
         float beta=1,
         float alpha=1);
 
-bool use_mkldnn_bf16_matmul(
+bool use_mkldnn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result_opt);

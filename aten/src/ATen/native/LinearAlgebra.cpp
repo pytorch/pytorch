@@ -1646,7 +1646,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
 
-  if (use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)){
+  if (use_mkldnn_matmul(batch1, batch2, self_or_result)) {
     mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
     return;
   }
