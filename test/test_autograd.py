@@ -915,36 +915,41 @@ class TestAutograd(TestCase):
         def tensor_prehook(g):
             return g * 2
 
-        def posthook(gI, gO):
-            self.assertTrue(torch.allclose(gO[0], a * 2))
-            self.assertEqual(len(gI), 0)
+        def posthook(gO, gI):
+            self.assertTrue(torch.allclose(gI[0], a * 2))
+            self.assertEqual(len(gO), 0)
+
+        def prehook(gI):
+            self.assertTrue(torch.allclose(gI[0], a * 2))
+            self.assertEqual(len(gI), 1)
 
         b = a.clone()
         acc = b.grad_fn.next_functions[0][0]
         acc.register_hook(posthook)
+        acc.register_prehook(prehook)
         a.register_hook(tensor_prehook)
 
         b.backward()
 
     def test_hook_edge_case_when_called_with_grad(self):
-        # grad executes the tensor prehooks of the next node but not
+        # grad executes the tensor hooks of the next node but not
         # grad_fn pre hooks or the post hooks
         a = torch.tensor(1., requires_grad=True)
         b = a * 2
         c = b * 2
 
-        tensor_prehook_count = [0]
+        tensor_hook_count = [0]
         prehook_count = [0]
         posthook_count = [0]
 
         def reset_counts():
-            nonlocal tensor_prehook_count, prehook_count, posthook_count
-            tensor_prehook_count = [0]
+            nonlocal tensor_hook_count, prehook_count, posthook_count
+            tensor_hook_count = [0]
             prehook_count = [0]
             posthook_count = [0]
 
         def tensor_prehook(g):
-            tensor_prehook_count[0] += 1
+            tensor_hook_count[0] += 1
 
         def prehook(g):
             prehook_count[0] += 1
@@ -961,25 +966,25 @@ class TestAutograd(TestCase):
         b.grad_fn.register_prehook(prehook)
 
         torch.autograd.grad(c, inputs=(b), retain_graph=True)
-        self.assertEqual(tensor_prehook_count[0], 1)
+        self.assertEqual(tensor_hook_count[0], 1)
         self.assertEqual(posthook_count[0], 0)
         self.assertEqual(prehook_count[0], 0)
         reset_counts()
 
         torch.autograd.grad(c, inputs=(a, b), retain_graph=True)
-        self.assertEqual(tensor_prehook_count[0], 2)
+        self.assertEqual(tensor_hook_count[0], 2)
         self.assertEqual(posthook_count[0], 1)
         self.assertEqual(prehook_count[0], 1)
         reset_counts()
 
         c.backward(retain_graph=True)
-        self.assertEqual(tensor_prehook_count[0], 2)
+        self.assertEqual(tensor_hook_count[0], 2)
         self.assertEqual(posthook_count[0], 2)
         self.assertEqual(prehook_count[0], 2)
         reset_counts()
 
         c.backward(inputs=(a, b), retain_graph=True)
-        self.assertEqual(tensor_prehook_count[0], 2)
+        self.assertEqual(tensor_hook_count[0], 2)
         self.assertEqual(posthook_count[0], 2)
         self.assertEqual(prehook_count[0], 2)
 
