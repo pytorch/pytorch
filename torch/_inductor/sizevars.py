@@ -367,6 +367,9 @@ class SizeVarAllocator(object):
         out = sympy_subs(sympy.expand(expr), self.var_to_val)
         return int(out)
 
+    def size_hints(self, exprs: List[Expr]) -> int:
+        return tuple(self.size_hint(x) for x in exprs)
+
     def _lru_cache(self, fn, maxsize=None):
         """
         Wrapper around functools.lru_cache that clears when replacements
