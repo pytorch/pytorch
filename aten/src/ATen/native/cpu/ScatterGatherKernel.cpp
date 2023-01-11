@@ -750,6 +750,44 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
   });
 }
 
+template <typename scalar_t>
+void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
+  int64_t* index_data = index.data_ptr<int64_t>();
+  scalar_t* result_data = result.data_ptr<scalar_t>();
+  scalar_t* self_data = self.data_ptr<scalar_t>();
+
+  const int64_t M = ensure_nonempty_size(result, 0);
+  const int64_t N = ensure_nonempty_size(self, 0);
+  const int64_t K = index.numel() / M;
+
+  const int64_t index_upper_bound = N;
+
+  using Vec = vec::Vectorized<scalar_t>;
+  int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / K);
+  at::parallel_for(0, M, grain_size, [&](int64_t begin, int64_t end) {
+    for (const auto m : c10::irange(begin, end)) {
+      scalar_t* result_ptr = result_data + m * K;
+      int64_t index = index_data[m];
+      TORCH_CHECK(index >= 0 && index < index_upper_bound,
+                  "index ", index,
+                  " is out of bounds for dimension ", 0,
+                  " with size ", index_upper_bound);
+      scalar_t* self_ptr = self_data + index * K;
+      int64_t d = 0;
+      for (; d < K - (K % Vec::size()); d += Vec::size()) {
+        Vec out_vec = Vec::loadu(self_ptr + d);
+        out_vec.store(result_ptr + d);
+      }
+      #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
+      # pragma unroll
+      #endif
+      for (; d < K; d++) {
+        result_ptr[d] = self_ptr[d];
+      }
+    }
+  });
+}
+
 void scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
   AT_DISPATCH_FLOATING_TYPES_AND(
     ScalarType::BFloat16, self.scalar_type(), "scatter_add_expanded_index", [&] {
@@ -779,6 +817,13 @@ void scatter_reduce_expanded_index_kernel(
         cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_MEAN>(self, index, src, include_self);
         break;
       }
+  });
+}
+
+void gather_expanded_index_kernel(const Tensor& result, const Tensor& self, const Tensor& index) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+    ScalarType::BFloat16, self.scalar_type(), "gather_expanded_index", [&] {
+      cpu_gather_expanded_index_kernel<scalar_t>(result, index, self);
   });
 }
 
@@ -875,5 +920,6 @@ REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cpu_kernel);
 // fast paths for GNN usage
 REGISTER_DISPATCH(scatter_add_expanded_index_stub, &scatter_add_expanded_index_kernel);
 REGISTER_DISPATCH(scatter_reduce_expanded_index_stub, &scatter_reduce_expanded_index_kernel);
+REGISTER_DISPATCH(gather_expanded_index_stub, &gather_expanded_index_kernel);
 
 }} // namespace at::native
