@@ -254,7 +254,6 @@ def validate_vmap_returns_two(result):
         raise RuntimeError(base_error_msg + f"Got a {type(result)} instead")
     if not len(result) == 2:
         raise RuntimeError(base_error_msg + f"Got {len(result)} returns instead")
-    unwrapped_output, out_dims = result
 
 @custom_function_call.py_impl(TransformType.Vmap)
 def custom_function_call_vmap(interpreter, autograd_function, *operands):
