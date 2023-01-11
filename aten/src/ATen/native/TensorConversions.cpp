@@ -1817,7 +1817,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
               "to_sparse: ", self.layout(), " to ", layout_,
               " conversion does not use the specified blocksize ", blocksize.value(), ".");
   if (self.layout() == layout_ && (!blocksize.has_value() || at::sparse_csr::getBlockSize(self) == *blocksize)) {
-    return self;
+    return self.clone();
   }
   switch (layout_) {
   case kStrided:
@@ -1859,13 +1859,13 @@ Tensor sparse_coo_to_sparse(const Tensor& self, c10::optional<c10::Layout> layou
               "to_sparse: ", self.layout(), " to ", layout_,
               " conversion does not use the specified blocksize ", blocksize.value(), ".");
   if (self.layout() == layout_) {
-    return self;
+    return self.clone();
   }
   switch (layout_) {
   case kStrided:
     return self.to_dense();
   case kSparse:
-    return self;
+    return self.clone();
   case kSparseCsr:
     return self.to_sparse_csr();
   case kSparseCsc:
