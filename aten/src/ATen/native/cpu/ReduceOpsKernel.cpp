@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/native/ReduceOps.h>
@@ -260,7 +261,7 @@ static void norm_kernel_tensor_iterator_impl(
          iter.input_dtype() == kBFloat16)) {
       AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
         // use float as accumulate type for BFloat16
-        using acc_t = vec_scalar_t<scalar_t>;
+        using acc_t = at::opmath_type<scalar_t>;
         binary_kernel_reduce_lastdim(iter, [](char* result_data_bytes, char* self_data_bytes, int64_t size) {
           scalar_t* result_data = (scalar_t*)result_data_bytes;
           scalar_t* self_data = (scalar_t*)self_data_bytes;

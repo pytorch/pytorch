@@ -2,6 +2,7 @@
 
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/complex.h>
@@ -83,7 +84,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
       c10::BFloat16* out, const c10::BFloat16* in, int64_t size) {                \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
       DL_RUNTIME_BUG_BFLOAT16()                                                   \
-      using vecscalar_t = vec_scalar_t<c10::BFloat16>;                            \
+      using vecscalar_t = at::opmath_type<c10::BFloat16>;                            \
       map([](const Vectorized<vecscalar_t>& x) { return x.op(); },                \
           out + begin,                                                            \
           in + begin,                                                             \
@@ -95,7 +96,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   template <typename scalar_t>                                                    \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      using vecscalar_t = vec_scalar_t<scalar_t>;                                 \
+      using vecscalar_t = at::opmath_type<scalar_t>;                                 \
       map([](const Vectorized<vecscalar_t>& x) { return x.op(); },                \
           out + begin,                                                            \
           in + begin,                                                             \
