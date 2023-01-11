@@ -4,6 +4,7 @@ from typing import cast, List, Optional, Dict, Tuple
 import torch
 from torch import Tensor
 from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling, _dispatch_sqrt
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['Adam', 'adam']
 
@@ -609,7 +610,7 @@ def _fused_adam(
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
 ) -> None:
-    grouped_tensors = _group_params_by_device_and_dtype(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device, dtype) in grouped_tensors:
         (
             device_params,
