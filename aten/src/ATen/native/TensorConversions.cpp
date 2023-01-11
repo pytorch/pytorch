@@ -503,13 +503,15 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
     case kStrided:
       return grad.to_dense();
     case kSparse:
+      // Autograd operates on the coalesced assumption, i.e. no duplicate values.
+      return grad.sparse_mask(input_.coalesce());
     case kSparseCsr:
     case kSparseCsc:
-      // TODO: add CSR/CSC support for sparse_mask
+      // TODO: add efficient CSR/CSC support for sparse_mask
       return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout);
     case kSparseBsr:
     case kSparseBsc: {
-      // TODO: add BSR/BSC support for sparse_mask
+      // TODO: add efficient BSR/BSC support for sparse_mask
       const auto blocksize = at::DimVector(input_.values().sizes().slice(1, 2));
       return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout, blocksize);
     }
