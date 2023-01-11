@@ -7,7 +7,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
-#include <ATen/cpu/vml.h>
+#include <ATen/cpu/vec/functional.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace native { namespace {
