@@ -376,7 +376,7 @@ static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) 
 }
 
 static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const Vectorized<scalar_t> min_vec(min);
     cpu_kernel_vec(iter,
