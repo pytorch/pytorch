@@ -34,7 +34,7 @@ class Node(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def next_functions(self) -> Tuple[Tuple['Node', int], ...]:
+    def next_functions(self) -> Tuple[Tuple[Optional['Node'], int], ...]:
         ...
 
     @abc.abstractmethod
