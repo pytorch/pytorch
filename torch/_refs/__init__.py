@@ -702,26 +702,24 @@ def log_softmax(
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
 
 
+@register_decomposition(aten.logsumexp)
 @out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
 def logsumexp(
-    a: TensorLikeType,
-    dim: DimsType,
-    keepdim: bool = False,
+    self: TensorLikeType, dim: DimsType, keepdim: bool = False
 ) -> TensorLikeType:
-    dim = utils.canonicalize_dims(a.ndim, dim)
-    # ATen specifies int[1] type dims which expands integers to tuples of length 1
     if not isinstance(dim, Iterable):
         dim = (dim,)
-    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        # For float and complex dtypes, we shift input to exp by a constant to avoid overflow
-        a_max = amax(a, dim, keepdim=True)
-        a_max = where(abs(a_max) == float("inf"), 0.0, a_max)
-        a_max_squeezed = prims.squeeze(a_max, dim) if not keepdim else a_max
-        result = log(sum(exp(a - a_max), dim, keepdim=keepdim)) + a_max_squeezed
-    else:
-        # This case covers boolean and integer dtypes and we use non-stabilized computation
-        result = log(sum(exp(a), dim, keepdim=keepdim))
-    return result
+    if self.numel() == 0:
+        return torch.sum(torch.exp(self), dim, keepdim).log()
+    maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
+    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)  # type: ignore[arg-type]
+    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
+    return result.log().add(maxes_squeezed)
 
 
 @register_decomposition(aten.nan_to_num)
@@ -907,12 +905,14 @@ def _make_elementwise_binary_reference(
         ) -> Tensor:
             check(
                 supports_lhs_python_scalar or not isinstance(a, Number),
-                lambda: "{name}: Received a lhs Python scalar to an elementwise binary operation that does not accept lhs scalars!",
+                lambda: f"{name}: Received a lhs Python scalar to an elementwise binary "
+                "operation that does not accept lhs scalars!",
                 ValueError,
             )
             check(
                 supports_rhs_python_scalar or not isinstance(b, Number),
-                lambda: "{name}: Received a rhs Python scalar to an elementwise binary operation that does not accept rhs scalars!",
+                lambda: f"{name}: Received a rhs Python scalar to an elementwise binary "
+                "operation that does not accept rhs scalars!",
                 ValueError,
             )
             check(
@@ -1430,6 +1430,20 @@ def lcm(a: TensorLikeType, b: TensorLikeType):
 )
 def le(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.le(a, b)
+
+
+@_make_elementwise_binary_reference(
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
+def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    # Nb. this implementation does nto distribute the gradients evenly when a == b
+    mask = a >= b
+    max_ = torch.where(mask, a, b)
+    min_ = torch.where(mask, b, a)
+    inf_mask = torch.logical_and(torch.isinf(a), a == b)
+    return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
 
 # TODO: add docstring
@@ -2285,6 +2299,7 @@ def var(
     return result
 
 
+@register_decomposition(aten.std)
 @out_wrapper()
 def std(
     a: TensorLikeType,
@@ -3363,8 +3378,11 @@ def softmax(
     result_dtype = dtype or a.dtype
     computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
-    a_max = amax(a_, dim, keepdim=True)
-    a_exp = exp(a_ - a_max)
+    if a.numel() == 0:
+        a_exp = exp(a_)
+    else:
+        a_max = amax(a_, dim, keepdim=True)
+        a_exp = exp(a_ - a_max)
     return _maybe_convert_to_dtype(
         true_divide(a_exp, sum(a_exp, dim, keepdim=True)), result_dtype
     )  # type: ignore[return-value]
@@ -4328,20 +4346,28 @@ def linspace(
     if start == end:
         return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
-    # arange returns values in the interval [start, end) so we add an an eps to make it [start, end]
-    # The eps is small enough as to always add just the element end
-    step_size = 1 / (steps - 1)
-    eps = step_size / 2
-    # arange returns a tensor of size divup(end - start, step) and thus, for the arguemnts below
-    # ceil(div(1 + step_size/2,  1/(steps - 1)) = steps - 1  + ceil(1 / 2) = steps
-    # torch.arange is an scan algorithm, so we need a high-precision dtype
-    rg = torch.arange(
-        0, 1 + eps, step_size, dtype=torch.float64, **factory_kwargs  # type: ignore[arg-type]
+    # Perform in arange in int because some backends like ATen or Triton do not support all the dtypes
+    rg = torch.arange(0, steps, **factory_kwargs)  # type: ignore[arg-type]
+
+    # Small types need to be computed in higher precision as this is, at heart, an associative scan
+    dtype_red = (
+        torch.int64
+        if (utils.is_boolean_dtype(dtype) or utils.is_integer_dtype(dtype))
+        else dtype
     )
-    double_dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
-    rg = _maybe_convert_to_dtype(rg, double_dtype)  # type: ignore[assignment]
-    cast = partial(torch.full, (1,), dtype=double_dtype, **factory_kwargs)
-    out = torch.lerp(cast(start), cast(end), rg)
+    computation_dtype, _ = utils.reduction_dtypes(
+        rg, REDUCTION_OUTPUT_TYPE_KIND.SAME, dtype_red
+    )
+    cast_rg = partial(_maybe_convert_to_dtype, dtype=computation_dtype)
+
+    # We implement torch.lerp without performing rg / (steps - 1) explicitly
+    # With this we get out[0] == start, out[-1] == end
+    step = (end - start) / (steps - 1)
+    out = torch.where(
+        rg < steps / 2,
+        start + step * cast_rg(rg),  # type: ignore[arg-type,operator]
+        end - step * cast_rg((steps - 1) - rg),  # type: ignore[arg-type,operator]
+    )
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
@@ -4804,6 +4830,7 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
+@register_decomposition(aten.norm)
 @out_wrapper(exact_dtype=True)
 def norm(
     input: TensorLikeType,

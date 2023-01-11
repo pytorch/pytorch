@@ -44,18 +44,10 @@ class ShaderLayout final {
   friend void swap(ShaderLayout& lhs, ShaderLayout& rhs) noexcept;
 };
 
-struct ShaderSource final {
-  enum class Type { GLSL, SPIRV } type;
-
-  union {
-    struct {
-      const char* src; // Null-terminated
-      uint32_t unused; // padding
-    } glsl;
-    struct {
-      const uint32_t* bin;
-      uint32_t size;
-    } spirv;
+struct ShaderInfo final {
+  struct {
+    const uint32_t* bin;
+    uint32_t size;
   } src_code;
 
   std::string kernel_name{""};
@@ -64,25 +56,17 @@ struct ShaderSource final {
   // Shader Metadata
   utils::uvec3 out_tile_size{1u, 1u, 1u};
 
-  explicit ShaderSource();
-  explicit ShaderSource(std::string, const char*);
-  explicit ShaderSource(
-      std::string,
-      const uint32_t*,
-      const uint32_t,
-      const std::vector<VkDescriptorType>&);
-};
-
-bool operator==(const ShaderSource& _1, const ShaderSource& _2);
-
-struct ShaderInfo final {
-  ShaderSource shader_src;
   c10::SmallVector<uint32_t, 4> tile_size;
   StorageType bias_storage_type{StorageType::UNKNOWN};
   StorageType weight_storage_type{StorageType::UNKNOWN};
 
-  explicit ShaderInfo() = default;
+  explicit ShaderInfo();
   explicit ShaderInfo(std::string, const char*);
+  explicit ShaderInfo(
+      std::string,
+      const uint32_t*,
+      const uint32_t,
+      const std::vector<VkDescriptorType>&);
   explicit ShaderInfo(
       std::string,
       const uint32_t*,
@@ -93,9 +77,11 @@ struct ShaderInfo final {
       const StorageType weight_storage_type);
 };
 
+bool operator==(const ShaderInfo& _1, const ShaderInfo& _2);
+
 class ShaderModule final {
  public:
-  explicit ShaderModule(const VkDevice device, const ShaderSource& source);
+  explicit ShaderModule(const VkDevice device, const ShaderInfo& source);
 
   ShaderModule(const ShaderModule&) = delete;
   ShaderModule& operator=(const ShaderModule&) = delete;
@@ -172,13 +158,12 @@ class ShaderCache final {
 
   ~ShaderCache();
 
-  using Key = ShaderSource;
+  using Key = ShaderInfo;
   using Value = ShaderModule;
 
   struct Hasher {
-    inline size_t operator()(const ShaderSource& source) const {
-      return c10::get_hash(
-          source.type, source.src_code.spirv.bin, source.src_code.spirv.size);
+    inline size_t operator()(const ShaderInfo& source) const {
+      return c10::get_hash(source.src_code.bin, source.src_code.size);
     }
   };
 
