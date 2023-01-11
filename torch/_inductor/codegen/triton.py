@@ -416,13 +416,16 @@ class IterationRangesRoot(IterationRanges):
             self.nodes[expr] = node
         return self.nodes[expr]
 
-    def construct(self, lengths: List[sympy.Expr]):
+    def construct_entries(self, lengths: List[sympy.Expr]):
         divisor = sympy.Integer(1)
         itervars = []
         for length in reversed(lengths):
-            itervars.append(self.lookup(divisor, length).symbol())
+            itervars.append(self.lookup(divisor, length))
             divisor = divisor * length
         return list(reversed(itervars))
+
+    def construct(self, lengths: List[sympy.Expr]):
+        return [e.symbol() for e in self.construct_entries(lengths)]
 
     def vars_and_sizes(self, index: sympy.Expr):
         """Figure out vars from this tree used in index"""
@@ -496,6 +499,11 @@ class IterationRangesEntry(IterationRanges):
         self.parent = parent
         self.codegen = functools.lru_cache(None)(self._codegen)
         self.expr = expr
+
+    def set_name(self, name):
+        self.codegen = lambda: name
+        self.codegen.cache_clear = lambda: None
+        self.name = name
 
     def cache_clear(self):
         self.codegen.cache_clear()
@@ -732,6 +740,7 @@ class TritonKernel(Kernel):
         *,
         copy_shape=None,
         dense_indexing=False,
+        override_mask=None,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -742,7 +751,9 @@ class TritonKernel(Kernel):
 
         mask_vars: Set[str] = set()
         for var in index_vars:
-            if var.name.startswith("tmp"):
+            if override_mask:
+                pass
+            elif var.name.startswith("tmp"):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
@@ -770,7 +781,10 @@ class TritonKernel(Kernel):
             dense_mask_vars.add(f"{tree.prefix}mask")
 
         if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
-            index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
+            if copy_shape:
+                index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+            else:
+                index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
             if isinstance(index, sympy.Integer):
                 return index_str, set(), "None"
             else:
@@ -778,6 +792,9 @@ class TritonKernel(Kernel):
         elif not have_loop_vars and copy_shape:
             mask_vars = dense_mask_vars
             index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+
+        if override_mask:
+            mask_vars = {override_mask}
 
         if self._load_mask:
             mask_vars.add(self._load_mask)
@@ -829,6 +846,7 @@ class TritonKernel(Kernel):
             ep = ", eviction_policy='evict_last'"
         else:
             ep = ""
+
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
@@ -1106,6 +1124,13 @@ class TritonKernel(Kernel):
         wrapper.writeline("''')")
         return wrapper.getvalue()
 
+    def codegen_template_wrapper(self, src_code):
+        wrapper = IndentedBuffer()
+        wrapper.writeline("async_compile.triton('''")
+        wrapper.splice(src_code, strip=True)
+        wrapper.writeline("''')")
+        return wrapper.getvalue()
+
     def codegen_static_numels(self, code):
         """
         We get a small speedup from hard coding numels if they are static.
@@ -1187,6 +1212,9 @@ class TritonScheduling:
             if not (numel1 == numel2 and rnumel1 == rnumel2):
                 return False
 
+            if node1.is_template():
+                return True  # skip checks for compatible tiling
+
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
             tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
@@ -1212,7 +1240,10 @@ class TritonScheduling:
                     for n in node1.get_nodes()
                 ):
                     return False
-                if config.triton.tiling_prevents_reduction_fusion:
+                if (
+                    config.triton.tiling_prevents_reduction_fusion
+                    and not node1.is_template()
+                ):
                     return self.select_tiling(node1.get_nodes(), numel1) in (
                         (numel1, 1),
                         (numel2, rnumel2, 1),
@@ -1348,8 +1379,13 @@ class TritonScheduling:
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
-        wrapper = V.graph.wrapper_code
         src_code = kernel.codegen_kernel()
+        kernel_name = self.define_kernel(src_code, node_schedule)
+        kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+        self.scheduler.free_buffers()
+
+    def define_kernel(self, src_code, node_schedule):
+        wrapper = V.graph.wrapper_code
         if src_code in wrapper.kernels:
             kernel_name = wrapper.kernels[src_code]
         else:
@@ -1366,7 +1402,25 @@ class TritonScheduling:
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
             wrapper.define_kernel(kernel_name, src_code)
-        kernel.call_kernel(wrapper, kernel_name)
+        return kernel_name
+
+    def codegen_template(self, template_node, epilogue_nodes):
+        """
+        Codegen a triton template
+        """
+        _, (numel, rnumel) = template_node.group
+        assert rnumel == 1
+        kernel, render = template_node.node.make_kernel_render(template_node.node)
+        with kernel:
+            for node in [template_node, *epilogue_nodes]:
+                node.mark_run()
+            render()  # warmup run to get the args right
+            for node in epilogue_nodes:
+                node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+
+        src_code = kernel.codegen_template_wrapper(render())
+        kernel_name = self.define_kernel(src_code, [template_node, *epilogue_nodes])
+        kernel.call_kernel(V.graph.wrapper_code, kernel_name)
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
