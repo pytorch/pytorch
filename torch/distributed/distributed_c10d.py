@@ -1020,8 +1020,9 @@ def _new_process_group_helper(
                 dist_backend_opts.timeout = timeout
                 dist_backend_opts.group_id = group_name
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
-
                 backend_class = creator_fn(dist_backend_opts, pg_options)
+
+            backend_type = ProcessGroup.BackendType.CUSTOM
 
         # Set sequence numbers for gloo and nccl backends.
         if backend_str in [Backend.GLOO, Backend.NCCL]:
@@ -1055,8 +1056,10 @@ def _new_process_group_helper(
                         timeout=timeout,
                     )
 
-        # only create single backend pg when backend is set to gloo, nccl, mpi, and ucc
-        if backend in [Backend.GLOO, Backend.NCCL, Backend.UCC, Backend.MPI]:
+        # only create single backend pg when backend is set to gloo, nccl, mpi, ucc, and custom
+        if backend_type in [ProcessGroup.BackendType.GLOO, ProcessGroup.BackendType.NCCL,
+                            ProcessGroup.BackendType.UCC, ProcessGroup.BackendType.MPI,
+                            ProcessGroup.BackendType.CUSTOM]:
             for device in backend_config.get_device_backend_map().keys():
                 pg._register_backend(torch.device(device), backend_type, backend_class)
 
