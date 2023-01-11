@@ -299,6 +299,21 @@ def _linalg_svd_meta(A: Tensor, full_matrices: bool = True, compute_uv: bool = T
     return U, S, V
 
 
+# From aten/src/ATen/native/LinearAlgebra.cpp
+@register_meta(aten._linalg_det.default)
+def _linalg_det_meta(A):
+    squareCheckInputs(A, "linalg.det")
+    checkFloatingOrComplex(A, "linalg.det")
+
+    det = A.new_empty(A.shape[:-2])
+
+    LU = A.new_empty(A.shape)
+    LU.as_strided_(A.shape, make_contiguous_strides_for(A.shape, row_major=False))
+
+    pivots = A.new_empty(A.shape[:-1], dtype=torch.int32)
+    return det, LU, pivots
+
+
 # From aten/src/ATen/native/ReflectionPad.cpp
 @register_meta(
     [aten.reflection_pad2d_backward.default, aten.replication_pad2d_backward.default]
