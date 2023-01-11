@@ -145,11 +145,14 @@ def generate_single_level_function(interpreter, autograd_function):
     )
     return Generated
 
+NO_OUT_DIMS = "not specified"
+
 # NOTE [mark_dirty object identity check]
 # autograd.Function's ctx.mark_dirty expect a returned input
 # to have the same object identity as the input.
 # Mode-only functorch will greatly simplify this logic.
-def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, wrap_fn, out_dims=None):
+def wrap_outputs_maintaining_identity(
+        outputs, unwrapped_inputs, orig_inputs, wrap_fn, out_dims=NO_OUT_DIMS):
     flat_unwrapped_inputs, _ = pytree.tree_flatten(unwrapped_inputs)
     flat_orig_inputs, _ = pytree.tree_flatten(orig_inputs)
 
@@ -161,8 +164,20 @@ def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, wr
     flat_outputs, spec = pytree.tree_flatten(outputs)
     result = []
 
-    if out_dims is not None:
+    out_dims_specified = out_dims != NO_OUT_DIMS
+
+    if out_dims_specified:
         flat_out_dims = _broadcast_to_and_flatten(out_dims, spec)
+        # _broadcast_to_and_flatten returns None if it is unable to broadcast.
+        if flat_out_dims is None:
+            raise RuntimeError(
+                f"The autograd.Function's vmap staticmethod returned an "
+                f"incompatible (output, out_dims) tuple. "
+                f"Expected out_dims={out_dims} "
+                f"to be compatible with the structure of `output`. "
+                f"out_dims has structure {pytree.tree_flatten(out_dims)[1]} "
+                f"but output has structure {spec}."
+            )
 
     for i, output in enumerate(flat_outputs):
         if not isinstance(output, torch.Tensor):
@@ -171,8 +186,7 @@ def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, wr
         if id(output) in unwrapped_input_to_orig_input:
             result.append(unwrapped_input_to_orig_input[id(output)])
             continue
-        if out_dims is not None:
-            assert flat_out_dims is not None
+        if out_dims_specified:
             result.append(wrap_fn(output, flat_out_dims[i]))
         else:
             result.append(wrap_fn(output))
@@ -231,6 +245,17 @@ def has_overriden_vmap_rule(autograd_function):
     return autograd_function.vmap is not torch.autograd.Function.vmap
 
 
+def validate_vmap_returns_two(result):
+    base_error_msg = (
+        "Expected the vmap staticmethod to have two returns, an output "
+        "and out_dims with pytree structure compatible with the output. "
+    )
+    if not isinstance(result, tuple):
+        raise RuntimeError(base_error_msg + f"Got a {type(result)} instead")
+    if not len(result) == 2:
+        raise RuntimeError(base_error_msg + f"Got {len(result)} returns instead")
+    unwrapped_output, out_dims = result
+
 @custom_function_call.py_impl(TransformType.Vmap)
 def custom_function_call_vmap(interpreter, autograd_function, *operands):
     if autograd_function.generate_vmap_rule:
@@ -267,7 +292,9 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
             return custom_function_call(autograd_function, *operands)
 
     with interpreter.lower():
-        unwrapped_output, out_dims = autograd_function.vmap(info, in_dims, *unwrapped_operands)
+        result = autograd_function.vmap(info, in_dims, *unwrapped_operands)
+    validate_vmap_returns_two(result)
+    unwrapped_output, out_dims = result
 
     # See NOTE [mark_dirty object identity check]
     def wrap_fn(output, out_dim):
