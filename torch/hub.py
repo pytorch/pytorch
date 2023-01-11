@@ -12,7 +12,7 @@ import warnings
 import zipfile
 from pathlib import Path
 from typing import Dict, Optional, Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 from torch.serialization import MAP_LOCATION
@@ -146,6 +146,17 @@ def _parse_repo_info(github):
                 ref = 'master'
             else:
                 raise
+        except URLError as e:
+            # No internet connection, need to check for cache as last resort
+            for possible_ref in ("main", "master"):
+                if os.path.exists(f"{get_dir()}/{repo_owner}_{repo_name}_{possible_ref}"):
+                    ref = possible_ref
+                    break
+            if ref is None:
+                raise RuntimeError(
+                    "It looks like there is no internet connection and the "
+                    f"repo could not be found in the cache ({get_dir()})"
+                ) from e
     return repo_owner, repo_name, ref
 
 
