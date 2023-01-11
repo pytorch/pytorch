@@ -218,6 +218,12 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
         Py_VISIT(pyhook->dict);
       }
     }
+    // See NOTE [retains_grad_hook PyObject traversal]
+    for (const auto& hook : cdata->retains_grad_hooks()) {
+      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
+    }
     for (const auto& hook : cdata->pre_hooks()) {
       if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
