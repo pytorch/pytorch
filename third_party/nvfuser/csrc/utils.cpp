@@ -173,7 +173,8 @@ auto parseEnableOptions() {
       {"linear_decomposition", EnableOption::LinearDecomposition},
       {"conv_decomposition", EnableOption::ConvDecomposition},
       {"graph_op_fusion", EnableOption::GraphOp},
-      {"kernel_db", EnableOption::KernelDb}};
+      {"kernel_db", EnableOption::KernelDb},
+      {"warn_register_spill", EnableOption::WarnRegisterSpill}};
 
   return parseEnvOptions("PYTORCH_NVFUSER_ENABLE", available_options);
 }

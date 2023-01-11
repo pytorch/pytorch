@@ -110,6 +110,7 @@ enum class EnableOption {
   ConvDecomposition, //! Enable conv-bias decomposition
   GraphOp, //! Enable graphOps(index_select/gather/scatter)
   KernelDb, //! Enable Kernel Database
+  WarnRegisterSpill, //! Enable warnings of register spill
   EndOfOption //! Placeholder for counting the number of elements
 };
 
