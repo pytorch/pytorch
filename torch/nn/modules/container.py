@@ -8,7 +8,7 @@ from .module import Module
 from ..parameter import Parameter
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, overload, Sequence, Tuple, TypeVar, Union
+from typing import Any, Dict, ItemsView, Iterable, Iterator, Mapping, MutableMapping, Optional, overload, Sequence, Tuple, TypeVar, Union, ValuesView
 
 __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList', 'ParameterDict']
 
@@ -424,7 +424,7 @@ class ModuleList(Module, Sequence[T]):
     # remove forward alltogether to fallback on Module's _forward_unimplemented
 
 
-class ModuleDict(Module):
+class ModuleDict(Module, MutableMapping[str, T]):
     r"""Holds submodules in a dictionary.
 
     :class:`~torch.nn.ModuleDict` can be indexed like a regular Python dictionary,
@@ -468,18 +468,18 @@ class ModuleDict(Module):
                 return x
     """
 
-    _modules: Dict[str, Module]  # type: ignore[assignment]
+    _modules: Dict[str, T]  # type: ignore[assignment]
 
-    def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
+    def __init__(self, modules: Optional[Mapping[str, T]] = None) -> None:
         super(ModuleDict, self).__init__()
         if modules is not None:
             self.update(modules)
 
     @_copy_to_script_wrapper
-    def __getitem__(self, key: str) -> Module:
+    def __getitem__(self, key: str) -> T:
         return self._modules[key]
 
-    def __setitem__(self, key: str, module: Module) -> None:
+    def __setitem__(self, key: str, module: T) -> None:
         self.add_module(key, module)
 
     def __delitem__(self, key: str) -> None:
@@ -494,7 +494,7 @@ class ModuleDict(Module):
         return iter(self._modules)
 
     @_copy_to_script_wrapper
-    def __contains__(self, key: str) -> bool:
+    def __contains__(self, key: Any) -> bool:
         return key in self._modules
 
     def clear(self) -> None:
@@ -502,7 +502,7 @@ class ModuleDict(Module):
         """
         self._modules.clear()
 
-    def pop(self, key: str) -> Module:
+    def pop(self, key: str) -> T:
         r"""Remove key from the ModuleDict and return its module.
 
         Args:
@@ -519,18 +519,18 @@ class ModuleDict(Module):
         return self._modules.keys()
 
     @_copy_to_script_wrapper
-    def items(self) -> Iterable[Tuple[str, Module]]:
+    def items(self) -> ItemsView[str, T]:
         r"""Return an iterable of the ModuleDict key/value pairs.
         """
         return self._modules.items()
 
     @_copy_to_script_wrapper
-    def values(self) -> Iterable[Module]:
+    def values(self) -> ValuesView[T]:
         r"""Return an iterable of the ModuleDict values.
         """
         return self._modules.values()
 
-    def update(self, modules: Mapping[str, Module]) -> None:
+    def update(self, modules: Mapping[str, T]) -> None:
         r"""Update the :class:`~torch.nn.ModuleDict` with the key-value pairs from a
         mapping or an iterable, overwriting existing keys.
 

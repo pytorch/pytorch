@@ -743,8 +743,11 @@ def ignore(drop=False, **kwargs):
     return decorator
 
 
-def _copy_to_script_wrapper(fn):
-    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+# Make `_copy_to_script_wrapper` properly pass through types
+F = TypeVar("F")
+
+def _copy_to_script_wrapper(fn: F) -> F:
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER  # type: ignore[assignment]
     return fn
 
 
