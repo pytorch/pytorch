@@ -24,6 +24,7 @@ from trymerge import (find_matching_merge_rule,
                       MergeRule,
                       MandatoryChecksMissingError,
                       WorkflowCheckState,
+                      PostCommentError,
                       main as trymerge_main)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any, List, Optional
@@ -353,6 +354,23 @@ class TestGitHubPR(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 79694)
         repo = DummyGitRepo()
         self.assertIsNotNone(validate_revert(repo, pr, comment_id=1189459845))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_revert_codev_fails(self, mock_gql: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 91340)
+
+        class GitRepoCoDev(GitRepo):
+            def __init__(self) -> None:
+                super().__init__(get_git_repo_dir(), get_git_remote_name())
+
+            def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
+                return ["FakeCommitSha"]
+
+            def commit_message(self, ref: str) -> str:
+                return pr.get_body()
+
+        repo = GitRepoCoDev()
+        self.assertRaisesRegex(PostCommentError, "landed via phabricator", lambda: validate_revert(repo, pr, comment_id=1372496233))
 
     def test_checks_filter(self) -> None:
         checks = [
