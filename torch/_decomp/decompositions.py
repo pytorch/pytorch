@@ -2153,6 +2153,7 @@ def _rnn_helper(
     return input, final_hiddens
 
 
+@register_decomposition(aten.rnn_tanh.input)
 @aten.rnn_tanh.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.rnn_tanh.input.py_impl(DispatchKey.Autograd)
 def rnn_tanh_input(
@@ -2183,6 +2184,7 @@ def rnn_tanh_input(
     return out, torch.stack(final_hiddens, 0)
 
 
+@register_decomposition(aten.rnn_relu.input)
 @aten.rnn_relu.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.rnn_relu.input.py_impl(DispatchKey.Autograd)
 def rnn_relu_input(
