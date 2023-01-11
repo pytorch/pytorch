@@ -7,6 +7,7 @@ import operator
 import random
 import unittest
 import math
+import enum
 
 import torch
 import numpy as np
@@ -31,7 +32,7 @@ from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-    GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest
+    GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest, TEST_WITH_SLOW
 )
 
 import torch._refs as refs  # noqa: F401
@@ -7733,98 +7734,324 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         if indices.unique().numel() == indices.numel():
             yield sample
 
+
+# Includes some values such that N * N won't be a multiple of 4,
+# which should ensure we test the vectorized and non-vectorized
+# kernel code paths.
+foreach_num_tensors = [20, 23] if not TEST_WITH_SLOW else [23, 30, 300]
+class ForeachRightmostArgType(enum.Enum):
+    TensorList = 1
+    ScalarList = 2
+    Scalar = 3
+foreach_scalars = (
+    random.randint(1, 10),
+    1.0 - random.random(),
+    True,
+    complex(1.0 - random.random(), 1.0 - random.random()),
+)
+_foreach_inputs_default_kwargs = {"noncontiguous": False, "same_size": False, "low": None, "high": None}
+# TODO(crcrpar): Update to return `n_expected_cudaLaunchKernels` as well
+class foreach_inputs_sample_func:
+    def __init__(
+        self,
+        arity: int,
+        rightmost_supports_scalar: bool,
+        rightmost_supports_scalarlist: bool,
+    ) -> None:
+        self.arity = arity
+        self._set_rightmost_arg_types(rightmost_supports_scalar, rightmost_supports_scalarlist)
+
+    def _set_rightmost_arg_types(
+        self,
+        rightmost_supports_scalar: bool,
+        rightmost_supports_scalarlist: bool,
+    ) -> None:
+        self._rightmost_arg_types = [ForeachRightmostArgType.TensorList]
+        if self.arity > 1:
+            if rightmost_supports_scalar:
+                self._rightmost_arg_types.append(ForeachRightmostArgType.Scalar)
+            if rightmost_supports_scalarlist:
+                self._rightmost_arg_types.append(ForeachRightmostArgType.ScalarList)
+
+    def _sample_rightmost_arg(self, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs):
+        if rightmost_arg_type == ForeachRightmostArgType.TensorList:
+            return [sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)]
+        if rightmost_arg_type == ForeachRightmostArgType.ScalarList:
+            return [
+                [random.randint(0, 9) + 1 for _ in range(num_tensors)],
+                [1.0 - random.random() for _ in range(num_tensors)],
+                [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(num_tensors)],
+                [True for _ in range(num_tensors)],
+                [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 3)],
+                [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 4)],
+            ]
+        if rightmost_arg_type == ForeachRightmostArgType.Scalar:
+            return foreach_scalars
+        raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
+
+    def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
+        if self.arity < 2:
+            return None
+        if rightmost_arg_type == ForeachRightmostArgType.TensorList:
+            disable_fastpath = "foreach_div" in opinfo.name and dtype in integral_types_and(torch.bool)
+            if "foreach_add" in opinfo.name and dtype == torch.bool:
+                disable_fastpath = True
+            return disable_fastpath
+        elif rightmost_arg_type == ForeachRightmostArgType.Scalar:
+            disable_fastpath = "foreach_div" in opinfo.name and dtype in integral_types_and(torch.bool)
+            if isinstance(rightmost_arg, bool):
+                disable_fastpath |= dtype == torch.bool
+                if opinfo.ref in (torch.add, torch.mul):
+                    disable_fastpath = False
+            elif isinstance(rightmost_arg, int):
+                disable_fastpath |= dtype == torch.bool
+            elif isinstance(rightmost_arg, float):
+                disable_fastpath |= dtype in integral_types_and(torch.bool)
+            elif isinstance(rightmost_arg, complex):
+                disable_fastpath |= dtype not in complex_types()
+            else:
+                raise AssertionError(f"Invalid scalar of type {rightmost_arg_type} - {rightmost_arg}")
+            return disable_fastpath
+        elif rightmost_arg_type == ForeachRightmostArgType.ScalarList:
+            disable_fastpath = opinfo.ref == torch.div and dtype in integral_types_and(torch.bool)
+            elmt_t = type(rightmost_arg[0])
+            has_same_type = all(isinstance(v, elmt_t) for v in rightmost_arg)
+            if not has_same_type:
+                return dtype not in complex_types()
+            if isinstance(rightmost_arg[0], bool):
+                if ("foreach_add" in opinfo.name or "foreach_mul" in opinfo.name) and dtype == torch.bool:
+                    disable_fastpath = False
+            elif isinstance(rightmost_arg[0], int):
+                disable_fastpath |= dtype == torch.bool
+            elif isinstance(rightmost_arg[0], float):
+                disable_fastpath |= dtype in integral_types_and(torch.bool)
+            elif isinstance(rightmost_arg[0], complex):
+                disable_fastpath |= dtype not in complex_types()
+            else:
+                raise AssertionError(f"Invalid scalarlist of {rightmost_arg}")
+            return disable_fastpath
+        else:
+            raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
+
+    def _sample_kwargs(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
+        kwargs = {}
+        if rightmost_arg_type == ForeachRightmostArgType.TensorList and opinfo.supports_alpha_param:
+            if dtype in integral_types_and(torch.bool):
+                kwargs["alpha"] = 3
+            elif dtype.is_complex:
+                kwargs["alpha"] = complex(3, 3)
+            else:
+                kwargs["alpha"] = 3.14
+        if self.arity > 1:
+            kwargs["disable_fastpath"] = self._should_disable_fastpath(opinfo, rightmost_arg, rightmost_arg_type, dtype)
+        return kwargs
+
+    def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
+        num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
+        assert isinstance(num_input_tensors, list)
+        _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+
+        for num_tensors in num_input_tensors:
+            for rightmost_arg_type in self._rightmost_arg_types:
+                input = sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+                args = []
+                kwargs = {}
+                if self.arity > 1:
+                    args = [
+                        sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+                        for _ in range(self.arity - 2)
+                    ]
+                    rightmost_arg_list = self._sample_rightmost_arg(
+                        rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+                    for rightmost_arg in rightmost_arg_list:
+                        args.append(rightmost_arg)
+                        kwargs = self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype)
+                        yield SampleInput(input, *args, **kwargs)
+                        args.pop()
+                else:
+                    yield SampleInput(input, *args, **kwargs)
+
+
+class foreach_norm_sample_func(foreach_inputs_sample_func):
+    def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
+        num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
+        assert isinstance(num_input_tensors, list)
+        _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+
+        for num_tensors, ord in product(num_input_tensors, (0, 1, 2, -1, -2)):
+            input = sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+            disable_fastpath = True
+            if ord in (1, 2) and dtype in floating_types_and(torch.half, torch.bfloat16):
+                disable_fastpath = False
+            yield SampleInput(input, **{"ord": ord, "disable_fastpath": disable_fastpath})
+
+
+class foreach_lerp_sample_func(foreach_inputs_sample_func):
+    def _sample_rightmost_arg(self, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs):
+        if rightmost_arg_type == ForeachRightmostArgType.TensorList:
+            return [sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)]
+        if rightmost_arg_type == ForeachRightmostArgType.ScalarList:
+            return [
+                [random.randint(0, 9) + 1 for _ in range(num_tensors)],
+                [1.0 - random.random() for _ in range(num_tensors)],
+                [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(num_tensors)],
+                [True for _ in range(num_tensors)],
+                [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 3)],
+                [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 4)],
+            ]
+        if rightmost_arg_type == ForeachRightmostArgType.Scalar:
+            return [random.random()]
+        raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
+
+
+
+class foreach_pointwise_sample_func(foreach_inputs_sample_func):
+
+    def __init__(
+        self,
+        arity: int = 3,
+        rightmost_supports_scalar: bool = False,
+        rightmost_supports_scalarlist: bool = False,
+    ):
+        super().__init__(3 + 1, True, True)
+
+    def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
+        return dtype in integral_types_and(torch.bool)
+
+    def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
+        num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
+        assert isinstance(num_input_tensors, list)
+        _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+
+        for num_tensors in num_input_tensors:
+            for rightmost_arg_type in self._rightmost_arg_types:
+                input = sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+                args = [
+                    sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+                    for _ in range(2 - int(rightmost_arg_type == ForeachRightmostArgType.TensorList))
+                ]
+                rightmost_arg_list = self._sample_rightmost_arg(
+                    rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+                for rightmost_arg in rightmost_arg_list:
+                    kwargs = {}
+                    if rightmost_arg_type == ForeachRightmostArgType.TensorList:
+                        args.append(rightmost_arg)
+                        kwargs["values"] = None
+                    else:
+                        kwargs["values"] = rightmost_arg
+                    kwargs.update(
+                        self._sample_kwargs(
+                            opinfo, kwargs["values"] or rightmost_arg, rightmost_arg_type, dtype)
+                    )
+                    assert hasattr(kwargs, "values")
+                    assert len(args) == 2
+                    yield SampleInput(input, *args, **kwargs)
+
+
 foreach_unary_op_db: List[OpInfo] = [
-    ForeachFuncInfo('exp'),
-    ForeachFuncInfo('acos'),
-    ForeachFuncInfo('asin'),
-    ForeachFuncInfo('atan'),
-    ForeachFuncInfo('cos'),
-    ForeachFuncInfo('cosh'),
-    ForeachFuncInfo('log'),
-    ForeachFuncInfo('log10'),
-    ForeachFuncInfo('log2'),
-    ForeachFuncInfo('tan'),
-    ForeachFuncInfo('tanh'),
-    ForeachFuncInfo('sin'),
-    ForeachFuncInfo('sinh'),
+    ForeachFuncInfo('exp', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('acos', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('asin', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('atan', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('cos', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('cosh', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('log', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('log10', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('log2', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('tan', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('tanh', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('sin', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
+    ForeachFuncInfo('sinh', sample_inputs_func=foreach_inputs_sample_func(1, False, False)),
 
     ForeachFuncInfo(
         'neg',
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex(),
-        sample_inputs_func=sample_inputs_foreach,
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'sqrt',
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'ceil',
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'erf',
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'erfc',
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'expm1',
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'floor',
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'log1p',
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'round',
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'frac',
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'reciprocal',
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'sigmoid',
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
         'trunc',
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 
     ForeachFuncInfo(
@@ -7833,6 +8060,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
     ),
 ]
 
@@ -7842,58 +8070,54 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "sub",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "mul",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        skips=(
-            # Ref: https://github.com/pytorch/pytorch/issues/77946
-            DecorateInfo(unittest.skip("Unable to reproduce failure locally"), "TestForeach",
-                         "test_binary_op_scalarlist_fastpath",
-                         device_type='cuda', dtypes=(torch.float16,)),
-        )
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "div",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        skips=(
-            # Ref: https://github.com/pytorch/pytorch/issues/77946
-            DecorateInfo(unittest.skip("Unable to reproduce failure locally"), "TestForeach",
-                         "test_binary_op_scalarlist_fastpath",
-                         device_type='cuda', dtypes=(torch.float16,)),
-        )
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "clamp_min",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "clamp_max",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "minimum",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "maximum",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
     ),
 ]
 
@@ -7902,11 +8126,13 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
         "addcmul",
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_pointwise_sample_func(3, False, False),
     ),
     ForeachFuncInfo(
         "addcdiv",
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_pointwise_sample_func(3, False, False),
     ),
 ]
 
@@ -7915,6 +8141,16 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
         "norm",
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=foreach_norm_sample_func(1, False, False),
+    ),
+]
+
+foreach_lerp_op_db: List[ForeachFuncInfo] = [
+    ForeachFuncInfo(
+        "lerp",
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=foreach_lerp_sample_func(3, True, False),
     ),
 ]
 
