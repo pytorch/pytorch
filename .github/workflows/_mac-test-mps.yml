@@ -79,6 +79,7 @@ jobs:
           # shellcheck disable=SC1090
           set -ex
           # TODO(https://github.com/pytorch/pytorch/issues/79293)
+          export TORCH_SHOW_CPP_STACKTRACES=1
 
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
 
