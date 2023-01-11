@@ -108,8 +108,6 @@
 #include <ATen/ops/resize_as_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/svd_native.h>
-#include <ATen/ops/symeig.h>
-#include <ATen/ops/symeig_native.h>
 #include <ATen/ops/triangular_solve_meta.h>
 #include <ATen/ops/triangular_solve_native.h>
 #include <ATen/ops/tril.h>
