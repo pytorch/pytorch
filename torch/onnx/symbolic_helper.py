@@ -224,7 +224,7 @@ def _unpack_quantized_tensor(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
 # Check if list_value is output from prim::ListConstruct
 # This is usually called before _unpack_list to ensure the list can be unpacked.
 @_beartype.beartype
-def _is_packed_list(list_value: _C.Value) -> bool:
+def _is_packed_list(list_value: Any) -> bool:
     return _is_value(list_value) and list_value.node().kind() == "prim::ListConstruct"
 
 
