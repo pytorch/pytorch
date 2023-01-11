@@ -433,7 +433,7 @@ class Module:
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
 
-    def __init__(self) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
@@ -461,7 +461,7 @@ class Module:
         super().__setattr__('_load_state_dict_pre_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
         super().__setattr__('_modules', OrderedDict())
-        super().__init__()
+        super().__init__(*args, **kwargs)
 
     forward: Callable[..., Any] = _forward_unimplemented
 
