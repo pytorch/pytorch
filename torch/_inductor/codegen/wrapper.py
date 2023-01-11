@@ -351,7 +351,8 @@ class WrapperCodeGen(CodeGen):
                 self.wrapper_call.writeline(
                     f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
                 )
-            V.graph.sizevars.codegen(self.wrapper_call, V.graph.graph_inputs)
+            # commenting out for now since it seems like this is just for symbolic shapes
+            # V.graph.sizevars.codegen(self.wrapper_call, V.graph.graph_inputs)
 
     def write_get_cuda_stream(self, index):
         name = f"stream{index}"

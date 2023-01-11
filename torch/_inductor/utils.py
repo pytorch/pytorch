@@ -64,6 +64,7 @@ def sympy_product(it):
 
 
 def sympy_dot(seq1, seq2):
+    print("seq1", seq1, seq2)
     assert len(seq1) == len(seq2)
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 

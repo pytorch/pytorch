@@ -245,6 +245,20 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
+                elif t.is_nested:
+                    is_leaf = safe_is_leaf(t)
+                    sizes = t._nested_tensor_size()
+                    strides = t._nested_tensor_strides()
+                    _storage_offset = t._nested_tensor_offsets_tensor()
+                    numel = t.numel()
+                    # buffer device is propagated to NT device
+                    buffer = torch.empty(numel, device='meta')
+                    r = callback(
+                        lambda: torch._nested_view_from_buffer(buffer, sizes, strides, _storage_offset.tolist())
+                    )
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
+                    # FIXME: should have some autograd handling logic here
+                    r.requires_grad = False
                 elif t.is_mkldnn:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
@@ -459,7 +473,7 @@ class MetaConverter:
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
-                    t.is_nested,
+                    # t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
                     # these are supported in meta conversion but the fallbacks

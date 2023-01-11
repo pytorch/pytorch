@@ -60,6 +60,7 @@ class TensorVariable(VariableTracker):
         is_quantized=None,
         is_contiguous=None,
         is_sparse=None,
+        is_nested=None,
         class_type=torch.Tensor,
         specialized_value=None,
         **kwargs,
@@ -76,6 +77,7 @@ class TensorVariable(VariableTracker):
         self.is_quantized = is_quantized
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
+        self.is_nested = is_nested
         self.class_type = class_type
         self.specialized_value = specialized_value
 
@@ -108,11 +110,12 @@ class TensorVariable(VariableTracker):
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
+            "is_nested": value.is_nested,
             "class_type": type(value),
         }
         if not config.dynamic_shapes:
-            props["size"] = tuple(value.size())
-            props["stride"] = tuple(value.stride())
+            props["size"] = tuple(value.size()) if not value.is_nested else None
+            props["stride"] = tuple(value.stride()) if not value.is_nested else None
             props["is_contiguous"] = tuple(
                 [
                     x

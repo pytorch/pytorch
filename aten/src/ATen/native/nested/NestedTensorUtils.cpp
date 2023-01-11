@@ -8,6 +8,7 @@
 #include <ATen/ops/_nested_tensor_size_native.h>
 #include <ATen/ops/_nested_tensor_strides_native.h>
 #include <ATen/ops/_nested_tensor_offsets_native.h>
+#include <ATen/ops/_nested_tensor_offsets_tensor_native.h>
 #include <ATen/ops/chunk_native.h>
 #endif
 
@@ -28,6 +29,10 @@ at::Tensor _nested_tensor_strides(const at::Tensor& self){
 }
 std::vector<int64_t> _nested_tensor_offsets(const at::Tensor& self){
   return get_nested_tensor_impl(self) -> get_storage_offsets();
+}
+
+at::Tensor _nested_tensor_offsets_tensor(const at::Tensor& self){
+  return at::tensor(get_nested_tensor_impl(self) -> get_storage_offsets());
 }
 
 // Helper functions for getting information about a nested tensor's shape.

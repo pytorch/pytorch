@@ -768,6 +768,9 @@ class FakeTensorMode(TorchDispatchMode):
             torch.ops.aten.is_coalesced.default,
             torch.ops.aten.dense_dim.default,
             torch.ops.aten.sparse_dim.default,
+            torch.ops.aten._nested_tensor_size.default,
+            torch.ops.aten._nested_tensor_strides.default,
+            torch.ops.aten._nested_tensor_offsets_tensor.default,
         }:
             # NB: no_dispatch is ok here too, this func is very simple
             with in_kernel_invocation_manager(self):
@@ -1089,9 +1092,12 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
 
         def to_real_tensor(e):
             if isinstance(e, FakeTensor):
-                out = torch.zeros_like(e, device=e.fake_device)
-                if e.is_sparse:
-                    out._coalesced_(e.is_coalesced())
+                if e.is_nested:
+                    out = torch.empty_like(e, device=e.fake_device)
+                else:
+                    out = torch.zeros_like(e, device=e.fake_device)
+                    if e.is_sparse:
+                        out._coalesced_(e.is_coalesced())
                 inp_impls[id(out)] = e
                 return out
             return e

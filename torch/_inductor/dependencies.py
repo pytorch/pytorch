@@ -176,10 +176,19 @@ class _RecordLoadStoreInner(V.MockHandler):
     def canonicalize(
         self, index: sympy.Expr
     ) -> Tuple[sympy.Expr, Tuple[sympy.Expr, ...]]:
+        # modify canoncalize to canonicalize lists of sympy.Expr
         sizes = list(self._var_ranges.values())
-        sizes = [V.graph.sizevars.simplify(x) for x in sizes]
+        sizes = [map(V.graph.sizevars.simplify, x) if isinstance(x, list) else V.graph.sizevars.simplify(x) for x in sizes]
         if not self._normalize:
-            return index, tuple([x for x in sizes if x != 1])
+            def remove_ones(sizes):
+                if isinstance(sizes, sympy.Expr):
+                    if sizes != 1:
+                        return sizes
+                else:
+                    return tuple([remove_ones(x) for x in sizes])
+            if isinstance(index, list):
+                index = tuple(index)
+            return index, remove_ones(sizes)  # tuple([x for x in sizes if x != 1])
 
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simpliest form because of the interference from
@@ -200,6 +209,7 @@ class _RecordLoadStoreInner(V.MockHandler):
         return index, tuple(new_sizes)
 
     def load(self, name: str, index: sympy.Expr) -> str:
+        log.warn(f"self._var_ranges={self._var_ranges}, index={index}")
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
         return f"load({name}, {sympy_str(index)})"
@@ -257,7 +267,16 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
-        args.append(reindex(list(map(add_var, new_size))))
+        # hacking in d0 for nested case where range is n_tensors
+        # this might not be a good check when there is more compression in the ranges
+        # e.g. non-ragged dim = just 1 number and not list
+        if len(size) > 0 and isinstance(size[0], list):
+            arg = (add_var(len(argsizes[0])),)
+        else:
+            arg = tuple()
+        arg = arg + reindex(list(map(add_var, new_size)))
+        args.append(arg)
+    log.warn(f"arg_sizes={argsizes}, arg={arg}, new_sizes={new_sizes}")
     return new_sizes, args, var_ranges
 
 
@@ -266,8 +285,9 @@ def extract_read_writes(
     *argsizes: Tuple[sympy.Expr, ...],
     normalize: bool = False,
     prefix: str = "d",
-):
+): 
     _, args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
+    log.warn(f"var_ranges={var_ranges}")
     rw = RecordLoadStore(var_ranges, normalize=normalize)
     with V.set_ops_handler(rw):  # type: ignore[call-arg]
         fn(*args)

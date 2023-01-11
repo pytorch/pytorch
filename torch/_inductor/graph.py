@@ -76,8 +76,17 @@ class GraphLowering(torch.fx.Interpreter):
         """
         Primarily used to weights
         """
-        size = [sympy.Integer(i) for i in ex.size()]
-        stride = [sympy.Integer(i) for i in ex.stride()]
+        if ex.is_nested:
+            # do this per dim rather than per tensor
+            sizes = ex._nested_tensor_size()
+            strides = ex._nested_tensor_strides()
+            size = [[sympy.Integer(i) for i in size] for size in sizes.t().unbind()]
+            stride = [[sympy.Integer(i) for i in stride] for stride in strides.t().unbind()]
+            # size = [[sympy.Integer(i) for i in size] for size in sizes.unbind()]
+            # stride = [[sympy.Integer(i) for i in stride] for stride in strides.unbind()]
+        else:
+            size = [sympy.Integer(i) for i in ex.size()]
+            stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
     def __init__(
@@ -256,12 +265,21 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
-        tensor = TensorBox.create(
-            InputBuffer(
-                target,
-                FixedLayout(example.device, example.dtype, sizes, strides),
+        if example.is_nested:
+            offsets = [sympy.Integer(i) for i in example._nested_tensor_offsets_tensor()]
+            tensor = TensorBox.create(
+                InputBuffer(
+                    target,
+                    FixedLayout(example.device, example.dtype, sizes, strides, nested_offsets=offsets)
+                )
             )
-        )
+        else:
+            tensor = TensorBox.create(
+                InputBuffer(
+                    target,
+                    FixedLayout(example.device, example.dtype, sizes, strides),
+                )
+            )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.device_types.add(example.device.type)
@@ -293,6 +311,8 @@ class GraphLowering(torch.fx.Interpreter):
                     raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
             try:
+                # log.warn("in call_function!!!", target)
+                # log.warn(lowerings[target])
                 out = lowerings[target](*args, **kwargs)
                 return out
             except Exception as e:
@@ -373,7 +393,7 @@ class GraphLowering(torch.fx.Interpreter):
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            if any(user.op == "output" for user in n.users):
+            if any(user.op == "output" for user in n.users) and not result.data.data.is_nested:
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't

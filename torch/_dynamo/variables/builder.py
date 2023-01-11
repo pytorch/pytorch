@@ -804,6 +804,7 @@ def wrap_fx_proxy_cls(
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
+        print("options", options)
         should_specialize = options.pop("should_specialize", False)
         if is_parameter or should_specialize:
             specialized_value = initial_example_value

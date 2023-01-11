@@ -565,6 +565,7 @@ class Scheduler:
             *V.graph.constants.keys(),
         }
         for node in nodes:
+            log.warn(f"scheduling {node}")
             assert (
                 node.origins is not None
             ), "All nodes passed to scheduling must have an origin"
@@ -572,6 +573,7 @@ class Scheduler:
                 self.nodes.append(NopKernelSchedulerNode(self, node))
             elif isinstance(node, ir.ComputedBuffer):
                 group_fn = self.get_backend(node.get_device()).group_fn
+                log.warn(f"group_fn={group_fn}")
                 self.nodes.append(SchedulerNode(self, node, group_fn))
             elif isinstance(node, ir.ExternKernel) and should_use_template(node):
                 group_fn = self.get_backend(node.get_device()).group_fn

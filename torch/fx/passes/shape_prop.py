@@ -28,10 +28,10 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     """
     Extract a TensorMetadata NamedTuple describing `result`.
     """
-    shape = result.shape
+    shape = result.shape if not result.is_nested else None
     dtype = result.dtype
     requires_grad = result.requires_grad
-    stride = result.stride()
+    stride = result.stride() if not result.is_nested else None
 
     memory_formats = {
         torch.contiguous_format,

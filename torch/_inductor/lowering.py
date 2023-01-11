@@ -322,6 +322,7 @@ def make_pointwise(
             assert alpha is None
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
+        offsets = inputs[0].get_nested_offsets()
         dtype = override_return_dtype or inputs[0].get_dtype()
         is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
 
@@ -331,7 +332,8 @@ def make_pointwise(
             ), f"ndim mismatch {fn} {ranges} {other.get_size()}"
 
         def inner_fn(index):
-            assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
+            is_nested = (len(index) == len(ranges) + 1) and isinstance(ranges[0], list)
+            assert len(index) == len(ranges) or is_nested, f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
             elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
@@ -355,6 +357,7 @@ def make_pointwise(
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
+            nested_offsets=offsets,
         )
 
     return inner
@@ -3572,7 +3575,7 @@ exp = register_pointwise(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     use_libdevice_for_f64=True,
 )
-relu = register_pointwise(aten.relu)
+relu = register_pointwise(aten.relu, type_promotion_kind=None, broadcast=False)
 sigmoid = register_pointwise(
     aten.sigmoid,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -3623,7 +3626,9 @@ register_pointwise(
 
 register_pointwise(
     aten.tanh,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    # type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    type_promotion_kind=None,
+    broadcast=False
 )
 
 register_pointwise(
