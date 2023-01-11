@@ -13,7 +13,6 @@ from inspect import signature
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
-import numpy
 import sympy
 from sympy import Expr, Integer
 
@@ -1176,7 +1175,8 @@ class PermuteView(BaseView):
 
     @classmethod
     def create(cls, x, dims):
-        assert set(cls._map_neg_dims(dims)) == set(range(len(dims)))
+        dims = cls._map_neg_dims(dims)
+        assert set(dims) == set(range(len(dims)))
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
@@ -1578,6 +1578,9 @@ class Constant(BaseConstant):
 
         return loader
 
+    def realize(self):
+        pass
+
 
 @dataclasses.dataclass
 class IndexingConstant(BaseConstant):
@@ -1626,6 +1629,17 @@ class Layout(IRNode):
     def is_contiguous(self):
         for left, right, size in zip(
             self.stride, FlexibleLayout.contiguous_strides(self.size), self.size
+        ):
+            if size != 1 and left != right:
+                return False
+        return True
+
+    def is_channels_last_contiguous(self):
+        ndim = len(self.size)
+        if ndim not in [4, 5]:
+            return False
+        for left, right, size in zip(
+            self.stride, make_channels_last_strides_for(self.size), self.size
         ):
             if size != 1 and left != right:
                 return False
@@ -1686,6 +1700,24 @@ class Layout(IRNode):
 
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
+
+    def __init__(
+        self,
+        device: torch.device,
+        dtype: torch.dtype,
+        size: List[Expr],
+        stride: List[Expr] = None,
+        offset: Expr = Integer(0),
+    ):
+        if stride is None:
+            stride = FlexibleLayout.contiguous_strides(size)
+        super().__init__(
+            device,
+            dtype,
+            size,
+            stride,
+            offset,
+        )
 
     def make_indexer(self):
         """A closure containing math to read a given element"""
@@ -2069,10 +2101,9 @@ class ComputedBuffer(Buffer):
             ]
 
             if reads:
-                stride_lengths = numpy.array(
-                    [V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads],
-                    dtype=numpy.int64,
-                )
+                stride_lengths = [
+                    V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads
+                ]
                 from .scheduler import pick_loop_order
 
                 return pick_loop_order(stride_lengths, self.get_size(), priority_idx)
@@ -2199,14 +2230,12 @@ class ComputedBuffer(Buffer):
             priority_idx = []
 
         try:
-            strides = numpy.array(
-                [
-                    V.graph.sizevars.stride_hints(expr, index_vars)
-                    for expr in memory_addrs
-                ],
-                dtype=numpy.int64,
+            strides = [
+                V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs
+            ]
+            assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
+                index_vars
             )
-            assert strides.shape == (len(memory_addrs), len(index_vars))
             # consider both layout(strides) and reordering(reordering_reindex)
             if reordering_reindex is not None:
                 for i in range(len(memory_addrs)):
@@ -2240,6 +2269,58 @@ class ComputedBuffer(Buffer):
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
         return self.data.constant_to_device(device)
+
+
+class TemplateBuffer(Buffer):
+    """
+    Represents a Triton (in the futurue other type) of template operator
+    that we can fuse an epilogue onto.
+    """
+
+    def __init__(self, layout, inputs, make_kernel_render):
+        super().__init__(name=None, layout=layout)
+        self.inputs = InputsKernel.unwrap_storage(inputs)
+        self.make_kernel_render = make_kernel_render
+        self.name = V.graph.register_buffer(self)
+
+    def get_read_writes(self):
+        return self.normalized_read_writes()
+
+    @cache_on_self
+    def normalized_read_writes(self):
+        name = self.get_name()
+        indexer = self.layout.make_indexer()
+
+        def dummy(index, rindex):
+            assert len(rindex) == 0
+            return ops.store(name, indexer(index), "fake")
+
+        deps = dependencies.extract_read_writes(
+            dummy, self.get_size(), (), normalize=True
+        )
+        deps.reads = {dependencies.StarDep(x.get_name()) for x in self.inputs}
+        return deps
+
+    def get_reduction_size(self):
+        return 1
+
+    def get_reduction_type(self):
+        return None
+
+    def is_no_op(self):
+        return False
+
+    def should_allocate(self):
+        return True
+
+    def simplify_and_reorder(self):
+        return (
+            (
+                self.get_size(),
+                (),
+            ),
+            None,
+        )
 
 
 @dataclasses.dataclass
@@ -2307,9 +2388,19 @@ class ConcatKernel(NopKernel):
                     )
             offsets_end.append(new_size[dim])
 
-        with V.graph.fake_mode:
-            x_fake = [ir_node_to_tensor(x, guard_shape=True) for x in inputs]
-            output = torch.ops.aten.cat(x_fake, dim)
+        output_stride = FlexibleLayout.contiguous_strides(new_size)
+        # If any of the inputs is in CL format, use CL format for the output
+        for i in range(len(inputs)):
+            x = inputs[i]
+            if is_storage_and_layout(x):
+                layout = x.get_layout()
+                if (
+                    isinstance(layout, FixedLayout)
+                    and layout.is_channels_last_contiguous()
+                ):
+                    # use CL stride for the output
+                    output_stride = make_channels_last_strides_for(new_size)
+                    break
 
         kernel = ConcatKernel(
             name=None,
@@ -2317,7 +2408,7 @@ class ConcatKernel(NopKernel):
                 device=device,
                 dtype=dtype,
                 size=new_size,
-                stride=output.stride(),
+                stride=output_stride,
             ),
             inputs=[],
         )
@@ -2670,12 +2761,24 @@ class ExternKernelOut(ExternKernel):
             self.cpp_kernel,
         )
 
-    def __init__(self, layout, inputs, constant_args=(), kwargs=None, output_view=None):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kwargs=None,
+        output_view=None,
+        kernel=None,
+        cpp_kernel=None,
+    ):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
         self.output_view = output_view
         self.name = V.graph.register_buffer(self)
+        if kernel is not None:
+            self.kernel = kernel
+        self.cpp_kernel = cpp_kernel
 
     def should_allocate(self):
         return True
@@ -2764,198 +2867,6 @@ class IndexPutFallback(ExternKernel):
             [accumulate],
         )
         self.name = V.graph.register_buffer(self)
-
-
-class MatrixMultiply(ExternKernelOut):
-    kernel = "aten.mm.out"
-    cpp_kernel = "at::mm_out"
-
-    def __init__(
-        self, layout, inputs, constant_args=(), output_view=None, kernel="aten.mm.out"
-    ):
-        super().__init__(layout, inputs, constant_args, output_view)
-        self.kernel = kernel
-
-    @classmethod
-    def create(cls, a, b):
-        *m, k1 = a.get_size()
-        k2, n = b.get_size()
-        V.graph.sizevars.guard_equals(k1, k2)
-        a = cls.realize_input(a)
-        b = cls.realize_input(b)
-        if len(m) != 1 and not a.get_layout().is_contiguous():
-            a = cls.copy_input(a)
-        else:
-            a = cls.require_stride1(a)
-        b = cls.require_stride1(b)
-
-        # choose runtime kernel
-        config_mm = config.triton.mm
-        # default kernel is aten
-        kernel = "aten.mm.out"
-        if config_mm == "aten":
-            kernel = "aten.mm.out"
-        elif config_mm == "triton" and a.get_device().type == "cuda":
-            kernel = "triton_ops.matmul_out"
-        elif config_mm == "autotune":
-            from .codegen.autotuner import tuned_mm
-
-            kernel = tuned_mm(
-                a.get_size(),
-                b.get_size(),
-                a.get_stride(),
-                b.get_stride(),
-                a.get_device(),
-                a.get_dtype(),
-            )
-
-        return MatrixMultiply(
-            layout=FlexibleLayout(
-                device=a.get_device(),
-                dtype=a.get_dtype(),
-                size=list(m) + [n],
-            ),
-            inputs=[a, b],
-            kernel=kernel,
-        )
-
-    def get_template_tiling(self):
-        tile1, tile2 = self.get_size()
-        return (
-            tile1,
-            tile2,
-            sympy.Integer(1),
-        )
-
-    def map_args(self):
-        # a, b
-        in_args = [x.codegen_reference() for x in self.inputs]
-        # const_args = self.constant_args
-        inout_dict = OrderedDict(
-            [
-                ("A", f"{in_args[0]}"),
-                ("B", f"{in_args[1]}"),
-                ("C", f"{self.get_name()}"),
-            ]
-        )
-        # batch==1 bmm->mm
-        if len(self.get_stride()) == 3:
-            assert self.get_size()[0] == 1
-            stride_cm = self.get_stride()[1]
-            stride_cn = self.get_stride()[2]
-        else:
-            stride_cm = self.get_stride()[0]
-            stride_cn = self.get_stride()[1]
-        args_dict = OrderedDict(
-            [
-                ("M", f"{self.inputs[0].get_size()[0]}"),
-                ("N", f"{self.inputs[1].get_size()[1]}"),
-                ("K", f"{self.inputs[0].get_size()[1]}"),
-                ("stride_am", f"{self.inputs[0].get_stride()[0]}"),
-                ("stride_ak", f"{self.inputs[0].get_stride()[1]}"),
-                ("stride_bk", f"{self.inputs[1].get_stride()[0]}"),
-                ("stride_bn", f"{self.inputs[1].get_stride()[1]}"),
-                ("stride_cm", f"{stride_cm}"),
-                ("stride_cn", f"{stride_cn}"),
-            ]
-        )
-        # accumulator types
-        ACC_TYPE = (
-            "tl.float32"
-            if self.inputs[0].get_dtype()
-            in [torch.float16, torch.bfloat16, torch.float32]
-            else "tl.int32"
-        )
-        # dict for tl.constexpr
-        const_dict = OrderedDict(
-            [
-                ("GROUP_M", "8"),
-                ("ACC_TYPE", ACC_TYPE),
-                ("allow_tf32", f"{torch.backends.cuda.matmul.allow_tf32}"),
-            ]
-        )
-
-        other_dict = OrderedDict()
-
-        return inout_dict, args_dict, const_dict, other_dict
-
-
-class MatrixMultiplyAdd(ExternKernelOut):
-    def __init__(self, layout, inputs, constant_args=(), kwargs=None, output_view=None):
-        super().__init__(layout, inputs, constant_args, kwargs or {}, output_view)
-        self.kernel = "aten.addmm.out"
-        self.cpp_kernel = "at::addmm_out"
-        self.ordered_kwargs_for_cpp_kernel = ["beta", "alpha"]
-
-    @classmethod
-    def create(cls, inp, a, b, beta, alpha):
-        m, k1 = a.get_size()
-        k2, n = b.get_size()
-        V.graph.sizevars.guard_equals(k1, k2)
-        inp = cls.realize_input(inp)
-        a = cls.realize_input(a)
-        b = cls.realize_input(b)
-        a = cls.require_stride1(a)
-        b = cls.require_stride1(b)
-        return MatrixMultiplyAdd(
-            layout=FlexibleLayout(
-                device=a.get_device(),
-                dtype=a.get_dtype(),
-                size=[m] + [n],
-            ),
-            inputs=[inp, a, b],
-            kwargs={"beta": beta, "alpha": alpha},
-        )
-
-
-class BatchMatrixMultiply(ExternKernelOut):
-    kernel = "aten.bmm.out"
-    cpp_kernel = "at::bmm_out"
-
-    def __init__(self, layout, inputs, constant_args=(), output_view=None):
-        super().__init__(layout, inputs, constant_args, output_view)
-        if (
-            config.triton.use_bmm
-            and len(inputs) > 0
-            and inputs[0].get_device().type == "cuda"
-        ):
-            self.kernel = "triton_bmm_out"
-
-    @classmethod
-    def create(cls, a, b):
-        b1, m, k1 = a.get_size()
-        b2, k2, n = b.get_size()
-        b3 = V.graph.sizevars.guard_equals(b1, b2)
-        V.graph.sizevars.guard_equals(k1, k2)
-        a = cls.require_stride1(cls.realize_input(a))
-        b = cls.require_stride1(cls.realize_input(b))
-
-        output_layout = FlexibleLayout(
-            device=a.get_device(),
-            dtype=a.get_dtype(),
-            size=[b3, m, n],
-        ).as_fixed()
-
-        if b3 == 1:
-            # convert to normal mm
-            data = MatrixMultiply(
-                layout=output_layout.as_fixed(),
-                inputs=[SqueezeView.create(a, dim=0), SqueezeView.create(b, dim=0)],
-            )
-            data.output_view = ReinterpretView(
-                data,
-                FlexibleLayout(
-                    device=a.get_device(),
-                    dtype=a.get_dtype(),
-                    size=[m, n],
-                ).as_fixed(),
-            )
-        else:
-            data = BatchMatrixMultiply(
-                layout=output_layout,
-                inputs=[a, b],
-            )
-        return data
 
 
 class DeviceCopy(ExternKernelOut):
@@ -3844,7 +3755,14 @@ class StorageBox(MutableBox):
 
     def realize(self):
         if isinstance(
-            self.data, (ComputedBuffer, InputsKernel, InputBuffer, ReinterpretView)
+            self.data,
+            (
+                ComputedBuffer,
+                InputsKernel,
+                InputBuffer,
+                ReinterpretView,
+                TemplateBuffer,
+            ),
         ):
             return self.data.get_name()
         assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
