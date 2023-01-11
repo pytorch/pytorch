@@ -130,6 +130,9 @@ class ExpandedWeight(torch.Tensor):
     def shape(self):
         return self.orig_weight.shape
 
+    def data_ptr(self):
+        return self.orig_weight.data_ptr()
+
     def set_allow_smaller_batches(self, is_allow_smaller_batches):
         self.allow_smaller_batches = is_allow_smaller_batches
 
