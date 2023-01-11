@@ -114,6 +114,14 @@ class Sequential(Module):
         idx %= size
         return next(islice(iterator, idx, None))
 
+    @overload
+    def __getitem__(self, idx: int) -> T:
+        ...
+
+    @overload
+    def __getitem__(self, idx: slice) -> 'Sequential':
+        ...
+
     @_copy_to_script_wrapper
     def __getitem__(self, idx: Union[slice, int]) -> Union['Sequential', T]:
         if isinstance(idx, slice):

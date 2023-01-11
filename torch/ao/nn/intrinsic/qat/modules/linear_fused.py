@@ -144,7 +144,8 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert mod.qconfig, 'Input float module must have a valid config'
         qconfig = mod.qconfig
-        linear, bn = mod[0], mod[1]
+        linear: nn.modules.linear.Linear = mod[0]
+        bn: nn.modules.batchnorm.BatchNorm1d = mod[1]
         qat_linearbn = cls(linear.in_features, linear.out_features, linear.bias is not None,
                            bn.eps, bn.momentum,
                            False, qconfig)
