@@ -834,6 +834,7 @@
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_check: NoCheck
   device_guard: False
+  tags: canonical
 
 - func: as_strided_(Tensor(a!) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
@@ -2545,7 +2546,7 @@
   dispatch:
     SparseCPU, SparseCUDA: floor_sparse
     SparseCsrCPU, SparseCsrCUDA: floor_sparse_csr
-  tags: pointwise
+  tags: [canonical, pointwise]
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -4779,6 +4780,7 @@
     CompositeExplicitAutograd: select_symint
     SparseCsrCPU, SparseCsrCUDA: select_sparse_csr
     NestedTensorCPU, NestedTensorCUDA: select_nested
+  tags: canonical
 
 - func: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt index) -> Tensor
   variants: function
@@ -9395,6 +9397,7 @@
   structured_delegate: topk.values
   dispatch:
     QuantizedCPU: topk_quantized_cpu
+  tags: canonical
 
 - func: all(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -11446,6 +11449,7 @@
   dispatch:
     CPU: max_pool3d_with_indices_cpu
     CUDA: max_pool3d_with_indices_cuda
+  tags: canonical
 
 - func: max_pool3d_with_indices_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -11522,6 +11526,7 @@
     QuantizedCPU: reflection_pad2d_quantized_cpu
     CUDA: reflection_pad2d_cuda
     MPS: reflection_pad2d_mps
+  tags: canonical
 
 - func: reflection_pad2d_backward.grad_input(Tensor grad_output, Tensor self, SymInt[4] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -11596,6 +11601,7 @@
 - func: replication_pad2d(Tensor self, SymInt[4] padding) -> Tensor
   python_module: nn
   structured_delegate: replication_pad2d.out
+  tags: canonical
 
 - func: replication_pad2d_backward.grad_input(Tensor grad_output, Tensor self, SymInt[4] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -11622,6 +11628,8 @@
 - func: replication_pad3d(Tensor self, SymInt[6] padding) -> Tensor
   python_module: nn
   structured_delegate: replication_pad3d.out
+  tags: canonical
+
 
 - func: replication_pad3d_backward.grad_input(Tensor grad_output, Tensor self, SymInt[6] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
