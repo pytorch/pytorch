@@ -22,6 +22,7 @@ class Node(abc.ABC):
         r"""Returns the name.
 
         Example::
+
             >>> import torch
             >>> a = torch.tensor([0., 0., 0.], requires_grad=True)
             >>> b = a.clone()
@@ -115,8 +116,8 @@ class Node(abc.ABC):
     @classmethod
     def __subclasshook__(cls, C):
         if cls is Node:
-            # Subclasses of Node should not inherit this special isinstance hook
-            if C is not None and C is getattr(torch._C._functions, C.__name__, None):
+            if ((C is not None and C is getattr(torch._C._functions, C.__name__, None))
+                    or issubclass(C, torch.autograd.function.BackwardCFunction)):
                 return True
         return NotImplemented
 
