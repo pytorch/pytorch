@@ -180,8 +180,8 @@ void update_cpp_hooks_on_new_gradfn(
     new_list->push_back(std::move((*meta->retains_grad_hooks_list_)[0]));
     (*meta->retains_grad_hooks_list_)[0] = nullptr;
     meta->retains_grad_hooks_list_ = new_list;
-    std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionTensorPreHook(
-        meta->retains_grad_hooks_list_, self.output_nr()));
+    std::unique_ptr<FunctionPreHook> hook_ptr = std::make_unique<CppFunctionTensorPreHook>(
+        meta->retains_grad_hooks_list_, self.output_nr());
     new_fn->add_retains_grad_hook(std::move(hook_ptr));
   }
 }
@@ -527,7 +527,7 @@ unsigned register_retains_grad_hook(
     std::function<at::TensorBase(const at::TensorBase&)> hook) {
   TORCH_CHECK(
       self.requires_grad(),
-      "cannot register a hook on a variable that "
+      "cannot retain grad on a variable that "
       "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
   auto& list =

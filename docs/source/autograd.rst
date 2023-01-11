@@ -261,11 +261,11 @@ Anomaly detection
 
 Autograd graph
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Autograd exposes methods to allow one to inspect the graph and interpose behavior during
+Autograd exposes methods that allow one to inspect the graph and interpose behavior during
 the backward pass.
 
 The ``grad_fn`` attribute of a :class:`torch.Tensor` holds a  :class:`torch.autograd.graph.Node`
-if the tensor is the output of a operatoin that was recorded by autograd (i.e., grad_mode is
+if the tensor is the output of a operation that was recorded by autograd (i.e., grad_mode is
 enabled and at least one of the inputs required gradients), or ``None`` otherwise.
 
 .. autosummary::
