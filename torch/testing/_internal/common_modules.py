@@ -11,7 +11,7 @@ from torch.testing._internal.common_cuda import TEST_CUDNN
 from torch.testing._internal.common_dtype import floating_types, floating_and_complex_types_and
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
-    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta)
+    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipCUDAVersionIn)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
@@ -1059,6 +1059,10 @@ rnn_gru_lstm_module_info_decorators = (
         unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
         active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
     ),
+    DecorateInfo(
+        skipCUDAVersionIn([(11, 7)]), "TestExpandedWeights", "test_module",
+        device_type='cude'
+    )
 )
 
 # Database of ModuleInfo entries in alphabetical order.
