@@ -419,12 +419,12 @@ class TestExpandedWeightModule(TestCase):
                 input_slice = input.narrow(batch_dim, i, 1)
                 input_slice = input_slice.squeeze(batch_dim)
 
-                # h's batch dim is always the first dim
-                sliced_args = tree_map_only(torch.Tensor, lambda t: t.narrow(1, i, 1), args)
+                # h's batch dim is always the first dim. Must be contiguous for CUDA
+                sliced_args = tree_map_only(torch.Tensor, lambda t: t.narrow(1, i, 1).contiguous(), args)
                 diff_params = module.parameters()
                 if diff_input:
                     diff_params = chain(diff_params, (input_slice,))
-                res = module(input_slice.unsqueeze(batch_dim), *sliced_args, **kwargs).sum()
+                res = module(input_slice.unsqueeze(batch_dim).contiguous(), *sliced_args, **kwargs).sum()
                 out_grads = torch.autograd.grad(res, diff_params, torch.ones_like(res), allow_unused=True)
                 expected_grads.append(out_grads)
                 expected_res += res
