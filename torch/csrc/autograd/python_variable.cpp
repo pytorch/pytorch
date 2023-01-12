@@ -694,24 +694,23 @@ static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
   const auto& new_base = THPVariable_Unpack(arg);
 
   // Ensure that self is indeed a backward differentiable view
+  // If not, we return an undefined Tensor (None) and let the user handle it.
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
-  TORCH_CHECK(
-      diff_view_meta && diff_view_meta->has_bw_view(),
-      "_view_func can only be called on "
-      "a Tensor that is a backward differentiable view.");
-  const auto& view_info = diff_view_meta->get_backward_view();
-  // Ensure that the newly provided base is similar to the original base
-  TORCH_CHECK(
-      torch::autograd::utils::has_same_meta(new_base, view_info.base_),
-      "The new base passed to _view_func must have the same metadata as the Tensors's base");
-
-  // Do the actual view replay
-  if (view_info.has_view_fn()) {
-    return THPVariable_Wrap(view_info.view_fn()(new_base));
-  } else {
-    return THPVariable_Wrap(new_base.as_strided(
-        self.sizes(), self.strides(), self.storage_offset()));
+  at::Tensor out;
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
+    const auto& view_info = diff_view_meta->get_backward_view();
+    // Ensure that the newly provided base is similar to the original base
+    if (torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
+      // Do the actual view replay
+      if (view_info.has_view_fn()) {
+        out = view_info.view_fn()(new_base);
+      } else {
+        out = new_base.as_strided(
+            self.sizes(), self.strides(), self.storage_offset());
+      }
+    }
   }
+  return THPVariable_Wrap(out);
   END_HANDLE_TH_ERRORS
 }
 
@@ -728,11 +727,10 @@ static PyObject* THPVariable_as_subclass(
   ParsedArgs<1> parsed_args{};
   auto r = parser.parse(_self, args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  TORCH_CHECK_TYPE(
-      PyType_Check(cls),
-      "cls must be a type (got ",
-      Py_TYPE(cls)->tp_name,
-      ")");
+  if (!PyType_Check(cls)) {
+    throw torch::TypeError(
+        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+  }
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       self.alias(),
@@ -751,11 +749,10 @@ static PyObject* THPVariable_make_subclass(
   ParsedArgs<7> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  TORCH_CHECK_TYPE(
-      PyType_Check(cls),
-      "cls must be a type (got ",
-      Py_TYPE(cls)->tp_name,
-      ")");
+  if (!PyType_Check(cls)) {
+    throw torch::TypeError(
+        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+  }
   // guard completely turns off torch dispatch modes, doesn't just pop off the
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
@@ -1060,10 +1057,11 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   }
   THPUtils_assertRet(
       -1, data, "Deleting tensor data is not allowed. Delete tensor instead!");
-  TORCH_CHECK_TYPE(
-      THPVariable_Check(data),
-      "Variable data has to be a tensor, but got ",
-      Py_TYPE(data)->tp_name);
+  if (!THPVariable_Check(data)) {
+    throw torch::TypeError(
+        "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
+  }
+
   THPVariable_Unpack(self).set_data(THPVariable_Unpack(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)

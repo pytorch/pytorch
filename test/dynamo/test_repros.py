@@ -2045,6 +2045,22 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same_two_models(mod, opt_mod, args))
         opt_mod(*args)
 
+    def test_output_aliases_intermediate(self):
+        def f(x):
+            intermediate = x.mul(2)
+            return intermediate.view(-1)
+
+        opt_f = torch._dynamo.optimize("aot_eager")(f)
+
+        for b in [True, False]:
+            x = torch.randn(4, requires_grad=b)
+            out = f(x)
+            out_test = opt_f(x)
+            self.assertEqual(out, out_test)
+            self.assertEqual(out.requires_grad, out_test.requires_grad)
+            self.assertEqual(out._is_view(), out_test._is_view())
+            self.assertEqual(out._base.requires_grad, out_test._base.requires_grad)
+
     def test_while_loop_graph_break(self):
         # Repro of tacotron2 cache_size_recompilation
         def inner(x):
@@ -2224,6 +2240,43 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_tensor_item(self):
+        def f(x, y):
+            val = y.item()
+            return x.sum() + val
+
+        gm, _ = torch._dynamo.export(
+            f,
+            torch.zeros(6, 4),
+            torch.tensor(1),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+        self.assertEqual(
+            f(torch.zeros(6, 4), torch.tensor(1)),
+            gm(torch.zeros(6, 4), torch.tensor(1)),
+        )
+        self.assertEqual(
+            f(torch.zeros(6, 4), torch.tensor(2)),
+            gm(torch.zeros(6, 4), torch.tensor(2)),
+        )
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_tensor_split(self):
+        def f(x):
+            return torch.split(x, x.shape[0] // 2, dim=0)[0]
+
+        gm, _ = torch._dynamo.export(
+            f,
+            torch.zeros(6, 4),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
 
 
 if __name__ == "__main__":
