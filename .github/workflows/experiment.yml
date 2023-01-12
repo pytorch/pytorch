@@ -1,0 +1,18 @@
+name: experiment
+
+on:
+  # DEBUG
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+    tags:
+      - ciflow/experiment/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
