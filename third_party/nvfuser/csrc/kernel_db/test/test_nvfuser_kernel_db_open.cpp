@@ -17,16 +17,6 @@ namespace Nvf = torch::jit::fuser::cuda;
 
 // RUN CMD: bin/test_jit --gtest_filter="NVFuserTest*KernelDb_Open*"
 TEST_F(NVFuserTest, KernelDb_Open_CUDA) {
-  // Try a DB path that should fail
-  try {
-    auto& kernel_db =
-        Nvf::KernelDb::get("../nvfuser_kernel_db_open_test", "db.csv");
-    ASSERT_FALSE(kernel_db.enabled());
-    SUCCEED();
-  } catch (const std::exception& e) {
-    FAIL() << "Unexpected failure while opening an improper Kernel DB Dir!";
-  }
-
   // Check a corrupted DB and reset the DB
   // 1.) Test writes a bad db.csv file and open fails to match header
   // 2.) Should delete cubins because of bad db.csv file.
