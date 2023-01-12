@@ -1,3 +1,5 @@
+from functools import partial
+
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
@@ -5,10 +7,10 @@ from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
-    get_proxy_slot,
     make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
+    unwrap_proxy,
 )
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
@@ -21,12 +23,6 @@ map = PyOperator("map")
 
 
 def trace_map(proxy_mode, func_overload, f, xs, *args):
-    def _unwrap_proxy(e):
-        if not isinstance(e, (torch.Tensor, torch.SymInt, torch.SymFloat)):
-            return e
-        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
-
-
     if not isinstance(xs, torch.Tensor):
         raise ValueError("map() must loop over a tensor")
     if len(xs.shape) == 0 or xs.shape[0] == 0:
@@ -48,7 +44,7 @@ def trace_map(proxy_mode, func_overload, f, xs, *args):
 
     proxy_mode.tracer.root.register_module(next_name, body_graph)
     node_args = (body_graph, xs, *args)
-    proxy_args = pytree.tree_map(_unwrap_proxy, node_args)
+    proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), node_args)
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                                name="map")
     outs = [body_graph(x, *args) for x in xs]
