@@ -13,6 +13,7 @@ from itertools import product
 from functools import partial
 from collections import OrderedDict
 from tempfile import NamedTemporaryFile
+from unittest import SkipTest
 
 import torch
 
@@ -1654,10 +1655,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # This should work though
         l2.weight = Parameter(torch.randn(10, 10))
 
+    @parametrize_test('device_type', ('cpu', 'cuda'))
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
-    def test_clip_grad_norm(self, norm_type, foreach):
-        l = nn.Linear(10, 10)
+    def test_clip_grad_norm(self, device_type, norm_type, foreach):
+        if device_type == 'cuda' and not TEST_CUDA:
+            raise SkipTest('CUDA not available')
+
+        l = nn.Linear(10, 10).to(device_type)
         max_norm = 2
 
         def compute_norm(norm_type):
@@ -1676,7 +1681,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(scale.std(), 0)
             return scale[0]
 
-        grads = torch.arange(1., 101).view(10, 10), torch.ones(10).div(1000)
+        grads = torch.arange(1., 101, device=device_type).view(10, 10), torch.ones(10, device=device_type).div(1000)
         for p, g in zip(l.parameters(), grads):
             p._grad = g.clone().view_as(p.data)
         norm_before = compute_norm(norm_type)
@@ -1688,7 +1693,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         compare_scaling(grads)
 
         # Small gradients should be left unchanged
-        grads = torch.rand(10, 10).div(10000), torch.ones(10).div(500)
+        grads = torch.rand(10, 10, device=device_type).div(10000), torch.ones(10, device=device_type).div(500)
         for p, g in zip(l.parameters(), grads):
             p.grad.data.copy_(g)
         norm_before = compute_norm(norm_type)
@@ -1701,20 +1706,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(scale, 1)
 
         # Should accept a single Tensor as input
-        p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
-        g = torch.arange(1., 101).view(10, 10)
+        p1, p2 = torch.randn(10, 10, device=device_type), torch.randn(10, 10, device=device_type)
+        g = torch.arange(1., 101, device=device_type).view(10, 10)
         p1._grad = g.clone()
         p2._grad = g.clone()
         clip_grad_norm_(p1, max_norm, norm_type=norm_type, foreach=foreach)
         clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
+    @parametrize_test('device_type', ('cpu', 'cuda'))
     @parametrize_test('foreach', (False, True))
-    def test_clip_grad_value(self, foreach):
-        l = nn.Linear(10, 10)
+    def test_clip_grad_value(self, device_type, foreach):
+        if device_type == 'cuda' and not TEST_CUDA:
+            raise SkipTest('CUDA not available')
+
+        l = nn.Linear(10, 10).to(device_type)
         clip_value = 2.5
 
-        grad_w, grad_b = torch.arange(-50., 50).view(10, 10).div_(5), torch.ones(10).mul_(2)
+        grad_w, grad_b = torch.arange(-50., 50, device=device_type).view(10, 10).div_(5), torch.ones(10, device=device_type).mul_(2)
         for grad_list in [[grad_w, grad_b], [grad_w, None]]:
             for p, g in zip(l.parameters(), grad_list):
                 p._grad = g.clone().view_as(p.data) if g is not None else g
@@ -1725,8 +1734,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.assertGreaterEqual(p.grad.data.min(), -clip_value)
 
         # Should accept a single Tensor as input
-        p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
-        g = torch.arange(-50., 50).view(10, 10).div_(5)
+        p1, p2 = torch.randn(10, 10, device=device_type), torch.randn(10, 10, device=device_type)
+        g = torch.arange(-50., 50, device=device_type).view(10, 10).div_(5)
         p1._grad = g.clone()
         p2._grad = g.clone()
         clip_grad_value_(p1, clip_value, foreach=foreach)
