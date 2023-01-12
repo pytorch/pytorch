@@ -1331,13 +1331,13 @@ from torch.func import vmap
 # Triton registrations for Sparse
 from ._inductor.cuda_properties import get_device_capability
 
-# For has_triton defined below
+# For _has_triton defined below
 from functools import lru_cache
 
 # TODO: this function is a copy of what is defined in ._inductor.utils.
 # Update the storage place as to avoid any import issues.
 @lru_cache(None)
-def has_triton():
+def _has_triton():
     if not torch.cuda.is_available():
         return False
     try:
@@ -1349,7 +1349,7 @@ def has_triton():
 
 _sparse_kernels_lib = torch.library.Library("aten", "IMPL")
 
-if has_triton():
+if _has_triton():
     from torch.sparse.triton_ops._triton_bsr_dense_mm import bsr_dense_mm
 
     _sparse_kernels_lib.impl(
