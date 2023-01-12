@@ -5,6 +5,8 @@ on:
     branches:
       - master
       - main
+    paths:
+      - .github/workflows/inductor-perf-smoke-test.yml
   pull_request:
     paths:
       - .github/workflows/inductor-perf-smoke-test.yml
@@ -24,7 +26,7 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "test_inductor_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "test_inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
         ]}
 
   linux-bionic-cuda11_6-py3_10-gcc7-inductor-test:
