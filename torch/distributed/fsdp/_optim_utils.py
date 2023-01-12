@@ -1493,7 +1493,7 @@ def _all_gather_optim_state(
             if info is not None:
                 numels[-1] = info.shape.numel()
                 dtype = info.dtype
-                max_numel = max(max_numel, numel[-1])
+                max_numel = max(max_numel, numels[-1])
         local_state = (
             optim_state[name]
             if name in optim_state
@@ -1534,9 +1534,11 @@ def _all_gather_optim_state(
         assert value.work is not None
         value.work.wait()
         gathered_state[name] = torch.cat(
-            rank_tensor[:rank_numel]
-            for rank_tensor, rank_numel in zip(value.tensors, value.numels)
-            if rank_numel > 0
+            [
+                rank_tensor[:rank_numel]
+                for rank_tensor, rank_numel in zip(value.tensors, value.numels)
+                if rank_numel > 0
+            ]
         )
 
     return gathered_state
