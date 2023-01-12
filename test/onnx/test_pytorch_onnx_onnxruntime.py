@@ -7047,7 +7047,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3)
         t1 = torch.randn(3, 1)
         t2 = torch.randn(1, 3)
-        self.run_test(AddcmulModel(), (x, t1, t2))
+        self.run_test(AddcmulModel(), (x, t1, t2), verbose=True)
+
+    def test_mixed_ops(self):
+        class MixedOpsModel(torch.nn.Module):
+            def forward(self, x, y):
+                add_z = x + y + 5
+                minus_z = x - y
+                return add_z * minus_z
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(MixedOpsModel(), (x, y), verbose=True)
 
     def test_rsqrt(self):
         class RsqrtModel(torch.nn.Module):

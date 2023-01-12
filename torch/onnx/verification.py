@@ -490,7 +490,7 @@ def _traced_graph_from_model(
     with utils.exporter_context(model, training, verbose):
         export_inputs = _prepare_input_for_export(args, kwargs)
         model = utils._pre_trace_quant_model(model, export_inputs)
-        jit_graph, _, _, _ = utils._create_jit_graph(model, export_inputs)
+        jit_graph, _, _, _, _ = utils._create_jit_graph(model, export_inputs)
         return jit_graph
 
 
