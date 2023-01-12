@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 import expecttest
+import multiprocessing as mp
 import torch
 import torch.nn as nn
 import torch.optim
@@ -62,7 +63,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.utils.hooks import RemovableHandle
 
 try:
     import psutil
@@ -73,7 +73,6 @@ except ImportError:
 import pickle
 
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
-from torch.profiler.profiler import _profile_using_dynolog
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -1052,6 +1051,49 @@ class TestProfiler(TestCase):
         for step in range(len(test_schedule_expected_outputs)):
             self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
+    def test_kineto_profiler_multiple_steppers(self):
+        niters = 8
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        net = SimpleNet()
+        opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
+        opt.zero_grad()
+        inputs = torch.rand(10)
+
+        with profile(activities=supported_activities()):
+            self.payload(use_cuda=use_cuda)
+
+        def optimizer_step():
+            """This simulates a step() hook in the optimizer"""
+            KinetoStepTracker.increment_step("yet_another_step")
+
+        initial_step = KinetoStepTracker.current_step()
+
+        def run_batch():
+            out = net(inputs)
+            loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+            loss.backward()
+            opt.step()
+            # Manually call the hook. TODO: Remove this once we add the
+            # profiler step hooks in the Optimizer class that will get triggered above.
+            # See https://github.com/pytorch/pytorch/issues/88446
+            optimizer_step()
+
+        for idx in range(niters):
+            run_batch()
+
+        with profile(
+            activities=supported_activities(),
+            schedule=torch.profiler.schedule(
+                wait=1,
+                warmup=1,
+                active=2),
+        ) as p:
+            for idx in range(niters):
+                run_batch()
+                p.step()
+
+        self.assertEqual(KinetoStepTracker.current_step(), initial_step + 2 * niters)
+
     def test_export_stacks(self):
         with _profile(with_stack=True, use_kineto=kineto_available(), experimental_config=_ExperimentalConfig(verbose=True)) as p:
             x = torch.randn(10, 10)
@@ -1286,78 +1328,47 @@ class TestProfiler(TestCase):
                 self.assertTrue(len(e.input_shapes[0]) > 0)
 
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
-    def test_kineto_profiler_multiple_steppers_with_override_False(self):
-        handle: RemovableHandle = _profile_using_dynolog(False)
-        niters = 8
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        net = SimpleNet()
-        opt = torch.optim.SGD(net.parameters(), lr=0.01)
-        opt.zero_grad()
-        inputs = torch.rand(10)
+    def test_kineto_profiler_with_environment_variable(self):
+        proc = mp.Process(target=launch_subprocess)
+        proc.start()
+        proc.join()
 
-        with profile(activities=supported_activities()):
-            self.payload(use_cuda=use_cuda)
 
-        initial_step = KinetoStepTracker.current_step()
+def launch_subprocess():
+    import torch
 
-        def run_batch():
-            out = net(inputs)
-            loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
-            loss.backward()
-            opt.step()
+    niters = 8
+    use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+    net = SimpleNet()
+    opt = torch.optim.SGD(net.parameters(), lr=0.01)
+    opt.zero_grad()
+    inputs = torch.rand(10)
 
-        for idx in range(niters):
+    with profile(activities=supported_activities()):
+        TestProfiler().payload(use_cuda=use_cuda)
+
+    initial_step = KinetoStepTracker.current_step()
+
+    def run_batch():
+        out = net(inputs)
+        loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+        loss.backward()
+        opt.step()
+
+    for _ in range(niters):
+        run_batch()
+
+    with profile(
+        activities=supported_activities(),
+        schedule=torch.profiler.schedule(
+            wait=1,
+            warmup=1,
+            active=2),
+    ) as p:
+        for _ in range(niters):
             run_batch()
-
-        with profile(
-            activities=supported_activities(),
-            schedule=torch.profiler.schedule(
-                wait=1,
-                warmup=1,
-                active=2),
-        ) as p:
-            for idx in range(niters):
-                run_batch()
-                p.step()
-        self.assertEqual(KinetoStepTracker.current_step(), initial_step + 2 * niters)
-        handle.remove()
-
-    def test_kineto_profiler_multiple_steppers_with_override_True(self):
-        handle: RemovableHandle = _profile_using_dynolog(True)
-        niters = 8
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        net = SimpleNet()
-        opt = torch.optim.SGD(net.parameters(), lr=0.01)
-        opt.zero_grad()
-        inputs = torch.rand(10)
-
-        with profile(activities=supported_activities()):
-            self.payload(use_cuda=use_cuda)
-
-        initial_step = KinetoStepTracker.current_step()
-
-        def run_batch():
-            out = net(inputs)
-            loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
-            loss.backward()
-            opt.step()
-
-        for idx in range(niters):
-            run_batch()
-
-        with profile(
-            activities=supported_activities(),
-            schedule=torch.profiler.schedule(
-                wait=1,
-                warmup=1,
-                active=2),
-        ) as p:
-            for idx in range(niters):
-                run_batch()
-                p.step()
-        self.assertEqual(KinetoStepTracker.current_step(), initial_step + 2 * niters)
-        handle.remove()
-
+            p.step()
+    assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
 def find_node_with_name(nodes, name):
     for node in _utils.traverse_dfs(nodes):

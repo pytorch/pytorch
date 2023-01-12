@@ -1,4 +1,3 @@
-import contextlib
 import gzip
 import json
 import os
@@ -10,7 +9,6 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch.autograd.profiler import KinetoStepTracker
 from torch._C._profiler import (
     _add_execution_graph_observer,
     _disable_execution_graph_observer,
@@ -20,8 +18,6 @@ from torch._C._profiler import (
 )
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler import _memory_profiler
-from torch.optim.optimizer import register_optimizer_step_post_hook
-from torch.utils.hooks import RemovableHandle
 
 
 __all__ = [
@@ -33,7 +29,6 @@ __all__ = [
     "ExecutionGraphObserver",
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
-_dynolog_handle = None
 
 
 def supported_activities():
@@ -48,40 +43,6 @@ def supported_activities():
     but not in the JSON trace.
     """
     return torch.autograd._supported_activities()
-
-
-def _optimizer_post_hook(optimizer, args, kwargs):
-    KinetoStepTracker.increment_step("Optimizer")
-
-
-@contextlib.contextmanager
-def _dynolog_handler_context():
-    """
-    The code before the yield statement runs when the context starts before any code from
-    the context is executed. The code after the yield statement runs after the context ends.
-    """
-    global _dynolog_handle
-    if _dynolog_handle is None:
-        _dynolog_handle = True
-    yield
-    _dynolog_handle = None
-
-
-def _profile_using_dynolog(override: bool = False) -> Optional[RemovableHandle]:
-    """
-    To enable tracing via dynolog we register a global optimizer step post
-    hook. Requires the 'KINETO_USE_DAEMON' environment variable to be set.
-    """
-    global _dynolog_handle
-    hook_handle: Optional[RemovableHandle] = None
-    with _dynolog_handler_context():
-        # check if hook has been registered and environment variable is set properly.
-        # the override option is to handle the test cases only.
-        if _dynolog_handle is True and (os.environ.get("KINETO_USE_DAEMON", None) is not None or override is True):
-            hook_handle = register_optimizer_step_post_hook(_optimizer_post_hook)
-            # set _dynolog_handle to False to prevent re-registeration of the hook.
-            _dynolog_handle = False
-    return hook_handle
 
 
 class _KinetoProfile(object):
