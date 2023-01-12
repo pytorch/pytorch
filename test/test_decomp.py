@@ -297,6 +297,10 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "empty_like"),
     (None, None, "empty"),
 
+    # It's the only in-place op without an out-of-place equivalent in the Python API
+    # Its OpInfo wrongly registers it as `torch.zero_(x.clone())`.
+    (None, None, "zero_"),
+
     # No idea what's going on here
     # In the recursive test logsumexp.default fails with args = (torch.tensor(-math.inf), [])
     # in the test, but it seems to pass when tested locally and in the logsumexp test
