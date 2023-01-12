@@ -70,6 +70,25 @@ class DTypeWithConstraints:
     Config for specifying additional constraints for a given dtype, such as quantization
     value ranges, scale value ranges, and fixed quantization params, to be used in
     :class:`~torch.ao.quantization.backend_config.DTypeConfig`.
+
+    The constraints currently supported are:
+
+    * `quant_min_lower_bound` and `quant_max_upper_bound`: Lower and upper
+      bounds for the minimum and maximum quantized values respectively. If
+      the QConfig’s `quant_min` and `quant_max` fall outside this range,
+      then the QConfig will be ignored.
+
+    * `scale_min_lower_bound` and `scale_max_upper_bound`: Lower and upper
+      bounds for the minimum and maximum scale values respectively. If the
+      QConfig’s minimum scale value (currently exposed as `eps`) falls below
+      the lower bound, then the QConfig will be ignored. Note that the upper
+      bound is currently not enforced.
+
+    * `scale_exact_match` and `zero_point_exact_match`: Exact match requirements
+      for scale and zero point, to be used for operators with fixed quantization
+      parameters such as sigmoid and tanh. If the observer specified in the QConfig
+      is neither `FixedQParamsObserver` nor `FixedQParamsFakeQuantize`, or if
+      the quantization parameters don't match, then the QConfig will be ignored.
     """
     dtype: Optional[torch.dtype] = None
     quant_min_lower_bound: Union[int, float, None] = None
@@ -85,8 +104,33 @@ class DTypeConfig:
     """
     Config object that specifies the supported data types passed as arguments to
     quantize ops in the reference model spec, for input and output activations,
-    weights, and biases. This object also optionally specifies constraints
-    associated with the data types.
+    weights, and biases.
+
+    For example, consider the following reference model:
+
+      quant1 - [dequant1 - fp32_linear - quant2] - dequant2
+
+    The pattern in the square brackets refers to the reference pattern of
+    statically quantized linear. Setting the input dtype as `torch.quint8`
+    in the DTypeConfig means we pass in `torch.quint8` as the dtype argument
+    to the first quantize op (quant1). Similarly, setting the output dtype as
+    `torch.quint8` means we pass in `torch.quint8` as the dtype argument to
+    the second quantize op (quant2).
+
+    Note that the dtype here does not refer to the interface dtypes of the
+    op. For example, the "input dtype" here is not the dtype of the input
+    tensor passed to the quantized linear op. Though it can still be the
+    same as the interface dtype, this is not always the case, e.g. the
+    interface dtype is fp32 in dynamic quantization but the "input dtype"
+    specified in the DTypeConfig would still be quint8. The semantics of
+    dtypes here are the same as the semantics of the dtypes specified in
+    the observers.
+
+    These dtypes are matched against the ones specified in the user’s
+    QConfig. If there is a match, and the QConfig satisfies the constraints
+    specified in the DTypeConfig (if any), then we will quantize the given
+    pattern using this DTypeConfig. Otherwise, the QConfig is ignored and
+    the pattern will not be quantized.
 
     Example usage::
 

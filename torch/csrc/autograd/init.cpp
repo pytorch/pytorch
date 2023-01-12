@@ -29,6 +29,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
+#include <torch/csrc/utils/torch_dispatch_mode.h>
 
 #include <set>
 #include <unordered_set>
@@ -60,13 +61,14 @@ struct DisableAutocast {
 
 struct EnableTorchFunction {
   EnableTorchFunction()
-      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
-    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+      : old_(at::impl::PythonTorchFunctionTLS::get_disabled_state()) {
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ENABLED);
   }
   ~EnableTorchFunction() {
-    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_);
   }
-  bool old_;
+  at::impl::TorchFunctionDisabledState old_;
 };
 
 struct EnablePythonDispatcher {
