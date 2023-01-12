@@ -113,10 +113,8 @@ class ExpandedWeight(torch.Tensor):
                 with setup_rnn(use_input_variant, args, kwargs):
                     return decomp(*args, **kwargs)
         if func == torch._cudnn_rnn_flatten_weight:
-            # this updates in place, so just pass the underyling tensors through
-            args = tree_map_only(ExpandedWeight, lambda ew: ew.orig_weight, args)
-            kwargs = tree_map_only(ExpandedWeight, lambda ew: ew.orig_weight, kwargs)
-            return torch._cudnn_rnn_flatten_weight(*args, **kwargs)
+            # since we aren't using the fused cuda kernels for RNNs, don't do this
+            return
         if func in cls.handled_functions:
             return cls.handled_functions[func].apply(tuple(kwargs.keys()), func, *(args + tuple(kwargs.values())))
         # We cannot use a fallback here because we do not know the batch dimension for any regular tensor inputs,
