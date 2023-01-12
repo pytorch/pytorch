@@ -302,6 +302,7 @@ ALLOWLIST_OP: AbstractSet[str] = frozenset(
     [
         "ceil",
         "sqrt",
+        "stft",
         "t",
     ]
 )
