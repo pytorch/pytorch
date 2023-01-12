@@ -200,11 +200,12 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   # OOM error instead of crashing the runner and losing all the logs.
   #
   # Leave 1 CPU free and use only up to 80% of memory
-  BAZEL_LIMIT="--local_ram_resources=HOST_RAM*.8 --local_cpu_resources=HOST_CPUS-1"
+  BAZEL_MEM_LIMIT="--local_ram_resources=HOST_RAM*.8"
+  BAZEL_CPU_LIMIT="--local_cpu_resources=HOST_CPUS-1"
 
-  tools/bazel build --config=no-tty ${BAZEL_LIMIT} //...
+  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   # Build torch, the Python module, and tests for CPU-only
-  tools/bazel build --config=no-tty ${BAZEL_LIMIT} --config=cpu-only :torch :_C.so :all_tests
+  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :_C.so :all_tests
 
 else
   # check that setup.py would fail with bad arguments
