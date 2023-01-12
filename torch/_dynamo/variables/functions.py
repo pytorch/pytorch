@@ -183,7 +183,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
             if name == "__class__":
-                source = AttrSource(self.source, "__class__") if self.source else None
+                source = AttrSource(self.source, "__class__")
                 result[name] = variables.UserDefinedClassVariable(
                     cell.cell_contents,
                     source=source,
