@@ -716,10 +716,8 @@ def logsumexp(
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
     maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)  # type: ignore[arg-type]
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
 
@@ -3458,8 +3456,14 @@ def index_fill_(
 ):
     return _index_fill(x, dim, index, value, inplace=True)
 
+
 def _index_fill(
-        x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike], *, inplace: bool
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    value: Union[NumberType, TensorLike],
+    *,
+    inplace: bool,
 ):
     utils.check(
         index.ndim <= 1,
@@ -3483,12 +3487,20 @@ def _index_fill(
     shape = list(y.shape)
     shape[dim] = index.numel()
     value = value.expand(shape)
-    index_copy = torch.index_copy_ if inplace else torch.index_copy
-    out = index_copy(y, dim, index, value)
+    index_copy = Tensor.index_copy_ if inplace else torch.index_copy
+    out = index_copy(y, dim, index, value)  # type: ignore[operator]
     if inplace:
         return x
     else:
-        return out.squeeze(0) if zero_dim else out
+        if zero_dim:
+            # The clone is necessary so that it returns a fresh tensor rather than a view
+            out = out.squeeze(0).clone()
+        # index_fill preserves the strides. index_copy always returns contiguous tensors
+        if out.stride() != x.stride():
+            new_out = torch.empty_like(x)
+            new_out.copy_(out)
+            out = new_out
+        return out
 
 
 @out_wrapper()
