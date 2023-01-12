@@ -259,6 +259,12 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __sym_max__(self, other):
+        raise AssertionError("type stub not overridden")
+
+    def __sym_min__(self, other):
+        raise AssertionError("type stub not overridden")
+
     def __sym_float__(self):
         raise AssertionError("type stub not overridden")
 
@@ -301,6 +307,12 @@ class SymFloat:
         raise AssertionError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __sym_max__(self, other):
+        raise AssertionError("type stub not overridden")
+
+    def __sym_min__(self, other):
         raise AssertionError("type stub not overridden")
 
     def __repr__(self):
