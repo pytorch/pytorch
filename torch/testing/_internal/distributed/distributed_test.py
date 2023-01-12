@@ -4264,6 +4264,29 @@ class DistributedTest:
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        def test_load_local_into_ddp(self):
+            """
+            Tests that we can load a local nn.Module into DDP wrapped module.
+            """
+            net = torch.nn.Linear(10, 10, bias=False)
+            state_dict = copy.deepcopy(net.state_dict())
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(10, 10, bias=False).cuda(self.rank),
+                device_ids=[self.rank]
+            )
+            # Should not throw
+            ddp.load_state_dict(net)
+            ddp_state_dict = ddp.state_dict()
+            for (k1, v1), (k2, v2) in zip(state_dict.items(), ddp_state_dict.items()):
+                local_key = k2.replace("module.", "")
+                self.assertEqual(local_key, k1)
+                self.assertEqual(v1, v2, f"{local_key} mismatch: {v1} vs {v2}")
+
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel"
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_DistributedDataParallel_non_default_stream(self):
             stream = torch.cuda.Stream(self.rank)
             rank = self.rank

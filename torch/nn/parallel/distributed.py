@@ -44,6 +44,8 @@ __all__ = ["DistributedDataParallel"]
 
 logger = logging.getLogger(__name__)
 
+_DDP_PREFIX = "module"
+
 
 def _tree_flatten_with_rref(output):
     output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
@@ -692,6 +694,24 @@ class DistributedDataParallel(Module, Joinable):
             self._set_static_graph()
 
         self._setup_in_backward_optimizers()
+        self._register_load_state_dict_pre_hook(
+            self._pre_load_state_dict_hook, with_module=True
+        )
+
+    @staticmethod
+    def _pre_load_state_dict_hook(
+        module: nn.Module,
+        state_dict: Dict[str, Any],
+        prefix: str,
+        *args: Any,
+    ) -> None:
+        """
+        ``_pre_state_dict_hook` is called before ``self._load_from_state_dict()``
+        is called. For ``DistributedDataParallel``, it will add back the module
+        prefix so that non-DDP modules (i.e. local nn.Modules) can be loaded into
+        DDP module properly.
+        """
+        _replace_by_prefix(state_dict, prefix, prefix + f"{_DDP_PREFIX}.")
 
     def _setup_in_backward_optimizers(self):
         # Check if user has used apply_optim_in_backward to overlap optimizer
