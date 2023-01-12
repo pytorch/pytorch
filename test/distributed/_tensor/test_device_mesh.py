@@ -52,7 +52,7 @@ class DeviceMeshTest(DTensorTestBase):
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         _set_env_var(world_size=self.world_size, rank=self.rank)
         # missing ranks
-        mesh_tensor = torch.arange(self.world_size-2).reshape(2, -1)
+        mesh_tensor = torch.arange(self.world_size - 2).reshape(2, -1)
         with self.assertRaisesRegex(RuntimeError, "DeviceMesh must include every process in WORLD"):
             mesh = DeviceMesh(device_type, mesh_tensor)
         # mesh ranks are not unique
