@@ -3,7 +3,8 @@
         "Upload the new file to S3 under a new folder with the version number embedded in (see actionlint for an example).",
         "(Don't override the old files, otherwise you'll break `lintrunner install` for anyone using an older commit of pytorch.)",
         "'Hash' is the sha256 of the uploaded file.",
-        "Validate the new download url and hash by running 'lintrunner init' to pull the new binaries and then run 'lintrunner' to try linting the files."
+        "Validate the new download url and hash by running 'lintrunner init' to pull the new binaries and then run 'lintrunner' to try linting the files.",
+        "Some binaries have custom builds; see https://github.com/pytorch/test-infra/blob/main/.github/workflows/clang-tidy-linux.yml and https://github.com/pytorch/test-infra/blob/main/.github/workflows/clang-tidy-macos.yml"
     ],
     "clang-format": {
         "Darwin": {
@@ -16,13 +17,17 @@
         }
     },
     "clang-tidy": {
-        "Darwin": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos/clang-tidy",
-            "hash": "541797a7b8fa795e2f3c1adcd8236cc336a40aa927028dc5bc79172e1d9eca36"
+        "Darwin-i386": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-i386/11.1.0/clang-tidy",
+            "hash": "00a61e97189d096dc8ff029590fdc38493862993df04980a53a926bdccc80905"
+        },
+        "Darwin-arm": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-arm/11.1.0/clang-tidy",
+            "hash": "22b22f5625e030c50fece061fc94bd04d6a884e22859361e5094ef5cf74135f6"
         },
         "Linux": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/clang-tidy",
-            "hash": "e4a1537ee997aa486a67bcc06d050b1aa6cfb14aa3073c08f19123ac990ab2f7"
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/11.1.0/clang-tidy",
+            "hash": "f0eb93147808e361ea7d42d8868f4feddb53185e878d6cc2a493a4104265d2ee"
         }
     },
     "actionlint": {

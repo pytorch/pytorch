@@ -1039,6 +1039,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("ofFloats", &ListType::ofFloats)
       .def_static("ofComplexDoubles", &ListType::ofComplexDoubles)
       .def_static("ofBools", &ListType::ofBools)
+      .def_static("ofStrings", &ListType::ofStrings)
       .def("getElementType", &ListType::getElementType);
   py::class_<DictType, Type, DictTypePtr>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
