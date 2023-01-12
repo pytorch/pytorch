@@ -92,7 +92,26 @@ class SubgraphMatcher:
             # and should be matched against as an anchor
             self.pattern_anchors = [n for n in output_node.all_input_nodes if len(n.users) == 1]
 
-    def _match_attributes(self, pn: Node, gn: Node) -> bool:
+    @compatibility(is_backward_compatible=False)
+    def match_literals(self, pn: Any, gn: Any) -> bool:
+        """
+        Checks if the given values (not Nodes) match.
+        """
+        assert not (isinstance(pn, Node) or isinstance(gn, Node)), "neither pn nor gn can be Nodes"
+        return type(gn) == type(pn) and gn == pn
+
+    @compatibility(is_backward_compatible=False)
+    def match_placeholder_nodes(self, pn: Node, gn: Node) -> bool:
+        """
+        Checks if the given ``placeholder`` nodes match.
+        """
+        return True
+
+    @compatibility(is_backward_compatible=False)
+    def match_get_attr_nodes(self, pn: Node, gn: Node) -> bool:
+        """
+        Checks if the given ``get_attr`` nodes match.
+        """
         # Attributes matching is compilcated. Right now we only support matching constant tensor
         assert isinstance(pn.target, str), f"pn.target {pn.target} must be a string."
         assert isinstance(gn.target, str), f"gn.target {gn.target} must be a string."
@@ -106,7 +125,37 @@ class SubgraphMatcher:
             return isinstance(gn_value, torch.Tensor)
         else:
             raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
-        return False
+
+    @compatibility(is_backward_compatible=False)
+    def match_call_function_nodes(self, pn: Node, gn: Node) -> bool:
+        """
+        Checks if the given ``call_function`` nodes match.
+        """
+        assert not (isinstance(pn.target, str) or isinstance(gn.target, str))
+        return pn.target == gn.target
+
+    @compatibility(is_backward_compatible=False)
+    def match_call_method_nodes(self, pn: Node, gn: Node) -> bool:
+        """
+        Checks if the given ``call_method`` nodes match.
+        """
+        assert isinstance(pn.target, str) and isinstance(gn.target, str)
+        return pn.target == gn.target
+
+    @compatibility(is_backward_compatible=False)
+    def match_call_module_nodes(self, pn: Node, gn: Node) -> bool:
+        """
+        Checks if the given ``call_module`` nodes match.
+        """
+        assert isinstance(pn.target, str) and isinstance(gn.target, str)
+        return pn.target == gn.target
+
+    @compatibility(is_backward_compatible=False)
+    def match_output_nodes(self, pn: Node, gn: Node) -> bool:
+        """
+        Checks if the given ``output`` nodes match.
+        """
+        return True
 
     def _nodes_are_equal(self, pn: Node, gn: Node) -> bool:
         # if exact match for placeholder is not required, then use placeholder as a wildcard
@@ -114,11 +163,7 @@ class SubgraphMatcher:
             return True
 
         if pn.op == gn.op:
-            if pn.op == "placeholder" or pn.op == "output":
-                return True
-            elif pn.op == "get_attr":
-                return self._match_attributes(pn, gn)
-            return pn.target == gn.target
+            return getattr(self, f"match_{pn.op}_nodes")(pn, gn)
         return False
 
     def _is_contained(self, nodes_map: Dict[Node, Node]) -> bool:
@@ -175,7 +220,7 @@ class SubgraphMatcher:
         elif not isinstance(pn, Node) and isinstance(gn, Node):
             return False
         else:
-            return type(gn) == type(pn) and gn == pn
+            return self.match_literals(pn, gn)
 
     def _match_nodes(self, pn: Node, gn: Node, match: InternalMatch) -> bool:
         logger.info(f"  matching {pn} to {gn}")
