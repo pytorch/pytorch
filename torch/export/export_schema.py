@@ -59,6 +59,12 @@ SymInt = Union[
     str
 ]
 
+# !!! To support t.item(), we need to introduce SymFloat
+# SymFloat = Union[
+#     float,
+#     str
+# ]
+
 Scalar = Union[int, float, bool]
 
 # This is a Tensor Arugment used in the args of an node
@@ -81,6 +87,7 @@ class SymIntArgument:
 # !!! What about .item()? Do we need to handle this?
 ReturnArgument = Union[
     TensorArgument,
+    # List[TensorArgument],    # !!! ATM, no operator has return type as Tensor[], might need this latter?
     SymIntArgument,
 ]
 
@@ -90,7 +97,7 @@ Argument = Union[
     # None          # !!! This is used for nullable arguments, is this the right way to handle None?
 
     TensorArgument,
-    # List[TensorArgument],   # !!! This is an important decision to decide how to handle list of tensors. More discussion to come.
+    List[TensorArgument],   # Tensor[], used by aten.cat, and condition ops
 
     SymIntArgument,         # Symint can be an argument, there are symint in native_function.yaml
     List[SymIntArgument],   # Symint[] can be an argement, there are symint[] in native_function.yaml
@@ -109,6 +116,7 @@ Argument = Union[
 
     # Graph,            # !!! Consider how to handle condition op, which need to pass in a graph for the branch
     # List[Graph],      # !!! What about list of graphs? Do we need this?
+    "GraphModule",     #  !!! ATM, torch.cond models branch as GraphModule
 
     # !!! Following types doesn't have a list version in native_function.yaml
     ScalarType,
