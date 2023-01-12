@@ -532,7 +532,7 @@ class TestExpandedWeightModule(TestCase):
 
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
-                                                       requires_grad=True, training=training)
+                                                       requires_grad=True, training=training, with_packed_sequence=True)
         for module_input in module_inputs:
             if module_input.forward_input is None:
                 continue

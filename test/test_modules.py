@@ -363,7 +363,7 @@ class TestModule(TestCase):
                 continue
 
             input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
-            if not (_can_be_noncontiguous(input_args) and _can_be_noncontiguous(input_kwargs)):
+            if not (_can_be_noncontiguous(input_args) or _can_be_noncontiguous(input_kwargs)):
                 continue
 
             # === Instantiate the module. ===
