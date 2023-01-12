@@ -807,7 +807,9 @@ class TritonKernel(Kernel):
             if tree.prefix.upper() not in config.triton.max_block:
                 continue
             max_block = config.triton.max_block[tree.prefix.upper()]
-            if tree.numel == 1 or tree.numel % max_block == 0:
+            if V.graph.sizevars.maybe_guard_equals(
+                tree.numel, 1
+            ) or V.graph.sizevars.maybe_guard_multiple_of(tree.numel, max_block):
                 mask_vars.discard(f"{tree.prefix}mask")
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
