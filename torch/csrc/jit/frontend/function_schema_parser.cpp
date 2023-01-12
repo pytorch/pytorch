@@ -2,6 +2,7 @@
 
 #include <ATen/core/Reduction.h>
 #include <ATen/core/type_factory.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
@@ -22,7 +23,6 @@ using c10::make_left;
 using c10::make_right;
 using c10::OperatorName;
 using c10::OptionalType;
-
 namespace torch {
 namespace jit {
 
@@ -35,7 +35,18 @@ struct SchemaParser {
             0,
             nullptr,
             Source::DONT_COPY)),
-        type_parser(L, /*parse_complete_tensor_types*/ false) {}
+        type_parser(L, /*parse_complete_tensor_types*/ false),
+        argument_types() {}
+
+  explicit SchemaParser(const std::string& str, const ArgumentTypes& argumentAllowedTypes)
+      : L(std::make_shared<Source>(
+            c10::string_view(str),
+            c10::nullopt,
+            0,
+            nullptr,
+            Source::DONT_COPY)),
+        type_parser(L, /*parse_complete_tensor_types*/ false),
+        argument_types(argumentAllowedTypes) {}
 
   either<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();
@@ -194,6 +205,13 @@ struct SchemaParser {
         default_value = parseDefaultValue(*fake_type, fake_type->kind(), N);
       }
     }
+    c10::ArrayRef<c10::ScalarType> types = {};
+    if (real_type->kind() == c10::TypeKind.TensorType) {
+      auto res = argument_types_.find(name);
+      if (res != argument_types_.end()) {
+        types = res->second;
+      }
+    }
     return Argument(
         std::move(name),
         std::move(fake_type),
@@ -201,7 +219,8 @@ struct SchemaParser {
         N,
         std::move(default_value),
         !is_return && kwarg_only,
-        std::move(alias_info));
+        std::move(alias_info),
+        types);
   }
   IValue parseSingleConstant(const c10::Type& type, TypeKind kind) {
     if (kind == c10::TypeKind::DynamicType) {
@@ -366,6 +385,7 @@ struct SchemaParser {
   }
   Lexer L;
   SchemaTypeParser type_parser;
+  ArgumentTypes argument_types;
 };
 } // namespace
 
@@ -376,6 +396,14 @@ either<OperatorName, FunctionSchema> parseSchemaOrName(
 
 FunctionSchema parseSchema(const std::string& schema) {
   auto parsed = parseSchemaOrName(schema);
+  TORCH_CHECK(
+      parsed.is_right(),
+      "Tried to parse a function schema but only the operator name was given");
+  return std::move(parsed.right());
+}
+
+FunctionSchema parseSchema(const std::string& schema, const ArgumentTypes& argumentAllowedTypes) {
+  auto parsed = SchemaParser(schema, argumentAllowedTypes).parseExactlyOneDeclaration();
   TORCH_CHECK(
       parsed.is_right(),
       "Tried to parse a function schema but only the operator name was given");

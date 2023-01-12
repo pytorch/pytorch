@@ -41,14 +41,16 @@ struct Argument {
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
-      c10::optional<AliasInfo> alias_info = c10::nullopt)
+      c10::optional<AliasInfo> alias_info = c10::nullopt,
+      c10::ArrayRef<c10::ScalarType> allowed_types = {})
       : name_(std::move(name)),
         type_(fake_type ? std::move(fake_type) : TensorType::get()),
         real_type_(real_type ? std::move(real_type) : type_),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         alias_info_(alias_info ? std::make_unique<AliasInfo>(std::move(*alias_info)) : nullptr),
-        kwarg_only_(kwarg_only) {
+        kwarg_only_(kwarg_only),
+        allowed_types_(allowed_types) {
     // this is an softly-enforced invariant for out arguments.
     bool is_alias = alias_info_ != nullptr && alias_info_->isWrite();
     is_out_ = kwarg_only_ && is_alias;
@@ -64,7 +66,8 @@ struct Argument {
         default_value_(rhs.default_value_),
         alias_info_(rhs.alias_info_ ? std::make_unique<AliasInfo>(*rhs.alias_info_) : nullptr),
         kwarg_only_(rhs.kwarg_only_),
-        is_out_(rhs.is_out_) {}
+        is_out_(rhs.is_out_),
+        allowed_types_(rhs.allowed_types_){}
 
   Argument& operator=(Argument&& rhs) = default;
 
@@ -78,6 +81,7 @@ struct Argument {
       alias_info_ = rhs.alias_info_ ? std::make_unique<AliasInfo>(*rhs.alias_info_) : nullptr;
       kwarg_only_ = rhs.kwarg_only_;
       is_out_ = rhs.is_out_;
+      allowed_types_ = rhs.allowed_types_;
     }
     return *this;
   }
@@ -98,6 +102,9 @@ struct Argument {
   }
   const c10::optional<IValue>& default_value() const {
     return default_value_;
+  }
+  const c10::ArrayRef<c10::ScalarType> allowed_types() const {
+    return allowed_types_;
   }
   bool kwarg_only() const {
     return kwarg_only_;
@@ -189,6 +196,7 @@ struct Argument {
   bool kwarg_only_;
   // marks if the argument is out variant of the schema
   bool is_out_;
+  c10::ArrayRef<c10::ScalarType> allowed_types_;
 };
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {

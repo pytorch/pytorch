@@ -408,6 +408,12 @@ inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
   return s;
 }
 
+inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
+  c10::FunctionSchema s = torch::jit::parseSchema(str);
+  s.setAliasAnalysis(k);
+  return s;
+}
+
 /// Function schemas can be directly constructed from string literals.
 ///
 /// \ingroup torch-schema-overloads

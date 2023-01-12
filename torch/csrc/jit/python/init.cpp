@@ -1742,6 +1742,14 @@ void initJITBindings(PyObject* module) {
           "alias_info", [](Argument& self) { return self.alias_info(); })
       .def_property_readonly(
           "is_out", [](Argument& self) { return self.is_out(); })
+      .def_property_readonly(
+          "allowed_types", [](Argument& self) {
+            py::list types;
+            for (const auto& type : self.allowed_types()) {
+              types.append(type);
+            }
+            return types;
+          })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });

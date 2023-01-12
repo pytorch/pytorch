@@ -7,10 +7,12 @@
 
 namespace torch {
 namespace jit {
+using ArgumentTypes = std::map<std::string, c10::ArrayRef<c10::ScalarType>>;
 
 TORCH_API c10::either<c10::OperatorName, c10::FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName);
 TORCH_API c10::FunctionSchema parseSchema(const std::string& schema);
+TORCH_API c10::FunctionSchema parseSchema(const std::string& schema, const ArgumentTypes& argumentTypes);
 TORCH_API c10::OperatorName parseName(const std::string& name);
 
 } // namespace jit
