@@ -1516,6 +1516,7 @@ def _native_batch_norm_legit_functional(
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
+    assert generator is None
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
@@ -1854,10 +1855,8 @@ def index_add_(
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
         tensor = tensor * alpha
-    # Treat scalars as elements of \R^1
-    x1 = x.unsqueeze(0) if x.ndim == 0 else x
     idx = (None,) * dim + (index,)
-    aten.index_put_(x1, idx, tensor, accumulate=True)
+    aten.index_put_(x, idx, tensor, accumulate=True)
     return x
 
 

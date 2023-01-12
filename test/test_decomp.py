@@ -294,6 +294,10 @@ CROSS_REF_EXCLUDE_SET = {
     # (int)num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP)`
     ("cuda", torch.bfloat16, "nn.functional.bilinear"),
     # randomness
+    ("cuda", torch.float16, "nn.functional.dropout"),
+    ("cuda", torch.bfloat16, "nn.functional.dropout"),
+    ("cuda", torch.float64, "nn.functional.dropout"),
+    ("cuda", torch.float32, "nn.functional.dropout"),
     (None, None, "special.ndtr"),  # aten.special_ndtr was not decomposed
     (None, None, "new_empty"),
     (None, None, "empty_like"),
@@ -444,11 +448,7 @@ class TestDecomp(TestCase):
                     # non-deterministic ops
                     torch.ops.aten.empty.memory_format,
                     torch.ops.aten.empty_like.default,
-                    torch.ops.aten.new_empty.default,
-                    torch.ops.aten.empty_strided.default,
-                    torch.ops.aten.new_empty_strided.default,
-                    torch.ops.aten.randn.default,
-                    torch.ops.aten.native_dropout.default,
+                    torch.ops.aten.new_empty.default
                 ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
 

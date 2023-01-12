@@ -2971,6 +2971,13 @@ else:
             sz[d] = 0
             self.assertEqual(sz, y.size())
 
+    def test_narrow_copy_non_contiguous(self, device):
+        # see https://github.com/pytorch/pytorch/issues/91690.
+        inp = torch.randn(10, 2, device=device).movedim(-1, 0)
+        expected = torch.narrow_copy(inp.contiguous(), 1, 0, 10)
+        actual = torch.narrow_copy(inp, 1, 0, 10)
+        self.assertEqual(expected, actual)
+
     # FIXME: move to indexing test suite
     @parametrize("reduce", ['prod', 'amin', 'amax', 'mean'])
     @dtypes(*all_types_and(torch.half, torch.bfloat16))

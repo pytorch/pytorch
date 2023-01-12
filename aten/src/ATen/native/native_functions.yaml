@@ -10538,6 +10538,38 @@
     CUDA: foreach_tensor_norm_cuda
   autogen: _foreach_norm.Scalar_out
 
+- func: _foreach_lerp.List(Tensor[] self, Tensor[] tensors1, Tensor[] weights) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_ternary_lerp_slow
+    CUDA: foreach_tensor_lerp_ternary_cuda
+  autogen: _foreach_lerp.List_out
+
+- func: _foreach_lerp_.List(Tensor(a!)[] self, Tensor[] tensors1, Tensor[] weights) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_ternary_lerp_slow_
+    CUDA: foreach_tensor_lerp_ternary_cuda_
+  autogen: _foreach_lerp.List_out
+
+- func: _foreach_lerp.Scalar(Tensor[] self, Tensor[] tensors1, Scalar weight) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_lerp_list_kernel_slow
+    CUDA: foreach_tensor_lerp_list_cuda
+  autogen: _foreach_lerp.Scalar_out
+
+- func: _foreach_lerp_.Scalar(Tensor(a!)[] self, Tensor[] tensors1, Scalar weight) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_lerp_list_kernel_slow_
+    CUDA: foreach_tensor_lerp_list_cuda_
+  autogen: _foreach_lerp.Scalar_out
+
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu

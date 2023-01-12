@@ -716,10 +716,8 @@ def logsumexp(
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
     maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)  # type: ignore[arg-type]
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
 
@@ -3458,28 +3456,22 @@ def index_fill(
 def index_fill_(
     x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
 ):
-    utils.check(
-        index.ndim <= 1,
-        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
-    )
     if isinstance(value, TensorLike):
         utils.check(
             value.ndim == 0,
             lambda: "Only supports 0-dimensional value tensor. "  # type: ignore[union-attr]
             f"Got a tensor with {value.ndim} dimensions.",
         )  # type: ignore[arg-type]
-    else:
-        value = torch.scalar_tensor(
-            value, dtype=x.dtype, layout=x.layout, device=x.device  # type: ignore[arg-type]
-        )
-
-    # index_copy has some innecessary preconditions when x is a scalar. We do this to work through them
+        return x.clone().index_copy_(dim, index, value)
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    idx = (slice(None),) * dim + (index,)
+    # Treat scalars as elements of \R^1
     y = x.unsqueeze(0) if x.ndim == 0 else x
-    # index_copy does not broadcast on value so we have to do it manually
-    shape = list(y.shape)
-    shape[dim] = index.numel()
-    value = value.expand(shape)
-    y.index_copy_(dim, index, value)
+    y[idx] = value  # type: ignore[assignment]
     return x
 
 
@@ -3507,13 +3499,12 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
-    if index.ndim == 0:
-        index = index.unsqueeze(0)
+    # Treat scalars as elements of \R^1
     if x.ndim == 0:
-        # Treat scalars as elements of \R^1
-        # We cannot use x[idx] here as it accesses item() (??), hence this awkward construction
-        return torch.empty_like(x).index_copy_(0, index, x.expand_as(index))
-
+        # we cannot write `x.unsqueeze(0)[index].squeeze(0).clone()`
+        # as tensor[index] will trigger index.item() if index is a 0-dim tensor
+        # and .item() cannot be symbolically traced with FakeTensor.
+        return aten.index(x.unsqueeze(0), [index]).squeeze(0).clone()
     idx = (slice(None),) * dim + (index,)
     return x[idx]
 
@@ -4278,8 +4269,17 @@ def arange(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
+    check(
+        start.dtype == end.dtype,
+        lambda: f"expected dtype {start.dtype} for `end` but got dtype {end.dtype}",
+    )
     if isinstance(weight, Number):
         weight = start.new_full((), weight)  # type: ignore[arg-type]
+    else:
+        check(
+            start.dtype == weight.dtype,
+            lambda: f"expected dtype {start.dtype} for `weight` but got dtype {weight.dtype}",  # type: ignore[union-attr]
+        )
     assert isinstance(weight, Tensor)  # mypy
     # We implement it this way for numerical stability. We assume (in the stability optimisation)
     # that 0 <= weight <= 1. We take the abs to deal with complex numbers
@@ -4744,7 +4744,7 @@ def _uniform_helper(
     return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
 
 
-@register_decomposition(aten.masked_fill)
+@register_decomposition([aten.masked_fill.Scalar, aten.masked_fill.Tensor])
 def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
     python_type = utils.dtype_to_type(a.dtype)
     if isinstance(value, Number):
