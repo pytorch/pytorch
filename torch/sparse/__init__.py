@@ -115,7 +115,6 @@ and :attr:`beta` are the scaling factors.
 
 .. note::
     :attr:`input` must be a sparse CSR tensor. :attr:`mat1` and :attr:`mat2` must be dense tensors.
-    This function is implemented only for tensors on CUDA devices.
 
 Args:
     input (Tensor): a sparse CSR matrix of shape `(m, n)` to be added and used to compute
