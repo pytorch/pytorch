@@ -17,6 +17,7 @@ jobs:
   # There must be at least one job here to satisfy GitHub action workflow syntax
   introduction:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Introduce PyTorch unstable workflow
         run: |
