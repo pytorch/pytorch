@@ -17,6 +17,7 @@ Tensors
     is_nonzero
     set_default_dtype
     get_default_dtype
+    set_default_device
     set_default_tensor_type
     numel
     set_printoptions
@@ -47,6 +48,10 @@ Creation Ops
 
     tensor
     sparse_coo_tensor
+    sparse_csr_tensor
+    sparse_csc_tensor
+    sparse_bsr_tensor
+    sparse_bsc_tensor
     asarray
     as_tensor
     as_strided

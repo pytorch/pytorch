@@ -106,7 +106,7 @@ class GuardBuilder(GuardBuilderBase):
         ) in torch.package.package_importer._package_imported_modules.items():
             name = name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             # Write the package module into the scope so that we can import it
-            self.scope["__builtins__"][name] = package_module  # type: ignore[index]
+            self.scope["__builtins__"].__dict__[name] = package_module  # type: ignore[index]
             # Write the demangled name to the scope so that we can use it
             self.scope[name] = package_module
 
@@ -217,6 +217,9 @@ class GuardBuilder(GuardBuilderBase):
                 np.uint16,
                 np.uint32,
                 np.uint64,
+                np.float16,
+                np.float32,
+                np.float64,
             )
             if HAS_NUMPY
             else ()
