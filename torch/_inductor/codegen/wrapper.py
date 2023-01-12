@@ -380,7 +380,7 @@ class WrapperCodeGen(CodeGen):
 
                 def clear(self):
                     for param in self.p_cache.values():
-                        torch.mkldnn_delete_param(param[0], param[1])
+                        torch.ops.mkldnn._delete_param(param[0], param[1])
                     self.p_cache.clear()
 
                 def __del__(self):

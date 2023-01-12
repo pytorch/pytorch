@@ -133,7 +133,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.blackman_window,
         torch.broadcast_shapes,
         torch.can_cast,
-        torch.mkldnn_delete_param,
         torch.compile,
         torch.cudnn_affine_grid_generator,
         torch.cudnn_batch_norm,

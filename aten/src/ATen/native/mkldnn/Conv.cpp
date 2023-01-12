@@ -44,10 +44,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
   TORCH_CHECK(false, "mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
 }
 
-bool mkldnn_delete_param(int64_t param, int64_t param_type) {
-  TORCH_CHECK(false, "mkldnn_delete_param: ATen not compiled with MKLDNN support");
-}
-
 REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
 
 }}
@@ -1019,6 +1015,12 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_create_conv_param_binary"),
       TORCH_FN(mkldnn_create_conv_param_binary));
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, CatchAll, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_delete_param"),
+      TORCH_FN(mkldnn_delete_param));
 }
 }}  // namespace at::native
 

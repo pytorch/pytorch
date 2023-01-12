@@ -49,6 +49,8 @@ TORCH_LIBRARY(mkldnn, m) {
       "mkldnn::_create_conv_param(Tensor X, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups, str attr, Scalar?[] scalars, str? algorithm) -> int param"));
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn::_create_conv_param_binary(Tensor X, Tensor other, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups, str binary_attr, Scalar? alpha, str? unary_attr, Scalar?[] unary_scalars, str? unary_algorithm) -> int param"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "mkldnn::_delete_param(int param_handle, int param_type) -> bool success"));
 }
 
 TORCH_LIBRARY(mkldnn_prepacked, m) {
