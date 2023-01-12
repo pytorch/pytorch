@@ -1,5 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import os
+import sys
 
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -8,6 +10,7 @@ from torch.distributed._tensor.placement_types import Shard
 from torch.distributed.distributed_c10d import (
     get_global_rank,
     get_world_size,
+    is_initialized,
     new_group,
     ProcessGroup,
 )
@@ -16,12 +19,29 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.common_distributed import TEST_SKIPS
 
 
 class DeviceMeshTest(DTensorTestBase):
     @property
     def world_size(self):
         return 8
+
+    def test_init_process_group(self):
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        backend = "nccl" if device_type == "cuda" else "gloo"
+        # skip the test if not enough GPUs
+        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        self.assertTrue(not is_initialized())
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "25364"
+        os.environ["WORLD_SIZE"] = f"{self.world_size}"
+        os.environ["RANK"] = f"{self.rank}"
+        mesh = DeviceMesh(device_type, mesh_tensor)
+        self.assertTrue(is_initialized())
+        self.destroy_pg()
 
     @with_comms
     def test_device_mesh_2d(self):
