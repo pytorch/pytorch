@@ -5574,9 +5574,12 @@ if HAS_CPU:
             for simdlen in (None, 256, 1):
                 with patch.object(config.cpp, "simdlen", simdlen):
                     torch._dynamo.reset()
-                    self.common(channel_shuffle, (torch.randn(64, 58, 28, 28), 2))
+                    metrics.reset()
+                    x = torch.randn(64, 58, 28, 28)
+                    opt_fn = torch._dynamo.optimize("inductor")(channel_shuffle)
+                    same(channel_shuffle(x, 2), opt_fn(x, 2))
                     if simdlen != 1:
-                        assert metrics.generated_cpp_vec_kernel_count >= 1
+                        assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -5609,12 +5612,14 @@ if HAS_CPU:
             x = torch.randn(128, 196, 256)
             for simdlen in (None, 256, 1):
                 with patch.object(config.cpp, "simdlen", simdlen):
-                    torch._dynamo.reset()
                     for eval_mode in [True, False]:
+                        torch._dynamo.reset()
+                        metrics.reset()
                         m = Model().eval() if eval_mode else Model()
-                        self.common(m, (x,))
-                    if simdlen != 1:
-                        assert metrics.generated_cpp_vec_kernel_count >= 1
+                        opt_fn = torch._dynamo.optimize("inductor")(m)
+                        same(m(x), opt_fn(x))
+                        if simdlen != 1:
+                            assert metrics.generated_cpp_vec_kernel_count == 7
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -5625,8 +5630,6 @@ if HAS_CPU:
 
             for simdlen in (None, 256, 1):
                 with patch.object(config.cpp, "simdlen", simdlen):
-                    torch._dynamo.reset()
-                    metrics.reset()
                     for shape in (
                         (7, 7),
                         (8, 8),
@@ -5636,9 +5639,13 @@ if HAS_CPU:
                         (32, 32),
                         (33, 33),
                     ):
-                        self.common(fn, (torch.randn(shape),))
-                    if simdlen != 1:
-                        assert metrics.generated_cpp_vec_kernel_count >= 1
+                        torch._dynamo.reset()
+                        metrics.reset()
+                        x = torch.randn(shape)
+                        opt_fn = torch._dynamo.optimize("inductor")(fn)
+                        same(fn(x), opt_fn(x))
+                        if simdlen != 1:
+                            assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if HAS_CUDA:
