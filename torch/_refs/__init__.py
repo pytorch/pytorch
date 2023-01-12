@@ -3211,7 +3211,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end + 1)
+            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end)
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
