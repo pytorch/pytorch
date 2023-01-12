@@ -229,6 +229,7 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "current_stream",
       "default_stream",
       "current_device",
+      "_exchange_device",
       "set_device",
       "device_index",
       "device_count",
