@@ -367,14 +367,6 @@ bool Context::isXNNPACKAvailable() {
 #endif
 }
 
-void Context::setCheckSparseTensorInvariants(bool e) {
-  enable_sparse_tensor_invariant_checks = e;
-}
-
-bool Context::checkSparseTensorInvariants() const {
-  return enable_sparse_tensor_invariant_checks;
-}
-
 bool Context::releaseWeightsWhenPrepacking() const {
   return release_original_weights;
 }
