@@ -97,6 +97,19 @@ class GuardBuilder(GuardBuilderBase):
         else:
             scope = dict()
         self.scope: Dict[str, object] = scope
+
+        if "__builtins__" not in self.scope:
+            self.scope["__builtins__"] = {}
+        for (
+            name,
+            package_module,
+        ) in torch.package.package_importer._package_imported_modules.items():
+            name = name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
+            # Write the package module into the scope so that we can import it
+            self.scope["__builtins__"].__dict__[name] = package_module  # type: ignore[index]
+            # Write the demangled name to the scope so that we can use it
+            self.scope[name] = package_module
+
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
         self.code: List[str] = []
@@ -204,6 +217,9 @@ class GuardBuilder(GuardBuilderBase):
                 np.uint16,
                 np.uint32,
                 np.uint64,
+                np.float16,
+                np.float32,
+                np.float64,
             )
             if HAS_NUMPY
             else ()
@@ -521,7 +537,14 @@ class CheckFunctionManager:
         w_local = weakref.ref(local_builder)
         w_global = weakref.ref(global_builder)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if not config.guard_nn_modules and guard.is_nn_module():
+            if (
+                not config.guard_nn_modules
+                and guard.is_nn_module()
+                # Default func args must be guarded on.
+                # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
+                and "__defaults__" not in guard.name
+                and "__kwdefaults__" not in guard.name
+            ):
                 continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(

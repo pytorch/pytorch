@@ -154,6 +154,8 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "dim", [], {})
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
+        # TODO: reimplement the T/H/mT/mH by generating a function call
+        # to torch.Tensor.{T/H/mT/mH}.__get__
         elif name in ("T", "H"):
             out = (
                 tx.output.create_proxy(
@@ -179,12 +181,14 @@ class TensorVariable(VariableTracker):
                 if name == "mH"
                 else self
             )
-            dims = (-2, -1) if self.ndim > 0 else (-1, 0)
-            args = [
-                variables.ConstantVariable(dims[0]),
-                variables.ConstantVariable(dims[1]),
-            ]
-            result = out.call_method(tx, "transpose", args, {})
+            if self.ndim > 0:
+                args = [
+                    variables.ConstantVariable(-2),
+                    variables.ConstantVariable(-1),
+                ]
+                result = out.call_method(tx, "transpose", args, {})
+            else:
+                result = out.call_method(tx, "t", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
 
@@ -312,20 +316,7 @@ class TensorVariable(VariableTracker):
             else:
                 unimplemented(f"Tensor.{name}")
         elif name == "__len__":
-            if self.size:
-                assert not config.dynamic_shapes
-                return ConstantVariable(self.size[0], **options)
-            else:
-                return wrap_fx_proxy(
-                    tx,
-                    tx.output.create_proxy(
-                        "call_function",
-                        len,
-                        (self.as_proxy(),),
-                        {},
-                    ),
-                    **options,
-                )
+            return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
         elif name == "__setitem__":
             tx.output.guards.update(options["guards"])
             tx.output.create_proxy(
