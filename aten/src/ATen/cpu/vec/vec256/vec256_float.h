@@ -453,6 +453,105 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
   return _mm256_fmsub_ps(a, b, c);
 }
 
+// Used by Inductor CPP codegen
+template<>
+inline void transpose_mxn<float, 8, 8>(
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst) {
+  // load from src to registers
+  // a: a0  a1  a2  a3  a4  a5  a6  a7
+  // b: b0  b1  b2  b3  b4  b5  b6  b7
+  // c: c0  c1  c2  c3  c4  c5  c6  c7
+  // d: d0  d1  d2  d3  d4  d5  d6  d7
+  // e: e0  e1  e2  e3  e4  e5  e6  e7
+  // f: f0  f1  f2  f3  f4  f5  f6  f7
+  // g: g0  g1  g2  g3  g4  g5  g6  g7
+  // h: h0  h1  h2  h3  h4  h5  h6  h7
+  __m256 a = _mm256_loadu_ps(&src[0 * ld_src]);
+  __m256 b = _mm256_loadu_ps(&src[1 * ld_src]);
+  __m256 c = _mm256_loadu_ps(&src[2 * ld_src]);
+  __m256 d = _mm256_loadu_ps(&src[3 * ld_src]);
+  __m256 e = _mm256_loadu_ps(&src[4 * ld_src]);
+  __m256 f = _mm256_loadu_ps(&src[5 * ld_src]);
+  __m256 g = _mm256_loadu_ps(&src[6 * ld_src]);
+  __m256 h = _mm256_loadu_ps(&src[7 * ld_src]);
+
+  __m256 ta, tb, tc, td, te, tf, tg, th;
+  // unpacking and interleaving 32-bit elements
+  // a0  b0  a1  b1  a4  b4  a5  b5
+  // a2  b2  a3  b3  a6  b6  a7  b7
+  // c0  d0  c1  d1 ...
+  // c2  d2  c3  d3 ...
+  // e0  f0  e1  f1 ...
+  // e2  f2  e3  f3 ...
+  // g0  h0  g1  h1 ...
+  // g2  h2  g3  h3 ...
+  ta = _mm256_unpacklo_ps(a, b);
+  tb = _mm256_unpackhi_ps(a, b);
+  tc = _mm256_unpacklo_ps(c, d);
+  td = _mm256_unpackhi_ps(c, d);
+  te = _mm256_unpacklo_ps(e, f);
+  tf = _mm256_unpackhi_ps(e, f);
+  tg = _mm256_unpacklo_ps(g, h);
+  th = _mm256_unpackhi_ps(g, h);
+
+  // unpacking and interleaving 64-bit elements
+  //  a0  b0  c0  d0  a4  b4  c4  d4
+  //  a1  b1  c1  d1 ...
+  //  a2  b2  c2  d2 ...
+  //  a3  b3  c3  d3 ...
+  //  e0  f0  g0  h0  e4  f4  g4  h4
+  //  e1  f1  g1  h1 ...
+  //  e2  f2  g2  h2 ...
+  //  e3  f3  g3  h3 ...
+  a = _mm256_castpd_ps(
+      _mm256_unpacklo_pd(_mm256_castps_pd(ta), _mm256_castps_pd(tc)));
+  b = _mm256_castpd_ps(
+      _mm256_unpackhi_pd(_mm256_castps_pd(ta), _mm256_castps_pd(tc)));
+  c = _mm256_castpd_ps(
+      _mm256_unpacklo_pd(_mm256_castps_pd(tb), _mm256_castps_pd(td)));
+  d = _mm256_castpd_ps(
+      _mm256_unpackhi_pd(_mm256_castps_pd(tb), _mm256_castps_pd(td)));
+  e = _mm256_castpd_ps(
+      _mm256_unpacklo_pd(_mm256_castps_pd(te), _mm256_castps_pd(tg)));
+  f = _mm256_castpd_ps(
+      _mm256_unpackhi_pd(_mm256_castps_pd(te), _mm256_castps_pd(tg)));
+  g = _mm256_castpd_ps(
+      _mm256_unpacklo_pd(_mm256_castps_pd(tf), _mm256_castps_pd(th)));
+  h = _mm256_castpd_ps(
+      _mm256_unpackhi_pd(_mm256_castps_pd(tf), _mm256_castps_pd(th)));
+
+  //  shuffle 128-bits (composed of 4 32-bit elements)
+  //  a0  b0  c0  d0  e0  f0  g0  h0
+  //  a1  b1  c1  d1 ...
+  //  a2  b2  c2  d2 ...
+  //  a3  b3  c3  d3 ...
+  //  a4  b4  c4  d4 ...
+  //  a5  b5  c5  d5 ...
+  //  a6  b6  c6  d6 ...
+  //  a7  b7  c7  d7 ...
+  ta = _mm256_permute2f128_ps(a, e, 0x20);
+  tb = _mm256_permute2f128_ps(b, f, 0x20);
+  tc = _mm256_permute2f128_ps(c, g, 0x20);
+  td = _mm256_permute2f128_ps(d, h, 0x20);
+  te = _mm256_permute2f128_ps(a, e, 0x31);
+  tf = _mm256_permute2f128_ps(b, f, 0x31);
+  tg = _mm256_permute2f128_ps(c, g, 0x31);
+  th = _mm256_permute2f128_ps(d, h, 0x31);
+
+  // store from registers to dst
+  _mm256_storeu_ps(&dst[0 * ld_dst], ta);
+  _mm256_storeu_ps(&dst[1 * ld_dst], tb);
+  _mm256_storeu_ps(&dst[2 * ld_dst], tc);
+  _mm256_storeu_ps(&dst[3 * ld_dst], td);
+  _mm256_storeu_ps(&dst[4 * ld_dst], te);
+  _mm256_storeu_ps(&dst[5 * ld_dst], tf);
+  _mm256_storeu_ps(&dst[6 * ld_dst], tg);
+  _mm256_storeu_ps(&dst[7 * ld_dst], th);
+}
+
 #endif
 
 }}}

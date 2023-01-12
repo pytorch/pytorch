@@ -1027,4 +1027,15 @@ inline Vectorized<T> flip(const Vectorized<T> & data) {
   return Vectorized<T>::loadu(static_cast<void*>(output));
 }
 
+// Transpose the `src` buffer of type `T` and size (M,N) into the `dst` buffer. `ld_src` is the leading
+// dimension of `src` and `ld_dst` is the leading dimension of `dst`.
+template <typename T, int M, int N>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      dst[j*ld_dst + i] = src[i*ld_src + j];
+    }
+  }
+}
+
 }}}
