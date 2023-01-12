@@ -29,7 +29,6 @@
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
 #include <ATen/native/transformers/cuda/flash_attn/kernel_traits.h>
 #include <ATen/native/transformers/cuda/flash_attn/fmha_fprop_kernel_1xN.h>
-#include <ATen/native/transformers/cuda/flash_attn/fp16_switch.h>
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Return_softmax>
 __global__ void fmha_fprop_loop_kernel(FMHA_fprop_params params) {

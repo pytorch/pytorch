@@ -23,3 +23,25 @@
             return __VA_ARGS__();                                                    \
         }                                                                            \
     }()
+
+#pragma once
+
+/// @param COND       - a boolean expression to switch by
+/// @param ...       - code to execute for true and false
+///
+/// Usage:
+/// ```
+/// FP16_SWITCH(flag, [&] {
+///     some_function(...);
+/// });
+/// ```
+#define FP16_SWITCH(COND, ...)                                                       \
+    [&] {                                                                            \
+        if (COND) {                                                                  \
+            using elem_type = cutlass::bfloat16_t;                                   \
+            return __VA_ARGS__();                                                    \
+        } else {                                                                     \
+            using elem_type =  cutlass::half_t;                                      \
+            return __VA_ARGS__();                                                    \
+        }                                                                            \
+    }()

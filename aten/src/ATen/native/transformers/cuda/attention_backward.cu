@@ -10,7 +10,6 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 
-#include <iostream>
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
 #endif
