@@ -1274,9 +1274,6 @@ class DeviceCachingAllocator {
   // them, the values are 1024, 1280, 1536, and 1792. So the function will
   // return 1280 as the nearest ceiling of power-2 divison.
   static size_t roundup_power2_next_division(size_t size, size_t divisions) {
-    if (C10_UNLIKELY(size <= 4 || divisions <= 1)) {
-      return size;
-    }
     if (llvm::isPowerOf2_64(size)) {
       return size;
     }
@@ -1299,7 +1296,7 @@ class DeviceCachingAllocator {
       return kMinBlockSize;
     } else {
       auto divisions = CachingAllocatorConfig::roundup_power2_divisions(size);
-      if (divisions > 0 && size > (kMinBlockSize * divisions)) {
+      if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
       } else {
         return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
