@@ -37,7 +37,6 @@ decompositions = get_decompositions(
         aten.embedding_dense_backward,
         aten.expand_as,
         aten.eye,
-        aten.full_like,
         aten.ones_like,
         aten.zeros_like,
         aten.fill,

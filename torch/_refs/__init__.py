@@ -4100,7 +4100,7 @@ def new_zeros(
 
     return torch.full(
         size,
-        False if dtype == torch.bool else 0,
+        False if (dtype or a.dtype) == torch.bool else 0,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4152,7 +4152,7 @@ def new_ones(
 
     return torch.full(
         size,
-        True if dtype == torch.bool else 1,
+        True if (dtype or a.dtype) == torch.bool else 1,
         dtype=dtype,
         layout=layout,
         device=device,
