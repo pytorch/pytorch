@@ -1,6 +1,8 @@
 name: experiment
 
 on:
+  # DEBUG
+  pull_request:
   push:
     branches:
       - master
