@@ -988,8 +988,11 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    unnormalized = torch.exp(x - x_max)
+    if x.numel() == 0:
+        unnormalized = torch.exp(x)
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
@@ -1008,8 +1011,11 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    shifted = x - x_max
+    if x.numel() == 0:
+        shifted = x
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
     if not half_to_float:
@@ -1547,9 +1553,7 @@ def _to_copy(
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
     if memory_format is not None:  # no ref/prim for memory format
-        out = torch.empty_like(x, memory_format=memory_format)
-        out = aten.copy.default(out, x)
-        return out  # type: ignore[call-overload]
+        return torch.clone(x, memory_format=memory_format)
     return x
 
 
@@ -1897,6 +1901,12 @@ def uniform(
         dtype=x.dtype,
         device=x.device,
     )
+
+
+@register_decomposition(aten.uniform_)
+def uniform_(self, low=0, high=1, generator=None):
+    assert generator is None
+    return self.copy_((high - low) * torch.rand_like(self) + low)
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
