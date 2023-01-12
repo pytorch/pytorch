@@ -1,5 +1,4 @@
 import torch
-from torch._inductor.utils import has_triton
 
 import triton
 import triton.language as tl
@@ -568,6 +567,8 @@ def bsr_dense_mm(
 
 
 if __name__ == "__main__":
+    from torch._inductor.utils import has_triton
+
     if has_triton():
         torch.manual_seed(13)
         dtype = torch.float32
