@@ -128,7 +128,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
   int max_chunks_per_tensor = -1;
 
   for (int t = 0; t < ntensors; t++) {
-    int max_chunks_this_tensor = (tensors[0][t].numel() + kChunkSize - 1) / kChunkSize;
+    int max_chunks_this_tensor = (tensors[t].numel() + kChunkSize - 1) / kChunkSize;
     if(max_chunks_this_tensor > max_chunks_per_tensor) {
       max_chunks_per_tensor = max_chunks_this_tensor;
     }
