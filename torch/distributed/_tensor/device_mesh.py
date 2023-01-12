@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import os
 import warnings
 from typing import List, Optional, Sequence, TypeVar, Union
 
@@ -219,6 +220,13 @@ class DeviceMesh(object):
 
     def _get_or_create_default_group(self):
         if not is_initialized():
+            # TODO: we will support mesh on a subset of WORLD in future
+            world_size = int(os.getenv("WORLD_SIZE", 1))
+            if self.mesh.numel() < world_size:
+                raise RuntimeError(
+                    "DeviceMesh must include every process in WORLD, "
+                    f"but WORLD_SIZE({world_size}) != mesh size({self.mesh.numel()})"
+                )
             _backend = "gloo" if self.device_type == "cpu" else "nccl"
             init_process_group(backend=_backend)
         return _get_default_group()

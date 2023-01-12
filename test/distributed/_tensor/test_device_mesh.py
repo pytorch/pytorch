@@ -25,7 +25,7 @@ from torch.testing._internal.common_distributed import TEST_SKIPS
 class DeviceMeshTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return 4
 
     def test_init_process_group(self):
         device_type = "cuda" if torch.cuda.is_available() else "cpu"
@@ -137,6 +137,27 @@ class DeviceMeshTest(DTensorTestBase):
                 [[0, 1], [2, 3]],
                 dim_groups=[dim_groups[0]],
             )
+
+
+class DeviceMeshTestNDim(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    def test_mesh_size_requirement_error(self):
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        backend = "nccl" if device_type == "cuda" else "gloo"
+        # skip the test if not enough GPUs
+        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "25364"
+        os.environ["WORLD_SIZE"] = f"{self.world_size}"
+        os.environ["RANK"] = f"{self.rank}"
+        with self.assertRaisesRegex(RuntimeError, "DeviceMesh must include every process in WORLD"):
+            mesh = DeviceMesh(device_type, mesh_tensor)
+        self.assertTrue(not is_initialized())
 
     @with_comms
     def test_device_mesh_nd(self):
