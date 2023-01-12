@@ -4686,7 +4686,7 @@ def zeros_like(
 ) -> TensorLikeType:
     return torch.full_like(
         a,
-        False if a.dtype == torch.bool else 0,
+        False if (dtype or a.dtype) == torch.bool else 0,
         dtype=dtype,
         layout=layout,
         device=device,
