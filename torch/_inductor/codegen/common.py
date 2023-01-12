@@ -1,4 +1,3 @@
-import collections
 import contextlib
 import itertools
 import logging
@@ -200,13 +199,29 @@ class KernelArgs:
         return odict[name]
 
     def __init__(self, sizevars=None):
-        self.input_buffers = collections.OrderedDict()
-        self.output_buffers = collections.OrderedDict()
-        self.inplace_buffers = collections.OrderedDict()
-        self.sizevars = sizevars or collections.OrderedDict()
+        self.input_buffers = dict()
+        self.output_buffers = dict()
+        self.inplace_buffers = dict()
+        self.sizevars = sizevars or dict()
+
+    def __repr__(self):
+        return "KernelArgs({})".format(
+            ", ".join(
+                map(
+                    repr,
+                    [
+                        self.input_buffers,
+                        self.output_buffers,
+                        self.inplace_buffers,
+                        self.sizevars,
+                    ],
+                )
+            )
+        )
 
     def input(self, name):
-        name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
@@ -217,7 +232,8 @@ class KernelArgs:
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
-        name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.inplace_buffers:
             return self.inplace_buffers[name].inner_name
@@ -428,7 +444,10 @@ class CSE:
             var = self.newvar()
             self.cache[expr] = var
             if write:
-                V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
+                if V.kernel.current_node:
+                    V.kernel.current_node.codegen_originating_info(
+                        buffer, only_once=True
+                    )
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
         return self.cache[expr]
 
@@ -552,8 +571,9 @@ class Kernel(CodeGen):
                 self.store_buffer_names.add(name)
                 if mode is None:
                     self.cse.store_cache[name] = value
-                    for other_name in self.current_node.get_mutations():
-                        self.cse.store_cache[other_name] = value
+                    if self.current_node:
+                        for other_name in self.current_node.get_mutations():
+                            self.cse.store_cache[other_name] = value
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
 
@@ -571,7 +591,8 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        V.graph.scheduler.remove_kernel_local_buffers()
+        if V.graph.scheduler:
+            V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index) -> sympy.Expr:
