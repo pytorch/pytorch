@@ -264,7 +264,7 @@ std::unique_ptr<SegmentedFusion> SegmentedFusion::fromCompleteFusion(
   // convert Welford to two-pass
   SegmentCandidateFinderOptions scfo;
   if (scfo.run_translate_welford)
-    SegmentCandidateFinder::TranslateWelfordInFusion(fusion,runtime_inputs);
+    SegmentCandidateFinder::TranslateWelfordInFusion(fusion, runtime_inputs);
 
   auto segmented_fusion_ptr =
       std::make_unique<SegmentedFusion>(std::move(fusion_ptr));
@@ -1850,7 +1850,8 @@ bool TranslateApplicableWelford::isValidPersistentFusion(
 
   auto scheduler = SchedulerEntry::makeEntry(
       ScheduleHeuristic::Persistent, translated_fusion, runtime_info);
-  return scheduler->reductionParams().persistent_kernel && scheduler->reductionParams().fastest_dim;
+  return scheduler->reductionParams().persistent_kernel &&
+      scheduler->reductionParams().fastest_dim;
 }
 
 bool TranslateApplicableWelford::wouldTranslateToPersistent(

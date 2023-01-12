@@ -1108,7 +1108,8 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   std::vector<void*> option_vals;
   std::vector<char> info_log;
   unsigned int log_size = 8196;
-  const bool isWarnRegisterSpill = isOptionEnabled(EnableOption::WarnRegisterSpill);
+  const bool isWarnRegisterSpill =
+      isOptionEnabled(EnableOption::WarnRegisterSpill);
   if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog) ||
       isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose) ||
       isWarnRegisterSpill) {
@@ -1248,38 +1249,42 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       }
       AT_CUDA_NVRTC_CHECK(result);
 
-      if(isWarnRegisterSpill) {
-        auto getRegisterSpillInfo = [&log](const char *subStr){
-          auto it_end = std::search(log.begin(), log.end(), subStr, subStr + strlen(subStr)) - 1;
+      if (isWarnRegisterSpill) {
+        auto getRegisterSpillInfo = [&log](const char* subStr) {
+          auto it_end =
+              std::search(
+                  log.begin(), log.end(), subStr, subStr + strlen(subStr)) -
+              1;
           auto it_beg = it_end - 1;
-          while(!std::isspace(*(it_beg-1))){
+          while (!std::isspace(*(it_beg - 1))) {
             it_beg--;
           }
           std::string str(it_beg, it_end);
           return std::stoi(str);
         };
 
-        const char *str_stack = "bytes stack frame";
-        const char *str_store = "bytes spill stores";
-        const char *str_load  = "bytes spill loads";
+        const char* str_stack = "bytes stack frame";
+        const char* str_store = "bytes spill stores";
+        const char* str_load = "bytes spill loads";
         int stack_count = getRegisterSpillInfo(str_stack);
         int store_count = getRegisterSpillInfo(str_store);
-        int load_count  = getRegisterSpillInfo(str_load);
-        auto optionArgs = getEnableOptionArguments(EnableOption::WarnRegisterSpill);
+        int load_count = getRegisterSpillInfo(str_load);
+        auto optionArgs =
+            getEnableOptionArguments(EnableOption::WarnRegisterSpill);
         int allowed_spill = 0;
-        if(optionArgs.size() > 0){
-          try{
+        if (optionArgs.size() > 0) {
+          try {
             allowed_spill = std::stoi(optionArgs[0]);
-          }
-          catch (const std::exception& e){
-            std::cout << "skip invalid argument for WarnRegisterSpill, arg = " << optionArgs[0] << std::endl;
+          } catch (const std::exception& e) {
+            std::cout << "skip invalid argument for WarnRegisterSpill, arg = "
+                      << optionArgs[0] << std::endl;
           }
         }
-        if(stack_count > allowed_spill || store_count > allowed_spill || load_count > allowed_spill){
+        if (stack_count > allowed_spill || store_count > allowed_spill ||
+            load_count > allowed_spill) {
           std::cout << ptxas_log.str() << std::endl;
         }
       }
-
     }
 
     const char* lowered_kernel_name = nullptr;
