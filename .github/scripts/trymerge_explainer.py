@@ -63,7 +63,8 @@ class TryMergeExplainer(object):
             return "Your change will be merged immediately since you used the force (-f) flag, " + \
                 "**bypassing any CI checks** (ETA: 1-5 minutes)."
         elif self.on_green:
-            return "Your change will be merged once all checks on your PR pass (ETA: 0-4 Hours). This is the default behavior and the green (-g) is no longer needed."
+            return "Your change will be merged once all checks on your PR pass (ETA: 0-4 Hours). " + \
+                "This is the default behavior and the green (-g) is no longer needed."
         elif self.land_checks:
             flag_msg = \
                 "**The `-l` land checks flag is deprecated and no longer needed.** Instead we now automatically " + \
