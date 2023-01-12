@@ -2680,7 +2680,7 @@ TEST_F(NVFuserTest, FusionGather6_CUDA) {
 
   auto tv0_cache = tv0->cacheAfter();
   auto out = tv1;
-  auto out_cache = out->cacheBefore();
+  out->cacheBefore();
 
   out->split(1, block_x);
   out->split(0, block_y);
@@ -2740,7 +2740,7 @@ TEST_F(NVFuserTest, FusionGather7_CUDA) {
 
   auto tv0_cache = tv0->cacheAfter();
   auto out = tv1;
-  auto out_cache = out->cacheBefore();
+  out->cacheBefore();
 
   out->split(1, block_x);
   out->split(0, block_y);
@@ -2841,7 +2841,7 @@ TEST_F(NVFuserTest, FusionGather9_CUDA) {
 
   auto tv0_cache = tv0->cacheAfter();
   auto out = tv1;
-  auto out_cache = out->cacheBefore();
+  out->cacheBefore();
 
   out->split(1, block_x);
   out->split(0, block_y);
@@ -4017,7 +4017,6 @@ TEST_F(NVFuserTest, FusionShiftNoPaddingChain_CUDA) {
   int numel_y = 101;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
   std::vector<IValue> inputs = {t0};
@@ -4167,7 +4166,6 @@ TEST_F(NVFuserTest, FusionPartialSplit1_CUDA) {
       "Invalid extent of outer domain of partial split");
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x}, options);
   std::vector<IValue> inputs = {t0};
@@ -4247,7 +4245,6 @@ TEST_F(NVFuserTest, FusionPartialSplit3_CUDA) {
   const int numel_y = 32 + 3;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
   std::vector<IValue> inputs = {t0};
@@ -4388,7 +4385,6 @@ TEST_F(NVFuserTest, FusionPartialSplit5_CUDA) {
   const int numel_x = 10;
   const int numel_y = 11;
 
-  // auto tv0 = makeSymbolicTensor(2);
   auto tv0 = makeConcreteTensor({numel_x, numel_y});
   fusion.addInput(tv0);
 

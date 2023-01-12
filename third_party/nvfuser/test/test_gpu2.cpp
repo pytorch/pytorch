@@ -780,8 +780,6 @@ TEST_F(NVFuserTest, FusionReductionHalf_CUDA) {
       at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn({8, 8, 16}, options);
 
-  auto reduction_tv = tv3;
-
   auto reduction_params = getReductionHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
   scheduleReduction(&fusion, *reduction_params);
@@ -2828,7 +2826,6 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
   fusion.addOutput(tv_N);
 
   auto options = at::TensorOptions().dtype(aten_dtype).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   std::vector<TensorView*> outputs_of_red;
   at::Tensor aten_input =
@@ -3615,7 +3612,7 @@ TEST_F(NVFuserTest, FusionVectorizeSimple_CUDA) {
 
   auto tv0_cache = tv0->cacheAfter();
 
-  auto tv1_cache = tv1->cacheBefore();
+  tv1->cacheBefore();
 
   tv1->merge(0);
   tv1->merge(0);
@@ -3668,7 +3665,7 @@ TEST_F(NVFuserTest, FusionSimpleVectorizeUnroll_CUDA) {
 
   auto tv0_cache = tv0->cacheAfter();
   auto tv1_cache = tv1->cacheAfter();
-  auto tv3_cache = tv3->cacheBefore();
+  tv3->cacheBefore();
 
   // Do transformations, remember, transformations are outputs to inputs
   // This doesn't have to be in this order
@@ -3998,7 +3995,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwise_CUDA) {
 
   auto c0 = tv0->cacheAfter();
   auto c1 = tv1->cacheAfter();
-  auto c2 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   tv2->split(-1, kVecSize);
 
@@ -4052,7 +4049,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeContig_CUDA) {
 
   auto c0 = tv0->cacheAfter();
   auto c1 = tv1->cacheAfter();
-  auto c2 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   tv2->split(0, 128);
   tv2->split(-1, kVecSize);
@@ -4107,10 +4104,11 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicPass_CUDA) {
   // Create caches for vectorization
   auto c0 = tv0->cacheAfter();
   auto c1 = tv1->cacheAfter();
-  auto c2 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   // Merge all dimensions together except inner-most dim
-  for (const auto idx : c10::irange(kNumDims - 2)) {
+  for (const auto i : c10::irange(kNumDims - 2)) {
+    (void)i; // Suppress unused variable warning
     tv2->merge(0);
   }
   // Split inner-most dim
@@ -4170,7 +4168,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicFail_CUDA) {
   // Create caches for vectorization
   auto c0 = tv0->cacheAfter();
   auto c1 = tv1->cacheAfter();
-  auto c2 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   // Merge all dimensions together
   // Backward merge order is necessary for vectorize validation
@@ -4289,7 +4287,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedWrongDimFail_CUDA) {
 
   auto c0 = tv0->cacheAfter();
   auto c1 = tv1->cacheAfter();
-  auto c2 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   c0->computeAt(tv2, -2);
   c1->computeAt(tv2, -2);
@@ -4377,7 +4375,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
 
   auto c0 = tv0->cacheAfter();
   auto c1 = tv1->cacheAfter();
-  auto c2 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   tv2->split(-1, kVecSize);
 
@@ -4427,7 +4425,7 @@ TEST_F(NVFuserTest, FusionVectorization1_CUDA) {
 
   auto c0 = tv0->cacheAfter();
   auto c1 = tv1->cacheAfter();
-  auto c2 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   c0->computeAt(tv2, -2);
   c1->computeAt(tv2, -2);
@@ -4476,7 +4474,7 @@ TEST_F(NVFuserTest, FusionVectorization2_CUDA) {
 
   auto c0 = tv0->cacheAfter();
   auto c1 = tv1->cacheAfter();
-  auto c2 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   c0->computeAt(tv2, -2);
   c1->computeAt(tv2, -2);
@@ -4517,7 +4515,7 @@ TEST_F(NVFuserTest, FusionVectorization3_CUDA) {
 
   auto c0 = tv0->cacheAfter();
   auto c1 = tv1->cacheAfter();
-  auto c2 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   c0->computeAt(tv2, -2);
   c1->computeAt(tv2, -2);
@@ -5228,7 +5226,6 @@ TEST_F(NVFuserTest, FusionBlockWelfordInSerialLoop_CUDA) {
   fusion.addInput(tv0);
   auto tv_avg = tvs.avg;
   auto tv_M2 = tvs.var_sum;
-  auto tv_N = tvs.n;
   fusion.addOutput(tv_avg);
   fusion.addOutput(tv_M2);
 
@@ -5724,9 +5721,7 @@ TEST_F(NVFuserTest, FusionBNBackwardRepro2_CUDA) {
   int c = 81;
   int h = 1;
   int w = 1;
-  int numDims = 4;
 
-  // auto input = makeSymbolicTensor(numDims);
   auto input = makeConcreteTensor({-1, -1, 1, 1});
   fusion.addInput(input);
   auto weight = makeSymbolicTensor(1);
@@ -5740,11 +5735,8 @@ TEST_F(NVFuserTest, FusionBNBackwardRepro2_CUDA) {
   auto save_invstd = makeSymbolicTensor(1);
   fusion.addInput(save_invstd);
 
-  // auto grad_out_prev = makeSymbolicTensor(numDims);
   auto grad_out_prev = makeConcreteTensor({-1, -1, 1, 1});
   fusion.addInput(grad_out_prev);
-  // auto gt_0 =
-  //     makeSymbolicTensor(numDims); // single tensor broadcasted is dangerous.
   auto gt_0 = makeConcreteTensor({-1, -1, 1, 1});
   fusion.addInput(gt_0);
 
@@ -6977,7 +6969,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination3_CUDA) {
   auto tv2 = add(tv1, IrBuilder::create<Double>(1));
   fusion.addOutput(tv2);
 
-  auto tv3 = tv0->cacheAfter();
+  tv0->cacheAfter();
 
   tv1->split(0, 10);
   tv1->split(0, 33);
@@ -7226,8 +7218,6 @@ TEST_F(NVFuserTest, FusionPredicateElimination8_CUDA) {
 
   std::vector<int> reduction_axes = {0, 2, 3};
 
-  const int kNumberOfDims =
-      TensorDomain::noReductions(tv1->getMaybeRFactorDomain()).size();
   Val* num_features = IrBuilder::create<Double>(tv1->container(), 1);
   for (const auto dim : reduction_axes) {
     num_features = mul(num_features, tv1->domain()->domain()[dim]->extent());
@@ -7521,10 +7511,10 @@ TEST_F(NVFuserTest, FusionBufferReuseStressTest_CUDA) {
   auto tv5 = broadcast(tv4, {true, false, false});
   auto tv6 = mul(tv5, IrBuilder::create<Double>(5));
   auto tv7 = mul(tv6, tv1);
-  auto tv8 = mul(tv7, IrBuilder::create<Double>(7));
+  mul(tv7, IrBuilder::create<Double>(7));
   // tv9 shouldn't alias to avoid buffer over-subscription
   auto tv9 = broadcast(tv4, {true, false, false});
-  auto tv10 = mul(tv9, IrBuilder::create<Double>(9));
+  mul(tv9, IrBuilder::create<Double>(9));
   auto tv11 = add(tv5, tv9);
   fusion->addOutput(tv7);
   fusion->addOutput(tv11);
@@ -7750,7 +7740,6 @@ TEST_F(NVFuserTest, FusionIssue970_CUDA) {
   tv1->split(1, 4);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({nelm, nelm}, options);
 
@@ -7807,7 +7796,7 @@ TEST_F(NVFuserTest, FusionIssue1021_CUDA) {
   auto tv2 = broadcast(tv1, {false, true});
   fusion.addOutput(tv2);
 
-  auto tv3 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   tv2->split(0, 2);
 
@@ -8199,7 +8188,8 @@ TEST_F(NVFuserTest, FusionSegmenterCombineReductionsCycleRepro_CUDA) {
   args.push(aten_inputs);
   args.push(val);
 
-  for (auto _ : c10::irange(5)) {
+  for (auto i : c10::irange(5)) {
+    (void)i; // Suppress unused variable warning
     auto segmented_fusion =
         SegmentCandidateFinder::segment(fusion_ptr.get(), args);
   }
@@ -9723,7 +9713,7 @@ TEST_F(NVFuserTest, FusionRfactorPredication1_CUDA) {
   fusion.addOutput(tv4);
 
   tv2->split(0, 4);
-  auto tv5 = tv2->rFactor({1});
+  tv2->rFactor({1});
 
   tv0->computeAt(tv2, 1);
 

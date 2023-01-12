@@ -186,8 +186,7 @@ const auto& getEnableOptions() {
 
 } // namespace
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-function"
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
 void debugPrint(const c10::TensorTypePtr& type) {
   std::stringstream sizes_s;
   if (auto sizes = type->symbolic_sizes().sizes()) {
@@ -234,7 +233,7 @@ void debugPrint(const c10::TensorTypePtr& type) {
     std::cout << "no stride properties available" << std::endl;
   }
 }
-#pragma clang diagnostic pop
+C10_DIAGNOSTIC_POP()
 
 bool is_zero_dim_tensor(const std::shared_ptr<c10::TensorType>& tensor_type) {
   return tensor_type && tensor_type->dim().has_value() &&

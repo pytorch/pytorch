@@ -623,8 +623,6 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_LN_BWD(
       benchmark_state.range(2)};
 
   at::manual_seed(0);
-  // auto bool_options = at::TensorOptions().dtype(at::kBool).device(at::kCUDA,
-  // 0);
   auto fp16_options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
   auto fp32_options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);

@@ -269,7 +269,6 @@ TEST_F(NVFuserTest, FusionTorchGatherAddMulHugeSize_CUDA) {
 }
 // Test the fusion support of input tensor as fusion input
 TEST_F(NVFuserTest, FusionTorchGatherInput_CUDA) {
-  const int max_dim_size = 45536;
   const int rank = 2;
 
   auto fusion_ptr = std::make_unique<Fusion>();

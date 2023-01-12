@@ -52,8 +52,7 @@ TEST_F(NVFuserTest, KernelDb_Open_CUDA) {
     fs::path test_cubin_file = test_db_path / "test1.cubin";
     ASSERT_TRUE(Nvf::copy_to_text_file(test_cubin_file.string(), bad_text));
     // Execute 1, 2, 3
-    auto& kernl_db =
-        Nvf::KernelDb::get(kernel_db_dir, kernel_db_file, true, false, true);
+    Nvf::KernelDb::get(kernel_db_dir, kernel_db_file, true, false, true);
     // Check 1
     ASSERT_TRUE(fs::is_regular_file(test_db_file));
     // Check 2

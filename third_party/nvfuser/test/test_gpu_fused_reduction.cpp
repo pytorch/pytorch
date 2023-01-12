@@ -508,7 +508,6 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
   auto tvs = Welford(tv5, {0, 2, 3});
   auto tv8 = tvs.avg;
   auto tv9 = tvs.var_sum;
-  auto tv10 = tvs.n;
   auto tv11 = mul(tv8, IrBuilder::create<Double>(0.1));
   auto tv12 = mul(tv3, d34);
   auto tv13 = add(tv12, tv11);
@@ -533,15 +532,15 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
   fusion.addOutput(tv17);
   fusion.addOutput(tv29);
 
-  auto tv0_cache = tv0->cacheAfter();
-  auto tv1_cache = tv1->cacheAfter();
-  auto tv2_cache = tv2->cacheAfter();
-  auto tv3_cache = tv3->cacheAfter();
-  auto tv4_cache = tv4->cacheAfter();
+  tv0->cacheAfter();
+  tv1->cacheAfter();
+  tv2->cacheAfter();
+  tv3->cacheAfter();
+  tv4->cacheAfter();
 
-  auto tv13_cache = tv13->cacheBefore();
-  auto tv17_cache = tv17->cacheBefore();
-  auto tv29_cache = tv29->cacheBefore();
+  tv13->cacheBefore();
+  tv17->cacheBefore();
+  tv29->cacheBefore();
 
   tv0->split(1, NamedScalar::getParallelDim(ParallelType::BIDx), false);
   tv0->split(0, NamedScalar::getParallelDim(ParallelType::BIDy), false);
@@ -1354,9 +1353,9 @@ TEST_F(NVFuserTest, FusionPersistentBNBackwardAllreduce_CUDA) {
 
   auto input_cache = input->cacheAfter();
   auto grad_output_cache = grad_output->cacheAfter();
-  auto weight_cache = weight->cacheAfter();
-  auto save_mean_cache = save_mean->cacheAfter();
-  auto save_invstd_cache = save_invstd->cacheAfter();
+  weight->cacheAfter();
+  save_mean->cacheAfter();
+  save_invstd->cacheAfter();
 
   // Group the two reductions
   groupReductions({grad_output_sum, dot_p});
@@ -1706,7 +1705,7 @@ TEST_F(
   TORCH_CHECK(num_channels % vector == 0);
   // Use at most 32 TIDx threads
   const int64_t tidx = std::min<int64_t>(32l, num_channels / vector);
-  const auto bidx = ceilDiv(num_channels, tidx * vector);
+  ceilDiv(num_channels, tidx * vector);
 
   const int64_t tidy = 8;
   const int64_t reduction_work_per_thread = 8;
@@ -2287,18 +2286,15 @@ TEST_F(NVFuserTest, FusionCrossIterationGroupedGridAllreduceWelfordShmoo_CUDA) {
     auto tv4 = tvs.n;
     auto tv5 = broadcast(tv2, bcast_pattern);
     auto tv6 = broadcast(tv3, bcast_pattern);
-    auto tv7 = broadcast(tv4, bcast_pattern);
+    broadcast(tv4, bcast_pattern);
     auto tv8 = sub(tv1, tv5);
     auto tv9 = add(tv8, tv6);
-    // auto tv10 = div(tv9, tv7);
-    // fusion.addOutput(tv10);
     fusion.addOutput(tv9);
 
     // Schedule the fusion as it will be done by the persistent
     // scheduler
 
-    auto input_cache = tv1;
-    auto output_cache = tv9->cacheBefore();
+    tv9->cacheBefore();
 
     auto transform_ref = tv2;
 
@@ -2375,8 +2371,7 @@ TEST_F(NVFuserTest, FusionCrossIterationGroupedGridAllreduceWelfordShmoo_CUDA) {
     GpuLower gpulw(&fusion);
     bool validated = false;
     for (auto expr : KernelExprVisitor::getAllExprs(gpulw.kernel())) {
-      auto grouped_grid_reduction =
-          dynamic_cast<kir::GroupedGridWelford*>(expr);
+      (void)expr; // Suppress unused variable warning
       validated = true;
     }
     TORCH_CHECK(
@@ -2484,12 +2479,6 @@ TEST_F(NVFuserTest, FusionGeluBwdReduction_CUDA) {
   at::Tensor at_grad = at::randn(tensor_shape, options);
   at::Tensor at_xvar = at::randn(tensor_shape, options);
   auto at_x = at_xvar.to(c10::ScalarType::Float);
-
-  // auto at_tanh_out = (k_079 * at_x * (1 + k_004 * at_x * at_x)).tanh();
-  // auto at_ff = 0.5 * at_x *
-  //        ((1 - at_tanh_out * at_tanh_out) * (k_079 + k_010 * at_x * at_x)) +
-  //    0.5 * (1 + at_tanh_out);
-  // auto at_output_pointwise = at_ff * at_grad;
 
   auto at_output_pointwise = at::gelu_backward(at_grad, at_x, "tanh");
   auto at_output_reduction = at_output_pointwise.sum({0});

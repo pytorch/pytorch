@@ -1153,8 +1153,8 @@ TEST_F(NVFuserTest, FusionMatmulSoftmaxMatmulAmpere_CUDA) {
   // Gemm 1:
   // (80, 80, 64)
   const int M1 = seql_q, N1 = seql_k, K1 = head_dim;
-  // (80, 64, 80)
-  const int M2 = seql_q, N2 = head_dim, K2 = seql_k;
+  // (64, 80)
+  const int N2 = head_dim, K2 = seql_k;
 
   // Fusion definition (Both gemms are TN)
   // [M,K1]
@@ -1246,7 +1246,6 @@ TEST_F(NVFuserTest, FusionMatmulSoftmaxMatmulAmpere_CUDA) {
   // tv3ccr -> tv3h : softmax
 
   // Gemm 2 main loop read
-  // auto tv3cw = tv3h->cacheAfter();
   auto tv3cr = tv3h->cacheAfter(LoadStoreOpType::LdMatrix);
 
   auto tv2cw = tv2r->cacheAfter();

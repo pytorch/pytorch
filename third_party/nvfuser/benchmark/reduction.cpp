@@ -38,11 +38,6 @@ static void setupReduction(Fusion* fusion, DataType dtype, int red_axis) {
   }
 
   fusion->addOutput(tv1_cast);
-
-  TensorView* output_of_reduction = nullptr;
-  if (is_fp16) {
-    output_of_reduction = tv1_cast;
-  }
 }
 
 static void NvFuserScheduler_Reduction(

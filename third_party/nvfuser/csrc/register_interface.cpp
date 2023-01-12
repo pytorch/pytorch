@@ -216,7 +216,6 @@ RegisterOperators size_eq_guard({
               return;
             }
 
-            // auto inp = inputs[0].toIntList();
             TORCH_INTERNAL_ASSERT(
                 inputs[1].isIntList(), "reference needs to be of int list");
             auto ref = inputs[1].toIntList();

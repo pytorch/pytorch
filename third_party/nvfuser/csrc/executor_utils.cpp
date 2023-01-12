@@ -554,7 +554,8 @@ void validateAlignedVectorizeExtents(
       " and ",
       info.producer_tv->toString());
 
-  int64_t vectorized_merged_domain_extent = 1;
+  // TODO: Rewrite validation of the vectorized dimension
+  // int64_t vectorized_merged_domain_extent = 1;
   for (auto id : info.contig_root_ids) {
     auto extent_val = expr_eval.evaluate(id->extent());
     TORCH_INTERNAL_ASSERT(
@@ -564,7 +565,8 @@ void validateAlignedVectorizeExtents(
         " as the extent of a vectorized root domain, ",
         id->toString(),
         ", is unknown.");
-    vectorized_merged_domain_extent *= extent_val->as<int64_t>();
+    // TODO: Rewrite validation of the vectorized dimension
+    // vectorized_merged_domain_extent *= extent_val->as<int64_t>();
   }
 
   // TODO: Rewrite validation of the vectorized dimension, we can't just used a

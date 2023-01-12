@@ -44,10 +44,12 @@ bool hasRequiredSmemSize(size_t required_size) {
 // util to track support matmul operand layout.
 using MatmulLayout = MmaOptions::MmaInputLayout;
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-variable")
 static constexpr std::array<MatmulLayout, 3> kAllSupportedLayout = {
     MatmulLayout::TT,
     MatmulLayout::NT,
     MatmulLayout::TN};
+C10_DIAGNOSTIC_POP()
 
 // Generic interface to get matmul op with the given layout.
 TensorView* matmul(TensorView* a, TensorView* b, MatmulLayout layout) {

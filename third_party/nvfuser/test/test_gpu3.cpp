@@ -1307,7 +1307,6 @@ TEST_F(NVFuserTest, FusionIssue1430_CUDA) {
   auto tvs = Welford(tv2, {1, 2, 3, 4});
   auto tv3 = tvs.avg;
   auto tv4 = tvs.var_sum;
-  auto tv5 = tvs.n;
 
   // avg
   auto tv6 = broadcast(tvs.avg, {false, true, true, true, true});
@@ -2979,7 +2978,7 @@ TEST_F(NVFuserTest, FusionCpAsyncPredicate_CUDA) {
   fusion.addOutput(tv1);
 
   auto tv0_shared = tv0->cacheAfter(LoadStoreOpType::CpAsync);
-  auto tv0_reg = tv0_shared->cacheAfter();
+  tv0_shared->cacheAfter();
   tv0_shared->setMemoryType(MemoryType::Shared);
   tv0->computeAt(tv1, 1);
 
@@ -3056,8 +3055,6 @@ TEST_F(NVFuserTest, FusionPredRemovalCheck_CUDA) {
       }
     }
 
-   private:
-    bool within_ite_ = false;
   } pred_checker;
 
   GpuLower gpulw(&fusion);
@@ -3111,7 +3108,6 @@ TEST_F(NVFuserTest, FusionPropagateParallelTypesToSiblings_CUDA) {
   }
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({9999}, options);
 
@@ -3210,7 +3206,8 @@ graph(%x.1 : Tensor,
     auto x = torch::rand({32, 32}, at::TensorOptions(at::kCUDA));
     auto y = torch::rand({32, 32}, at::TensorOptions(at::kCUDA));
     std::vector<IValue> results;
-    for (const auto& _ : c10::irange(10)) {
+    for (const auto& i : c10::irange(10)) {
+      (void)i; // Suppress unused variable warning
       auto stack = createStack({x.clone(), y.clone()});
       fn.run(stack);
       results.push_back(stack.back());
@@ -3256,7 +3253,8 @@ TEST_F(NVFuserMultithreadedTest, MultipleFunctions_CUDA) {
     auto y = torch::rand({32, 32}, at::TensorOptions(at::kCUDA));
     std::vector<IValue> results;
     constexpr size_t numRuns = 10;
-    for (const auto& _ : c10::irange(numRuns)) {
+    for (const auto& i : c10::irange(numRuns)) {
+      (void)i; // Suppress unused variable warning
       auto stack = createStack({x.clone(), y.clone()});
       fn.run(stack);
       results.push_back(stack.back());
@@ -3329,13 +3327,12 @@ TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
   auto tvs = Welford(tv1, {0, 1, 2});
   auto tv_avg = tvs.avg;
   auto tv_M2 = tvs.var_sum;
-  auto tv_N = tvs.n;
   fusion.addOutput(tv_avg);
   fusion.addOutput(tv_M2);
 
   auto cached_input = tv0->cacheAfter();
-  auto cached_avg = tv_avg->cacheBefore();
-  auto cached_M2 = tv_M2->cacheBefore();
+  tv_avg->cacheBefore();
+  tv_M2->cacheBefore();
 
   auto reduction_tv = scheduler_utils::getReductionTvs(&fusion)[0];
 
@@ -4649,8 +4646,6 @@ TEST_F(NVFuserTest, FusionIssueRepro1844_CUDA) {
 
   const auto options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  const auto mask_options =
-      at::TensorOptions().dtype(at::kBool).device(at::kCUDA, 0);
   at::manual_seed(0);
 
   at::Tensor a = at::randn(shape, options);
@@ -5699,9 +5694,9 @@ TEST_F(NVFuserTest, FusionTrivialInputForwarding_CUDA) {
   TensorView* tv1 = makeConcreteTensor({-1, -1});
   fusion->addInput(tv0);
   fusion->addInput(tv1);
-  // Note: tv2 is not needed. Kept it here since previously there was an
+  // Note: output of add is not used. Kept it here since previously there was an
   // assertion from sorting in codegen.
-  auto tv2 = add(tv1, IrBuilder::create<Double>(3.141));
+  add(tv1, IrBuilder::create<Double>(3.141));
   fusion->addOutput(tv0);
 
   auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
@@ -6883,7 +6878,6 @@ TEST_F(NVFuserTest, FusionIssue2163ReproInvalidAlias_CUDA) {
 
   // This seems to confuse the alias analysis
   auto weight_copy1 = set(weight);
-  // auto weight_copy2 = weight_copy1;
   auto weight_copy2 = set(weight_copy1);
 
   auto input_sum = sum(input, {0});
@@ -6893,7 +6887,7 @@ TEST_F(NVFuserTest, FusionIssue2163ReproInvalidAlias_CUDA) {
   auto output = mul(input_sub_sum, weight_bcast);
   fusion_ptr->addOutput(output);
 
-  auto output_cache = output->cacheBefore();
+  output->cacheBefore();
 
   auto ref = input;
   ref->split(-1, 8);

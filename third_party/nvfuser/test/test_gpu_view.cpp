@@ -1207,7 +1207,7 @@ TEST_F(NVFuserTest, FusionViewIdGraph_CUDA) {
   fusion.addOutput(t13);
 
   // Grab the trivial reduced tensor from t12's view.
-  auto tv11 = ir_utils::producerTvsOf(tv12)[0];
+  ir_utils::producerTvsOf(tv12)[0];
 
   // Start from the exact iter domain graph of the fusion
   IterDomainGraph id_graph(&fusion);
@@ -1377,6 +1377,7 @@ TEST_F(NVFuserTest, FusionPwiseViewSchedule_CUDA) {
   }
 
   for (auto i : c10::irange(tv5->nDims() - 1)) {
+    (void)i; // Suppress unused variable warning
     tv5->merge(0);
   }
   tv5->split(0, 32);
@@ -1628,7 +1629,7 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule4_CUDA) {
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
 
-  int w = 15, x = 31, y = 49, z = 65;
+  int x = 31, y = 49, z = 65;
 
   auto tv0 = makeConcreteTensor({x, y, z});
   fusion.addInput(tv0);

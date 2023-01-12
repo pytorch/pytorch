@@ -1261,7 +1261,6 @@ void grid_persistent_batchnorm_bwd_manual(
        at_save_var});
 
   std::vector<at::Tensor> cg_outputs;
-  Fusion* fusion_validate = nullptr;
 
   FusionExecutor fe;
   fe.compileFusion(fusion_ptr.get(), aten_inputs);

@@ -204,7 +204,7 @@ TEST_F(NVFuserTest, FusionComputeWith2_CUDA) {
   TransformPropagatorWithCheck tp(input_tv0);
   tree.traverse(&tp);
 
-  auto sum_exp_rf_tv5 = sum_exp_tv2->rFactor({-1});
+  sum_exp_tv2->rFactor({-1});
 
   inlineMost();
   input_tv0_cache->computeWith(-1);
@@ -401,8 +401,7 @@ TEST_F(NVFuserTest, FusionComputeWith6_CUDA) {
 
   int64_t N = bidy * us_factor, H = tidy, W = persist_buffer;
 
-  auto tv0_cache = tv1;
-  auto tv7_cache = tv7->cacheBefore();
+  tv7->cacheBefore();
 
   tv3->merge(0)->merge(0);
 

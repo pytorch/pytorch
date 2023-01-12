@@ -25,7 +25,6 @@ namespace jit {
 using namespace torch::jit::fuser::cuda;
 
 namespace {
-bool var;
 // Make a tensor that is known to be fully contiguous of dimensionality=ndims,
 // but unknown sizes
 TensorView* makeContigTensor(size_t ndims, DataType dtype = DataType::Float) {
@@ -69,6 +68,7 @@ void checkIntValue(
   TORCH_CHECK(actual_value.value() == expected_value);
 }
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-variable")
 // prime numbers
 int64_t prime_numbers[] = {
     2,    3,    5,    7,    11,   13,   17,   19,   23,   29,   31,   37,
@@ -88,6 +88,7 @@ int64_t prime_numbers[] = {
     1009, 1013, 1019, 1021, 1031, 1033, 1039, 1049, 1051, 1061, 1063, 1069,
     1087, 1091, 1093, 1097, 1103, 1109, 1117, 1123, 1129, 1151, 1153, 1163,
     1171, 1181, 1187, 1193, 1201, 1213, 1217, 1223};
+C10_DIAGNOSTIC_POP()
 
 bool deviceMajorMinorCheck(int major, int minor = 0) {
   auto dev_prop = at::cuda::getCurrentDeviceProperties();

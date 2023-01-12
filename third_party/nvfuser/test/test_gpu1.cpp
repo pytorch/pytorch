@@ -6803,7 +6803,7 @@ TEST_F(NVFuserTest, FusionCacheBefore_CUDA) {
   // Before: TV2 = TV1 * 3
   // After:  TV3 = TV1 * 3;
   //         TV2 = TV3;
-  TensorView* tv3 = tv2->cacheBefore();
+  tv2->cacheBefore();
 
   constexpr int BSX = 32;
   tv2->split(-1, BSX);
@@ -6841,7 +6841,7 @@ TEST_F(NVFuserTest, FusionCacheAfter_CUDA) {
   // Before: TV1 = TV0 + 1
   // After:  TV3 = TV0;
   //         TV1 = TV3 + 1
-  TensorView* tv3 = tv0->cacheAfter();
+  tv0->cacheAfter();
 
   constexpr int BSX = 32;
   tv2->split(-1, BSX);
@@ -6885,7 +6885,7 @@ TEST_F(NVFuserTest, FusionCacheFork_CUDA) {
   // Output:  TV3, TV2
 
   // cacheFork !!does not!! automatically apply ComputeAt to the cache
-  auto tv3 = tv1->cacheFork();
+  tv1->cacheFork();
 
   constexpr int BSX = 32;
   tv2->split(-1, BSX);
@@ -7516,7 +7516,8 @@ TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
   for (const auto idx : c10::irange(kOuterNumDims)) {
     outer_shape.push_back(shape[idx]);
   }
-  for (const auto idx : c10::irange(kOuterNumDims, kM)) {
+  for (const auto i : c10::irange(kOuterNumDims, kM)) {
+    (void)i; // Suppress unused variable warning
     outer_shape.push_back(1);
   }
 
@@ -7604,7 +7605,8 @@ TEST_F(NVFuserTest, FusionMagicSchedulerRMSNormBackward_CUDA) {
   for (const auto idx : c10::irange(kOuterNumDims)) {
     outer_shape.push_back(shape[idx]);
   }
-  for (const auto idx : c10::irange(kOuterNumDims, kM)) {
+  for (const auto i : c10::irange(kOuterNumDims, kM)) {
+    (void)i; // Suppress unused variable warning
     outer_shape.push_back(1);
   }
 
@@ -7884,7 +7886,6 @@ TEST_F(NVFuserTest, FusionMagicSchedulerInstanceNormalization_CUDA) {
   FusionExecutorCache executor_cache(std::move(fusion));
 
   auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
-  auto cg_outputs_full = {at_run_mean, at_run_var, cg_outputs[0]};
 
   auto aten_outputs = at::instance_norm(
       at_input,
