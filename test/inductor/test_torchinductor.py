@@ -5921,6 +5921,17 @@ if HAS_CUDA:
             compiled = compile_fx_inner(mod, inps)
             compiled(inps)
 
+        @requires_cuda()
+        def test_backward_context(self):
+            def fn(x):
+                return x * 3
+
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            gO = torch.rand_like(x)
+            opt_fn = torch.compile(fn)
+            out = opt_fn(x)
+            out.backward(gO)
+
         @patch.object(config, "fallback_random", True)
         def test_dtype_factory_issue(self):
             def forward():
