@@ -1,5 +1,7 @@
 import warnings
-from typing import Union, Iterable
+from typing import Union, Iterable, List
+
+from torch import Tensor
 
 import torch
 from torch._six import inf
@@ -105,7 +107,7 @@ def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach:
         parameters = [parameters]
     clip_value = float(clip_value)
     if foreach:
-        grouped_tensors = _group_tensors_by_device_and_dtype([[p.grad for p in parameters if p is not None]])
+        grouped_tensors = _group_tensors_by_device_and_dtype([[p.grad for p in parameters if p.grad is not None]])
         for [grads] in grouped_tensors.values():
             torch._foreach_clamp_min_(grads, -clip_value)
             torch._foreach_clamp_max_(grads, clip_value)
