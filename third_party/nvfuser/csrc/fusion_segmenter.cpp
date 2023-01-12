@@ -1861,6 +1861,14 @@ bool TranslateApplicableWelford::wouldTranslateToPersistent(
     return false;
   }
 
+  // Make sure all welford inputs are not already statistics, e.g.
+  // FusionSqueezeOnlyWelford_CUDA
+  for (auto welford : orignal_welfords) {
+    if (!welford->inN()->isOneInt()) {
+      return false;
+    }
+  }
+
   // Make sure all welford ops come from the same complete fusion
   auto fusion = orignal_welfords[0]->fusion();
   TORCH_INTERNAL_ASSERT(
