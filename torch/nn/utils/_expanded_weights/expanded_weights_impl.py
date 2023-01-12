@@ -141,6 +141,9 @@ class ExpandedWeight(torch.Tensor):
     def data_ptr(self):
         return self.orig_weight.data_ptr()
 
+    def get_device(self):
+        return self.orig_weight.get_device()
+
     def set_allow_smaller_batches(self, is_allow_smaller_batches):
         self.allow_smaller_batches = is_allow_smaller_batches
 
