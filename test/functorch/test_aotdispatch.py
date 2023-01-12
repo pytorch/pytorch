@@ -1905,11 +1905,10 @@ class TestAOTModuleSimplified(AOTTestCase):
                 # constant to make_fx, and result in the tensor being traced
                 # into the graph, which is an error condition.  Make sure we
                 # report adequately in this case.
-                return (torch.add(x, fake_z), )
+                return (x + fake_z, )
 
         with self.assertRaisesRegex(
-            TypeError,
-            "no implementation found for .*FakeTensor"
+            AssertionError, "Unexpected fake buffer"
         ):
             aot_module_simplified(MockModule(), (fake_x,), nop)
 
