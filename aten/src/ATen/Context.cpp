@@ -4,7 +4,6 @@
 
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/env.h>
 
 #include <algorithm>
 #include <cctype>
@@ -183,8 +182,7 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-  static bool allow_tf32_cublas_override = c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true;
-  return allow_tf32_cublas_override || float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
+  return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
@@ -362,6 +360,14 @@ bool Context::isXNNPACKAvailable() {
 #else
   return false;
 #endif
+}
+
+void Context::setCheckSparseTensorInvariants(bool e) {
+  enable_sparse_tensor_invariant_checks = e;
+}
+
+bool Context::checkSparseTensorInvariants() const {
+  return enable_sparse_tensor_invariant_checks;
 }
 
 bool Context::releaseWeightsWhenPrepacking() const {
