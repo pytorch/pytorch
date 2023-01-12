@@ -53,6 +53,12 @@ decompositions = get_decompositions(
         aten.hardtanh_backward,
         aten.im2col,
         aten.index_select,
+        aten.index_add,
+        aten.index_add_,
+        aten.index_copy,
+        aten.index_copy_,
+        aten.index_fill,
+        aten.index_fill_,
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
@@ -165,14 +171,6 @@ def pad_dim(x, padded_length, dim):
 
 @register_decomposition([aten.addmm])
 def addmm(input, mat1, mat2, *, beta=1, alpha=1):
-    if config.triton.mm != "aten":
-        out = torch.mm(mat1, mat2)
-        if not isinstance(alpha, numbers.Number) or alpha != 1:
-            out = out * alpha
-        if not isinstance(beta, numbers.Number) or beta != 1:
-            input = input * beta
-        return input + out
-
     if (
         config.shape_padding
         and check_device(mat1, mat2)
