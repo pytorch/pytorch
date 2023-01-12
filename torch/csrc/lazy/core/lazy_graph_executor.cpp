@@ -488,8 +488,7 @@ Value LazyGraphExecutor::GetIrValueForScalarFromCodegen(
   if (IsSpecialScalar(value)) {
     return MakeScalar(value, value.type());
   }
-  auto data =
-      GetDeviceData(value, value.type(), device);
+  auto data = GetDeviceData(value, value.type(), device);
   data->SetInfo(
       std::make_shared<DeviceDataInfo>(/*tensor_id=*/-1, /*read_only=*/true));
   return MakeDeviceData(std::move(data));
