@@ -81,6 +81,9 @@ class ExpandedWeight(torch.Tensor):
             if decomp is not None:
                 with batch_second(args, kwargs):
                     return decomp(*args, **kwargs)
+        if func == torch._cudnn_rnn_flatten_weight:
+            # this is hacky but because we won't use the cuda kernels, we shouldn't let cuda update these in place
+            return
         if func in cls.handled_functions:
             return cls.handled_functions[func].apply(tuple(kwargs.keys()), func, *(args + tuple(kwargs.values())))
         # We cannot use a fallback here because we do not know the batch dimension for any regular tensor inputs,
