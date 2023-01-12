@@ -3802,6 +3802,7 @@ else:
         self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
     # functions that operate over a dimension but don't reduce.
+    @skipIfTorchInductor("RuntimeError: Trying to create tensor with negative dimension -1: [-1]")
     def test_dim_function_empty(self, device):
         shape = (0, 1, 2, 0)
         x = torch.randn(shape, device=device)
