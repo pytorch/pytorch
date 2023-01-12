@@ -75,6 +75,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.is_tensor,
         torch.is_storage,
         torch.set_default_tensor_type,
+        torch.set_default_device,
         torch.set_rng_state,
         torch.get_rng_state,
         torch.manual_seed,
