@@ -12,13 +12,22 @@ int device_count = 0;
 
 void custom_raw_deleter(void* ptr);
 
+_AllocationMetadata::_AllocationMetadata()
+    : size(0), device_idx(-1), stream(0) {}
+
+_AllocationMetadata::_AllocationMetadata(
+    size_t size,
+    int device_idx,
+    cudaStream_t stream)
+    : size(size), device_idx(device_idx), stream(stream) {}
+
 // This is a fast API to just register allocators
 // based on function pointers (ie. external .so libraries)
 // This avoids having to link against libtorch for C++ based custom allocators
 // And also use this from python
 CUDAPluggableAllocator::CUDAPluggableAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, cudaStream_t)> free_fn)
+    std::function<void(void*, size_t, int, cudaStream_t)> free_fn)
     : alloc_fn_(alloc_fn), free_fn_(free_fn) {}
 
 CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
@@ -85,7 +94,7 @@ void* CUDAPluggableAllocator::malloc(
   void* r = alloc_fn_(size, device, stream);
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);
-    allocation_metadata_.emplace(r, std::make_pair(size, stream));
+    allocation_metadata_.emplace(r, _AllocationMetadata(size, device, stream));
   }
   return r;
 }
@@ -122,18 +131,20 @@ void* CUDAPluggableAllocator::raw_alloc_with_stream(
 
 void CUDAPluggableAllocator::raw_delete(void* ptr) {
   cudaStream_t stream;
+  int device_idx;
   size_t size;
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);
     TORCH_CHECK(
         allocation_metadata_.count(ptr),
         "Trying to free a pointer not allocated here");
-    auto pair = allocation_metadata_[ptr];
-    size = pair.first;
-    stream = pair.second;
+    _AllocationMetadata& metadata = allocation_metadata_[ptr];
+    size = metadata.size;
+    device_idx = metadata.device_idx;
+    stream = metadata.stream;
     allocation_metadata_.erase(ptr);
   }
-  free_fn_(ptr, size, stream);
+  free_fn_(ptr, size, device_idx, stream);
 }
 
 void CUDAPluggableAllocator::init(int device_count) {
@@ -292,7 +303,7 @@ getCurrentAllocator() {
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, cudaStream_t)> free_fn) {
+    std::function<void(void*, size_t, int, cudaStream_t)> free_fn) {
   std::shared_ptr<CUDAPluggableAllocator> allocator(
       new CUDAPluggableAllocator(alloc_fn, free_fn));
   allocator->init(device_count);
