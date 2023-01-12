@@ -1350,7 +1350,7 @@ def _has_triton():
 _sparse_kernels_lib = torch.library.Library("aten", "IMPL")
 
 if _has_triton():
-    from torch.sparse.triton_ops._triton_bsr_dense_mm import bsr_dense_mm
+    from torch.sparse.triton_ops import bsr_dense_mm
 
     _sparse_kernels_lib.impl(
         "aten::_triton_bsr_dense_mm",
