@@ -1654,7 +1654,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # This should work though
         l2.weight = Parameter(torch.randn(10, 10))
 
-    def test_clip_grad_norm(self):
+    @parametrize_test('foreach', (False, True))
+    @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
+    def test_clip_grad_norm(self, norm_type, foreach):
         l = nn.Linear(10, 10)
         max_norm = 2
 
@@ -1675,42 +1677,40 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             return scale[0]
 
         grads = torch.arange(1., 101).view(10, 10), torch.ones(10).div(1000)
-        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
-            for p, g in zip(l.parameters(), grads):
-                p._grad = g.clone().view_as(p.data)
-            norm_before = compute_norm(norm_type)
-            norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type)
-            norm_after = compute_norm(norm_type)
-            self.assertEqual(norm, norm_before)
-            self.assertEqual(norm_after, max_norm)
-            self.assertLessEqual(norm_after, norm_before)
-            compare_scaling(grads)
+        for p, g in zip(l.parameters(), grads):
+            p._grad = g.clone().view_as(p.data)
+        norm_before = compute_norm(norm_type)
+        norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type, foreach=foreach)
+        norm_after = compute_norm(norm_type)
+        self.assertEqual(norm, norm_before)
+        self.assertEqual(norm_after, max_norm)
+        self.assertLessEqual(norm_after, norm_before)
+        compare_scaling(grads)
 
         # Small gradients should be left unchanged
         grads = torch.rand(10, 10).div(10000), torch.ones(10).div(500)
-        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
-            for p, g in zip(l.parameters(), grads):
-                p.grad.data.copy_(g)
-            norm_before = compute_norm(norm_type)
-            norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type)
-            norm_after = compute_norm(norm_type)
-            self.assertEqual(norm, norm_before)
-            self.assertEqual(norm_before, norm_after)
-            self.assertLessEqual(norm_after, max_norm)
-            scale = compare_scaling(grads)
-            self.assertEqual(scale, 1)
+        for p, g in zip(l.parameters(), grads):
+            p.grad.data.copy_(g)
+        norm_before = compute_norm(norm_type)
+        norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type, foreach=foreach)
+        norm_after = compute_norm(norm_type)
+        self.assertEqual(norm, norm_before)
+        self.assertEqual(norm_before, norm_after)
+        self.assertLessEqual(norm_after, max_norm)
+        scale = compare_scaling(grads)
+        self.assertEqual(scale, 1)
 
         # Should accept a single Tensor as input
         p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
         g = torch.arange(1., 101).view(10, 10)
         p1._grad = g.clone()
         p2._grad = g.clone()
-        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
-            clip_grad_norm_(p1, max_norm, norm_type=norm_type)
-            clip_grad_norm_([p2], max_norm, norm_type=norm_type)
-            self.assertEqual(p1.grad, p2.grad)
+        clip_grad_norm_(p1, max_norm, norm_type=norm_type, foreach=foreach)
+        clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
+        self.assertEqual(p1.grad, p2.grad)
 
-    def test_clip_grad_value(self):
+    @parametrize_test('foreach', (False, True))
+    def test_clip_grad_value(self, foreach):
         l = nn.Linear(10, 10)
         clip_value = 2.5
 
@@ -1719,7 +1719,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             for p, g in zip(l.parameters(), grad_list):
                 p._grad = g.clone().view_as(p.data) if g is not None else g
 
-            clip_grad_value_(l.parameters(), clip_value)
+            clip_grad_value_(l.parameters(), clip_value, foreach=foreach)
             for p in filter(lambda p: p.grad is not None, l.parameters()):
                 self.assertLessEqual(p.grad.data.max(), clip_value)
                 self.assertGreaterEqual(p.grad.data.min(), -clip_value)
@@ -1729,8 +1729,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         g = torch.arange(-50., 50).view(10, 10).div_(5)
         p1._grad = g.clone()
         p2._grad = g.clone()
-        clip_grad_value_(p1, clip_value)
-        clip_grad_value_([p2], clip_value)
+        clip_grad_value_(p1, clip_value, foreach=foreach)
+        clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
     def test_parameters_to_vector(self):
