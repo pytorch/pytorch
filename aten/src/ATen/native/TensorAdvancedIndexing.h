@@ -52,7 +52,7 @@ static inline bool can_use_expanded_index_path(
   }
 
   const auto st = self.scalar_type();
-  if (!(c10::isFloatingType(st) || st == ScalarType::Half)) {
+  if (!(c10::isFloatingType(st)) || st == ScalarType::Half) {
     return false;
   }
 
@@ -96,8 +96,10 @@ static inline bool can_use_expanded_index_path(
 
 using scatter_add_expanded_index_fn = void(*)(const Tensor&, const Tensor&, const Tensor&);
 using scatter_reduce_expanded_index_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, const SCATTER_GATHER_OP& reduce, bool);
+using gather_expanded_index_fn = void (*)(const Tensor&, const Tensor&, const Tensor&);
 
 DECLARE_DISPATCH(scatter_add_expanded_index_fn, scatter_add_expanded_index_stub);
 DECLARE_DISPATCH(scatter_reduce_expanded_index_fn, scatter_reduce_expanded_index_stub);
+DECLARE_DISPATCH(gather_expanded_index_fn, gather_expanded_index_stub);
 
 }} // namespace at::native
