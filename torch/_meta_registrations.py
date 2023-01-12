@@ -274,9 +274,10 @@ def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
+# NOTE: matching defaults in aten/src/ATen/native/native_functions.yaml
 @register_meta(aten._linalg_svd.default)
 def _linalg_svd_meta(
-    A: Tensor, full_matrices: bool = True, compute_uv: bool = True, driver: str = None
+    A: Tensor, full_matrices: bool = False, compute_uv: bool = True, driver: str = None
 ):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
