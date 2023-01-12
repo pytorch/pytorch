@@ -760,7 +760,7 @@ class Wrapper:
         val = getattr(self._data, name)
 
         # If it's a method
-        if callable(val):
+        if not isinstance(val, torch.device) and callable(val):
             c = getattr(type(self._data), name)
             # Don't append self to args if classmethod/staticmethod
             if c is val:
@@ -1451,6 +1451,27 @@ class TestTorchFunctionMode(TestCase):
                 self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
+
+    def test_disable_subclass_mode(self):
+        called = False
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called = True
+                return func(*args, **kwargs)
+
+        class B(torch.Tensor):
+            pass
+
+        x = B(torch.randn(5))
+        with A():
+            with torch._C.DisableTorchFunction():
+                self.assertNotIsInstance(torch.sum(x), B)
+
+        self.assertFalse(called)
 
     def test_disable_enable_subclass(self):
         called = False
