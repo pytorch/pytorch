@@ -57,9 +57,8 @@ class ForeachFuncWrapper:
             with torch.profiler.profile() as p:
                 actual = self.func(*inputs, **kwargs)
             keys = tuple([e.key for e in p.key_averages()])
-            mta_found = any("multi_tensor_apply_kernel" in k for k in keys)
-            if mta_found != is_fastpath:
-                raise RuntimeError(f"{mta_found = }, {is_fastpath = }, {keys = }")
+            mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
+            assert mta_called == is_fastpath
         else:
             actual = self.func(*inputs, **kwargs)
         # note(mkozuki): inplace foreach functions are void functions.

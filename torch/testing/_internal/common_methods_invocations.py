@@ -7859,7 +7859,7 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
 # Includes some values such that N * N won't be a multiple of 4,
 # which should ensure we test the vectorized and non-vectorized
 # kernel code paths.
-foreach_num_tensors = [20, 23] if not TEST_WITH_SLOW else [23, 37]
+foreach_num_tensors = [20, 23] if not TEST_WITH_SLOW else [23, 30, 300]
 class ForeachRightmostArgType(enum.Enum):
     TensorList = 1
     ScalarList = 2
