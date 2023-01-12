@@ -244,7 +244,7 @@ class DeviceMesh(object):
             # mesh must be contiguous (i.e. from 0 to N-1)
             if 2 * unique_mesh_values.sum().item() != world_size * (world_size - 1):
                 raise RuntimeError(
-                    f"DeviceMesh is expected to be contiguous, but found {self.mesh.tolist()}"
+                    f"DeviceMesh should have all ranks of WORLD, but found {self.mesh.tolist()}"
                 )
 
             _backend = "gloo" if self.device_type == "cpu" else "nccl"
