@@ -4709,7 +4709,7 @@ def ones_like(
 ) -> TensorLikeType:
     return torch.full_like(
         a,
-        True if (dtype or a.dtype) == torch.bool else 0,
+        True if (dtype or a.dtype) == torch.bool else 1,
         dtype=dtype,
         layout=layout,
         device=device,
