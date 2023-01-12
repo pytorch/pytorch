@@ -99,6 +99,14 @@ class ExpandedWeight(torch.Tensor):
     def shape(self):
         return self.orig_weight.shape
 
+    @property
+    def device(self):
+        return self.orig_weight.device
+
+    @property
+    def is_cuda(self):
+        return self.orig_weight.is_cuda
+
     def data_ptr(self):
         return self.orig_weight.data_ptr()
 
