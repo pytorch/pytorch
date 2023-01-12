@@ -5,8 +5,7 @@ on:
     branches:
       - master
       - main
-    paths:
-      - .github/workflows/inductor-perf-smoke-test.yml
+      - weiwangmeta/inductor_perf_ci_smoke_test
   pull_request:
     paths:
       - .github/workflows/inductor-perf-smoke-test.yml
