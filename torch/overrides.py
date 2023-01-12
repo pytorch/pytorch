@@ -163,7 +163,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_linear_backward_weights,
         torch.normal,
         torch.ones,
-        torch.profiler.profiler._profile_using_dynolog,
         torch.promote_types,
         torch.rand,
         torch.randn,

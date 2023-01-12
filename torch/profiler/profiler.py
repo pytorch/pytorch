@@ -30,7 +30,6 @@ __all__ = [
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
 
-
 def supported_activities():
     """
     Returns a set of supported profiler tracing activities.

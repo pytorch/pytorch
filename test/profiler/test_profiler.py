@@ -1333,10 +1333,8 @@ class TestProfiler(TestCase):
         proc.start()
         proc.join()
 
-
 def launch_subprocess():
     import torch
-
     niters = 8
     use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
     net = SimpleNet()
