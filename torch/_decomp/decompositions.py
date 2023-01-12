@@ -2660,7 +2660,12 @@ def upsample_bicubic2d_default(
         return _upsample_cubic_interp1d(coeffs_x, t_x)
 
     coeffs_y = tuple((get_x_interp(y_ofs) for y_ofs in iys_ofs))
-    return _upsample_cubic_interp1d(coeffs_y, t_y)
+    result = _upsample_cubic_interp1d(coeffs_y, t_y)
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(a)
+    result = result.contiguous(memory_format=memory_format)
+    return result
 
 
 @register_decomposition(aten.upsample_bicubic2d.vec)

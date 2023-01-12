@@ -1230,7 +1230,7 @@ void separable_upsample_generic_Nd_kernel_impl(
   for (const auto i : c10::irange(out_ndims - 1)) {
     int interp_dim = 2 + out_ndims - 1 - i;
     temp_oshape[interp_dim] = output.sizes()[interp_dim];
-    temp_output = at::empty(temp_oshape, input.options());
+    temp_output = at::empty(temp_oshape, input.options().memory_format(input.suggest_memory_format()));
     _separable_upsample_generic_Nd_kernel_impl_single_dim<
         out_ndims,
         scale_t,
