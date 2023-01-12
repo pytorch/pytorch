@@ -304,7 +304,7 @@ test_inductor_benchmark_perf() {
   # shellcheck disable=SC2086
   if [[ "$1" == *smoketest* ]]; then
     python benchmarks/dynamo/torchbench.py --performance --backend inductor --float16 --training \
-      --batch-size-file $(realpath benchmarks/dynamo/torchbench_models_list.txt) --only hf_Bert
+      --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert
   else
     python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
       --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
@@ -839,7 +839,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
     test_inductor_torchbench_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     test_inductor_torchbench_smoketest_perf
-  else 
+  else
     test_inductor_torchbench
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
