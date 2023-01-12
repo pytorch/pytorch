@@ -94,11 +94,11 @@ def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn):
 
         if maybe_expanded_weight.batch_size > grad_sample_contribution.shape[0]:
             # this only passes the other checks if the arg allows smaller batch sizes
-            int = torch.zeros(maybe_expanded_weight.batch_size, *grad_sample_contribution.shape[1:],
-                              dtype=grad_sample_contribution.dtype,
-                              device=grad_sample_contribution.device)
-            int[:grad_sample_contribution.shape[0]] = grad_sample_contribution
-            grad_sample_contribution = int
+            intermediate = torch.zeros(maybe_expanded_weight.batch_size, *grad_sample_contribution.shape[1:],
+                                       dtype=grad_sample_contribution.dtype,
+                                       device=grad_sample_contribution.device)
+            intermediate[:grad_sample_contribution.shape[0]] = grad_sample_contribution
+            grad_sample_contribution = intermediate
 
         if hasattr(unpacked, "grad_sample") and unpacked.grad_sample is not None:
             unpacked.grad_sample = unpacked.grad_sample + grad_sample_contribution

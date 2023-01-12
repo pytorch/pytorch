@@ -89,7 +89,6 @@ class ExpandedWeight(torch.Tensor):
         self.loss_reduction = loss_reduction
 
     handled_functions = HANDLED_FUNCTIONS
-    supported_unary = (torch.t, torch.Tensor.t)
 
     def __new__(cls, orig_weight, batch_size, loss_reduction):
         if not isinstance(orig_weight, torch.Tensor):
@@ -129,6 +128,14 @@ class ExpandedWeight(torch.Tensor):
     @property
     def shape(self):
         return self.orig_weight.shape
+
+    @property
+    def device(self):
+        return self.orig_weight.device
+
+    @property
+    def is_cuda(self):
+        return self.orig_weight.is_cuda
 
     def data_ptr(self):
         return self.orig_weight.data_ptr()

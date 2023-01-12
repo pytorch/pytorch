@@ -948,6 +948,13 @@ def module_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_grad, t
 
     return samples
 
+def make_padded_sequence(inp, batch_sizes):
+    required_grad = inp.requires_grad
+    inp.requires_grad_(False)  # user won't have access to inp so won't be able to get its grads
+    seq = pack_padded_sequence(inp, batch_sizes)
+    seq.data.requires_grad_(required_grad)
+    return seq
+
 
 def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
     # Currently all samples below are for validating the no-batch-dim support.
@@ -988,7 +995,14 @@ def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, tr
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(**cons_args),
-                forward_input=FunctionInput(pack_padded_sequence(make_input((5, 2, 2)), torch.tensor([5, 3]))),
+                forward_input=FunctionInput(make_padded_sequence(make_input((5, 2, 2)), torch.tensor([5, 3]))),
+                reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
+            )
+        )
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**cons_args),
+                forward_input=FunctionInput(make_padded_sequence(make_input((5, 5, 2)), torch.tensor([5, 3, 3, 2, 2]))),
                 reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
             )
         )
