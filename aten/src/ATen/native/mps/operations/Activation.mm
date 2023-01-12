@@ -342,6 +342,10 @@ TORCH_IMPL_FUNC(log_softmax_backward_mps_out) (
   const Tensor& out) {
   using namespace mps;
 
+  if (output.numel() == 0) {
+    return;
+  }
+
   struct CachedGraph : public MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
