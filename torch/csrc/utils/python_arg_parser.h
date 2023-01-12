@@ -1023,7 +1023,10 @@ inline c10::Stream PythonArgs::stream(int i) {
     throw TypeError(
         "expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
   }
-  return c10::Stream::unpack(((THPStream*)args[i])->cdata);
+  return c10::Stream::unpack3(
+      ((THPStream*)args[i])->stream_id,
+      ((THPStream*)args[i])->device_index,
+      ((THPStream*)args[i])->device_type);
 }
 
 inline PyObject* PythonArgs::pyobject(int i) {

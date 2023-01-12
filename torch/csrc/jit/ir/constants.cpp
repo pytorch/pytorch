@@ -110,8 +110,8 @@ c10::optional<Value*> tryInsertConstant(
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
   } else if (val.isStream()) {
-    auto stream = val.toStream();
-    n->i_(attr::value, stream.pack());
+    // packing into int64_t removed
+    n->ival_(attr::value, val);
     n->output()->setType(StreamObjType::get());
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
@@ -196,7 +196,8 @@ c10::optional<IValue> toIValue(const Value* v) {
     auto d = c10::Device(node->s(attr::value));
     return d;
   } else if (type == StreamObjType::get()) {
-    auto s = c10::Stream::unpack(node->i(attr::value));
+    // int64_t packing removed
+    auto s = node->ival(attr::value).toStream();
     return s;
   } else if (node->mustBeNone()) {
     return IValue();

@@ -13,10 +13,19 @@ static PyObject* THPStream_pynew(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  uint64_t cdata = 0;
+  int64_t stream_id = 0;
+  int64_t device_index = 0;
+  int64_t device_type = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  static char* kwlist[] = {"_cdata", nullptr};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|K", kwlist, &cdata)) {
+  static char* kwlist[] = {"stream_id", "device_index", "device_type", nullptr};
+  if (!PyArg_ParseTupleAndKeywords(
+          args,
+          kwargs,
+          "|KKK",
+          kwlist,
+          &stream_id,
+          &device_index,
+          &device_type)) {
     return nullptr;
   }
 
@@ -26,7 +35,9 @@ static PyObject* THPStream_pynew(
   }
 
   THPStream* self = (THPStream*)ptr.get();
-  self->cdata = cdata;
+  self->stream_id = stream_id;
+  self->device_index = device_index;
+  self->device_type = device_type;
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
 }
@@ -37,21 +48,37 @@ static void THPStream_dealloc(THPStream* self) {
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(c10::Stream::unpack(self->cdata).device());
+  return THPDevice_New(
+      c10::Stream::unpack3(
+          self->stream_id, self->device_index, self->device_type)
+          .device());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(self->cdata == other->cdata);
+  return PyBool_FromLong(
+      self->stream_id == other->stream_id &&
+      self->device_index == other->device_index &&
+      self->device_type == other->device_type);
   END_HANDLE_TH_ERRORS
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPStream_members[] = {
-    {(char*)"_cdata",
-     T_ULONGLONG,
-     offsetof(THPStream, cdata),
+    {(char*)"stream_id",
+     T_LONGLONG,
+     offsetof(THPStream, stream_id),
+     READONLY,
+     nullptr},
+    {(char*)"device_index",
+     T_LONGLONG,
+     offsetof(THPStream, device_index),
+     READONLY,
+     nullptr},
+    {(char*)"device_type",
+     T_LONGLONG,
+     offsetof(THPStream, device_type),
      READONLY,
      nullptr},
     {nullptr}};
