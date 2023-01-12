@@ -48,6 +48,10 @@ Creation Ops
 
     tensor
     sparse_coo_tensor
+    sparse_csr_tensor
+    sparse_csc_tensor
+    sparse_bsr_tensor
+    sparse_bsc_tensor
     asarray
     as_tensor
     as_strided
