@@ -2154,14 +2154,14 @@ def one_layer_rnn_data(
     return out, hidden_out
 
 
-def rnn_helper(nonlinearity):
+def rnn_cell(nonlinearity):
     def inner(i, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
         return nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + i)
 
     return inner
 
 
-def rnn_helper_data(nonlinearity):
+def rnn_cell_data(nonlinearity):
     def inner(i, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
         i = F.linear(i, ih_weight, ih_bias)
         return nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + i)
@@ -2258,7 +2258,7 @@ def rnn_tanh_input(
         train,
         bidirectional,
         batch_first,
-        partial(one_layer_rnn, hidden_fn=rnn_helper(torch.tanh)),
+        partial(one_layer_rnn, hidden_fn=rnn_cell(torch.tanh)),
     )
     return out, torch.stack(final_hiddens, 0)
 
@@ -2289,7 +2289,7 @@ def rnn_relu_input(
         train,
         bidirectional,
         batch_first,
-        partial(one_layer_rnn, hidden_fn=rnn_helper(torch.relu)),
+        partial(one_layer_rnn, hidden_fn=rnn_cell(torch.relu)),
     )
     return out, torch.stack(final_hiddens, 0)
 
@@ -2323,7 +2323,7 @@ def rnn_relu_data(
         partial(
             one_layer_rnn_data,
             batch_sizes=batch_sizes,
-            hidden_fn=rnn_helper_data(torch.relu),
+            hidden_fn=rnn_cell_data(torch.relu),
         ),
     )
     return out, torch.stack(final_hiddens, 0)
@@ -2358,7 +2358,7 @@ def rnn_tanh_data(
         partial(
             one_layer_rnn_data,
             batch_sizes=batch_sizes,
-            hidden_fn=rnn_helper_data(torch.tanh),
+            hidden_fn=rnn_cell_data(torch.tanh),
         ),
     )
     return out, torch.stack(final_hiddens, 0)
@@ -2534,7 +2534,7 @@ def lstm_data_impl(
     return out, torch.stack(final_hiddens[0], 0), torch.stack(final_hiddens[1], 0)
 
 
-def gru_helper(inp, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
+def gru_cell(inp, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
     chunked_igates = inp.chunk(3, 1)
     chunked_hgates = F.linear(cur_hidden, hh_weight, hh_bias).chunk(3, 2)
     reset_gate = (chunked_hgates[0] + chunked_igates[0]).sigmoid()
@@ -2543,7 +2543,7 @@ def gru_helper(inp, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
     return (cur_hidden - new_gate) * input_gate + new_gate
 
 
-def gru_helper_data(inp, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
+def gru_cell_data(inp, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
     chunked_igates = F.linear(inp, ih_weight, ih_bias).chunk(3, 1)
     chunked_hgates = F.linear(cur_hidden, hh_weight, hh_bias).chunk(3, 1)
     reset_gate = (chunked_hgates[0] + chunked_igates[0]).sigmoid()
@@ -2577,7 +2577,7 @@ def gru_impl_data(
         train,
         bidirectional,
         False,
-        partial(one_layer_rnn_data, batch_sizes=batch_sizes, hidden_fn=gru_helper_data),
+        partial(one_layer_rnn_data, batch_sizes=batch_sizes, hidden_fn=gru_cell_data),
     )
     return out, torch.stack(final_hiddens, 0)
 
@@ -2607,7 +2607,7 @@ def gru_impl(
         train,
         bidirectional,
         batch_first,
-        partial(one_layer_rnn, hidden_fn=gru_helper),
+        partial(one_layer_rnn, hidden_fn=gru_cell),
     )
     return out, torch.stack(final_hiddens, 0)
 
