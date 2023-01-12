@@ -56,12 +56,14 @@ struct SparseBitVectorElement {
   unsigned ElementIndex;
   BitWord Bits[BITWORDS_PER_ELEMENT];
 
-  SparseBitVectorElement() : ElementIndex(~0U) {
+  SparseBitVectorElement() {
+    ElementIndex = ~0U;
     memset(&Bits[0], 0, sizeof(BitWord) * BITWORDS_PER_ELEMENT);
   }
 
  public:
-  explicit SparseBitVectorElement(unsigned Idx) : ElementIndex(Idx) {
+  explicit SparseBitVectorElement(unsigned Idx) {
+    ElementIndex = Idx;
     memset(&Bits[0], 0, sizeof(BitWord) * BITWORDS_PER_ELEMENT);
   }
 
@@ -390,12 +392,12 @@ class SparseBitVector {
     SparseBitVectorIterator(
         const SparseBitVector<ElementSize>* RHS,
         bool end = false)
-        : AtEnd(end),
-          BitVector(RHS),
-          BitNumber(0),
-          Bits(0),
-          Iter(BitVector->Elements.begin()),
-          WordNumber(~0) {
+        : BitVector(RHS) {
+      Iter = BitVector->Elements.begin();
+      BitNumber = 0;
+      Bits = 0;
+      WordNumber = ~0;
+      AtEnd = end;
       AdvanceToFirstNonZero();
     }
 
