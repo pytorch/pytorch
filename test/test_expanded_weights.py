@@ -387,8 +387,8 @@ class TestExpandedWeightFunctional(TestCase):
 
 class TestExpandedWeightModule(TestCase):
     def _do_test(self, module, input, args=None, kwargs=None, batch_first=True):
-        args = args if args is not None else ()
-        kwargs = kwargs if kwargs is not None else {}
+        args = args or ()
+        kwargs = kwargs or {}
 
         batch_dim = 0 if batch_first else 1
         batch_size = input.shape[batch_dim]
