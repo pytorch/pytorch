@@ -1,9 +1,9 @@
 import warnings
-from collections import defaultdict
+from typing import Union, Iterable
 
 import torch
 from torch._six import inf
-from typing import Union, Iterable
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 _tensor_or_tensors = Union[torch.Tensor, Iterable[torch.Tensor]]
 
@@ -41,16 +41,14 @@ def clip_grad_norm_(
     device = grads[0].device
 
     if foreach:
-        per_device_and_dtype_grads = defaultdict(list)
-        for g in grads:
-            per_device_and_dtype_grads[(g.device, g.dtype)].append(g.detach())
+        grouped_tensors = _group_tensors_by_device_and_dtype([[g.detach() for g in grads]])
 
     if norm_type == inf:
         norms = [g.detach().abs().max().to(device) for g in grads]
         total_norm = norms[0] if len(norms) == 1 else torch.max(torch.stack(norms))
     elif foreach:
         norms = []
-        for grads in per_device_and_dtype_grads.values():
+        for [grads] in grouped_tensors.values():
             norms.extend(torch._foreach_norm(grads, norm_type))
         total_norm = torch.norm(torch.stack([norm.to(device) for norm in norms]), norm_type)
     else:
@@ -68,7 +66,7 @@ def clip_grad_norm_(
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     if foreach:
         clip_coef_clamped_scalar = clip_coef_clamped.item()
-        for (device, _), grads in per_device_and_dtype_grads.items():
+        for [grads] in grouped_tensors.values():
             torch._foreach_mul_(grads, clip_coef_clamped_scalar)
     else:
         for g in grads:
@@ -107,11 +105,8 @@ def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach:
         parameters = [parameters]
     clip_value = float(clip_value)
     if foreach:
-        per_device_dtype_grads = defaultdict(list)
-        for p in filter(lambda p: p.grad is not None, parameters):
-            per_device_dtype_grads[(p.grad.device, p.grad.dtype)].append(p.grad)
-
-        for grads in per_device_dtype_grads.values():
+        grouped_tensors = _group_tensors_by_device_and_dtype([[p.grad for p in parameters if p is not None]])
+        for [grads] in grouped_tensors.values():
             torch._foreach_clamp_min_(grads, -clip_value)
             torch._foreach_clamp_max_(grads, clip_value)
     else:
