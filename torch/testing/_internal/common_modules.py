@@ -948,7 +948,7 @@ def module_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_grad, t
 
     return samples
 
-def make_padded_sequence(inp, batch_sizes):
+def make_packed_sequence(inp, batch_sizes):
     required_grad = inp.requires_grad
     inp.requires_grad_(False)  # user won't have access to inp so won't be able to get its grads
     seq = pack_padded_sequence(inp, batch_sizes)
@@ -956,7 +956,7 @@ def make_padded_sequence(inp, batch_sizes):
     return seq
 
 
-def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
+def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, with_packed_sequence=False, **kwargs):
     # Currently all samples below are for validating the no-batch-dim support.
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     is_rnn = kwargs['is_rnn']
@@ -994,25 +994,26 @@ def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, tr
         )
         samples.append(
             ModuleInput(
-                constructor_input=FunctionInput(**cons_args),
-                forward_input=FunctionInput(make_padded_sequence(make_input((5, 2, 2)), torch.tensor([5, 3]))),
-                reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
-            )
-        )
-        samples.append(
-            ModuleInput(
-                constructor_input=FunctionInput(**cons_args),
-                forward_input=FunctionInput(make_padded_sequence(make_input((5, 5, 2)), torch.tensor([5, 3, 3, 2, 2]))),
-                reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
-            )
-        )
-        samples.append(
-            ModuleInput(
                 constructor_input=FunctionInput(**cons_args_hidden),
                 forward_input=FunctionInput(make_input((3, 2)), make_input((4 if bidir else 2, 3))),
                 reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
             )
         )
+        if with_packed_sequence:
+            samples.append(
+                ModuleInput(
+                    constructor_input=FunctionInput(**cons_args),
+                    forward_input=FunctionInput(make_packed_sequence(make_input((5, 2, 2)), torch.tensor([5, 3]))),
+                    reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
+                )
+            )
+            samples.append(
+                ModuleInput(
+                    constructor_input=FunctionInput(**cons_args),
+                    forward_input=FunctionInput(make_packed_sequence(make_input((5, 5, 2)), torch.tensor([5, 3, 3, 2, 2]))),
+                    reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
+                )
+            )
 
     return samples
 
