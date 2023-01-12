@@ -254,18 +254,17 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
     aw_->markCompleted(toIValue(input, type));
   }
 
-  explicit PythonAwaitWrapper(py::function pyf, py::tuple args) {
+  explicit PythonAwaitWrapper(py::function pf, py::tuple args) {
     // eager mode (no type inference) awaitable
     pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(
-        std::move(pyf));
+        std::move(pf));
     args_ = std::move(args);
-    // TODO: pass to lambda by ref?
-    std::function<IValue()> ival_func = [fg(pyfg_), args(args_)]() {
+    std::function<IValue()> f = [fg(pyfg_), &args(args_)]() {
       pybind11::gil_scoped_acquire ag;
       return toIValue(fg->func_(*args), PyObjectType::get());
     };
     aw_ = c10::make_intrusive<c10::ivalue::Await>(
-        PyObjectType::get(), std::move(ival_func));
+        PyObjectType::get(), std::move(f));
   }
 
   explicit PythonAwaitWrapper(const PythonAwaitWrapper&) = delete;

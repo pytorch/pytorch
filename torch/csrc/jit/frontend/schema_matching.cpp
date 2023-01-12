@@ -78,21 +78,6 @@ Value* tryConvertToType(
     }
   }
 
-  // Implicit conversion of Await[S] to T if S is subtype of T
-  // if (AwaitTypePtr aw = value->type()->cast<AwaitType>()) {
-  //   if (aw->getElementType()->isSubtypeOf(concrete_type)) {
-  //     value = graph.insert(aten::awaitable_wait, {value}, {}, loc);
-  //     return tryConvertToType(
-  //         loc, graph, concrete_type, value, allow_conversions);
-  //   }
-  // }
-
-  if (AwaitTypePtr aw = concrete_type->cast<AwaitType>()) {
-    if (value->type()->isSubtypeOf(aw->getElementType())) {
-      return graph.insert(aten::awaitable_nowait, {value}, {}, loc);
-    }
-  }
-
   // allow temporary, unannotated list literals `[]` to match to arbitrary list
   // types
   if (value->node()->kind() == prim::EmptyListLiteral &&

@@ -34,7 +34,6 @@ namespace jit {
   _(LOOP, "PI") /* perform a loop, X is where to branch if cond is false */    \
   _(RET, "") /* exit execution */                                              \
   _(WAIT, "") /* wait for a future to be complete */                           \
-  _(AWAITABLE_WAIT, "") /* call await function */                              \
   _(CALL, "F") /* call function X */                                           \
   _(GUARD, "T") /* check a guard against type_table, true if passes */         \
   _(TYPECHECK, "TN") /* check each type of input[i] against type_table[X+N] */ \

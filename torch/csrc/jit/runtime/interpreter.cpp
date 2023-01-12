@@ -440,35 +440,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             leaveFrame();
             return false;
           }
-          case INST(AWAITABLE_WAIT): {
-            INST_GUARD;
-            auto aw = stack.back().toAwait();
-            aw->wait();
-            //if (!aw->completed()) {
-            //  frame.function->function_table_[inst.X]->ensure_defined();
-
-            //  auto& gf =
-            //      toGraphFunction(*frame.function->function_table_[inst.X]);
-
-            //  for (const auto& arg : aw->args()) {
-            //    stack.push_back(arg);
-            //  }
-
-            //  gf.run(stack);
-
-            //  auto num_outputs = gf.graph()->outputs().size();
-            //  if (num_outputs == 1) {
-            //    aw->markCompleted(stack.back());
-            //  } else {
-            //    aw->markCompleted(
-            //        c10::ivalue::Tuple::create(jit::last(stack, num_outputs)));
-            //  }
-            //  drop(stack, num_outputs);
-            //}
-            stack.pop_back();
-            stack.emplace_back(aw->value());
-          }
-            INST_NEXT;
           case INST(WAIT): {
             INST_GUARD;
             auto future = stack.back().toFuture();
@@ -774,22 +745,24 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
             auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
             aw->setArgs(std::move(args));
-            aw->setInitFunc([&args=aw->args(), fn_ptr, taskLauncher=taskLauncher_]
-              () -> IValue {
-              auto& fn = toGraphFunction(*fn_ptr);
-              auto n_out = fn.graph()->outputs().size();
-              torch::jit::Stack s;
-              for (const auto& arg : args) {
-                s.push_back(arg);
-              }
-              InterpreterState await_interpreter(
-                  fn.get_executor().getPlanFor(s).code, taskLauncher);
-              await_interpreter.run(s);
-              if (n_out == 1) {
-                return s.back();
-              } 
-              return c10::ivalue::Tuple::create(jit::last(s, n_out));
-            });
+            aw->setFn(
+                [&args = aw->args(),
+                 fn_ptr,
+                 taskLauncher = taskLauncher_]() -> IValue {
+                  auto& fn = toGraphFunction(*fn_ptr);
+                  auto n_out = fn.graph()->outputs().size();
+                  torch::jit::Stack s;
+                  for (const auto& arg : args) {
+                    s.push_back(arg);
+                  }
+                  InterpreterState await_interpreter(
+                      fn.get_executor().getPlanFor(s).code, taskLauncher);
+                  await_interpreter.run(s);
+                  if (n_out == 1) {
+                    return s.back();
+                  }
+                  return c10::ivalue::Tuple::create(jit::last(s, n_out));
+                });
             drop(stack, inst.N);
             push(stack, std::move(aw));
           }

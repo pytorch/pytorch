@@ -343,11 +343,6 @@ struct CodeImpl {
     insertInstruction(WAIT);
   }
 
-  void emitAwaitableWait(Node* node) {
-    emitLoadInputs(node->inputs());
-    insertInstruction(AWAITABLE_WAIT);
-  }
-
   void emitDrop(at::ArrayRef<Value*> to_drop) {
     for (Value* input : to_drop) {
       emitUse(input, true);
@@ -677,9 +672,6 @@ struct CodeImpl {
         break;
       case aten::wait:
         emitWait(node);
-        break;
-      case aten::awaitable_wait:
-        emitAwaitableWait(node);
         break;
       case prim::Param:
         break;

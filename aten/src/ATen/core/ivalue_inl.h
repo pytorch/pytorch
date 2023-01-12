@@ -26,6 +26,8 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 
+#include <iostream>
+
 namespace torch {
 namespace jit {
 struct Function;
@@ -1366,10 +1368,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
 struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
  private:
-  explicit Await(TypePtr elType, std::function<IValue()> init_func)
-      : elType_(std::move(elType)), type_(AwaitType::create(elType_)), init_func_(init_func) {}
+  explicit Await(TypePtr elType, std::function<IValue()> fn)
+      : elType_(std::move(elType)), type_(AwaitType::create(elType_)), fn_(std::move(fn)) {}
 
-  explicit Await(TypePtr elType) : elType_(std::move(elType)), type_(AwaitType::create(elType_)) {}
+  explicit Await(TypePtr elType) : elType_(std::move(elType)), type_(AwaitType::create(elType_)) { }
 
   friend c10::intrusive_ptr<Await>;
 
@@ -1381,8 +1383,8 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
 
   IValue wait() {
     if (!completed_) {
-      TORCH_CHECK(init_func_, "Incompleted Await init_func can't be None");
-      value_ = init_func_();
+      TORCH_CHECK(fn_, "Incompleted Await: fn can't be None");
+      value_ = fn_();
       completed_ = true;
       args_ = {};
     }
@@ -1394,8 +1396,8 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
     return value_;
   }
 
-  void setInitFunc(std::function<IValue()> init_func) {
-    init_func_ = init_func;
+  void setFn(std::function<IValue()> fn) {
+    fn_ = std::move(fn);
   }
 
   bool completed() {
@@ -1431,7 +1433,7 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
   TypePtr elType_;
   TypePtr type_;
   std::vector<IValue> args_;
-  std::function<IValue()> init_func_;
+  std::function<IValue()> fn_;
   IValue value_;
   bool completed_{};
 };

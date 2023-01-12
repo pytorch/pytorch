@@ -319,7 +319,10 @@ RegisterOperators reg(
      Operator(
          "aten::awaitable_wait(Await(t) self) -> t",
          [](Stack& stack) {
-           TORCH_CHECK(false, "Not implemented yet");
+           auto aw = stack.back().toAwait();
+           aw->wait();
+           stack.pop_back();
+           stack.emplace_back(aw->value());
          },
          aliasAnalysisSpecialCase()),
      Operator(

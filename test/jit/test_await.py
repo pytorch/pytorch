@@ -1,9 +1,38 @@
+# Owner(s): ["oncall: jit"]
+
 import torch
-from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
+from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.jit_utils import make_global
 from typing import List, Optional
 from torch import Tensor
 from torch.awaits import Await
+
+@torch.jit.script
+class CFX(object):
+    def __init__(self, a: Tensor, b: Tensor):
+        self.a = a
+        self.b = b
+
+    def ma(self) -> Tensor:
+        return self.a
+
+    @torch.jit.unused
+    # Even for jit.unused we need to be decl-scriptable, as jit adds stub with the same decl. If to add fx types here - during decl resolve jit will try to compile it and fail.
+    def __fx_create_arg__(self, tracer):
+        return tracer.create_node(
+            "call_function",
+            CFX,
+            args=(tracer.create_arg(self.a),tracer.create_arg(self.b)),
+            kwargs={},
+        )
+
+def cfx_delayed(c: CFX) -> Tensor:
+    return 2 * (c.ma() + 1)
+
+@torch.fx.wrap
+def cfx_wrapped(c: CFX) -> Await[Tensor]:
+    return torch.jit.awaitable(cfx_delayed, c)
+
 
 class TestAwait(JitTestCase):
     def test_await_python(self):
@@ -46,23 +75,6 @@ class TestAwait(JitTestCase):
             a = torch.eye(2)
             b = torch.jit.awaitable_wait(aw)
             return a + b + x
-
-        inp = torch.zeros(2)
-
-        sm = torch.jit.script(fn)
-        out = fn(inp)
-        script_out = sm(inp)
-        self.assertTrue(torch.allclose(script_out, out))
-
-    def test_nowait_implicit(self):
-        @torch.jit.script
-        def delayed(y: Tensor) -> Await[Tensor]:
-            return y * 2
-
-        @torch.jit.script
-        def fn(x: Tensor) -> Tensor:
-            aw = delayed(x)
-            return torch.jit.awaitable_wait(aw) * 3
 
         inp = torch.zeros(2)
 
@@ -152,37 +164,6 @@ class TestAwait(JitTestCase):
         out = fn(inp)
         script_out = sm(inp)
         self.assertTrue(torch.allclose(script_out, out))
-
-#    def test_await_implicit_convertion(self):
-#        class C(object):
-#            def __init__(self, a: Tensor, b: Tensor):
-#                self._a = a
-#                self._b = b
-#
-#
-#        make_global(C)
-#        # Can not stay in the class as Jit does not support Recursive annotations
-#        # (self in wait_impl can not be annotated as C as C is not defined by this time)
-#        def C_wait_impl(self: C) -> C:
-#                return C(self._a * 2, self._b * 3)
-#
-#        def fn_arg_C(x: C) -> Tensor:
-#          return x._a + x._b
-#
-#        @torch.jit.script
-#        def fn(x: Tensor):
-#            aw: Await[C] = torch.jit.awaitable(C_wait_impl, C(x, x))
-#            _a = torch.eye(2)
-#            y = fn_arg_C(aw)
-#            return _a + y + x
-#
-#        inp = torch.zeros(2)
-#
-#        sm = torch.jit.script(fn)
-#        out = fn(inp)
-#        script_out = sm(inp)
-#        self.assertTrue(torch.allclose(script_out, out))
-#        self.assertGraphContainsExactly(sm.graph, kind='aten::awaitable_wait', num_kind_nodes=1)
 
     def test_await_class_return(self):
         class C(object):
@@ -384,3 +365,25 @@ class TestAwait(JitTestCase):
         tm = torch.jit.trace(main, (inp,inp))
         inp_check = torch.ones(2)
         self.assertEqual(main(inp_check, inp_check), tm(inp_check, inp_check))
+
+    def test_await_fx(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def process(self, aw: Await[Tensor]):
+                return torch.jit.awaitable_wait(aw)
+
+            def forward(self, x: Tensor, y: Tensor):
+                aw = cfx_wrapped(CFX(x, y))
+                z = torch.sin(x)
+                r = self.process(aw)
+                return r + z
+
+        m = M()
+        tracer = torch.fx.Tracer()
+        g = tracer.trace(m)
+        gm = torch.fx.GraphModule(tracer.root, g)
+        sm = torch.jit.script(gm)
+        inp = torch.randn(2)
+        self.assertEqual(m(inp, inp), sm(inp, inp))
