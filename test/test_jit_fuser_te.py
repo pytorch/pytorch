@@ -2479,7 +2479,7 @@ class TestTEFuser(JitTestCase):
         for i in range(4):
             res = script_fn(x)
 
-        self.asertEqual(ref, res)
+        self.assertEqual(ref, res)
 
 
 class TestTEFuserStatic(TestTEFuser):
