@@ -270,7 +270,7 @@ class PatternEntry:
 
 @dataclasses.dataclass
 class LoweringPatternEntry(PatternEntry):
-    handler: Callable[[Match, ...], Any]
+    handler: Any
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
         handler = functools.wraps(self.handler)(functools.partial(self.handler, match))
