@@ -2101,6 +2101,8 @@ def update_hidden_for_packed(cur_hidden, last_batch_size, batch_size, hiddens):
 def update_hidden_for_packed_reverse(
     cur_hidden, last_batch_size, batch_size, inp_hidden
 ):
+    if last_batch_size == batch_size:
+        return cur_hidden
     assert last_batch_size < batch_size
     return torch.concat(
         (
@@ -2129,16 +2131,13 @@ def one_layer_rnn_data(
     for inp in split_inp:
         i = inp.shape[0]
 
+        if last_batch_size == i:
+            pass  # don't update cur_hidden
         # this will only happen when reverse=False, since batch sizes are sorted largest -> smallest
-        if i < last_batch_size:
-            hiddens.append(cur_hidden.narrow(0, i, last_batch_size - i))
-            cur_hidden = cur_hidden.narrow(0, 0, i)
-
-        # this will only happen when reverse=True
-        if i > last_batch_size:
-            cur_hidden = torch.concat(
-                (cur_hidden, hidden.narrow(0, last_batch_size, i - last_batch_size)), 0
-            )
+        elif reverse:
+            cur_hidden = update_hidden_for_packed_reverse(cur_hidden, last_batch_size, i, hidden)
+        else:
+            cur_hidden = update_hidden_for_packed(cur_hidden, last_batch_size, i, hiddens)
 
         cur_hidden = hidden_fn(inp, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias)
         last_batch_size = i
