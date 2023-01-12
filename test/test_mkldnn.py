@@ -1318,12 +1318,12 @@ class TestMkldnn(TestCase):
                 model1 = copy.deepcopy(model)
                 model2 = copy.deepcopy(model)
                 with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16):
-                    torch._C._set_mkldnn_enabled(False)
-                    torch.manual_seed(seed)
-                    output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
-                                                                         (self._cast_dtype(h1, bf16), self._cast_dtype(c1, bf16)))
+                    with torch.backends.mkldnn.flags(enabled=False):
+                        torch.manual_seed(seed)
+                        output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
+                                                                             (self._cast_dtype(h1, bf16),
+                                                                             self._cast_dtype(c1, bf16)))
 
-                    torch._C._set_mkldnn_enabled(True)
                     torch.manual_seed(seed)
                     output2, (hn2, cn2) = model2(input2, (h2, c2))
                     self.assertEqual(output1, output2, rtol=rtol, atol=atol)
@@ -1331,11 +1331,10 @@ class TestMkldnn(TestCase):
                     self.assertEqual(cn1, cn2, rtol=rtol, atol=atol)
 
                     if training:
-                        torch._C._set_mkldnn_enabled(False)
-                        torch.manual_seed(seed)
-                        output1.sum().backward(retain_graph=True)
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            output1.sum().backward(retain_graph=True)
 
-                        torch._C._set_mkldnn_enabled(True)
                         torch.manual_seed(seed)
                         output2.sum().backward(retain_graph=True)
 
@@ -1344,18 +1343,16 @@ class TestMkldnn(TestCase):
                             self.assertEqual(para, self._cast_dtype(getattr(model2, name), bf16))
                             self.assertEqual(para.grad, self._cast_dtype(getattr(model2, name).grad, bf16), rtol=rtol, atol=atol)
 
-                        torch._C._set_mkldnn_enabled(False)
-                        torch.manual_seed(seed)
-                        hn1.sum().backward(retain_graph=True)
-                        torch._C._set_mkldnn_enabled(True)
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            hn1.sum().backward(retain_graph=True)
                         torch.manual_seed(seed)
                         hn2.sum().backward(retain_graph=True)
                         self.assertEqual(h1.grad, h2.grad, rtol=rtol, atol=atol)
 
-                        torch._C._set_mkldnn_enabled(False)
-                        torch.manual_seed(seed)
-                        cn1.sum().backward(retain_graph=True)
-                        torch._C._set_mkldnn_enabled(True)
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            cn1.sum().backward(retain_graph=True)
                         torch.manual_seed(seed)
                         cn2.sum().backward(retain_graph=True)
                         self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)

@@ -16,7 +16,7 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(
@@ -69,13 +69,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub);
 
 } // namespace at::native
-}
+
 #else // AT_MKLDNN_EBABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 struct RNNParams {
   ideep::rnn_kind mode;
@@ -201,7 +201,7 @@ Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
     return at::cat({gates[1], gates[0], gates[2]}, /*gates*/0);
   }
   return weight_t;
-};
+}
 
 Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_t fn_mode) {
   if (static_cast<ideep::rnn_kind>(fn_mode) == ideep::rnn_kind::GRU) {
@@ -210,7 +210,7 @@ Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_t fn_mo
     return at::cat({b1[1] + b2[1], b1[0] + b2[0], b1[2], b2[2]}, /*output_channels*/0);
   }
   return bias_ih + bias_hh;
-};
+}
 
 // Create mkldnn memory view from ATen tensor
 static inline ideep::tensor get_mkldnn_tensor(
@@ -272,29 +272,28 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   int64_t input_size = input.size(2);
   auto x = get_mkldnn_tensor(
       input,
-      rnn.src_layer_desc(input_size, get_mkldnn_dtype(input.scalar_type())));
+      rnn.src_layer_desc(input_size, get_mkldnn_dtype(input)));
   auto hx = get_mkldnn_tensor(
-      hx_, rnn.src_iter_desc(get_mkldnn_dtype(hx_.scalar_type())));
+      hx_, rnn.src_iter_desc(get_mkldnn_dtype(hx_)));
   auto cx = get_mkldnn_tensor(
-      cx_, rnn.src_iter_c_desc(get_mkldnn_dtype(cx_.scalar_type())));
+      cx_, rnn.src_iter_c_desc(get_mkldnn_dtype(cx_)));
   auto b = get_mkldnn_tensor(
-      bias, rnn.bias_desc(get_mkldnn_dtype(bias.scalar_type())));
+      bias, rnn.bias_desc(get_mkldnn_dtype(bias)));
   auto y = get_mkldnn_tensor(
-      output, rnn.dst_layer_desc(get_mkldnn_dtype(output.scalar_type())));
+      output, rnn.dst_layer_desc(get_mkldnn_dtype(output)));
   auto hy = get_mkldnn_tensor(
-      hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_.scalar_type())));
+      hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_)));
   auto cy = get_mkldnn_tensor(
-      cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_.scalar_type())));
-  auto w1_ = get_mkldnn_tensor(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih.scalar_type())));
-  auto w2_ = get_mkldnn_tensor(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh.scalar_type())));
+      cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_)));
+  auto w1_ = get_mkldnn_tensor(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
+  auto w2_ = get_mkldnn_tensor(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
 
-  Tensor workspace = Tensor();
   auto pd = ideep::lstm_forward_training::prepare(
       x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
-  workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
+  auto workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
   ideep::tensor mkldnn_workspace;
   mkldnn_workspace.init(
-      pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
+      pd.workspace_desc(), workspace.data_ptr<uint8_t>());
   ideep::lstm_forward_training::compute(
       pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
   return std::make_tuple(output, hy_, cy_, workspace);
@@ -350,13 +349,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
       ? _shuffle_bias(weight2, weight3, rnn.mode)
       : at::zeros({rnn.num_bias_gates * rnn.hidden_size}, weight_ih.options());
 
-  at::Tensor cx_;
-  if (hx_.storage().unsafeGetStorageImpl() ==
-      cx_tmp.storage().unsafeGetStorageImpl()) {
-    cx_ = at::clone(cx_tmp);
-  } else {
-    cx_ = cx_tmp;
-  }
+  auto cx_  =  hx_.storage().unsafeGetStorageImpl() == cx_tmp.storage().unsafeGetStorageImpl() ? at::clone(cx_tmp) : cx_tmp;
 
   // per layer input size
   int64_t input_size = input.size(2);
@@ -493,9 +486,9 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
   std::vector<at::Tensor> layer_output(num_directions);
   std::vector<at::Tensor> layer_hy(num_layers * num_directions);
   std::vector<at::Tensor> layer_cy(num_layers * num_directions);
-  for (int64_t layer = 0; layer < num_layers; layer++) {
-    for (int64_t direction = 0; direction < num_directions; direction++) {
-      auto index = layer * num_directions + direction;
+  for (const auto layer: c10::irange(num_layers)) {
+    for (const auto direction: c10::irange(num_directions)) {
+      const auto index = layer * num_directions + direction;
       auto layer_weights = weights[index];
       TORCH_CHECK(layer_weights.size() == 2 || layer_weights.size() == 4);
       auto layer_hx = hx[index];
@@ -578,6 +571,6 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
 
 REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
 
-}} // namespace at::native
+} // namespace at::native
 
 #endif // AT_MKLDNN_EBABLED
