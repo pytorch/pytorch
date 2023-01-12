@@ -533,7 +533,7 @@ class TestExpandedWeightModule(TestCase):
         module_cls = module_info.module_cls
         atol, rtol = (1e-4, 1e-5) if module_cls == torch.nn.GRU and dtype == torch.float32 else (None, None)
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
-                                                       requires_grad=True, training=training)
+                                                       requires_grad=True, training=training, with_packed_sequence=True)
         for module_input in module_inputs:
             if module_input.forward_input is None:
                 continue
