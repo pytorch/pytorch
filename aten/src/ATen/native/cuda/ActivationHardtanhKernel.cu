@@ -24,8 +24,9 @@ void hardtanh_backward_kernel(
     TensorIterator& iter,
     const Scalar& min,
     const Scalar& max) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::Half, iter.dtype(), "hardtanh_backward_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      iter.dtype(), "hardtanh_backward_cuda", [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
         auto min_val = min.to<opmath_t>();
         auto max_val = max.to<opmath_t>();

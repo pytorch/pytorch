@@ -28,8 +28,8 @@ class DeviceMeshTest(DTensorTestBase):
         return 8
 
     def test_init_process_group(self):
-        self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        backend = "nccl" if self.device_type == "cuda" else "gloo"
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        backend = "nccl" if device_type == "cuda" else "gloo"
         # skip the test if not enough GPUs
         if backend == "nccl" and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
@@ -37,11 +37,9 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(not is_initialized())
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "25364"
-        # mesh size can be smaller than world_size
         os.environ["WORLD_SIZE"] = f"{self.world_size}"
-        # this means user needs to set rank in env
         os.environ["RANK"] = f"{self.rank}"
-        mesh = DeviceMesh(self.device_type, mesh_tensor)
+        mesh = DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg()
 
