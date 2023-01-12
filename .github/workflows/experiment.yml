@@ -16,3 +16,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # There must be at least one job here to satisfy GitHub action workflow syntax
+  introduction:
+    name: introduction
