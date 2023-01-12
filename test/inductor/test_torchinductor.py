@@ -3456,6 +3456,18 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(0, 999, size=[2, 16, 31], dtype=torch.float32),))
 
+    def test_constant_pad_fill_dtype(self):
+        def fn(a, b):
+            return (
+                aten.constant_pad_nd(a, (1, 1), 1.0) & b,
+                aten.constant_pad_nd(a, (1, 1), 0.0) & b,
+            )
+
+        self.common(
+            fn,
+            (torch.randint(2, (4,), dtype=torch.bool), torch.ones(6, dtype=torch.bool)),
+        )
+
     def test_constant_pad_2d(self):
         def fn(a):
             return (
@@ -3676,6 +3688,38 @@ class CommonTemplate:
                 arg190,
             ),
         )
+
+    # The following 3 tests are meant to check the logic that drops
+    # xmask from triton load/store if xnumel = 1 or XBLOCK divides xnumel
+    @requires_cuda()
+    def test_single_elem(self):
+        def fn(a):
+            b = a + 1
+            return (b,)
+
+        self.common(fn, (torch.randn(1),))
+
+    @requires_cuda()
+    def test_single_elem_indirect(self):
+        def fn(a, b):
+            c = a[b] + 1
+            return (c,)
+
+        self.common(
+            fn,
+            (
+                torch.randn(1),
+                torch.tensor([0], dtype=torch.int64),
+            ),
+        )
+
+    @requires_cuda()
+    def test_xblock_divides_xnumel(self):
+        def fn(a):
+            b = a + 1
+            return (b,)
+
+        self.common(fn, (torch.randn(2 * 1024),))
 
     @unittest.skipIf(not has_torchvision_roi_align(), "requires torchvision")
     def test_roi_align(self):

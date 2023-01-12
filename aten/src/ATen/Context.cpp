@@ -302,7 +302,12 @@ at::QEngine Context::qEngine() const {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
-      qengine = at::kFBGEMM;
+      /* X86 is enabled if and only if fbgemm is available.
+       * It combines goodness of fbgemm and onednn by dispatching.
+       * If onednn not available, always dispatch to fbgemm.
+       * Make it default qengine for X86 CPU platforms.
+      */
+      qengine = at::kX86;
     }
 #endif
     return qengine;
@@ -360,14 +365,6 @@ bool Context::isXNNPACKAvailable() {
 #else
   return false;
 #endif
-}
-
-void Context::setCheckSparseTensorInvariants(bool e) {
-  enable_sparse_tensor_invariant_checks = e;
-}
-
-bool Context::checkSparseTensorInvariants() const {
-  return enable_sparse_tensor_invariant_checks;
 }
 
 bool Context::releaseWeightsWhenPrepacking() const {
