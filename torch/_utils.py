@@ -144,17 +144,17 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    # TODO(wechi): allow FakeTensorMode to execute torch.tensor and tensor.set_.
-    #t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
-    #return t.set_(storage._untyped_storage, storage_offset, size, stride)
-    from torch.utils._mode_utils import no_dispatch, all_same_mode
-    with no_dispatch():
-        t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
-        t.set_(storage._untyped_storage, storage_offset, size, stride)
-    from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack, _pop_mode_temporarily
-    fake_mode = _get_current_dispatch_mode()
-    fake_tensor = fake_mode.from_tensor(t)
-    return fake_tensor
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.utils._mode_utils import no_dispatch
+    from torch.utils._python_dispatch import _get_current_dispatch_mode
+    mode = _get_current_dispatch_mode()
+    if isinstance(mode, FakeTensorMode):
+        with no_dispatch():
+            t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
+            t.set_(storage._untyped_storage, storage_offset, size, stride)
+        return mode.from_tensor(t)
+    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
+    return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
 
 

@@ -223,23 +223,28 @@ def fetch_sym_proxy(tracer):
 def fetch_tensor_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
-HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
+HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
 
 def proxy_call(proxy_mode, func, args, kwargs):
+    print(f"proxy_call: {func}")
     def can_handle_tensor(x):
         return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
+    print(f"handle tensor")
     if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
+        print(f"NotImplemented {func} {args} {kwargs}")
         return NotImplemented
 
     if func in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode:
             r = CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
+            print(f"CURRENT_DECOMPOSITION_TABLE")
             if r is not NotImplemented:
                 return r
 
+    print(f"func.decompose")
     with proxy_mode:
         r = func.decompose(*args, **kwargs)
         if r is not NotImplemented:
@@ -315,6 +320,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
+    print(f"proxy_call create_proxy: {func}")
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
@@ -470,6 +476,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self._managers = []
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        print(f"ProxyTorchDispatchMode ({id(self)}): {func}")
         with self.sym_mode.enable(False):
             return self.inner_torch_dispatch(func, types, args, kwargs)
 
@@ -532,6 +539,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         return p_out
 
     def __sym_dispatch__(self, func, types, args, kwargs):
+        print(f"ProxySymDispatchMode: {func}")
         if not self.enable_tracing:
             return func(*args, **kwargs)
 
@@ -631,13 +639,14 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
-        fake_tensor_mode: Any = nullcontext()
+        fake_tensor_mode = get_innermost_fake_tensor_mode()
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
-            fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=True,
-                allow_non_fake_inputs=_allow_non_fake_inputs)
+            if fake_tensor_mode is None:
+                fake_tensor_mode = FakeTensorMode(
+                    allow_fallback_kernels=True,
+                    allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
             shape_env = ShapeEnv()
             fake_tensor_mode = FakeTensorMode(
@@ -687,7 +696,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
-        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
+        with decompose(decomposition_table), python_dispatcher_mode, fake_tensor_mode, \
              sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
@@ -706,6 +715,13 @@ def get_torch_dispatch_modes():
 def get_innermost_proxy_mode():
     for m in reversed(torch.utils._python_dispatch._get_current_dispatch_mode_stack()):
         if isinstance(m, ProxyTorchDispatchMode):
+            return m
+    return None
+
+
+def get_innermost_fake_tensor_mode():
+    for m in reversed(torch.utils._python_dispatch._get_current_dispatch_mode_stack()):
+        if isinstance(m, FakeTensorMode):
             return m
     return None
 
