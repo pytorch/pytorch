@@ -9,7 +9,7 @@
 #include <ATen/native/Pow.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Forward declare some unary kernels
 void rsqrt_kernel_cuda(TensorIteratorBase& iter);
@@ -206,4 +206,4 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
 REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, &pow_tensor_scalar_kernel);
 
-}} // namespace at::native
+} // namespace at::native

@@ -13,8 +13,7 @@
 
 #include <type_traits>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace binary_internal {
 
 const char div_name[] = "div_kernel";
