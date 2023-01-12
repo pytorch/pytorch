@@ -399,8 +399,8 @@ class GraphLowering(torch.fx.Interpreter):
                         #
                         # When we do a better job selecting layout, we should
                         # revisit this.
-                        # Note: for as_strided given a size and stride, we should
-                        # make sure it's input has same size and stride eager model
+                        # Note: for as_strided given a size(stride), we should
+                        # make sure it's input has same size(stride) with eager model
                         # to avoid asserting failed error.
                         if user.target in (
                             torch.ops.aten.convolution.default,
@@ -411,7 +411,6 @@ class GraphLowering(torch.fx.Interpreter):
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
                             )
-
                     if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()

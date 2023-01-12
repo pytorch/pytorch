@@ -3989,7 +3989,9 @@ class CommonTemplate:
 
         def fn_channels_last(x):
             return (
-                 aten.as_strided(x,  (8, 384, 2, 20, 12), (153600, 1, 61440, 384, 7680), 0),
+                aten.as_strided(
+                    x, (8, 384, 2, 20, 12), (153600, 1, 61440, 384, 7680), 0
+                ),
                 aten.as_strided(
                     x + 1, (8, 384, 2, 20, 12), (153600, 1, 61440, 384, 7680), 0
                 )
