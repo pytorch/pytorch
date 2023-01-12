@@ -1471,8 +1471,8 @@ def _all_gather_optim_state(
                     value.shape, value.dtype
                 )
         else:
-            processed_state[state_name] = value
-    object_list: List[Dict[str, Any]] = [{} for _ in range(fsdp_state.world_size)]
+            processed_state.non_tensors = value
+    object_list: List[StateInfo] = [processed_state for _ in range(fsdp_state.world_size)]
     dist.all_gather_object(object_list, processed_state)
 
     # Convert the gathered, pre-proccessed state of each rank to the original one.
@@ -1511,14 +1511,14 @@ def _all_gather_optim_state(
         gathered_state[name] = AllGatherInfo(tensors, numels, work)
 
     for object_state in object_list:
-        for name, value in object_state.non_tensors.items():
-            curr_value = gathered_state.get(name, None)
-            if curr_object_value is not None:
+        for name, non_tensor_value in object_state.non_tensors.items():
+            curr_non_tensor_value = gathered_state.get(name, None)
+            if curr_non_tensor_value is not None:
                 assert (
-                    curr_object_value == object_value
+                    curr_non_tensor_value == non_tensor_value
                 ), f"Different ranks have different value for {name}."
             else:
-                gathered_state[name] = object_value
+                gathered_state[name] = non_tensor_value
 
         for name, scalar_tensor_value in object_state.scalar_tensors.items():
             curr_scalar_tensor_value = gathered_state.get(name, None)
@@ -1532,6 +1532,7 @@ def _all_gather_optim_state(
     for name, value in list(gathered_state.items()):
         if not isinstance(value, AllGatherInfo):
             continue
+        assert value.work is not None
         value.work.wait()
         tensors = []
         for rank_tensor, rank_numel in zip(value.tensors, value.numels):
