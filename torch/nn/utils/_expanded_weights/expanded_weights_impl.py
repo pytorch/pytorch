@@ -58,7 +58,6 @@ class ExpandedWeight(torch.Tensor):
         self.loss_reduction = loss_reduction
 
     handled_functions = HANDLED_FUNCTIONS
-    supported_unary = (torch.t, torch.Tensor.t)
 
     def __new__(cls, orig_weight, batch_size, loss_reduction):
         if not isinstance(orig_weight, torch.Tensor):
