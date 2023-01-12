@@ -530,32 +530,43 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
 
 
 template<int size0>
-void vectorized_cpu_hflip_channels_last_uint8(int64_t & i, char * C10_RESTRICT *data, const int64_t size, const int64_t stride) {
+int64_t vectorized_cpu_hflip_channels_last_uint8(char * C10_RESTRICT *data, const int64_t size, const int64_t stride) {
 
+  int64_t i = 0;
 #ifdef CPU_CAPABILITY_AVX2
 
-  constexpr auto vec_size = 256 / (8 * sizeof(uint8_t));
+  const auto vec_size = 256 / (8 * stride);
 
   if (size > vec_size) {
 
-    const auto proc_vec_size = 2 * ((vec_size / 2) / size0);
-    const auto delta = vec_size - proc_vec_size * size0;
-    __m256i data_vec, reversed_vec;
-
-    // Example for N=3
+    // Example for size0=3
     // Data: (1 2 3) (4 5 6) (7 8 9) (10 11 12) (13 14 15) (16 17 18) (19 20 21) (22 23 24) (25 26 27) (28 29 30) (31 32 33)
     // load by 2 parts
     // R = [ (1 2 3) (4 5 6) (7 8 9) (10 11 12) (13 14 15) (16 | (16 17 18) (19 20 21) (22 23 24) (25 26 27) (28 29 30) (31 ]
     // flip(R) ->
     // R = [ 31 (28 29 30) (25 26 27) (22 23 24) (19 20 21) (16 17 18) | 16 (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3) ]
+    //
     // Write in 2 parts
     // Output pointer:                                                                                                       v
+    // - Init:
     //                (X X X)  (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X) (X X X) (X X X)
-
+    // 0) Move to initial position: output_ptr += (size0 - delta/2) * stride;
+    //                                                                                                                           v
+    //                (X X X)  (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X)    (X X X) (X X X) (X X X)
+    // - In the loop:
+    // 1) Move to write position: output_ptr -= usable_vec_stride and write 1st block from output_ptr + usable_vec_half_stride
+    //                     v                                                    | ----> vec_size / 2 ----------------------------|
     // Output part 1: (X X X)  (X X X)    (X X X)    (X X X)    (X X X)    (X X 16)   (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3)
+    // 2) Write 2nd block from output_ptr:
+    //                     v ----> vec_size / 2 -----------------------------------|
     // Output part 2: (X X 31) (28 29 30) (25 26 27) (22 23 24) (19 20 21) (16 17 18) (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3)
+    //
+    // - After the loop:
+    // 3) Move to write position: output_ptr -= (size0 - delta/2) * stride;
+    //                 v
+    //                (X X 31) (28 29 30) (25 26 27) (22 23 24) (19 20 21) (16 17 18) (13 14 15) (10 11 12) (7 8 9) (4 5 6) (1 2 3)
 
-    // Shuffle mask for N channels, N in [2, 8]
+    // Generate shuffle mask for N channels, N in [2, 8]
     char mdata[16] = {};
     for (int k=0; k<16; k++) {
       int j = k / size0 + 1;
@@ -575,43 +586,45 @@ void vectorized_cpu_hflip_channels_last_uint8(int64_t & i, char * C10_RESTRICT *
       mdata[12], mdata[13], mdata[14], mdata[15] // second 128-bit lane
     );
 
-    // shift output pointer by size0
-    data[0] += size0 * stride;
+    const auto usable_vec_size = 2 * ((vec_size / 2) / size0);
+    const auto delta = vec_size - usable_vec_size * size0;
+    const auto usable_vec_stride = usable_vec_size * size0 * stride;
+    const auto usable_vec_half_stride = usable_vec_stride / 2;
 
-    for (; i < size - vec_size; i += proc_vec_size * size0) {
+    __m256i data_vec, reversed_vec;
+
+    auto output_ptr = data[0];
+    auto input_ptr = data[1];
+
+    output_ptr += (size0 - delta/2) * stride;
+
+    for (; i < size - vec_size; i += usable_vec_size * size0) {
 
       // load 256-bits by two 128-bits parts
-      auto a0 = _mm_loadu_si128((__m128i *) data[1]);
+      auto a0 = _mm_loadu_si128((__m128i *) input_ptr);
       auto b0 = _mm256_castsi128_si256(a0);
-      auto a1 = _mm_loadu_si128((__m128i *) (data[1] + proc_vec_size / 2 * size0 * sizeof(uint8_t)));
+      auto a1 = _mm_loadu_si128((__m128i *) (input_ptr + usable_vec_half_stride));
       data_vec = _mm256_inserti128_si256(b0, a1, 1);
 
-      data[1] += proc_vec_size * size0 * sizeof(uint8_t);
+      input_ptr += usable_vec_stride;
 
       reversed_vec = _mm256_shuffle_epi8(data_vec, mask);
       reversed_vec = _mm256_permute2x128_si256(reversed_vec, reversed_vec, 1);
 
       // write output in two parts
-      data[0] -= vec_size / 2 * stride;
+      output_ptr -= usable_vec_stride;
       auto rev_vec_h = _mm256_extracti128_si256(reversed_vec, 1);
-      _mm_storeu_si128((__m128i *)data[0], rev_vec_h);
-
-      if (delta > 0) {
-        data[0] += (delta / 2) * stride;
-      }
-      data[0] -= vec_size / 2 * stride;
+      _mm_storeu_si128((__m128i *) (output_ptr + usable_vec_half_stride), rev_vec_h);
       auto rev_vec_l = _mm256_extracti128_si256(reversed_vec, 0);
-      _mm_storeu_si128((__m128i *)data[0], rev_vec_l);
-
-      if (delta > 0) {
-        data[0] += (delta / 2) * stride;
-      }
-
+      _mm_storeu_si128((__m128i *) output_ptr, rev_vec_l);
     }
-    data[0] -= size0 * stride;
+    output_ptr -= (size0 - delta/2) * stride;
+
+    data[0] = output_ptr;
+    data[1] = input_ptr;
   }
 #endif
-
+  return i;
 }
 
 void cpu_hflip_channels_last_uint8_C(at::TensorIterator& iter) {
@@ -637,24 +650,25 @@ void cpu_hflip_channels_last_uint8_C(at::TensorIterator& iter) {
     int64_t i = 0;
 
     if (c == 2) {
-      vectorized_cpu_hflip_channels_last_uint8<2>(i, data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_uint8<2>(data, size, stride);
     } else if (c == 3) {
-      vectorized_cpu_hflip_channels_last_uint8<3>(i, data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_uint8<3>(data, size, stride);
     } else if (c == 4) {
-      vectorized_cpu_hflip_channels_last_uint8<4>(i, data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_uint8<4>(data, size, stride);
     } else if (c == 5) {
-      vectorized_cpu_hflip_channels_last_uint8<5>(i, data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_uint8<5>(data, size, stride);
     } else if (c == 6) {
-      vectorized_cpu_hflip_channels_last_uint8<6>(i, data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_uint8<6>(data, size, stride);
     } else if (c == 7) {
-      vectorized_cpu_hflip_channels_last_uint8<7>(i, data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_uint8<7>(data, size, stride);
     } else if (c == 8) {
-      vectorized_cpu_hflip_channels_last_uint8<8>(i, data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_uint8<8>(data, size, stride);
     }
 
+    auto data_stride = size0 * stride;
     for (; i < size; i += size0) {
 
-      memcpy(data[0], data[1], size0 * stride);
+      memcpy(data[0], data[1], data_stride);
 
       // advance:
       for (const auto arg : c10::irange(ntensors)) {
