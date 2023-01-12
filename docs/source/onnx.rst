@@ -499,6 +499,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
 
 Inline Autograd Function
 ~~~~~~~~~~~~~~~~~~~~~~~~
+
 In cases where a static symbolic method is not provided for its subsequent :class:`torch.autograd.Function` or
 where a function to register ``prim::PythonOp`` as custom symbolic functions is not provided,
 :func:`torch.onnx.export` tries to inline the graph that corresponds to that :class:`torch.autograd.Function` such that
@@ -525,6 +526,73 @@ If you need to avoid inlining of :class:`torch.autograd.Function`, you should ex
 
 Custom operators
 ^^^^^^^^^^^^^^^^
+
+You can export your model with custom operators that includes a combination of many standard ONNX ops,
+or are driven by self-defined C++ backend.
+
+ONNX-script functions
+~~~~~~~~~~~~~~~~~~~~~
+
+If an operator is not a standard ONNX op, but can be composed of multiple existing ONNX ops, you can utilize
+`ONNX-script <https://github.com/microsoft/onnx-script>`_ to create an external ONNX function to support the operator.
+You can export it by following this example::
+
+    import onnxscript
+    # There are three opset version needed to be aligned
+    # This is (1) the opset version in ONNX function
+    from onnxscript.onnx_opset import opset15 as op
+    opset_version = 15
+
+    x = torch.randn(1, 2, 3, 4, requires_grad=True)
+    model = torch.nn.SELU()
+
+    custom_opset = onnxscript.values.Opset(domain="onnx-script", version=1)
+
+    @onnxscript.script(custom_opset)
+    def Selu(X):
+        alpha = 1.67326  # auto wrapped as Constants
+        gamma = 1.0507
+        alphaX = op.CastLike(alpha, X)
+        gammaX = op.CastLike(gamma, X)
+        neg = gammaX * (alphaX * op.Exp(X) - alphaX)
+        pos = gammaX * X
+        zero = op.CastLike(0, X)
+        return op.Where(X <= zero, neg, pos)
+
+    # setType API provides shape/type to ONNX shape/type inference
+    def custom_selu(g: jit_utils.GraphContext, X):
+        return g.onnxscript_op(Selu, X).setType(X.type())
+
+    # Register custom symbolic function
+    # There are three opset version needed to be aligned
+    # This is (2) the opset version in registry
+    torch.onnx.register_custom_op_symbolic(
+        symbolic_name="aten::selu",
+        symbolic_fn=custom_selu,
+        opset_version=opset_version,
+    )
+
+    # There are three opset version needed to be aligned
+    # This is (2) the opset version in exporter
+    torch.onnx.export(
+        model,
+        x,
+        "model.onnx",
+        opset_version=opset_version,
+        # only needed if you want to specify an opset version > 1.
+        custom_opsets={"onnx-script": 2}
+    )
+
+The example above exports it as a custom operator in the "onnx-script" opset.
+When exporting a custom operator, you can specify the custom domain version using the
+``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
+
+NOTE: Be careful to align the opset version mentioned in the above example, and make sure they are consumed in exporter step.
+The example usage of how to write a onnx-script function is a beta version in terms of the active development on onnx-script.
+Please follow the latest `ONNX-script <https://github.com/microsoft/onnx-script>`_
+
+C++ Operators
+~~~~~~~~~~~~~
 
 If a model uses a custom operator implemented in C++ as described in
 `Extending TorchScript with Custom C++ Operators <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_,
@@ -563,8 +631,6 @@ you can export it by following this example::
         custom_opsets={"custom_domain": 2}
     )
 
-You can export your model as one or a combination of many standard ONNX ops, or as a custom ONNX operator.
-
 The example above exports it as a custom operator in the "custom_domain" opset.
 When exporting a custom operator, you can specify the custom domain version using the
 ``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
@@ -594,7 +660,7 @@ all of the unconvertible ops in one go you can::
 The set is approximated because some ops may be removed during the conversion
 process and don't need to be converted. Some other ops may have partial support
 that will fail conversion with particular inputs, but this should give you a
-general idea of what ops are not supported. Please feel free to open Github Issues
+general idea of what ops are not supported. Please feel free to open GitHub Issues
 for op support requests.
 
 Frequently Asked Questions

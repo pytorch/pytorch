@@ -57,10 +57,10 @@ enum class DebugDumpOption {
   PythonFrontendDebug, //! Python Frontend debug information.
   TransformPropagator, //! When running TransformPropagator, print propagation
                        //! path and replay result
-  InlinePropagator, //! When running InlinePropagator, print propagation
-                    //! path and inlining result
   Cubin, //! Dump compiled CUBIN
-  Ptx //! Dump compiled PTX
+  Ptx, //! Dump compiled PTX
+  BankConflictInfo, //! Dump bank confliction info
+  SyncMap //! RAW dependency info
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
@@ -71,6 +71,8 @@ TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
 //!
 enum class DisableOption {
   ArchCheck, //! Disable hardware-specific checks to enable cross arch debug
+  CompileToSass, //! Disable direct compilation to sass so the ptx can be
+                 //! examined
   Fallback, //! Disable fallback
   Fma, //! Disable FMA instructions
   IndexHoist, //! Disable index hoisting
@@ -89,7 +91,6 @@ enum class EnableOption {
   KernelProfile, //! Enable intra-kernel performance profiling
   LinearDecomposition, //! Enable linear-bias decomposition
   ConvDecomposition, //! Enable conv-bias decomposition
-  TransposeScheduler //! Enable the experimental transpose scheduler
 };
 
 TORCH_CUDA_CU_API bool isOptionEnabled(EnableOption option);

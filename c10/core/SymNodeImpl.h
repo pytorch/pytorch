@@ -14,7 +14,7 @@ using SymNode = c10::intrusive_ptr<SymNodeImpl>;
 
 class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
  public:
-  virtual ~SymNodeImpl(){};
+  virtual ~SymNodeImpl() = default;
 
   template <typename T>
   c10::intrusive_ptr<T> dyn_cast() const {
@@ -85,9 +85,6 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual SymNode clone() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymNode sym_int() {
-    TORCH_CHECK(false, "NYI");
-  }
   virtual SymNode sym_float() {
     TORCH_CHECK(false, "NYI");
   }

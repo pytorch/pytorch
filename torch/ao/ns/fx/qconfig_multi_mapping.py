@@ -5,17 +5,10 @@ from typing import Any, Callable, Dict, List, Union
 
 import torch
 from torch.ao.quantization import QConfigMapping
+from torch.ao.quantization.qconfig_mapping import _QCONFIG_STYLE_ORDER
 from torch.ao.quantization.qconfig import QConfigAny
 
 __all__ = ["QConfigMultiMapping"]
-
-_QCONFIG_STYLE_ORDER: List[str] = [
-    "global_qconfig",
-    "object_type_qconfigs",
-    "module_name_regex_qconfigs",
-    "module_name_qconfigs",
-    "module_name_object_type_order_qconfigs",
-]
 
 _QCONFIG_STYLE_TO_METHOD: Dict[str, str] = {
     "global_qconfig": "set_global",
@@ -198,6 +191,14 @@ class QConfigMultiMapping:
             qconfig_list,
         )
         return self
+
+    def __repr__(self):
+        return (
+            self.__class__.__name__ +
+            " [" +
+            "".join(f"\n{qconfig_mapping.__repr__()}," for qconfig_mapping in self.qconfig_mappings_list) +
+            "\n]"
+        )
 
     @classmethod
     def from_list_qconfig_mapping(

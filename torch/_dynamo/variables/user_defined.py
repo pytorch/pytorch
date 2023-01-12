@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import functools
 import importlib
@@ -11,11 +12,11 @@ import torch.nn
 
 from .. import variables
 from ..exc import unimplemented
-from ..guards import Guard, GuardBuilder
+from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import is_namedtuple_cls, namedtuple_fields
 from .base import MutableLocal, VariableTracker
-from .misc import ProfilerContextWrapperVariable
+from .misc import NullContextVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -31,7 +32,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return self.value
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from . import ConstantVariable
+        from .builder import VariableBuilder
+
         options = VariableTracker.propagate(self)
+        source = AttrSource(self.source, name) if self.source else None
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
@@ -41,6 +46,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserFunctionVariable(obj.__get__(self.value), **options)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, **options)
+
+        if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
+            obj
+        ):
+            if source:
+                return VariableBuilder(tx, source)(obj).add_options(options)
+            elif ConstantVariable.is_literal(obj):
+                return ConstantVariable(obj, **options)
 
         return super(UserDefinedClassVariable, self).var_getattr(tx, name)
 
@@ -68,7 +81,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return variables.ListVariable(subs_as_vars, **options)
 
-        return super().call_method(tx, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -77,8 +90,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        if self.value is torch.autograd.profiler.profile:
-            return ProfilerContextWrapperVariable()
+        if self.value in (
+            contextlib.nullcontext,
+            torch.autograd.profiler.profile,
+        ):
+            return NullContextVariable(**options)
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             items = list(args)
@@ -174,13 +190,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert all(map(ConstantVariable.is_literal, keys))
                 return TupleVariable(
                     [ConstantVariable(k, **options) for k in keys], **options
-                ).add_guard(
-                    Guard(
-                        self.source.name(),
-                        self.source.guard_source(),
-                        GuardBuilder.ODICT_KEYS,
-                    )
-                )
+                ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (
                 method is collections.OrderedDict.items

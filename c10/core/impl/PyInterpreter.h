@@ -122,7 +122,7 @@ struct C10_API PyInterpreter;
 // another word consider doing this!
 
 struct C10_API PyInterpreterVTable {
-  virtual ~PyInterpreterVTable() {}
+  virtual ~PyInterpreterVTable() = default;
 
   // Report the name of this interpreter
   virtual std::string name() const = 0;
@@ -140,6 +140,15 @@ struct C10_API PyInterpreterVTable {
   // Invoke the Python boxed fallback dispatch to go back into Python
   virtual void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const = 0;
+
+  // This is only invoked in the multipy/torchdeploy situation from
+  // pythonOpRegistrationTrampoline; this lets us get to the Python
+  // interpreter to actually find the appropriate Python op registration
+  // entry to call.
+  virtual void python_op_registration_trampoline(
+      const c10::OperatorHandle& op,
+      c10::DispatchKey,
+      torch::jit::Stack* stack) const = 0;
 
   // Invoke the Python dispatcher to handle this call
   virtual void python_dispatcher(

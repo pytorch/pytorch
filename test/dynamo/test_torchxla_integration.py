@@ -1,18 +1,27 @@
 # Owner(s): ["module: dynamo"]
 import copy
-import functools
-import os
-import unittest
 
 import torch
 
-has_torch_xla = True
+import torch._dynamo.test_case
+import torch._dynamo.testing
+from functorch.compile import aot_module_simplified, make_boxed_compiler
+from torch._dynamo import disable
+
+try:
+    from .test_torchxla_util import maybe_skip_torchxla_test
+except ImportError:
+    from test_torchxla_util import maybe_skip_torchxla_test
+
 try:
     import torch._dynamo.optimizations.torchxla_integration as integration
+    import torch_xla.core.xla_model as xm
+    import torch_xla.debug.metrics as metrics
 except ImportError:
-    has_torch_xla = False
+    # tests using torch_xla will be skipped. It's fine to ignore the
+    # importing error here.
+    pass
 
-import torch.utils._pytree as pytree
 from torch import fx, nn
 
 
@@ -47,7 +56,21 @@ class LinearModule(nn.Module):
         return self.linear(x)
 
     def get_random_inputs(self):
-        return (torch.randn(10),)
+        return (torch.randn(2, 10),)
+
+
+class MaxPoolModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(3, 6, kernel_size=3, stride=2)
+        self.pool = nn.MaxPool2d(3, stride=2)
+
+    def forward(self, x):
+        x = self.conv(x)
+        return self.pool(x)
+
+    def get_random_inputs(self):
+        return (torch.randn(2, 3, 10, 10),)
 
 
 class ModuleInplaceUpdate(nn.Module):
@@ -81,49 +104,28 @@ def allclose(expected, actual):
         raise RuntimeError("Unexpected types")
 
 
-@functools.lru_cache(None)
-def should_run_torchxla_tests():
-    """
-    Run the tests if torch_xla is available and number of gpu devices is specified.
-    """
-    gpu_device_specified = int(os.environ.get("GPU_NUM_DEVICES", "0")) > 0
-    return has_torch_xla and gpu_device_specified
-
-
 def make_reuse_graph_test(module_class, niter=100):
-    @unittest.skipIf(
-        not should_run_torchxla_tests(),
-        "Skip the tests since torch_xla is not available or XLA devices are not specified",
-    )
+    @maybe_skip_torchxla_test
     def test_wrapper(self):
-        import torch_xla.core.xla_model as xm
-
         xla_dev = xm.xla_device()
-        mod = module_class()
-        xla_module = copy.deepcopy(mod).to(device=xla_dev)
-        inputs = mod.get_random_inputs()
+        xla_module = module_class().to(device=xla_dev)
+        inputs = tuple(x.to(device=xla_dev) for x in xla_module.get_random_inputs())
+        metrics.clear_counters()
         optimized_mod = integration.extract_compiled_graph(
-            fx.symbolic_trace(mod), inputs
+            fx.symbolic_trace(xla_module), inputs
         )
 
         for i in range(niter):
-            rand_args = mod.get_random_inputs()
-            orig_dev = rand_args[0].device
-            rand_args_copy = copy.deepcopy(rand_args)
-
-            # Can not simply call
-            #   expected = mod(*rand_args)
-            # Since we need use xla to calculate expected results
             xla_inputs = tuple(
-                copy.deepcopy(inp).to(device=xla_dev) for inp in rand_args
+                inp.to(device=xla_dev) for inp in xla_module.get_random_inputs()
             )
-            xla_out = xla_module(*xla_inputs)
-            # copy xla_inputs back to rand_args since the model may inplace update
-            # the arguments
-            rand_args = tuple(inp.to(device=orig_dev) for inp in xla_inputs)
-            expected = pytree.tree_map(lambda o: o.to(device=orig_dev), xla_out)
+            xla_inputs_copy = copy.deepcopy(xla_inputs)
 
-            actual = optimized_mod(*rand_args_copy)
+            expected = xla_module(*xla_inputs)
+            # make sure above lazy computation is executed.
+            xm.mark_step()
+
+            actual = optimized_mod(*xla_inputs_copy)
 
             if not allclose(expected, actual):
                 print(
@@ -133,17 +135,84 @@ def make_reuse_graph_test(module_class, niter=100):
 
             # make sure arguments match after calling the model forward method
             # to handle inplace updates.
-            if not allclose(rand_args, rand_args_copy):
+            if not allclose(xla_inputs, xla_inputs_copy):
                 print(
-                    f"Incorrect updated arguments at iter {i}. expected\n{rand_args}, actual\n{rand_args_copy}"
+                    f"Incorrect updated arguments at iter {i}. expected\n{xla_inputs}, actual\n{xla_inputs_copy}"
                 )
                 self.assertTrue(False)
 
     return test_wrapper
 
 
-class TorchXLAReuseGraphTest(unittest.TestCase):
+def training_compiler(gm, example_inputs):
+    @make_boxed_compiler
+    @disable
+    def fw_compiler(graph, inputs, *args, **kwargs):
+        # tracing time inputs are FakeTensors, we can not pass them
+        # to extract_compiled_graph directly since we can not extract
+        # xla tensor id from fake tensors. Call extract_compiled_graph
+        # lazily and trigger that for the first call with non-fake tensors.
+        compiled_graph = None
+
+        def optimized_mod(*args):
+            nonlocal compiled_graph
+            if compiled_graph is None:
+                compiled_graph = integration.extract_compiled_graph(graph, args)
+            return compiled_graph(*args)
+
+        return optimized_mod
+
+    return aot_module_simplified(gm, example_inputs, fw_compiler=fw_compiler)
+
+
+def model_iter_fn_train(mod, inputs):
+    outputs = mod(*inputs)
+    loss = outputs.mean()
+    loss.backward()
+
+    param_list = list(mod.parameters())
+    return [param.grad for param in param_list]
+
+
+def make_training_test(model_cls):
+    @maybe_skip_torchxla_test
+    def test_wrapper(self):
+        import torch_xla.core.xla_model as xm
+
+        xla_dev = xm.xla_device()
+        model = model_cls()
+        inputs = model.get_random_inputs()
+
+        model = model.to(device=xla_dev)
+        inputs = tuple(inp.to(device=xla_dev) for inp in inputs)
+
+        # do baseline
+        baseline_model = copy.deepcopy(model)
+        baseline_inputs = copy.deepcopy(inputs)
+        expected_output = model_iter_fn_train(baseline_model, baseline_inputs)
+
+        compiler = training_compiler
+        optimize_ctx = torch._dynamo.optimize(compiler, nopython=False)
+        optimized_model_iter_fn = optimize_ctx(model_iter_fn_train)
+
+        actual_output = optimized_model_iter_fn(model, inputs)
+        print(f"expected_output:\n{expected_output}\nactual_output:\n{actual_output}")
+        assert allclose(expected_output, actual_output)
+
+    return test_wrapper
+
+
+class TorchXLAReuseGraphTest(torch._dynamo.test_case.TestCase):
     test_basic = make_reuse_graph_test(BasicModule)
     test_matmul = make_reuse_graph_test(MatmulModule)
     test_linear = make_reuse_graph_test(LinearModule)
     test_inplace_update = make_reuse_graph_test(ModuleInplaceUpdate)
+
+    test_training_linear = make_training_test(LinearModule)
+    test_training_maxpool = make_training_test(MaxPoolModule)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

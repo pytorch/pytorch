@@ -797,7 +797,7 @@ class TestJitTraceAutocast(JitTestCase):
                 y = traced_model(x.clone())
             with torch.cpu.amp.autocast(), torch.no_grad():
                 y2 = model(x.clone())
-            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
+            torch.testing.assert_close(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
         for i in range(self.models.__len__()):
             test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
@@ -812,7 +812,7 @@ class TestJitTraceAutocast(JitTestCase):
                 y = traced_model(x.clone().to(memory_format=torch.channels_last))
             with torch.cpu.amp.autocast(), torch.no_grad():
                 y2 = model(x.clone().to(memory_format=torch.channels_last))
-            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
+            torch.testing.assert_close(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
         for i in range(self.models.__len__()):
             if self.inputs[i].size().__len__() == 5:
                 # NHWC 3D case not support yet

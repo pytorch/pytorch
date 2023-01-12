@@ -33,9 +33,9 @@ class _InternalGlobals:
         self.onnx_shape_inference: bool = True
 
         # Internal feature flags
-        if os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "ERRORS":
+        if os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "WARNINGS":
             self.runtime_type_check_state = (
-                _exporter_states.RuntimeTypeCheckState.ERRORS
+                _exporter_states.RuntimeTypeCheckState.WARNINGS
             )
         elif os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "DISABLED":
             self.runtime_type_check_state = (
@@ -43,7 +43,7 @@ class _InternalGlobals:
             )
         else:
             self.runtime_type_check_state = (
-                _exporter_states.RuntimeTypeCheckState.WARNINGS
+                _exporter_states.RuntimeTypeCheckState.ERRORS
             )
 
     @property

@@ -870,9 +870,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::tensor_split, aten_tensor_split, [](Node*
           "aten::tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]"))) {
     return [](ProcessedNode* pnode) {
       const auto& a = pnode->Input(0).toTensor();
-      const auto b = pnode->Input(1).toInt();
+      const auto b = pnode->Input(1).toSymInt();
       const auto c = pnode->Input(2).toInt();
-      pnode->Output(0) = at::native::tensor_split(a, b, c);
+      pnode->Output(0) = at::native::tensor_split_sections_symint(a, b, c);
     };
   }
 

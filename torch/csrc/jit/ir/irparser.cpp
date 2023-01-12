@@ -237,7 +237,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       auto text = L.expect(TK_NUMBER);
       if (!parse_tensor_constants_) {
         throw ErrorReport(token.range)
-            << "Single-element tensor constant encoutered but "
+            << "Single-element tensor constant encountered but "
             << "`parse_tensor_constants` is set to false " << token.text();
       }
       L.expect('}');
@@ -501,6 +501,13 @@ void IRParser::parseOperator(Block* b) {
   for (const VarWithType& v : outs) {
     vmap[v.name] = n->outputs()[idx];
     if (schema && !schema->is_varret()) {
+      TORCH_CHECK(
+          schema->returns().size() > idx,
+          "Operator parsing error: out of bounds access at ",
+          idx,
+          " to schema->returns() which size is ",
+          schema->returns().size(),
+          " in size");
       auto schema_return_type = schema->returns().at(idx).type();
       if (!v.type) {
         vmap[v.name]->setType(schema_return_type);

@@ -34,3 +34,25 @@ class TestPassManager(unittest.TestCase):
         pm.add_constraint(constraint)
 
         self.assertRaises(RuntimeError, pm.validate)
+
+    def test_two_pass_managers(self) -> None:
+        """Make sure we can construct the PassManager twice and not share any
+        state between them"""
+
+        passes = [lambda x: 2 * x for _ in range(3)]
+        constraint = these_before_those_pass_constraint(passes[0], passes[1])
+        pm1 = PassManager()
+        for p in passes:
+            pm1.add_pass(p)
+        pm1.add_constraint(constraint)
+        output1 = pm1(1)
+        self.assertEqual(output1, 2 ** 3)
+
+        passes = [lambda x: 3 * x for _ in range(3)]
+        constraint = these_before_those_pass_constraint(passes[0], passes[1])
+        pm2 = PassManager()
+        for p in passes:
+            pm2.add_pass(p)
+        pm2.add_constraint(constraint)
+        output2 = pm2(1)
+        self.assertEqual(output2, 3 ** 3)

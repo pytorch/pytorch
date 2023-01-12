@@ -2,6 +2,13 @@
 #define PRECISION $precision
 #define FORMAT $format
 
+/*
+ * TILE_SIZE = (1, 1, 1)
+ * WEIGHT_STORAGE = TEXTURE_3D
+ * BIAS_STORAGE = TEXTURE_3D
+ * Note that for DW kernel IC = 1 so the weight layout is really OC4, H, W, 4oc
+ */
+
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
@@ -58,7 +65,7 @@ vec4 dequantize(vec4 tex, float scale, int zero_point) {
  * Quantizes a float texel based on a scale and zero point.
  */
 uvec4 quantize(vec4 tex, float scale, int zero_point) {
-  return uvec4(tex / scale + zero_point);
+  return uvec4(roundEven(tex / scale) + zero_point);
 }
 
 void main() {

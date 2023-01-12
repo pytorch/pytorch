@@ -37,22 +37,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
   key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
-  // For better error handling,
-  // we also don't want our wrapper tensor to be able to dispatch directly
-  // to a backend kernel.
-  // Dispatching directly to e.g. a CPU kernel would always segfault,
-  // because wrapper tensors don't have any real data.
-  // (This should never happen because we should always hit a functionalization kernel,
-  // but can help make bugs less nasty).
-  // Here, we defensively remove any backend keys from the wrapper's keyset.
-  // We don't want to remove actual backend bits though (say we're redispatching to autograd;
-  // we need to know if we're dispatching to AutogradCPU or AutogradXLA).
-  // Instead, it's sufficient to remove the `Dense` dispatch key,
-  // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
-  key_set_ = key_set_.remove(c10::DispatchKey::Dense);
   // We override a bunch of _custom(), so make sure they get called
   // TODO: metadata copying may not actually be necessary then
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
+  set_custom_device(true);
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -64,6 +52,10 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
     value_(value)
 {
   set_constructor_metadata();
+}
+
+void FunctionalTensorWrapper::freeze_storage() const {
+  functional_storage_impl()->freeze();
 }
 
 // Note [Functionalization: Alias Removal]
@@ -154,10 +146,14 @@ functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_st
 void FunctionalTensorWrapper::commit_update() {
   auto storage_impl = functional_storage_impl();
   storage_impl->add_update(value_, view_metas_);
-  // Invariant: commit_update() is called during an inplace operation.
-  // Tensor inputs to the operation are synced before runnig the op,
-  // so the current tensor must be up-to-date with its alias at this point.
-  generation_ = storage_impl->generation();
+  // As an optimization, we used to mark the tensor here as "up-to-date",
+  // That way, code like:
+  //   x = torch.ones(1'000'000)
+  //   x[0].add_(1)
+  // doesn't result in an unnecessary materialization of the base.
+  // This optimization results in the slice temporarily haven't incorrect
+  // stride/storage_offset though, and DCE should handle that optimization anyway.
+  // generation_ = storage_impl->generation();
 }
 
 bool FunctionalTensorWrapper::is_up_to_date() const {
@@ -331,6 +327,9 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
       std::move(version_counter), allow_tensor_metadata_change);
 }
 
+c10::Device FunctionalTensorWrapper::device_custom() const {
+  return value_.unsafeGetTensorImpl()->device();
+}
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sizes();
 }
@@ -537,6 +536,12 @@ bool isFunctionalTensor(ITensorListRef list) {
   return isFunctionalTensorIListRef(list);
 }
 
+void freeze_functional_tensor(const Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(tensor));
+  auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  functional_base_impl->freeze_storage();
+}
+
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(view_to_wrap));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(base));
@@ -563,7 +568,7 @@ std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_
 void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
   auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
-  self_impl->mutate_view_meta(meta);
+  self_impl->mutate_view_meta(std::move(meta));
 }
 
 // Note [Propagating strides in the functionalization pass]
@@ -611,7 +616,7 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
   for (uint64_t idx = 0; idx < num_arguments; ++idx) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
-      auto t = ivalue.toTensor();
+      const auto& t = ivalue.toTensor();
       if (t.defined()) {
         TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t),
           "The composite op functionalization fallback expects its inputs all not to be functional tensors");
@@ -658,7 +663,7 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
   for (const auto idx : c10::irange(num_returns)) {
     const auto& ivalue = returns[idx];
     if (ivalue.isTensor()) {
-      auto t = ivalue.toTensor();
+      const auto& t = ivalue.toTensor();
       if (!t.defined()) continue;
       at::functionalization::impl::sync(t);
       auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));

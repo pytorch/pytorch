@@ -2,6 +2,7 @@ import sys
 import torch
 import functools
 import inspect
+import warnings
 from typing import Any, Callable, TypeVar, cast
 
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
@@ -18,6 +19,12 @@ class _DecoratorContextManager:
     """Allow a context manager to be used as a decorator"""
 
     def __call__(self, func: F) -> F:
+        if inspect.isclass(func):
+            warnings.warn("Decorating classes is deprecated and will be disabled in "
+                          "future versions. You should only decorate functions or methods. "
+                          "To preserve the current behavior of class decoration, you can "
+                          "directly decorate the `__init__` method and nothing else.")
+
         if inspect.isgeneratorfunction(func):
             return self._wrap_generator(func)
 
@@ -113,7 +120,7 @@ class no_grad(_DecoratorContextManager):
         >>> # xdoctest: +SKIP
         >>> x = torch.tensor([1.], requires_grad=True)
         >>> with torch.no_grad():
-        ...   y = x * 2
+        ...     y = x * 2
         >>> y.requires_grad
         False
         >>> @torch.no_grad()
@@ -159,8 +166,8 @@ class enable_grad(_DecoratorContextManager):
         >>> # xdoctest: +SKIP
         >>> x = torch.tensor([1.], requires_grad=True)
         >>> with torch.no_grad():
-        ...   with torch.enable_grad():
-        ...     y = x * 2
+        ...     with torch.enable_grad():
+        ...         y = x * 2
         >>> y.requires_grad
         True
         >>> y.backward()
@@ -210,7 +217,7 @@ class set_grad_enabled(_DecoratorContextManager):
         >>> x = torch.tensor([1.], requires_grad=True)
         >>> is_train = False
         >>> with torch.set_grad_enabled(is_train):
-        ...   y = x * 2
+        ...     y = x * 2
         >>> y.requires_grad
         False
         >>> _ = torch.set_grad_enabled(True)
@@ -263,10 +270,11 @@ class inference_mode(_DecoratorContextManager):
         mode (bool): Flag whether to enable or disable inference mode
 
     Example::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> import torch
         >>> x = torch.ones(1, 2, 3, requires_grad=True)
         >>> with torch.inference_mode():
-        ...   y = x * x
+        ...     y = x * x
         >>> y.requires_grad
         False
         >>> # xdoctest: +SKIP("want string isnt quite right")
@@ -276,7 +284,7 @@ class inference_mode(_DecoratorContextManager):
         RuntimeError: Inference tensors do not track version counter.
         >>> @torch.inference_mode()
         ... def func(x):
-        ...   return x * x
+        ...     return x * x
         >>> out = func(x)
         >>> out.requires_grad
         False

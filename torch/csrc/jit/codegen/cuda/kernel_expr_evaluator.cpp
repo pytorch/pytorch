@@ -132,6 +132,7 @@ void ExpressionEvaluator::handle(const NamedScalar* named_scalar) {
 }
 
 void ExpressionEvaluator::handle(const UnaryOp* unary_op) {
+  using namespace IntOrDouble_functions;
   const auto in = evaluate(unary_op->in());
   if (in.has_value()) {
     switch (unary_op->getUnaryOpType()) {
@@ -149,6 +150,9 @@ void ExpressionEvaluator::handle(const UnaryOp* unary_op) {
         } else {
           TORCH_INTERNAL_ASSERT(false, "dtype not supported in evaluator");
         }
+        break;
+      case UnaryOpType::Abs:
+        known_values_[unary_op->out()] = abs(*in);
         break;
       default:
         TORCH_CHECK(

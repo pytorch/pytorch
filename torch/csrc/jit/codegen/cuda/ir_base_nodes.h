@@ -426,6 +426,10 @@ class TORCH_CUDA_CU_API Expr : public Statement {
 
   Expr(const Expr* src, IrCloner* ir_cloner);
 
+  // Creates a new instance of the expression with all its field copied.
+  // Note that unlike IrCloner, this function only do a shallow copy
+  virtual Expr* shallowCopy() const = 0;
+
   c10::optional<ExprType> getExprType() const override {
     return etype_;
   }
@@ -466,16 +470,27 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   // TODO: Protect based on being in kernel container
   kir::Predicate* predicate() const;
 
+  // Creates a shallow copy the expression with the given predicate attached.
   // TODO: Protect based on being in kernel container
-  void setPredicate(kir::Predicate* predicate);
+  Expr* withPredicate(kir::Predicate* predicate);
 
   // TODO: Protect based on being in kernel container
   kir::Predicate* writePredicate() const;
 
+  // Creates a shallow copy the expression with the given write-predicate
+  // attached.
+  // TODO: Protect based on being in kernel container
+  Expr* withWritePredicate(kir::Predicate* write_predicate);
+
+ protected:
+  // TODO: Protect based on being in kernel container
+  void setPredicate(kir::Predicate* predicate);
+
   // TODO: Protect based on being in kernel container
   void setWritePredicate(kir::Predicate* write_predicate);
 
- protected:
+  void copyPredicatesFrom(const Expr* expr);
+
   // TODO: Add Fusion passkey
   void addInput(Val* input) {
     TORCH_INTERNAL_ASSERT(input != nullptr);

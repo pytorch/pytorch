@@ -44,6 +44,7 @@ static_assert(
 #cmakedefine CAFFE2_USE_NVTX
 #cmakedefine CAFFE2_USE_ITT
 #cmakedefine CAFFE2_USE_TRT
+#cmakedefine TORCH_DISABLE_GPU_ASSERTS
 
 #ifndef EIGEN_MPL2_ONLY
 #cmakedefine EIGEN_MPL2_ONLY
@@ -85,4 +86,5 @@ static_assert(
   {"USE_NVTX", "${CAFFE2_USE_NVTX}"}, \
   {"USE_ITT", "${CAFFE2_USE_ITT}"}, \
   {"USE_TRT", "${CAFFE2_USE_TRT}"}, \
+  {"TORCH_DISABLE_GPU_ASSERTS", "${TORCH_DISABLE_GPU_ASSERTS}"}, \
 }

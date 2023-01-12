@@ -19,7 +19,8 @@ import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
-    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS
+    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
+    skipIfTorchDynamo
 
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
@@ -1060,6 +1061,11 @@ class TestMkldnn(TestCase):
                     x.to_mkldnn().transpose(dim1, dim2).to_dense(),
                 )
 
+    def test_transpose_invalid_dime(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch._mkldnn_transpose(x, 0, 12)
+
     def test_linear_non_contiguous_weight(self):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
@@ -1208,6 +1214,7 @@ class TestMkldnn(TestCase):
         self.assertTrue(x.to_mkldnn().is_mkldnn)
 
     # legacy constructor/new doesn't support mkldnn tensors
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1992")
     def test_legacy_new_failure(self):
         x = torch.randn(1, dtype=torch.float32)
         x_mkldnn = x.to_mkldnn()

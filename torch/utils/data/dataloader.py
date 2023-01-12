@@ -35,6 +35,7 @@ from . import (
     Dataset,)
 
 from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
+from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES
 
 from . import _utils
 
@@ -104,7 +105,6 @@ def _get_distributed_settings():
 
 
 def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
-    global_worker_id = worker_id
     info = torch.utils.data.get_worker_info()
     assert info is not None
     total_workers = info.num_workers
@@ -112,9 +112,10 @@ def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
     assert isinstance(datapipe, (IterDataPipe, MapDataPipe))
     # To distribute elements across distributed process evenly, we should shard data on distributed
     # processes first then shard on worker processes
-    total_workers *= world_size
-    global_worker_id = global_worker_id * world_size + rank_id
-    torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
+    torch.utils.data.graph_settings.apply_sharding(
+        datapipe, world_size, rank_id, sharding_group=SHARDING_PRIORITIES.DISTRIBUTED)
+    torch.utils.data.graph_settings.apply_sharding(
+        datapipe, total_workers, worker_id, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
     if worker_init_fn is not None:
         worker_init_fn(worker_id)
 
@@ -174,7 +175,9 @@ class DataLoader(Generic[T_co]):
             `base_seed` for workers. (default: ``None``)
         prefetch_factor (int, optional, keyword-only arg): Number of batches loaded
             in advance by each worker. ``2`` means there will be a total of
-            2 * num_workers batches prefetched across all workers. (default: ``2``)
+            2 * num_workers batches prefetched across all workers. (default value depends
+            on the set value for num_workers. If value of num_workers=0 default is ``None``.
+            Otherwise if value of num_workers>0 default is ``2``).
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
@@ -216,7 +219,7 @@ class DataLoader(Generic[T_co]):
     timeout: float
     sampler: Union[Sampler, Iterable]
     pin_memory_device: str
-    prefetch_factor: int
+    prefetch_factor: Optional[int]
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
 
@@ -227,7 +230,7 @@ class DataLoader(Generic[T_co]):
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
                  multiprocessing_context=None, generator=None,
-                 *, prefetch_factor: int = 2,
+                 *, prefetch_factor: Optional[int] = None,
                  persistent_workers: bool = False,
                  pin_memory_device: str = ""):
         torch._C._log_api_usage_once("python.data_loader")
@@ -239,10 +242,13 @@ class DataLoader(Generic[T_co]):
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')
 
-        if num_workers == 0 and prefetch_factor != 2:
+        if num_workers == 0 and prefetch_factor is not None:
             raise ValueError('prefetch_factor option could only be specified in multiprocessing.'
-                             'let num_workers > 0 to enable multiprocessing.')
-        assert prefetch_factor > 0
+                             'let num_workers > 0 to enable multiprocessing, otherwise set prefetch_factor to None.')
+        elif num_workers > 0 and prefetch_factor is None:
+            prefetch_factor = 2
+        elif prefetch_factor is not None and prefetch_factor < 0:
+            raise ValueError('prefetch_factor option should be non-negative')
 
         if persistent_workers and num_workers == 0:
             raise ValueError('persistent_workers option needs num_workers > 0')
@@ -580,7 +586,6 @@ class _BaseDataLoaderIter(object):
         ws, rank = _get_distributed_settings()
         self._world_size = ws
         self._rank = rank
-        self._prefetch_factor = loader.prefetch_factor
         # for other backends, pin_memory_device need to set. if not set
         # default behaviour is CUDA device. if pin_memory_device is selected
         # and pin_memory is not set, the default behaviour false.
@@ -663,7 +668,8 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
         #   Taking care of distributed sharding
         if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
-            torch.utils.data.graph_settings.apply_sharding(self._dataset, self._world_size, self._rank)
+            torch.utils.data.graph_settings.apply_sharding(
+                self._dataset, self._world_size, self._rank, sharding_group=SHARDING_PRIORITIES.DISTRIBUTED)
 
         self._dataset_fetcher = _DatasetKind.create_fetcher(
             self._dataset_kind, self._dataset, self._auto_collation, self._collate_fn, self._drop_last)
@@ -988,6 +994,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
     def __init__(self, loader):
         super(_MultiProcessingDataLoaderIter, self).__init__(loader)
+
+        self._prefetch_factor = loader.prefetch_factor
 
         assert self._num_workers > 0
         assert self._prefetch_factor > 0

@@ -136,6 +136,113 @@ matmul_nested_helper(
 }
 }
 
+Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
+  // Tensor self = self_.contiguous();
+  // Tensor mat2 = mat2_.contiguous();
+  // self [N, n_heads, *, head_dim]
+  // mat2 [N, n_heads, head_dim, *]
+  const auto self_ptr = get_nested_tensor_impl(self);
+  const auto mat2_ptr = get_nested_tensor_impl(mat2);
+  // metadata for self
+  std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
+  std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
+  std::vector<int64_t> self_offsets = self_ptr->get_storage_offsets();
+  auto opt = self_ptr->get_nested_size_tensor().options();
+
+  // metadata for mat2
+  std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
+  std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
+  std::vector<int64_t> mat2_offsets = mat2_ptr->get_storage_offsets();
+  auto opt2 = mat2_ptr->get_nested_size_tensor().options();
+
+  int64_t N = self_sizes.size();
+  int64_t n_heads = self_sizes[0][0];
+
+  // viewed metadata for self
+  auto self_new_sizes = at::empty({N * n_heads, 2}, opt);
+  int64_t* self_new_sizes_ptr = self_new_sizes.data_ptr<int64_t>();
+
+  auto self_new_strides = at::empty({N * n_heads, 2}, opt);
+  int64_t* self_new_strides_ptr = self_new_strides.data_ptr<int64_t>();
+  std::vector<int64_t> self_new_offsets;
+
+  // viewed metadata for mat2
+  auto mat2_new_sizes = at::empty({N * n_heads, 2}, opt2);
+  int64_t* mat2_new_sizes_ptr = mat2_new_sizes.data_ptr<int64_t>();
+
+  auto mat2_new_strides = at::empty({N * n_heads, 2}, opt2);
+  int64_t* mat2_new_strides_ptr = mat2_new_strides.data_ptr<int64_t>();
+  std::vector<int64_t> mat2_new_offsets;
+
+  for (int64_t i = 0; i < N; i++) {
+    const IntArrayRef& self_size_i = self_sizes[i];
+    const IntArrayRef& self_stride_i = self_strides[i];
+    int64_t self_offset = self_offsets[i];
+
+    const IntArrayRef& mat2_size_i = mat2_sizes[i];
+    const IntArrayRef& mat2_stride_i = mat2_strides[i];
+    int64_t mat2_offset = mat2_offsets[i];
+    for (int64_t j = 0; j < n_heads; j++) {
+      auto idx = (i * n_heads + j) * 2;
+      self_new_sizes_ptr[idx] = self_size_i[1];
+      self_new_sizes_ptr[idx + 1] = self_size_i[2];
+      self_new_strides_ptr[idx] = self_stride_i[1];
+      self_new_strides_ptr[idx + 1] = self_stride_i[2];
+      self_new_offsets.push_back(self_offset);
+      self_offset += self_stride_i[0];
+
+      mat2_new_sizes_ptr[idx] = mat2_size_i[1];
+      mat2_new_sizes_ptr[idx + 1] = mat2_size_i[2];
+      mat2_new_strides_ptr[idx] = mat2_stride_i[1];
+      mat2_new_strides_ptr[idx + 1] = mat2_stride_i[2];
+      mat2_new_offsets.push_back(mat2_offset);
+      mat2_offset += mat2_stride_i[0];
+    }
+  }
+
+
+  // view self as [N * n_heads, *, head_dim] (collapse first 2 dims)
+  auto viewed_self = create_nested_view_tensor(
+      self, self_new_sizes, self_new_strides, std::vector<int64_t>(self_new_offsets));
+
+  // view mat2 as [N * n_heads, head_dim, *] (collapse first 2_dims)
+  auto viewed_mat2 = create_nested_view_tensor(
+      mat2, mat2_new_sizes, mat2_new_strides, std::vector<int64_t>(mat2_new_offsets));
+
+  // output [N * n_heads, *, *]
+  auto bmm_output = at::bmm(viewed_self, viewed_mat2);
+
+  // generate metadata for viewing output as [N, n_heads, *, *]
+  // output of bmm should be contiguous so stride calculations should hold
+  auto out_new_sizes = at::empty({N, 3}, opt);
+  auto out_new_strides = at::empty({N, 3}, opt);
+  std::vector<int64_t> out_new_offsets;
+
+  int64_t* out_new_sizes_ptr = out_new_sizes.data_ptr<int64_t>();
+  int64_t* out_new_strides_ptr = out_new_strides.data_ptr<int64_t>();
+
+  int64_t out_offset = 0;
+  for (int64_t i = 0; i < N; i++) {
+    out_new_offsets.push_back(out_offset);
+    const IntArrayRef& self_size_i = self_sizes[i];
+    const IntArrayRef& mat2_size_i = mat2_sizes[i];
+    auto idx = i * 3;
+    out_new_sizes_ptr[idx] = n_heads;
+    out_new_sizes_ptr[idx + 1] = self_size_i[1];
+    out_new_sizes_ptr[idx + 2] = mat2_size_i[2];
+    out_new_strides_ptr[idx] = self_size_i[1] * mat2_size_i[2];
+    out_new_strides_ptr[idx + 1] = mat2_size_i[2];
+    out_new_strides_ptr[idx + 2] = 1;
+    out_offset += n_heads * (self_size_i[1] * mat2_size_i[2]);
+  }
+
+  auto viewed_out = create_nested_view_tensor(
+      bmm_output, out_new_sizes, out_new_strides, std::vector<int64_t>(out_new_offsets));
+
+  return viewed_out;
+
+}
+
 // Note [nested tensor matmul]
 // This is really a generalized batched matmul dedicated to nested tensors,
 // where `self` and `mat2` have same number (>= 3) of dimensions.
@@ -193,6 +300,20 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
     self_dim_size,
     "second last dimension of mat2 has sizes",
     mat2_dim_size);
+
+  // use bmm inference-only fast path for [N, n_heads, *, head_dim] [N, n_heads, head_dim, *]
+  if (self.is_cuda() &&
+      self_dim == 4 && self.is_contiguous() &&
+      mat2_dim == 4 && mat2.is_contiguous() &&
+      !(GradMode::is_enabled() && (self.requires_grad() || mat2.requires_grad()))) {
+    auto n_heads = self_sizes.select(0, 1).select(0, 0).item<int64_t>();
+    auto self_first_dim_n_heads = at::all(self_sizes.select(1, 0) == n_heads).item<bool>();
+    auto mat2_first_dim_n_heads = at::all(mat2_sizes.select(1, 0) == n_heads).item<bool>();
+    if (self_first_dim_n_heads && mat2_first_dim_n_heads) {
+      return matmul_with_bmm_nested(self, mat2);
+    }
+  }
+
   // Construct output size from input sizes
   Tensor output_sizes = self_sizes.clone();
   // The last entry in every row of output_sizes should be last column of mat2_sizes

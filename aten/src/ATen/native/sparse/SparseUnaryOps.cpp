@@ -19,6 +19,8 @@
 #include <ATen/ops/atanh_native.h>
 #include <ATen/ops/ceil.h>
 #include <ATen/ops/ceil_native.h>
+#include <ATen/ops/deg2rad.h>
+#include <ATen/ops/deg2rad_native.h>
 #include <ATen/ops/erf.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/erfinv.h>
@@ -27,6 +29,8 @@
 #include <ATen/ops/expm1_native.h>
 #include <ATen/ops/floor.h>
 #include <ATen/ops/floor_native.h>
+#include <ATen/ops/frac.h>
+#include <ATen/ops/frac_native.h>
 #include <ATen/ops/isinf.h>
 #include <ATen/ops/isinf_native.h>
 #include <ATen/ops/isnan.h>
@@ -39,6 +43,8 @@
 #include <ATen/ops/log1p_native.h>
 #include <ATen/ops/nan_to_num.h>
 #include <ATen/ops/nan_to_num_native.h>
+#include <ATen/ops/rad2deg.h>
+#include <ATen/ops/rad2deg_native.h>
 #include <ATen/ops/relu.h>
 #include <ATen/ops/relu_native.h>
 #include <ATen/ops/round.h>
@@ -165,12 +171,15 @@ COALESCED_UNARY_UFUNC(asinh);
 COALESCED_UNARY_UFUNC(atan);
 COALESCED_UNARY_UFUNC(atanh);
 COALESCED_UNARY_UFUNC(ceil);
+COALESCED_UNARY_UFUNC(deg2rad);
 COALESCED_UNARY_UFUNC(erf);
 COALESCED_UNARY_UFUNC(erfinv);
 COALESCED_UNARY_UFUNC(expm1);
 COALESCED_UNARY_UFUNC(floor);
+COALESCED_UNARY_UFUNC(frac);
 COALESCED_UNARY_UFUNC(log1p);
 COALESCED_UNARY_UFUNC(round);
+COALESCED_UNARY_UFUNC(rad2deg);
 COALESCED_UNARY_UFUNC(sign);
 COALESCED_UNARY_UFUNC(sgn);
 COALESCED_UNARY_UFUNC(sin);

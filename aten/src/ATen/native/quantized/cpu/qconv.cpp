@@ -130,7 +130,7 @@ at::SmallVector<int64_t, kSpatialDim + 2> MakeDeConvOutputShape(
                 ", output padding: ", output_padding[idx],
                 ", dilation: ", dilation[idx])
     TORCH_CHECK(output_shape[idx + 2] < kReasonableMaxDim,
-                "Output dimension is beyound reasonable maximum for ", idx,
+                "Output dimension is beyond reasonable maximum for ", idx,
                 " axis;"
                 " kernel: ", kernel[idx],
                 ", stride: ", stride[idx],
@@ -1329,14 +1329,19 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
       ideep::convolution_forward::compute(
           pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
     } else {
-      ideep::convolution_forward::compute_v2(
-          src, weights, b, dst_dims, dst,
+      src.set_zero_point(src_zero_points);
+      dst.set_zero_point(dst_zero_points);
+      ConvParams params;
+      ideep::convolution_forward::prepare(
+          params, src, weights, b, dst_dims, dst,
           strides, dilates, padding_l, padding_r, groups(),
           src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
-          src_zero_points, dst_zero_points, op_attr,
-          dnnl::algorithm::convolution_direct,
+          op_attr, dnnl::algorithm::convolution_direct,
           dnnl::prop_kind::forward_inference,
           ideep::u8s8, ideep::engine::cpu_engine());
+      onednn_utils::try_reorder(
+            weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+      ideep::convolution_forward::compute(params, src, weights, b, dst);
     }
   }
   return output;

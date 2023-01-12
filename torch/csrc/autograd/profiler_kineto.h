@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/events.h>
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
@@ -54,6 +55,7 @@ struct TORCH_API KinetoEvent {
   std::string backend() const;
   bool isPythonFunction() const;
   int64_t cudaElapsedUs() const;
+  void getPerfEventCounters(torch::profiler::perf_counters_t&) const;
 
  private:
   torch::profiler::impl::ProfilerEventStub fallbackStart() const;
@@ -61,6 +63,10 @@ struct TORCH_API KinetoEvent {
 
   std::shared_ptr<const torch::profiler::impl::Result> result_;
   std::vector<std::string> python_stack_;
+
+  // Copy fields from result so we can return ArrayRefs.
+  std::vector<std::vector<int64_t>> shapes_;
+  std::vector<std::string> dtypes_;
 };
 
 // Consolidating events returned directly from Kineto
@@ -167,4 +173,14 @@ TORCH_API void prepareProfiler(
 
 } // namespace profiler
 } // namespace autograd
+
+namespace profiler {
+namespace impl {
+
+// Experimental.
+TORCH_API void _reportVulkanEventToProfiler(vulkan_id_t id);
+
+} // namespace impl
+} // namespace profiler
+
 } // namespace torch

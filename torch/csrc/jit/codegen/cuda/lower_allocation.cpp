@@ -59,7 +59,7 @@ class AllocationInserter : public kir::ExprMutator {
   // info.init_place_before, info.alloc_for_loop, info.alloc_place_before
   void fillAllocationInformation(AllocationInformation& info, Expr* expr) {
     auto loop_alloc_info =
-        loop_utils::getAllocInformation(info.buffer, for_loops_);
+        lower_utils::getAllocInformation(info.buffer, for_loops_);
 
     info.init_for_loop = loop_alloc_info.init_for_loop;
     info.alloc_for_loop = loop_alloc_info.alloc_for_loop;
@@ -131,7 +131,7 @@ class AllocationInserter : public kir::ExprMutator {
          ++init_loop_it) {
       auto id = *init_loop_it;
       kir::ForLoop* new_loop = nullptr;
-      auto extent_with_halo = gpu_lower->haloInfo().getExtent(id);
+      auto extent_with_halo = gpu_lower->haloInfo()->getExtent(id);
       if (extent_with_halo) {
         new_loop = IrBuilder::create<kir::ForLoop>(
             id,
@@ -166,7 +166,7 @@ class AllocationInserter : public kir::ExprMutator {
       }
       auto extent = id->extent();
       // Use halo-extended extent if found
-      auto halo_extent = gpu_lower->haloInfo().getRootAxisInfo(id);
+      auto halo_extent = gpu_lower->haloInfo()->getRootAxisInfo(id);
       if (halo_extent.hasHalo()) {
         extent = IrBuilder::addExpr(
             extent, IrBuilder::create<Int>(halo_extent.width()));
@@ -213,7 +213,7 @@ class AllocationInserter : public kir::ExprMutator {
 
     // Get the halo extent if found
     auto getExtent = [this](IterDomain* id) {
-      auto extent = gpu_lower->haloInfo().getExtent(id);
+      auto extent = gpu_lower->haloInfo()->getExtent(id);
       if (extent == nullptr) {
         extent = id->extent();
       }
@@ -368,7 +368,7 @@ class AllocationInserter : public kir::ExprMutator {
 
       auto extent = concrete_id->extent();
 
-      if (gpu_lower->haloInfo().getExtent(info.buffer->axis(axis_i)) !=
+      if (gpu_lower->haloInfo()->getExtent(info.buffer->axis(axis_i)) !=
           nullptr) {
         has_halo = true;
       }

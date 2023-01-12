@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
 from collections import defaultdict
 import copy
+import torch
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
-import torch.utils._pytree as pytree
 from typing import Dict, List, Set, Any
 import logging
 import os
@@ -92,6 +92,22 @@ class SubgraphMatcher:
             # and should be matched against as an anchor
             self.pattern_anchors = [n for n in output_node.all_input_nodes if len(n.users) == 1]
 
+    def _match_attributes(self, pn: Node, gn: Node) -> bool:
+        # Attributes matching is compilcated. Right now we only support matching constant tensor
+        assert isinstance(pn.target, str), f"pn.target {pn.target} must be a string."
+        assert isinstance(gn.target, str), f"gn.target {gn.target} must be a string."
+        pn_value = getattr(pn.graph.owning_module, pn.target)
+        gn_value = getattr(gn.graph.owning_module, gn.target)
+        if type(pn_value) != type(gn_value):
+            return False
+
+        # Don't require exact match on tensor values.
+        if isinstance(pn_value, torch.Tensor):
+            return isinstance(gn_value, torch.Tensor)
+        else:
+            raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
+        return False
+
     def _nodes_are_equal(self, pn: Node, gn: Node) -> bool:
         # if exact match for placeholder is not required, then use placeholder as a wildcard
         if not self.match_placeholder and pn.op == "placeholder":
@@ -100,18 +116,19 @@ class SubgraphMatcher:
         if pn.op == gn.op:
             if pn.op == "placeholder" or pn.op == "output":
                 return True
+            elif pn.op == "get_attr":
+                return self._match_attributes(pn, gn)
             return pn.target == gn.target
         return False
 
     def _is_contained(self, nodes_map: Dict[Node, Node]) -> bool:
         # `lookup` represents all the nodes in `original_graph`
         # that are part of `pattern`
-        lookup: Dict[Node, Node] = {gn : pn for pn, gn in nodes_map.items()}
-        for gn, pn in lookup.items():
-            # Placeholders can be used by other nodes in the graphs
-            if pn.op == "placeholder":
-                continue
 
+        # Placeholders can be used by other nodes in the graphs
+        lookup: Dict[Node, Node] = {gn : pn for pn, gn in nodes_map.items() if pn.op != "placeholder"}
+
+        for gn, pn in lookup.items():
             # nodes returned by output are allowed to be used in other areas of the graph
             if pn in self.pattern_returning_nodes:
                 continue
@@ -188,8 +205,20 @@ class SubgraphMatcher:
         # match for `gn`
         match_found = True
 
-        pn_flatten_args, _ = pytree.tree_flatten(pn.args)
-        gn_flatten_args, _ = pytree.tree_flatten(gn.args)
+        def flatten_args(args) -> List[Any]:
+            # Recursively flatten args
+            result : List[Any] = []
+            for arg in args:
+                # flatten the list, if only it's a list/tuple of nodes
+                if isinstance(arg, (list, tuple)) and len(arg) > 0 and isinstance(arg[0], Node):
+                    result.extend(flatten_args(arg))
+                else:
+                    result.append(arg)
+
+            return result
+
+        pn_flatten_args = flatten_args(pn.args)
+        gn_flatten_args = flatten_args(gn.args)
 
         if pn.kwargs.keys() == gn.kwargs.keys():
             for key in pn.kwargs.keys():

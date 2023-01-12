@@ -159,8 +159,13 @@ pytest-shard
 #Pinned versions:
 #test that import:
 
+pytest-flakefinder==1.1.0
+#Description: plugin for rerunning tests a fixed number of times in pytest
+#Pinned versions: 1.1.0
+#test that import:
+
 pytest-rerunfailures
-#Description: plugin for rerunning tests in pytest
+#Description: plugin for rerunning failure tests in pytest
 #Pinned versions:
 #test that import:
 
@@ -174,9 +179,9 @@ pytest-rerunfailures
 #Pinned versions:
 #test that import:
 
-xdoctest==1.0.2
+xdoctest==1.1.0
 #Description: runs doctests in pytest
-#Pinned versions: 1.0.2
+#Pinned versions: 1.1.0
 #test that import:
 
 pygments==2.12.0

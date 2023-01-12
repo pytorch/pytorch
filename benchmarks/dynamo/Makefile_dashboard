@@ -7,7 +7,7 @@ clone-deps:
 		&& (test -e torchvision || git clone --recursive https://github.com/pytorch/vision torchvision) \
 		&& (test -e torchdata || git clone --recursive https://github.com/pytorch/data.git torchdata) \
 		&& (test -e torchtext || git clone --recursive https://github.com/pytorch/text torchtext) \
-		&& (test -e torchaudio || git clone --recursive https://github.com/pytorch/text torchaudio) \
+		&& (test -e torchaudio || git clone --recursive https://github.com/pytorch/audio torchaudio) \
 		&& (test -e detectron2 || git clone --recursive https://github.com/facebookresearch/detectron2) \
 		&& (test -e torchbenchmark || git clone --recursive https://github.com/pytorch/benchmark torchbenchmark) \
 		&& (test -e triton || git clone --recursive https://github.com/openai/triton.git) \

@@ -2,7 +2,6 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Common.h>
@@ -82,6 +81,10 @@ class Context final {
 
   inline void enable_op_profiling() {
     enable_op_profiling_ = true;
+  }
+
+  inline void disable_op_profiling() {
+    enable_op_profiling_ = false;
   }
 
   inline bool op_profiling_enabled() {
@@ -206,14 +209,16 @@ class UniformParamsBuffer final {
   VulkanBuffer vulkan_buffer_;
 
  public:
+  UniformParamsBuffer() : context_p_{nullptr}, vulkan_buffer_{} {}
+
   template <typename Block>
   UniformParamsBuffer(Context* context_p, const Block& block)
       : context_p_(context_p),
         vulkan_buffer_(
             context_p_->adapter_ptr()->vma().create_params_buffer(block)) {}
 
-  UniformParamsBuffer(const UniformParamsBuffer&) = delete;
-  UniformParamsBuffer& operator=(const UniformParamsBuffer&) = delete;
+  UniformParamsBuffer(const UniformParamsBuffer&);
+  UniformParamsBuffer& operator=(const UniformParamsBuffer&);
 
   UniformParamsBuffer(UniformParamsBuffer&&) = default;
   UniformParamsBuffer& operator=(UniformParamsBuffer&&) = default;

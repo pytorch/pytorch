@@ -5,6 +5,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Copy.h>
+#include <ATen/native/vulkan/ops/Convolution.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
@@ -233,24 +234,29 @@ class VulkanAPITest : public ::testing::Test {
       GTEST_SKIP() << "Vulkan is not available";
     }
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-    at::native::vulkan::api::context()->reset_querypool();
+    if (at::native::vulkan::api::context()->op_profiling_enabled()) {
+      at::native::vulkan::api::context()->reset_querypool();
+    }
 #endif
   }
 
   void TearDown() {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-    try {
-      at::native::vulkan::api::context()->querypool().extract_results();
-      at::native::vulkan::api::context()->querypool().print_results();
-    } catch (const std::exception& e) {
-      std::cout << "Could not get querypool results!"
-                << " Reason: " << e.what() << std::endl;
+    if (at::native::vulkan::api::context()->op_profiling_enabled()) {
+      try {
+        at::native::vulkan::api::context()->querypool().extract_results();
+        at::native::vulkan::api::context()->querypool().print_results();
+      } catch (const std::exception& e) {
+        std::cout << "Could not get querypool results!"
+                  << " Reason: " << e.what() << std::endl;
+      }
     }
 #endif
   }
 };
 
 TEST_F(VulkanAPITest, copy_to_texture) {
+  using namespace at::native::vulkan;
   at::Tensor test_tensors[] = {
     // 4D
     at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
@@ -272,6 +278,8 @@ TEST_F(VulkanAPITest, copy_to_texture) {
       std::cout << "Copy failed on size " << in_cpu.sizes()
                 << "with dtype" << in_cpu.dtype() << std::endl;
     }
+
+    ASSERT_TRUE(check_copy);
   }
 }
 
@@ -629,7 +637,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -643,7 +651,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -657,7 +665,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -671,7 +679,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -685,7 +693,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({12}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -699,7 +707,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({12}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -713,7 +721,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({12}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -844,6 +852,130 @@ TEST_F(VulkanAPITest, clamp_) {
   ASSERT_TRUE(check);
 }
 
+void test_conv2d_context(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef weight_shape,
+    const at::IntArrayRef bias_shape,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> dilation,
+    int64_t groups) {
+  c10::InferenceMode mode;
+
+  at::Tensor input = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  at::Tensor weight = at::rand(weight_shape, at::device(at::kCPU).dtype(at::kFloat));
+  at::Tensor bias = at::rand(bias_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  // cpu
+  const auto out_cpu = at::conv2d(
+    input, weight, bias, stride, padding, dilation, groups);
+
+  // vulkan
+  const auto prepack_vulkan = callOpByName(
+      "vulkan_prepack::create_conv2d_context",
+      "",
+      weight, bias, stride, padding, dilation, groups, c10::nullopt, c10::nullopt);
+
+  const auto vulkan_output = callOpByName(
+      "vulkan_prepack::run_conv2d_context",
+      "",
+      input.vulkan(), prepack_vulkan[0]);
+
+  const auto out_vulkan = vulkan_output[0].toTensor();
+  const auto out_vk_cpu = out_vulkan.cpu();
+
+  // check
+  const bool check = almostEqual(out_cpu, out_vk_cpu);
+  if (!check) {
+    showRtol(out_cpu, out_vk_cpu);
+  }
+
+  ASSERT_TRUE(check);
+}
+
+void test_backwards_compatible_conv2d_context(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef weight_shape,
+    const at::IntArrayRef bias_shape,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> dilation,
+    int64_t groups) {
+  c10::InferenceMode mode;
+
+  at::Tensor input = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  at::Tensor weight = at::rand(weight_shape, at::device(at::kCPU).dtype(at::kFloat));
+  at::Tensor bias = at::rand(bias_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  // cpu
+  const auto out_cpu = at::conv2d(
+    input, weight, bias, stride, padding, dilation, groups);
+
+  // vulkan
+  const auto prepack_vulkan = callOpByName(
+      "vulkan_prepack::conv2d_clamp_prepack",
+      "",
+      weight, bias, stride, padding, dilation, groups, c10::nullopt, c10::nullopt);
+
+  const auto vulkan_output = callOpByName(
+      "vulkan_prepack::conv2d_clamp_run",
+      "",
+      input.vulkan(), prepack_vulkan[0]);
+
+  const auto out_vulkan = vulkan_output[0].toTensor();
+  const auto out_vk_cpu = out_vulkan.cpu();
+
+  // check
+  const bool check = almostEqual(out_cpu, out_vk_cpu);
+  if (!check) {
+    showRtol(out_cpu, out_vk_cpu);
+  }
+
+  ASSERT_TRUE(check);
+}
+
+void test_transposed_conv2d_context(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef weight_shape,
+    const at::IntArrayRef bias_shape,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> output_padding,
+    std::vector<int64_t> dilation,
+    int64_t groups) {
+  c10::InferenceMode mode;
+
+  at::Tensor input = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  at::Tensor weight = at::rand(weight_shape, at::device(at::kCPU).dtype(at::kFloat));
+  at::Tensor bias = at::rand(bias_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  // cpu
+  const auto out_cpu = at::conv_transpose2d(
+    input, weight, bias, stride, padding, output_padding, groups, dilation);
+
+  // vulkan
+  const auto prepack_vulkan = callOpByName(
+      "vulkan_prepack::create_tconv2d_context",
+      "",
+      weight, bias, stride, padding, output_padding, dilation, groups, c10::nullopt, c10::nullopt);
+
+  const auto vulkan_output = callOpByName(
+      "vulkan_prepack::run_tconv2d_context",
+      "",
+      input.vulkan(), prepack_vulkan[0]);
+
+  const auto out_vulkan = vulkan_output[0].toTensor();
+  const auto out_vk_cpu = out_vulkan.cpu();
+
+  // check
+  const bool check = almostEqual(out_cpu, out_vk_cpu);
+  if (!check) {
+    showRtol(out_cpu, out_vk_cpu);
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, conv2d) {
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{2, 2};
@@ -908,6 +1040,158 @@ TEST_F(VulkanAPITest, conv2d) {
   const bool check = almostEqual(output_cpu, output_vulkan);
   if (!check) {
     showRtol(output_cpu, output_vulkan);
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, conv2d_prepack) {
+  test_conv2d_context(
+    {1, 3, 8, 8}, // input_shape
+    {1, 3, 3, 3}, // weight_shape
+    {1},          // bias_shape
+    {2, 2},       // stride
+    {1, 1},       // padding
+    {1, 1},       // dilation
+    1);           // groups
+}
+
+TEST_F(VulkanAPITest, conv2d_prepack_bc) {
+  test_backwards_compatible_conv2d_context(
+    {1, 3, 8, 8}, // input_shape
+    {1, 3, 3, 3}, // weight_shape
+    {1},          // bias_shape
+    {2, 2},       // stride
+    {1, 1},       // padding
+    {1, 1},       // dilation
+    1);           // groups
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_3x3) {
+  constexpr int64_t groups = 7;
+  constexpr std::array<int64_t, 2u> stride{2, 3};
+  constexpr std::array<int64_t, 2u> padding{0, 4};
+  constexpr std::array<int64_t, 2u> dilation{3, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{1, groups, 137, 199};
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{groups, 1, 3, 3};
+
+  const auto input_cpu =
+      at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu =
+      at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::rand(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto output_cpu = at::conv2d(
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, groups);
+
+  const auto output_vulkan = at::conv2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const bool check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_5x5) {
+  constexpr int64_t groups = 7;
+  constexpr std::array<int64_t, 2u> stride{2, 3};
+  constexpr std::array<int64_t, 2u> padding{0, 4};
+  constexpr std::array<int64_t, 2u> dilation{3, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{1, groups, 137, 199};
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{groups, 1, 5, 5};
+
+  const auto input_cpu =
+      at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu =
+      at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::rand(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto output_cpu = at::conv2d(
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, groups);
+
+  const auto output_vulkan = at::conv2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const bool check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -981,6 +1265,28 @@ TEST_F(VulkanAPITest, conv2d_dw) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, conv2d_dw_prepack) {
+  test_conv2d_context(
+    {1, 7, 137, 199}, // input_shape
+    {7, 1, 17, 7},    // weight_shape
+    {7},              // bias_shape
+    {2, 3},           // stride
+    {0, 4},           // padding
+    {3, 1},           // dilation
+    7);               // groups
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_prepack_bc) {
+  test_backwards_compatible_conv2d_context(
+    {1, 7, 137, 199}, // input_shape
+    {7, 1, 17, 7},    // weight_shape
+    {7},              // bias_shape
+    {2, 3},           // stride
+    {0, 4},           // padding
+    {3, 1},           // dilation
+    7);               // groups
+}
+
 TEST_F(VulkanAPITest, conv2d_pw) {
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{1, 1};
@@ -1047,6 +1353,115 @@ TEST_F(VulkanAPITest, conv2d_pw) {
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, conv2d_pw_prepack) {
+  test_conv2d_context(
+    {1, 17, 127, 397},  // input_shape
+    {29, 17, 1, 1},     // weight_shape
+    {29},               // bias_shape
+    {1, 1},             // stride
+    {0, 0},             // padding
+    {1, 1},             // dilation
+    1);                 // groups
+}
+
+TEST_F(VulkanAPITest, conv2d_pw_prepack_bc) {
+  test_backwards_compatible_conv2d_context(
+    {1, 17, 127, 397},  // input_shape
+    {29, 17, 1, 1},     // weight_shape
+    {29},               // bias_shape
+    {1, 1},             // stride
+    {0, 0},             // padding
+    {1, 1},             // dilation
+    1);                 // groups
+}
+
+TEST_F(VulkanAPITest, conv2d_transposed) {
+  // Arrange
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 0};
+  constexpr std::array<int64_t, 2u> output_padding{0, 1};
+  //TODO: Support conv_transpose2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t height;
+    uint32_t width;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        batches,
+        channels,
+        height,
+        width,
+      };
+    }
+  } input {1, 55, 7, 19};
+
+  constexpr struct {
+    uint32_t input_channels;
+    uint32_t output_channels;
+    uint32_t height;
+    uint32_t width;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        input_channels,
+        output_channels,
+        height,
+        width,
+      };
+    }
+  } weights {input.channels, 47, 2, 3};
+
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::zeros({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto output_cpu = at::conv_transpose2d(
+      input_cpu,
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation);
+
+  const auto output_vk = at::conv_transpose2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation).cpu();
+
+  // Assert
+  const bool check = almostEqual(output_cpu, output_vk);
+  if (!check) {
+    showRtol(output_cpu, output_vk);
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, conv2d_transposed_prepack) {
+  test_transposed_conv2d_context(
+    {1, 55, 7, 19}, // input_shape
+    {55, 47, 2, 3}, // weight_shape
+    {47},           // bias_shape
+    {1, 2},         // stride
+    {1, 0},         // padding
+    {0, 1},         // output_padding
+    {1, 1},         // dilation
+    1);             // groups
 }
 
 TEST_F(VulkanAPITest, copy) {
@@ -2764,81 +3179,6 @@ TEST_F(VulkanAPITest, sub_to_scalar_wrapped) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, transposed_conv2d) {
-  // Arrange
-  constexpr int64_t groups = 1;
-  constexpr std::array<int64_t, 2u> stride{1, 2};
-  constexpr std::array<int64_t, 2u> padding{1, 0};
-  constexpr std::array<int64_t, 2u> output_padding{0, 1};
-  //TODO: Support conv_transpose2d with dilation != 1
-  constexpr std::array<int64_t, 2u> dilation{1, 1};
-
-  constexpr struct {
-    uint32_t batches;
-    uint32_t channels;
-    uint32_t height;
-    uint32_t width;
-
-    std::array<int64_t, 4u> size() const {
-      return {
-        batches,
-        channels,
-        height,
-        width,
-      };
-    }
-  } input {1, 55, 7, 19};
-
-  constexpr struct {
-    uint32_t input_channels;
-    uint32_t output_channels;
-    uint32_t height;
-    uint32_t width;
-
-    std::array<int64_t, 4u> size() const {
-      return {
-        input_channels,
-        output_channels,
-        height,
-        width,
-      };
-    }
-  } weights {input.channels, 47, 2, 3};
-
-  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_cpu = at::zeros({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
-
-  // Act
-  const auto output_cpu = at::conv_transpose2d(
-      input_cpu,
-      weights_cpu,
-      bias_cpu,
-      stride,
-      padding,
-      output_padding,
-      groups,
-      dilation);
-
-  const auto output_vk = at::conv_transpose2d(
-      input_cpu.vulkan(),
-      weights_cpu,
-      bias_cpu,
-      stride,
-      padding,
-      output_padding,
-      groups,
-      dilation).cpu();
-
-  // Assert
-  const bool check = almostEqual(output_cpu, output_vk);
-  if (!check) {
-    showRtol(output_cpu, output_vk);
-  }
-
-  ASSERT_TRUE(check);
-}
-
 TEST_F(VulkanAPITest, upsample_nearest2d) {
   const auto in_cpu = at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::upsample_nearest2d(in_cpu, {4, 6});
@@ -2944,6 +3284,44 @@ TEST_F(VulkanAPITest, view_invalid_inputs) {
     at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan().view({7, 70});
   }, ::std::runtime_error);
+}
+
+TEST_F(VulkanAPITest, cat_dim0_invalidinputs_exceptions) {
+  // Arrange: Vulkan cat inputs must have matching sizes except concatenated dimension
+  {
+    const auto in_cpu1 = at::rand({3, 5, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({3, 9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+    }, ::c10::Error);
+  }
+
+  // Arrange: Vulkan cat expects 4 dimensional inputs
+  {
+    const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+    }, ::c10::Error);
+  }
+
+  // Arrange: Vulkan cat not implemented for batch dimension!
+  {
+    const auto in_cpu1 = at::rand({221, 3, 9, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({112, 3, 9, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({331, 3, 9, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+    }, ::c10::Error);
+  }
 }
 
 #if !defined(__APPLE__)
@@ -3174,6 +3552,25 @@ TEST_F(VulkanAPITest, cat_dim2_diffheight_success) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, cat_dim2_negdim_success) {
+  // Arrange
+  const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, -2);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, -2);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, cat_dim2_singledepth_success) {
   // Arrange: batch x channel (1x1) = single depth texture
   const auto in_cpu1 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -3231,6 +3628,44 @@ TEST_F(VulkanAPITest, cat_dim2_invalidinputs_exceptions) {
     EXPECT_THROW({
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1);
     }, ::c10::Error);
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
+    }, ::c10::Error);
+  }
+}
+
+TEST_F(VulkanAPITest, cat_dim3_invalidinputs_exceptions) {
+  // Arrange: Vulkan cat inputs must have matching sizes except concatenated dimension
+  {
+    const auto in_cpu1 = at::rand({3, 5, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({3, 9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
+    }, ::c10::Error);
+  }
+
+  // Arrange: Vulkan cat expects 4 dimensional inputs
+  {
+    const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
+    }, ::c10::Error);
+  }
+
+  // Arrange: Vulkan cat not implemented for width dimension!
+  {
+    const auto in_cpu1 = at::rand({3, 9, 193, 221}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({3, 9, 193, 112}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 193, 331}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
     EXPECT_THROW({
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
     }, ::c10::Error);
@@ -4602,6 +5037,96 @@ TEST_F(VulkanAPITest, lstm_prepack_success) {
     showRtol(cpu_cell, vulkan_cell.cpu());
   }
   ASSERT_TRUE(check_cell);
+}
+
+TEST_F(VulkanAPITest, querypool_flushed_shader_log) {
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  const bool op_profiling_enabled_initially =
+      at::native::vulkan::api::context()->op_profiling_enabled();
+
+  at::native::vulkan::api::context()->enable_op_profiling();
+
+  const at::Tensor a_add_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor a_add_vulkan = a_add_cpu.vulkan();
+
+  const at::Tensor b_add_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor b_add_vulkan = b_add_cpu.vulkan();
+
+  at::add(a_add_vulkan, b_add_vulkan, 2.1f).cpu();
+
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->reset_querypool();
+
+  const at::Tensor a_sub_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor a_sub_vulkan = a_sub_cpu.vulkan();
+
+  const at::Tensor b_sub_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor b_sub_vulkan = b_sub_cpu.vulkan();
+
+  at::sub(a_sub_vulkan, b_sub_vulkan, 2.1f).cpu();
+
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->reset_querypool();
+
+  const at::Tensor a_mul_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor a_mul_vulkan = a_mul_cpu.vulkan();
+
+  const at::Tensor b_mul_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor b_mul_vulkan = b_mul_cpu.vulkan();
+
+  at::mul(a_mul_vulkan, b_mul_vulkan).cpu();
+
+  /*
+    The most recent shaders should be
+    (-12) vulkan.nchw_to_image
+    (-11) vulkan.nchw_to_image
+    (-10) vulkan.add
+    (-9)  vulkan.image_to_nchw
+
+    (-8)  vulkan.nchw_to_image
+    (-7)  vulkan.nchw_to_image
+    (-6)  vulkan.sub
+    (-5)  vulkan.image_to_nchw
+
+    (-4)  vulkan.nchw_to_image
+    (-3)  vulkan.nchw_to_image
+    (-2)  vulkan.mul
+    (-1)  vulkan.image_to_nchw
+  */
+
+  const size_t entry_count =
+      at::native::vulkan::api::context()->querypool().shader_logs_entry_count();
+
+  std::tuple<std::string, uint64_t> add_shader_details =
+      at::native::vulkan::api::context()
+          ->querypool()
+          .get_shader_name_and_execution_duration_ns(entry_count - 10);
+  std::tuple<std::string, uint64_t> sub_shader_details =
+      at::native::vulkan::api::context()
+          ->querypool()
+          .get_shader_name_and_execution_duration_ns(entry_count - 6);
+  std::tuple<std::string, uint64_t> mul_shader_details =
+      at::native::vulkan::api::context()
+          ->querypool()
+          .get_shader_name_and_execution_duration_ns(entry_count - 2);
+
+  EXPECT_EQ(std::get<0>(add_shader_details), "vulkan.add");
+  EXPECT_EQ(std::get<0>(sub_shader_details), "vulkan.sub");
+  EXPECT_EQ(std::get<0>(mul_shader_details), "vulkan.mul");
+
+  if (!op_profiling_enabled_initially) {
+    at::native::vulkan::api::context()->reset_querypool();
+    at::native::vulkan::api::context()->disable_op_profiling();
+  }
+#else
+  GTEST_SKIP() << "QueryPool is not available";
+#endif
 }
 
 } // namespace

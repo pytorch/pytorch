@@ -7,6 +7,7 @@ import builtins
 import types
 import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
+from .._ops import ops as _ops
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -24,15 +25,16 @@ Argument = Optional[Union[
     List[Any],  # actually Argument
     Dict[str, Any],  # actually Argument
     slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
+    range,
     'Node',
     BaseArgumentTypes
 ]]
 
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
-    torch.ops.profiler._record_function_enter,
-    torch.ops.profiler._record_function_enter_new,
-    torch.ops.profiler._record_function_exit}
+    _ops.profiler._record_function_enter,
+    _ops.profiler._record_function_enter_new,
+    _ops.profiler._record_function_exit}
 
 # this is fixed on master, WAR for 1.5
 def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
@@ -468,7 +470,9 @@ class Node:
     @compatibility(is_backward_compatible=True)
     def replace_all_uses_with(self,
                               replace_with : 'Node',
-                              delete_user_cb: Callable[['Node'], bool] = lambda user: True
+                              delete_user_cb: Callable[['Node'], bool] = lambda user: True,
+                              *,
+                              propagate_meta=False
                               ) -> List['Node']:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
@@ -478,11 +482,21 @@ class Node:
             replace_with (Node): The node to replace all uses of ``self`` with.
             delete_user_cb (Callable): Callback that is called to determine
               whether a given user of the self node should be removed.
+            propagate_meta (bool): Whether or not to copy all properties
+              on the .meta field of the original node onto the replacement node.
+              For safety, this is only valid to do if the replacement node
+              doesn't already have an existing .meta field.
 
         Returns:
 
             The list of Nodes on which this change was made.
         """
+        if propagate_meta:
+            assert len(replace_with.meta) == 0, \
+                'Called node.replace_all_uses_with(replace_with, propagate_meta=True), ' \
+                'but replace_with already has .meta keys'
+            for k, v in self.meta.items():
+                replace_with.meta[k] = v
         to_process = list(self.users)
         skipped = []
         for use_node in to_process:

@@ -15,7 +15,7 @@ Updated operators:
     PRelu
     RoiAlign
     Scan
-    ScatterElemenets
+    ScatterElements
     ScatterND
     Where
     GreaterOrEqual
@@ -27,6 +27,7 @@ Updated operators:
 
 import functools
 
+import torch
 from torch.nn.functional import (
     GRID_SAMPLE_INTERPOLATION_MODES,
     GRID_SAMPLE_PADDING_MODES,
@@ -69,15 +70,26 @@ def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
 
-    src_type = src.type().scalarType()
+    src_type = _type_utils.JitScalarType.from_value(
+        src, _type_utils.JitScalarType.UNDEFINED
+    )
     src_sizes = symbolic_helper._get_tensor_sizes(src)
     index_sizes = symbolic_helper._get_tensor_sizes(index)
 
-    if src_sizes != index_sizes:
+    if len(src_sizes) != len(index_sizes):
         return symbolic_helper._unimplemented(
             "scatter_add",
             f"`index` ({index_sizes}) should have the same dimensionality as `src` ({src_sizes})",
         )
+
+    # PyTorch only allows index shape <= src shape, so we can only consider
+    # taking index as subset size to src, like PyTorch does. When sizes for src
+    # and index are not matched or there are dynamic axes, we take index shape to
+    # slice src to accommodate.
+    if src_sizes != index_sizes or None in index_sizes:
+        adjusted_shape = g.op("Shape", index)
+        starts = g.op("Constant", value_t=torch.tensor([0] * len(index_sizes)))
+        src = g.op("Slice", src, starts, adjusted_shape)
 
     src = symbolic_helper._maybe_get_scalar(src)
     if symbolic_helper._is_value(src):
@@ -85,13 +97,11 @@ def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
     else:
         # Check if scalar "src" has same type as self (PyTorch allows different
         # type for scalar src (but not when src is tensor)). If not, insert Cast node.
-        if self.type().scalarType() != src_type:
+        if _type_utils.JitScalarType.from_value(self) != src_type:
             src = g.op(
                 "Cast",
                 src,
-                to_i=_type_utils.JitScalarType.from_name(
-                    self.type().scalarType()
-                ).onnx_type(),
+                to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
             )
 
         return g.op(

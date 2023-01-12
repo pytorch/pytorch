@@ -10,6 +10,8 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
@@ -238,7 +240,7 @@ bool_is_contiguous _compute_contiguous(
   T z = 1;
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
-    const auto size_d = sizes[d];
+    const auto& size_d = sizes[d];
     if (size_d != 1) {
       if (strides[d] == z) {
         z *= size_d;
@@ -270,6 +272,9 @@ bool_is_contiguous _compute_contiguous(
              sizes_and_strides_.strides_arrayref()))
 
 bool_is_contiguous TensorImpl::compute_contiguous() const {
+  if (is_sparse()) {
+    return bool_is_contiguous(false);
+  }
   return COMPUTE_WITH_SIZES_STRIDES_NUMEL(_compute_contiguous);
 }
 
@@ -283,7 +288,7 @@ bool_is_channels_last_contiguous _compute_channels_last_contiguous_2d(
     case 4: {
       T expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
-        const auto size_d = sizes[d];
+        const auto& size_d = sizes[d];
         if (size_d != 1) {
           if (strides[d] != expected) {
             return bool_is_channels_last_contiguous(false);
@@ -304,6 +309,9 @@ bool_is_channels_last_contiguous _compute_channels_last_contiguous_2d(
 
 bool_is_channels_last_contiguous TensorImpl::
     compute_channels_last_contiguous_2d() const {
+  if (is_sparse()) {
+    return bool_is_channels_last_contiguous(false);
+  }
   return COMPUTE_WITH_SIZES_STRIDES(_compute_channels_last_contiguous_2d);
 }
 
@@ -317,7 +325,7 @@ bool_is_channels_last_3d_contiguous _compute_channels_last_contiguous_3d(
     case 5: {
       T expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d = sizes[d];
+        const auto& size_d = sizes[d];
         if (size_d != 1) {
           if (strides[d] != expected) {
             return bool_is_channels_last_3d_contiguous(false);
@@ -338,17 +346,26 @@ bool_is_channels_last_3d_contiguous _compute_channels_last_contiguous_3d(
 
 bool_is_channels_last_3d_contiguous TensorImpl::
     compute_channels_last_contiguous_3d() const {
+  if (is_sparse()) {
+    return bool_is_channels_last_3d_contiguous(false);
+  }
   return COMPUTE_WITH_SIZES_STRIDES(_compute_channels_last_contiguous_3d);
 }
 
 bool_is_channels_last TensorImpl::compute_strides_like_channels_last_2d()
     const {
+  if (is_sparse()) {
+    return bool_is_channels_last(false);
+  }
   return bool_is_channels_last(
       COMPUTE_WITH_SIZES_STRIDES(is_channels_last_strides_2d));
 }
 
 bool_is_channels_last_3d TensorImpl::compute_strides_like_channels_last_3d()
     const {
+  if (is_sparse()) {
+    return bool_is_channels_last_3d(false);
+  }
   return bool_is_channels_last_3d(
       COMPUTE_WITH_SIZES_STRIDES(is_channels_last_strides_3d));
 }
@@ -377,7 +394,7 @@ bool_is_non_overlapping_and_dense _compute_non_overlapping_and_dense(
   });
   T require_stride = 1;
   for (const auto i : c10::irange(dim)) {
-    const auto size_perm_i = sizes[perm[i]];
+    const auto& size_perm_i = sizes[perm[i]];
     if (size_perm_i < 2) {
       return bool_is_non_overlapping_and_dense(true);
     }
@@ -391,6 +408,9 @@ bool_is_non_overlapping_and_dense _compute_non_overlapping_and_dense(
 
 bool_is_non_overlapping_and_dense TensorImpl::
     compute_non_overlapping_and_dense() const {
+  if (is_sparse()) {
+    return bool_is_non_overlapping_and_dense(false);
+  }
   return COMPUTE_WITH_SIZES_STRIDES(_compute_non_overlapping_and_dense);
 }
 
@@ -786,7 +806,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
           sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
   auto oldSize = numel_;
-  Resize(newCapacity);
+  Resize(std::move(newCapacity));
   auto* newData = raw_mutable_data(data_type_);
   if (data_type_.copy()) {
     TORCH_CHECK(
@@ -838,7 +858,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
   auto oldSize = numel_;
   SmallVector<int64_t, 5> oldDims(
       sizes_and_strides.begin(), sizes_and_strides.end());
-  Resize(newCapacity);
+  Resize(std::move(newCapacity));
   // Allocate new memory but don't copy over the data
   raw_mutable_data(data_type_);
   sizes_and_strides_.set_sizes(oldDims);
@@ -950,8 +970,8 @@ void TensorImpl::ShareExternalPointer(
 void clone_symvec(SymIntArrayRef src, SymDimVector& dst) {
   dst.clear();
   dst.reserve(src.size());
-  for (size_t i = 0; i < src.size(); i++) {
-    dst.emplace_back(src[i].clone());
+  for (const auto& i : src) {
+    dst.emplace_back(i.clone());
   }
 }
 
@@ -973,6 +993,10 @@ void TensorImpl::set_sizes_and_strides(
       set_storage_offset(storage_offset->as_int_unchecked());
     return;
   }
+  TORCH_CHECK(
+      allow_tensor_metadata_change(),
+      "set_sizes_and_strides ",
+      err_msg_tensor_metadata_change_not_allowed);
 
   has_symbolic_sizes_strides_ = true;
   refresh_sizes_strides_policy();
@@ -988,6 +1012,81 @@ void TensorImpl::set_sizes_and_strides(
     extra_meta_->storage_offset_ = storage_offset->clone();
 
   refresh_numel();
+  refresh_contiguous();
+}
+
+void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
+  auto int_sizes = asIntArrayRefSlowOpt(sizes);
+  if (int_sizes.has_value()) {
+    set_sizes_contiguous(*int_sizes);
+    return;
+  }
+
+  TORCH_CHECK(
+      allow_tensor_metadata_change(),
+      "generic_set_sizes_contiguous ",
+      err_msg_tensor_metadata_change_not_allowed);
+
+  has_symbolic_sizes_strides_ = true;
+  refresh_sizes_strides_policy();
+  if (!extra_meta_) {
+    extra_meta_ = std::make_unique<ExtraMeta>();
+    extra_meta_->storage_offset_ = storage_offset_;
+  }
+
+  clone_symvec(sizes, extra_meta_->sizes_);
+  refresh_numel();
+  empty_tensor_restride_symint(
+      MemoryFormat::Contiguous); // calls refresh_contiguous()
+}
+
+void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
+  TORCH_INTERNAL_ASSERT(has_symbolic_sizes_strides_);
+#ifdef DEBUG
+  TORCH_INTERNAL_ASSERT(
+      compute_numel() == numel_,
+      "If you are seeing this error, that means empty_tensor_restride was "
+      "called before setting correct numel");
+#endif
+  switch (memory_format) {
+    case MemoryFormat::Contiguous: {
+      // dim_ is a virtual call, don't repeat it
+      const auto dim_ = dim();
+      extra_meta_->strides_.resize(dim_);
+      if (dim_ > 0) {
+        const auto last_idx = dim_ - 1;
+        extra_meta_->strides_[last_idx] = c10::SymInt(1);
+        for (auto i = last_idx - 1; i >= 0; --i) {
+          extra_meta_->strides_[last_idx] =
+              extra_meta_->strides_[i + 1] * extra_meta_->sizes_[i + 1].max(1);
+        }
+      }
+      break;
+    }
+    case MemoryFormat::ChannelsLast: {
+      TORCH_CHECK(
+          dim() == 4, "required rank 4 tensor to use channels_last format");
+      set_sizes_and_strides(
+          sym_sizes(), get_channels_last_strides_2d(sym_sizes()));
+      break;
+    }
+    case MemoryFormat::ChannelsLast3d: {
+      TORCH_CHECK(
+          dim() == 5, "required rank 5 tensor to use channels_last_3d format");
+      set_sizes_and_strides(
+          sym_sizes(), get_channels_last_strides_3d(sym_sizes()));
+      break;
+    }
+    case MemoryFormat::Preserve:
+      TORCH_CHECK(false, "unsupported memory format ", memory_format);
+      // Cleaning warning messages, no need to break as TORCH_CHECK(false)
+      // terminates flow.
+      // break;
+    case MemoryFormat::NumOptions:
+      TORCH_INTERNAL_ASSERT(false, "invalid memory format ", memory_format);
+  }
+  // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
+  // exclusive see #24090
   refresh_contiguous();
 }
 

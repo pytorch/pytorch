@@ -1,7 +1,7 @@
 import dataclasses
 import traceback
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Set, Tuple, Union
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
@@ -9,6 +9,7 @@ from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
     _is_namedtuple,
 )
 from torch.nn.utils.rnn import PackedSequence
+from torch.utils._mode_utils import no_dispatch
 
 
 def _contains_batchnorm(module):
@@ -68,14 +69,14 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
         bool: ``True`` if this method allocated storage and ``False`` if the
         storage was already allocated.
     """
-    already_allocated = tensor.storage().size() == size.numel()
+    already_allocated = tensor._typed_storage()._size() == size.numel()
     if not already_allocated:
-        tensor_storage_size = tensor.storage().size()
+        tensor_storage_size = tensor._typed_storage()._size()
         p_assert(
             tensor_storage_size == 0,
             f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
         )
-        tensor.storage().resize_(size.numel())
+        tensor._typed_storage()._resize_(size.numel())
     return not already_allocated
 
 
@@ -88,23 +89,23 @@ def _free_storage(tensor: torch.Tensor) -> bool:
         bool: ``True`` if the method freed the storage and ``False`` if the
         storage was already freed.
     """
-    already_freed = tensor.storage().size() == 0
+    already_freed = tensor._typed_storage()._size() == 0
     if not already_freed:
         p_assert(
             tensor.storage_offset() == 0,
             "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
             f"storage offset: {tensor.storage_offset()}\n"
-            f"storage size: {tensor.storage().size()}\n"
+            f"storage size: {tensor._typed_storage()._size()}\n"
             f"tensor shape: {tensor.shape}",
         )
-        tensor.storage().resize_(0)
+        tensor._typed_storage()._resize_(0)
     return not already_freed
 
 
 def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
     """Returns if ``x`` and ``y`` share the same storage."""
     # NOTE: CPU and GPU tensors are ensured to have different data pointers.
-    return x.storage().data_ptr() == y.storage().data_ptr()
+    return x._typed_storage()._data_ptr() == y._typed_storage()._data_ptr()
 
 
 def p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
@@ -114,4 +115,9 @@ def p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
         print(s)
         traceback.print_stack()
         if raise_assertion_error:
-            raise AssertionError
+            raise AssertionError(s)
+
+
+def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.cuda.Stream) -> None:
+    with no_dispatch():
+        tensor.record_stream(cast(torch._C.Stream, stream))

@@ -9,6 +9,7 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/SizesAndStrides.h>
@@ -28,6 +29,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <utility>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -215,7 +217,7 @@ enum class PyInterpreterStatus {
 } // namespace impl
 
 struct C10_API NamedTensorMetaInterface {
-  virtual ~NamedTensorMetaInterface(){};
+  virtual ~NamedTensorMetaInterface() = default;
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::clone");
@@ -264,7 +266,7 @@ struct C10_API ExtraMeta {
   bool_is_non_overlapping_and_dense is_non_overlapping_and_dense_{true};
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 
-  ExtraMeta() {}
+  ExtraMeta() = default;
 
   ExtraMeta(
       SymDimVector sizes,
@@ -670,6 +672,49 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // Sizes guaranteed to be non-negative, so unchecked cast is OK
       return c10::fromIntArrayRefKnownNonNegative(sizes_default());
     }
+  }
+
+  // From https://stackoverflow.com/a/3057522/23845
+  // TODO: does C++14 have a stdlib template for this?
+  template <typename T>
+  struct identity {
+    typedef T type;
+  };
+
+  template <typename T>
+  ArrayRef<T> generic_sizes() {
+    return _generic_sizes(identity<T>());
+  }
+
+  ArrayRef<int64_t> _generic_sizes(identity<int64_t>) {
+    return sizes();
+  }
+  ArrayRef<c10::SymInt> _generic_sizes(identity<c10::SymInt>) {
+    return sym_sizes();
+  }
+
+  template <typename T>
+  ArrayRef<T> generic_strides() {
+    return _generic_strides(identity<T>());
+  }
+
+  ArrayRef<int64_t> _generic_strides(identity<int64_t>) {
+    return strides();
+  }
+  ArrayRef<c10::SymInt> _generic_strides(identity<c10::SymInt>) {
+    return sym_strides();
+  }
+
+  template <typename T>
+  T generic_storage_offset() {
+    return _generic_storage_offset(identity<T>());
+  }
+
+  int64_t _generic_storage_offset(identity<int64_t>) {
+    return storage_offset();
+  }
+  c10::SymInt _generic_storage_offset(identity<c10::SymInt>) {
+    return sym_storage_offset();
   }
 
   /**
@@ -1306,7 +1351,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It can be expanded as needed in the future, e.g sparse Tensor.
    */
   inline bool support_as_strided() const {
-    return is_nested() ? false : device().supports_as_strided();
+    if (is_nested()) {
+      return false;
+    }
+    if (key_set_.has(DispatchKey::Functionalize)) {
+      return false;
+    }
+    return device().supports_as_strided();
   }
 
   // ~~~~~ Autograd API ~~~~~
@@ -1578,6 +1629,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       c10::SymIntArrayRef sizes,
       c10::SymIntArrayRef strides,
       c10::optional<c10::SymInt> storage_offset = c10::nullopt);
+  // This is renamed to avoid breaking overload BC
+  void generic_set_sizes_contiguous(c10::SymIntArrayRef sizes);
+  void generic_set_sizes_contiguous(c10::IntArrayRef sizes) {
+    set_sizes_contiguous(sizes);
+  }
 
   /**
    * Change the size at some dimension.  This DOES NOT update strides;
@@ -2037,7 +2093,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return c10::nullopt;
     } else if (interpreter == self_interpreter) {
       // NB: pyobj_ could still be null!
-      return c10::make_optional(_unchecked_untagged_pyobj());
+      if (c10::impl::HermeticPyObjectTLS::get_state()) {
+        return c10::nullopt;
+      } else {
+        return c10::make_optional(_unchecked_untagged_pyobj());
+      }
     } else {
       TORCH_CHECK(
           false,
@@ -2277,9 +2337,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_storage_and_dtype(
       at::Storage storage,
       const caffe2::TypeMeta data_type) {
-    set_storage_keep_dtype(storage);
+    set_storage_keep_dtype(std::move(storage));
     data_type_ = data_type;
   }
+
+  void empty_tensor_restride_symint(MemoryFormat memory_format);
 
   /**
    * Set the strides of the tensor to match memory_format
@@ -2288,9 +2350,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * memory contiguous
    */
   void empty_tensor_restride(MemoryFormat memory_format) {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "empty_tensor_restride() called on tensor with symbolic shape")
+    if (has_symbolic_sizes_strides_) {
+      empty_tensor_restride_symint(memory_format);
+      return;
+    }
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(
         compute_numel() == numel_,

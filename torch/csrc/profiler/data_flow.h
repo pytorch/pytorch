@@ -30,6 +30,14 @@ namespace impl {
 // can only be assigned when memory profiling is enabled.
 using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
 
+// Uniquely identifies an allocation. (Generally a StorageImpl's data ptr.)
+using AllocationID = strong::type<
+    size_t,
+    struct StorageID_,
+    strong::ordered,
+    strong::regular,
+    strong::hashable>;
+
 // We use a Tensor's TensorImpl adress and StorageImpl data start to build the
 // data flow graph. We do not hold an owning reference so we wrap them in strong
 // types to prevent direct access.
@@ -78,9 +86,9 @@ class WeakTensor {
 };
 
 struct Result;
-using result_ptr_t = std::shared_ptr<Result>;
 
-void calculateUniqueTensorIDs(std::vector<result_ptr_t>& sorted_results);
+void calculateUniqueTensorIDs(
+    std::vector<std::shared_ptr<Result>>& sorted_results);
 
 } // namespace impl
 } // namespace profiler

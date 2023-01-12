@@ -263,10 +263,10 @@ MemDependencyChecker::MemDependencyChecker() {
 MemDependencyChecker::MemDependencyChecker(
     const std::unordered_set<BufPtr>& inputs,
     const std::unordered_set<BufPtr>& outputs) {
-  for (auto s : inputs) {
+  for (const auto& s : inputs) {
     inputs_[s] = nullptr;
   }
-  for (auto s : outputs) {
+  for (const auto& s : outputs) {
     outputs_[s] = nullptr;
   }
 
@@ -509,7 +509,7 @@ void MemDependencyChecker::visit(StorePtr v) {
   lastStmt_ = v;
   v->value()->accept(this);
 
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ind->accept(this);
   }
   lastStmt_ = last;
@@ -543,7 +543,7 @@ void MemDependencyChecker::visit(LoadPtr v) {
       std::make_shared<Scope>(currentScope_->block, currentScope_);
   currentScope_ = indicesScope;
 
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ind->accept(this);
   }
 
@@ -1042,10 +1042,9 @@ void MemDependencyChecker::insertBuffers(
     BufPtr b = pair.first;
     VarPtr var = b->base_handle();
     IndexBounds bounds;
-    for (auto d : b->dims()) {
-      bounds.push_back(
-          {immLike(d, 0),
-           IRSimplifier::simplify(alloc<Sub>(d, immLike(d, 1)))});
+    for (const auto& d : b->dims()) {
+      bounds.emplace_back(
+          immLike(d, 0), IRSimplifier::simplify(alloc<Sub>(d, immLike(d, 1))));
     }
     auto info =
         std::make_shared<AccessInfo>(nextAccess_++, type, nullptr, var, bounds);
@@ -1070,11 +1069,11 @@ void MemDependencyChecker::visit(BlockPtr v) {
     currentScope_ = std::make_shared<Scope>((BlockPtr)v, prev_scope);
   }
 
-  for (auto s : *v) {
+  for (const auto& s : *v) {
     s->accept(this);
   }
 
-  for (auto v : currentScope_->localVars) {
+  for (const auto& v : currentScope_->localVars) {
     knownVarBounds_.erase(v);
   }
   for (auto& pair : currentScope_->shadowedVarBounds) {
@@ -1135,7 +1134,7 @@ void MemDependencyChecker::visit(AllocatePtr v) {
   ExprPtr flat_size = buf_flat_size(v->buf());
   flat_size =
       IRSimplifier::simplify(alloc<Sub>(flat_size, immLike(flat_size, 1)));
-  bounds.push_back({immLike(flat_size, 0), flat_size});
+  bounds.emplace_back(immLike(flat_size, 0), flat_size);
 
   auto info = std::make_shared<AccessInfo>(
       nextAccess_++, AccessType::Alloc, nullptr, var, bounds);
@@ -1235,7 +1234,7 @@ void MemDependencyChecker::updateWriteHistory(
   }
 
   if (insert && isWrite) {
-    writeHistory.emplace_back(std::make_pair(info->bounds(), info));
+    writeHistory.emplace_back(info->bounds(), info);
   }
 }
 
@@ -1313,7 +1312,7 @@ std::vector<Bound> MemDependencyChecker::getIndicesBounds(
   std::vector<Bound> bounds;
   bounds.reserve(indices.size());
   VarBoundBinder binder(knownVarBounds_);
-  for (auto s : indices) {
+  for (const auto& s : indices) {
     bounds.push_back(binder.getBounds(s));
   }
   return bounds;
