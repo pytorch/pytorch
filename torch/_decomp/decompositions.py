@@ -1963,8 +1963,9 @@ def uniform(
     )
 
 @register_decomposition(aten.geometric_)
-def geometric(self, p):
-    return self.copy_(torch.floor(torch.log(1 - torch.rand_like(self)) / torch.log(torch.tensor(1 - p))) + 1)
+def geometric(self, p, generator=None):
+    assert generator is None
+    return self.copy_(torch.floor(torch.log1p(-1 * torch.rand_like(self)) / torch.log1p(torch.tensor(-1 * p))) + 1)
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
