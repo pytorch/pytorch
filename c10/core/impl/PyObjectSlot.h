@@ -1,9 +1,9 @@
 #pragma once
 
-#include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/HermeticPyObjectTLS.h>
-#include <c10/util/python_stub.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Optional.h>
+#include <c10/util/python_stub.h>
 
 #include <atomic>
 

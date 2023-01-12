@@ -431,21 +431,24 @@ void TensorImpl::throw_storage_access_error() const {
 
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(this, memory_format);
+    return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
+        this, memory_format);
   }
   return is_contiguous_default(memory_format);
 }
 
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return pyobj_slot_.load_pyobj_interpreter()->is_strides_like(this, memory_format);
+    return pyobj_slot_.load_pyobj_interpreter()->is_strides_like(
+        this, memory_format);
   }
   return is_strides_like_default(memory_format);
 }
 
 bool TensorImpl::is_non_overlapping_and_dense_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return pyobj_slot_.load_pyobj_interpreter()->is_non_overlapping_and_dense(this);
+    return pyobj_slot_.load_pyobj_interpreter()->is_non_overlapping_and_dense(
+        this);
   }
   return is_non_overlapping_and_dense_default();
 }
@@ -520,7 +523,9 @@ c10::Layout TensorImpl::layout_custom() const {
 int64_t TensorImpl::storage_offset_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     // TODO: fix this
-    return pyobj_slot_.load_pyobj_interpreter()->sym_storage_offset(this).expect_int();
+    return pyobj_slot_.load_pyobj_interpreter()
+        ->sym_storage_offset(this)
+        .expect_int();
   }
   return storage_offset_default();
 }

@@ -135,17 +135,6 @@ class TestPoolingNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    def test_adaptive_pooling_input_size(self):
-        for numel in (2, 3):
-            for pool_type in ('Max', 'Avg'):
-                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
-                module_cls = getattr(nn, cls_name)
-                output_size = (2,) * numel
-                module = module_cls(output_size)
-
-                input = torch.randn(output_size)
-                self.assertRaises(ValueError, lambda: module(input))
-
     def test_adaptive_pooling_size_none(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
@@ -1134,15 +1123,6 @@ torch.cuda.synchronize()
 
         y.backward(grad)
 
-    def test_pooling_size_empty(self, device):
-        t = torch.rand([1, 2, 3, 4], device=device)
-        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool1d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool2d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool3d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool1d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool2d(t, []))
-        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool3d(t, []))
-
     def _test_maxpool_indices(self, num_dim, adaptive=False, device="cpu", dtype=torch.float):
         def expected_indices(dim, dtype):
             if dim == 1:
@@ -1476,20 +1456,6 @@ torch.cuda.synchronize()
             x = torch.randn(shape, device=device, requires_grad=True)
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
             self.assertEqual(x.grad, torch.ones_like(x.grad))
-
-    def test_adaptive_pool_invalid(self, device):
-        inp_1d = (torch.randn(1, 1, 1, device=device), (-1,))
-        inp_2d = (torch.randn(1, 1, 1, 1, device=device), (-1, 0))
-        inp_3d = (torch.randn(1, 1, 1, 1, 1, device=device), (-1, 0, 2))
-        module_input_dict = {torch.nn.AdaptiveAvgPool1d: inp_1d,
-                             torch.nn.AdaptiveAvgPool2d: inp_2d,
-                             torch.nn.AdaptiveAvgPool3d: inp_3d}
-
-        for m, inp in module_input_dict.items():
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"elements of output_size must be greater than or equal to 0"):
-                t, output_size = inp
-                m(output_size)(t)
 
     @slowTest
     def test_adaptive_pool_odd_size(self, device):

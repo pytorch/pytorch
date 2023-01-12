@@ -3,10 +3,7 @@
 namespace c10 {
 namespace impl {
 
-PyObjectSlot::PyObjectSlot()
-  : pyobj_interpreter_(nullptr),
-    pyobj_(nullptr) {
-}
+PyObjectSlot::PyObjectSlot() : pyobj_interpreter_(nullptr), pyobj_(nullptr) {}
 
 void PyObjectSlot::destroy_pyobj_if_needed() {
   if (owns_pyobj()) {
