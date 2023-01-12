@@ -1444,6 +1444,13 @@ class StateInfo:
     non_tensors: Dict[str, Any]
 
 
+@dataclass
+class AllGatherInfo:
+    tensors: List[torch.Tensor]
+    numels: List[int]
+    work: Optional[dist.Work]
+
+
 def _all_gather_optim_state(
     fsdp_state: _FSDPState, optim_state: Dict[str, Any], param_numel: int
 ) -> Dict[str, Any]:
@@ -1453,13 +1460,6 @@ def _all_gather_optim_state(
     We can fuse the communication across differnt state if the performance
     becomes a problem.
     """
-
-    @dataclass
-    class AllGatherInfo:
-        tensors: List[torch.Tensor]
-        numels: List[int]
-        work: Optional[dist.Work]
-
     # Allgather the scalar tensor state, non-tensor states and tensors metadata.
     processed_state = StateInfo({}, {}, {})
     for state_name, value in sorted_items(optim_state):
@@ -1472,7 +1472,9 @@ def _all_gather_optim_state(
                 )
         else:
             processed_state.non_tensors = value
-    object_list: List[StateInfo] = [processed_state for _ in range(fsdp_state.world_size)]
+    object_list: List[StateInfo] = [
+        processed_state for _ in range(fsdp_state.world_size)
+    ]
     dist.all_gather_object(object_list, processed_state)
 
     # Convert the gathered, pre-proccessed state of each rank to the original one.
@@ -1484,14 +1486,14 @@ def _all_gather_optim_state(
     for name in all_tensor_states:
         numels = []
         dtype = torch.float
+        max_numel = 0
         for object_state in object_list:
+            numels.append(0)
             info = object_state.tensors.get(name, None)
-            if info is None:
-                numels.append(0)
-            else:
-                numels.append(info.shape.numel())
+            if info is not None:
+                numels[-1] = info.shape.numel()
                 dtype = info.dtype
-        max_numel = max(numels)
+                max_numel = max(max_numel, numel[-1])
         local_state = (
             optim_state[name]
             if name in optim_state
@@ -1513,33 +1515,29 @@ def _all_gather_optim_state(
     for object_state in object_list:
         for name, non_tensor_value in object_state.non_tensors.items():
             curr_non_tensor_value = gathered_state.get(name, None)
-            if curr_non_tensor_value is not None:
-                assert (
-                    curr_non_tensor_value == non_tensor_value
-                ), f"Different ranks have different value for {name}."
-            else:
-                gathered_state[name] = non_tensor_value
+            assert (
+                curr_non_tensor_value is None
+                or curr_non_tensor_value == non_tensor_value
+            ), f"Different ranks have different values for {name}."
+            gathered_state[name] = non_tensor_value
 
         for name, scalar_tensor_value in object_state.scalar_tensors.items():
             curr_scalar_tensor_value = gathered_state.get(name, None)
-            if curr_scalar_tensor_value is not None:
-                assert torch.equal(
-                    scalar_tensor_value, curr_scalar_tensor_value
-                ), f"Different ranks have different value for {name}."
-            else:
-                gathered_state[name] = scalar_tensor_value
+            assert curr_scalar_tensor_value is None or torch.equal(
+                scalar_tensor_value, curr_scalar_tensor_value
+            ), f"Different ranks have different values for {name}."
+            gathered_state[name] = scalar_tensor_value
 
     for name, value in list(gathered_state.items()):
         if not isinstance(value, AllGatherInfo):
             continue
         assert value.work is not None
         value.work.wait()
-        tensors = []
-        for rank_tensor, rank_numel in zip(value.tensors, value.numels):
-            if rank_numel == 0:
-                continue
-            tensors.append(rank_tensor[:rank_numel])
-        gathered_state[name] = torch.cat(tensors)
+        gathered_state[name] = torch.cat(
+            rank_tensor[:rank_numel]
+            for rank_tensor, rank_numel in zip(value.tensors, value.numels)
+            if rank_numel > 0
+        )
 
     return gathered_state
 
