@@ -498,35 +498,29 @@ std::vector<Tensor> _to_cpu(TensorList tensors) {
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
-  AT_ASSERT(input_.layout() != c10::kStrided);
-  if (input_.layout() == c10::kSparse) {
-    auto input = input_.coalesce();
-    return grad.sparse_mask(input);
-  }
-  if (at::sparse_csr::is_sparse_compressed(input_)) {
-    // TODO: implement sparse_compressed_mask
-    switch(input_.layout()) {
-    case kSparseCsr: return grad.sparse_mask(input_.to_sparse()).to_sparse_csr();
-    case kSparseCsc: return grad.sparse_mask(input_.to_sparse().coalesce()).to_sparse_csc();
-    case kSparseBsr: {
-      auto blocksize = DimVector(input_.values().sizes().slice(1, 2));
-      return grad.sparse_mask(input_.to_sparse().coalesce()).to_sparse_bsr(blocksize);
-    }
+  const auto input_layout = input_.layout();
+  switch (input_layout) {
+    case kStrided:
+      return grad.to_dense();
+    case kSparse:
+      // Autograd operates on the coalesced assumption, i.e. no duplicate values.
+      return grad.sparse_mask(input_.coalesce());
+    case kSparseCsr:
+    case kSparseCsc:
+      // TODO: add efficient CSR/CSC support for sparse_mask
+      return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout);
+    case kSparseBsr:
     case kSparseBsc: {
-      auto blocksize = DimVector(input_.values().sizes().slice(1, 2));
-      return grad.sparse_mask(input_.to_sparse().coalesce()).to_sparse_bsc(blocksize);
+      // TODO: add efficient BSR/BSC support for sparse_mask
+      const auto blocksize = at::DimVector(input_.values().sizes().slice(1, 2));
+      return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout, blocksize);
     }
-      // BSR and BSC should be handled via implement sparse_compressed_mask
-    default: ; // fall back to unsupported input layout error
-    }
+    case kMkldnn:
+      return grad.to_mkldnn(input_.scalar_type());
+    default:
+      AT_ERROR("to_dense_backward: Unsupported input layout: ", input_layout);
+      return Tensor {};
   }
-  if (input_.layout() == c10::kMkldnn) {
-    return grad.to_mkldnn(input_.scalar_type());
-  }
-  if (input_.layout() == c10::kStrided) {
-    return grad.to_dense();
-  }
-  AT_ERROR("to_dense_backward: Unsupported input layout: ", input_.layout());
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
