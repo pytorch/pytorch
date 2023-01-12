@@ -1963,7 +1963,7 @@ def uniform(
     )
 
 @register_decomposition(aten.geometric_)
-def geometric(self, p, generator=None):
+def geometric_(self, p, generator=None):
     assert generator is None
     return self.copy_(torch.floor(torch.log1p(-1 * torch.rand_like(self)) / torch.log1p(torch.tensor(-1 * p))) + 1)
 
