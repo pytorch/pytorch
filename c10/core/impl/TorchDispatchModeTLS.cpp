@@ -54,10 +54,10 @@ const TorchDispatchModeTLS& TorchDispatchModeTLS::get_state() {
 void TorchDispatchModeTLS::set_state(const TorchDispatchModeTLS& state) {
   for (const std::shared_ptr<c10::SafePyObject>& stack_state :
        torchDispatchModeState.stack_) {
-    state->pyinterpreter()->mode_state_pop_trampoline(stack_state);
+    stack_state->pyinterpreter()->mode_state_pop_trampoline(stack_state);
   }
   for (const std::shared_ptr<c10::SafePyObject>& stack_state : state.stack_) {
-    state->pyinterpreter()->mode_state_push_trampoline(stack_state);
+    stack_state->pyinterpreter()->mode_state_push_trampoline(stack_state);
   }
   torchDispatchModeState = state;
 
