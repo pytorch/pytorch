@@ -19,6 +19,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -1436,9 +1437,15 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
     )
 
 
+@dataclass
+class StateInfo:
+    tensors: Dict[str, _PosDimTensorInfo]
+    scalar_tensors: Dict[str, torch.Tensor]
+    non_tensors: Dict[str, Any]
+
+
 def _all_gather_optim_state(
-    fsdp_state: _FSDPState,
-    optim_state: Dict[str, Any],
+    fsdp_state: _FSDPState, optim_state: Dict[str, Any], param_numel: int
 ) -> Dict[str, Any]:
     """
     All-gathering state from all the ranks. This API is slow as it uses
@@ -1447,56 +1454,91 @@ def _all_gather_optim_state(
     becomes a problem.
     """
 
-    # Pre-processed state to prepare for the all_gather_object call.
-    IS_ZERO_DIM_TENSOR_KEY = "__is_zero_dim_tensor"
-    processed_state: Dict[str, Any] = {}
+    @dataclass
+    class AllGatherInfo:
+        tensors: List[torch.Tensor]
+        numels: List[int]
+        work: Optional[dist.Work]
+
+    # Allgather the scalar tensor state, non-tensor states and tensors metadata.
+    processed_state = StateInfo({}, {}, {})
     for state_name, value in sorted_items(optim_state):
         if torch.is_tensor(value):
             if value.dim() == 0:
-                processed_state[state_name] = value.item()
-                processed_state[f"{state_name}{IS_ZERO_DIM_TENSOR_KEY}"] = value.dtype
+                processed_state.scalar_tensors[state_name] = value
             else:
-                processed_state[state_name] = value.to(fsdp_state.compute_device)
+                processed_state.tensors[state_name] = _PosDimTensorInfo(
+                    value.shape, value.dtype
+                )
         else:
             processed_state[state_name] = value
-
-    # Allgather the state
     object_list: List[Dict[str, Any]] = [{} for _ in range(fsdp_state.world_size)]
     dist.all_gather_object(object_list, processed_state)
 
-    # Convert the gathered, pre-proccessed state of each rank to the original  one.
+    # Convert the gathered, pre-proccessed state of each rank to the original one.
     gathered_state: Dict[str, Any] = {}
-    for object_state in object_list:
-        for name, object_value in object_state.items():
-            if IS_ZERO_DIM_TENSOR_KEY in name:
-                continue
-            curr_object_value = gathered_state.get(name, None)
-            dtype = object_state.get(f"{name}{IS_ZERO_DIM_TENSOR_KEY}", None)
-            if dtype is not None:
-                zero_dim_tensor = torch.tensor(object_value, dtype=dtype)
-                if curr_object_value is not None:
-                    assert torch.equal(
-                        zero_dim_tensor, curr_object_value
-                    ), f"Different ranks have different value for {name}."
-                else:
-                    gathered_state[name] = zero_dim_tensor
-            elif torch.is_tensor(object_value):
-                if curr_object_value is not None:
-                    curr_object_value.append(object_value.to(fsdp_state.compute_device))
-                else:
-                    gathered_state[name] = [object_value.to(fsdp_state.compute_device)]
+
+    all_tensor_states = sorted(
+        list(set([n for state in object_list for n in state.tensors.keys()]))
+    )
+    for name in all_tensor_states:
+        numels = []
+        dtype = torch.float
+        for object_state in object_list:
+            info = object_state.tensors.get(name, None)
+            if info is None:
+                numels.append(0)
             else:
-                if curr_object_value is not None:
-                    assert (
-                        curr_object_value == object_value
-                    ), f"Different ranks have different value for {name}."
-                else:
-                    gathered_state[name] = object_value
+                numels.append(info.shape.numel())
+                dtype = info.dtype
+        max_numel = max(numels)
+        local_state = (
+            optim_state[name]
+            if name in optim_state
+            else torch.empty(max_numel, dtype=dtype, device=fsdp_state.compute_device)
+        )
+        if max_numel > local_state.numel():
+            local_state = F.pad(local_state, [0, max_numel - local_state.numel()])
+        tensors = [
+            torch.empty(max_numel, dtype=dtype, device=fsdp_state.compute_device)
+            if rank != fsdp_state.rank
+            else local_state
+            for rank in range(len(object_list))
+        ]
+        work = dist.all_gather(
+            tensors, local_state, group=fsdp_state.process_group, async_op=True
+        )
+        gathered_state[name] = AllGatherInfo(tensors, numels, work)
+
+    for object_state in object_list:
+        for name, value in object_state.non_tensors.items():
+            curr_value = gathered_state.get(name, None)
+            if curr_object_value is not None:
+                assert (
+                    curr_object_value == object_value
+                ), f"Different ranks have different value for {name}."
+            else:
+                gathered_state[name] = object_value
+
+        for name, scalar_tensor_value in object_state.scalar_tensors.items():
+            curr_scalar_tensor_value = gathered_state.get(name, None)
+            if curr_scalar_tensor_value is not None:
+                assert torch.equal(
+                    scalar_tensor_value, curr_scalar_tensor_value
+                ), f"Different ranks have different value for {name}."
+            else:
+                gathered_state[name] = scalar_tensor_value
 
     for name, value in list(gathered_state.items()):
-        if not isinstance(value, list) or not torch.is_tensor(value[0]):
+        if not isinstance(value, AllGatherInfo):
             continue
-        gathered_state[name] = torch.cat(value)
+        value.work.wait()
+        tensors = []
+        for rank_tensor, rank_numel in zip(value.tensors, value.numels):
+            if rank_numel == 0:
+                continue
+            tensors.append(rank_tensor[:rank_numel])
+        gathered_state[name] = torch.cat(tensors)
 
     return gathered_state
 
@@ -1523,7 +1565,9 @@ def _gather_orig_param_state(
     ):
         return optim_state
 
-    gathered_state = _all_gather_optim_state(fsdp_state, optim_state)
+    gathered_state = _all_gather_optim_state(
+        fsdp_state, optim_state, flat_param._numels[param_idx]
+    )
 
     # Unflatten state values.
     for state_name, value in list(gathered_state.items()):

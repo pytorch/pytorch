@@ -416,13 +416,16 @@ class IterationRangesRoot(IterationRanges):
             self.nodes[expr] = node
         return self.nodes[expr]
 
-    def construct(self, lengths: List[sympy.Expr]):
+    def construct_entries(self, lengths: List[sympy.Expr]):
         divisor = sympy.Integer(1)
         itervars = []
         for length in reversed(lengths):
-            itervars.append(self.lookup(divisor, length).symbol())
+            itervars.append(self.lookup(divisor, length))
             divisor = divisor * length
         return list(reversed(itervars))
+
+    def construct(self, lengths: List[sympy.Expr]):
+        return [e.symbol() for e in self.construct_entries(lengths)]
 
     def vars_and_sizes(self, index: sympy.Expr):
         """Figure out vars from this tree used in index"""
@@ -452,8 +455,8 @@ class IterationRangesRoot(IterationRanges):
         return list(reversed(index_vars)), list(reversed(sizes))
 
     def ranges_code(self):
-        size = self.kernel.reshape_size_str(self.index, self.prefix)
-        return f"tl.reshape(tl.arange(0, {self.prefix.upper()}BLOCK), {size})"
+        size = self.kernel.indexing_size_str(self.index, self.prefix)
+        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}"
 
     def pid_cache_lookup(self, key):
         if key in self.pid_cache:
@@ -496,6 +499,11 @@ class IterationRangesEntry(IterationRanges):
         self.parent = parent
         self.codegen = functools.lru_cache(None)(self._codegen)
         self.expr = expr
+
+    def set_name(self, name):
+        self.codegen = lambda: name
+        self.codegen.cache_clear = lambda: None
+        self.name = name
 
     def cache_clear(self):
         self.codegen.cache_clear()
@@ -732,6 +740,7 @@ class TritonKernel(Kernel):
         *,
         copy_shape=None,
         dense_indexing=False,
+        override_mask=None,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -742,7 +751,9 @@ class TritonKernel(Kernel):
 
         mask_vars: Set[str] = set()
         for var in index_vars:
-            if var.name.startswith("tmp"):
+            if override_mask:
+                pass
+            elif var.name.startswith("tmp"):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
@@ -770,7 +781,10 @@ class TritonKernel(Kernel):
             dense_mask_vars.add(f"{tree.prefix}mask")
 
         if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
-            index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
+            if copy_shape:
+                index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+            else:
+                index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
             if isinstance(index, sympy.Integer):
                 return index_str, set(), "None"
             else:
@@ -778,6 +792,9 @@ class TritonKernel(Kernel):
         elif not have_loop_vars and copy_shape:
             mask_vars = dense_mask_vars
             index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+
+        if override_mask:
+            mask_vars = {override_mask}
 
         if self._load_mask:
             mask_vars.add(self._load_mask)
@@ -822,14 +839,13 @@ class TritonKernel(Kernel):
         indirect_indexing = self.is_indirect_indexing(index)
         index, mask_vars, mask = self.indexing(index)
 
-        # Keep the variable in cache if we are going to reuse it
-        # TODO(lezcano) We could potentially do better
-        # https://github.com/pytorch/pytorch/pull/91316#issuecomment-1364680622
-        ep = (
-            ", eviction_policy='evict_last'"
-            if name not in self.current_node.last_usage
-            else ""
-        )
+        if "rmask" in mask:
+            # This eviction policy heuristic is untested.
+            # ptillet suggested we should try only doing this for
+            # the first N-1 loops and not for the final loop.
+            ep = ", eviction_policy='evict_last'"
+        else:
+            ep = ""
 
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
@@ -868,12 +884,6 @@ class TritonKernel(Kernel):
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
         index, mask_vars, mask = self.indexing(index, dense_indexing=True)
-
-        # Lezcano: This is not useful ATM and not supported by triton MLIR
-        # Revisit in the future in case it's supported and becomes useful
-        # Keep the variable in cache if we are going to reuse it
-        # ep_str = "first" if name in self.current_node.last_usage else "last"
-        # ep = "eviction_policy='evict_{}'".format(ep_str)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -890,11 +900,11 @@ class TritonKernel(Kernel):
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
-        sizes = [f"{tree.prefix.upper()}BLOCK" for tree in self.range_trees]
-        sizes[-1] = "1"
+        sizes = [":" for _ in self.range_trees]
+        sizes[-1] = "None"
         reduction_range_prefix = self.range_trees[-1].prefix
-        reduction_sizes = ["1" for _ in self.range_trees]
-        reduction_sizes[-1] = f"{reduction_range_prefix.upper()}BLOCK"
+        reduction_sizes = ["None" for _ in self.range_trees]
+        reduction_sizes[-1] = ":"
 
         if reduction_type == "any":
             reduction_type = "max"
@@ -941,17 +951,17 @@ class TritonKernel(Kernel):
                 # argmax, argmin
                 self.suffix.writelines(
                     [
-                        f"{accumulator_index}_reduce = tl.reshape(",
-                        f"\ttl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}]).to(tl.int32)",
-                        f"{accumulator_index}_mask = (tl.reshape(tl.arange(0, {reduction_range_prefix.upper()}BLOCK),",
-                        f"\t[{', '.join(reduction_sizes)}]) == {accumulator_index}_reduce)",
-                        f"{result_var} = tl.reshape(tl.sum(",
-                        f"\ttl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim}), [{', '.join(sizes)}])",
+                        f"{accumulator_index}_reduce = "
+                        f"tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}].to(tl.int32)",
+                        f"{accumulator_index}_mask = tl.arange(0, {reduction_range_prefix.upper()}BLOCK)"
+                        f"[{', '.join(reduction_sizes)}] == {accumulator_index}_reduce",
+                        f"{result_var} = tl.sum("
+                        f"tl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim})[{', '.join(sizes)}]",
                     ]
                 )
             else:
                 self.suffix.writeline(
-                    f"{result_var} = tl.reshape(tl.{reduction_type}({accumulator}, {dim}), [{', '.join(sizes)}])"
+                    f"{result_var} = tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}]"
                 )
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
@@ -1048,6 +1058,7 @@ class TritonKernel(Kernel):
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
+        mutated_args = sorted(mutated_args)
 
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
@@ -1113,6 +1124,13 @@ class TritonKernel(Kernel):
         wrapper.writeline("''')")
         return wrapper.getvalue()
 
+    def codegen_template_wrapper(self, src_code):
+        wrapper = IndentedBuffer()
+        wrapper.writeline("async_compile.triton('''")
+        wrapper.splice(src_code, strip=True)
+        wrapper.writeline("''')")
+        return wrapper.getvalue()
+
     def codegen_static_numels(self, code):
         """
         We get a small speedup from hard coding numels if they are static.
@@ -1128,10 +1146,10 @@ class TritonKernel(Kernel):
                         f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}  # dynamic_shapes=False"
                     )
 
-    def reshape_size_str(self, i=None, x=None):
-        sizes = ["1"] * (len(self.range_trees) - int(self.numels[-1] == 1))
+    def indexing_size_str(self, i=None, x=None):
+        sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
         if i is not None:
-            sizes[i] = f"{x.upper()}BLOCK"
+            sizes[i] = ":"
         return f"[{', '.join(sizes)}]"
 
     def dense_size_str(self):
@@ -1194,6 +1212,9 @@ class TritonScheduling:
             if not (numel1 == numel2 and rnumel1 == rnumel2):
                 return False
 
+            if node1.is_template():
+                return True  # skip checks for compatible tiling
+
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
             tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
@@ -1219,7 +1240,10 @@ class TritonScheduling:
                     for n in node1.get_nodes()
                 ):
                     return False
-                if config.triton.tiling_prevents_reduction_fusion:
+                if (
+                    config.triton.tiling_prevents_reduction_fusion
+                    and not node1.is_template()
+                ):
                     return self.select_tiling(node1.get_nodes(), numel1) in (
                         (numel1, 1),
                         (numel2, rnumel2, 1),
@@ -1355,8 +1379,13 @@ class TritonScheduling:
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
-        wrapper = V.graph.wrapper_code
         src_code = kernel.codegen_kernel()
+        kernel_name = self.define_kernel(src_code, node_schedule)
+        kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+        self.scheduler.free_buffers()
+
+    def define_kernel(self, src_code, node_schedule):
+        wrapper = V.graph.wrapper_code
         if src_code in wrapper.kernels:
             kernel_name = wrapper.kernels[src_code]
         else:
@@ -1373,7 +1402,25 @@ class TritonScheduling:
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
             wrapper.define_kernel(kernel_name, src_code)
-        kernel.call_kernel(wrapper, kernel_name)
+        return kernel_name
+
+    def codegen_template(self, template_node, epilogue_nodes):
+        """
+        Codegen a triton template
+        """
+        _, (numel, rnumel) = template_node.group
+        assert rnumel == 1
+        kernel, render = template_node.node.make_kernel_render(template_node.node)
+        with kernel:
+            for node in [template_node, *epilogue_nodes]:
+                node.mark_run()
+            render()  # warmup run to get the args right
+            for node in epilogue_nodes:
+                node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+
+        src_code = kernel.codegen_template_wrapper(render())
+        kernel_name = self.define_kernel(src_code, [template_node, *epilogue_nodes])
+        kernel.call_kernel(V.graph.wrapper_code, kernel_name)
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
