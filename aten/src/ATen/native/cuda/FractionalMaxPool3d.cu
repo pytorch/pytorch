@@ -11,6 +11,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/native/FractionalMaxPooling.h>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -258,6 +259,7 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
   int64_t inputW,
   const Tensor& output,
   const Tensor& indices) {
+  fractional_max_pool_check_shape</*ndim*/ 3>(input, randomSamples);
 
   auto output_ = output;
   auto indices_ = indices;

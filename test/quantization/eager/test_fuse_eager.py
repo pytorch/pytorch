@@ -28,6 +28,7 @@ from torch.testing._internal.common_quantization import (
     ModelForLinearBNFusion,
     ModelForFusionWithBias,
     ModelForConvTransposeBNFusion,
+    SingleLayerLinearModel,
     test_only_eval_fn,
     test_only_train_fn,
     skipIfNoFBGEMM,
@@ -362,6 +363,17 @@ class TestFuseEager(QuantizationTestCase):
         self.assertEqual(type(model.bn3), nn.Identity)
 
         self.assertEqual(golden, model(inp2))
+
+    def test_fuse_function_customization(self):
+        dummy_model = SingleLayerLinearModel().train()
+        dummy_model.eval()
+
+        # A custom fuse funct
+        def custom_fuse_func(module, is_qat, add_fuser_mapping):
+            return [torch.nn.Identity()]
+
+        dummy_model = fuse_modules(dummy_model, [["fc1"]], fuser_func=custom_fuse_func)
+        self.assertEqual(type(dummy_model.fc1), nn.Identity)
 
     def test_forward_hooks_preserved(self):
         r"""Test case that checks whether forward pre hooks of the first module and

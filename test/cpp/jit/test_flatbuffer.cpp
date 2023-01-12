@@ -27,6 +27,14 @@
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <unordered_set>
+
+#if defined(FB_XPLAT_BUILD) || defined(FBCODE_CAFFE2)
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h> // NOLINT
+namespace flatbuffers = flatbuffers_fbsource;
+#define FLATBUFFERS_MAX_ALIGNMENT FLATBUFFERS_FBSOURCE_MAX_ALIGNMENT
+#else
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
+#endif
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
@@ -1796,13 +1804,9 @@ TEST(FlatbufferUpgraderTest, DivScalarInplaceIntV2) {
 
 } // namespace jit
 } // namespace torch
-#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
 namespace torch {
 namespace jit {
 
-#if defined(FBCODE_CAFFE2) or defined(FB_XPLAT_BUILD)
-namespace flatbuffers = flatbuffers_fbsource;
-#endif
 /**
  * An Allocator that can only deallocate (using delete []), counting
  * the number of times that it has been asked to deallocate.

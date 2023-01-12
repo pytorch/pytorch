@@ -47,7 +47,7 @@ class SchemaCheckMode(TorchDispatchMode):
                     before.size() == after.size() and
                     torch.allclose(before, after, equal_nan=True) and
                     md[0] == after.stride() and
-                    md[1] == after.storage()._cdata
+                    md[1] == after._typed_storage()._cdata
                 )
             return False
 
@@ -76,12 +76,12 @@ class SchemaCheckMode(TorchDispatchMode):
                 if not type(e) == torch.Tensor:
                     try:
                         current = e.elem
-                        return (deepcopy(current.stride()), current.storage()._cdata)
+                        return (deepcopy(current.stride()), current._typed_storage()._cdata)
                     except AttributeError as t:
                         return None
                 # Sparse CSR tensors do not have strides or storage
                 elif (e.layout != torch.sparse_csr):
-                    return (deepcopy(e.stride()), e.storage()._cdata)
+                    return (deepcopy(e.stride()), e._typed_storage()._cdata)
             return None
 
         self.ops.append(func._schema.name)

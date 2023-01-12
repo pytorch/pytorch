@@ -64,12 +64,12 @@ FunctionSchema PythonValue::getSchema(
     // No type signature was provided on the callable, so make a default
     // signature where each argument is typed as a Tensor
     for (; names_it != param_names.end(); ++names_it) {
-      args.emplace_back(Argument(
+      args.emplace_back(
           /*name=*/*names_it,
           /*type=*/TensorType::get(),
           /*N=*/c10::nullopt,
           /*default_value=*/c10::nullopt,
-          /*kwarg_only=*/false));
+          /*kwarg_only=*/false);
     }
 
     // Use as many outputs as are requested to make the return type
@@ -123,7 +123,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     size_t n_binders) {
   std::vector<NamedValue> argsWithSelf;
   if (moduleSelf_) {
-    argsWithSelf.emplace_back(NamedValue("self", moduleSelf_));
+    argsWithSelf.emplace_back("self", moduleSelf_);
   }
   argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
 
@@ -795,7 +795,7 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
             ->insertNode(calling_graph->createTupleUnpack(forward_input))
             ->outputs();
     for (auto& output_node : output_nodes) {
-      pre_hook_result.emplace_back(NamedValue(output_node));
+      pre_hook_result.emplace_back(output_node);
     }
     if (args.size() != 0) { // only replace input if it existed
       args = pre_hook_result;

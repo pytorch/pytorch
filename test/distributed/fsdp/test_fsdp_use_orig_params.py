@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import functools
 import itertools
 import sys
@@ -15,7 +16,7 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
-from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -117,12 +118,11 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         # combination with the parameter group construction, ensures different
         # hyperparameter settings within one `FlatParameter`
         fsdp_kwargs = {
-            "auto_wrap_policy": functools.partial(
-                transformer_auto_wrap_policy,
-                transformer_layer_cls={
+            "auto_wrap_policy": ModuleWrapPolicy(
+                {
                     TransformerEncoderLayer,
                     TransformerDecoderLayer,
-                },
+                }
             ),
             "use_orig_params": True,
             "sharding_strategy": sharding_strategy,
@@ -350,7 +350,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             {
                 "sharding_strategy": [
                     ShardingStrategy.FULL_SHARD,
-                    # ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.SHARD_GRAD_OP,
                 ]
             },
             self._test_multiple_optimizers,
@@ -1007,11 +1007,170 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
         fsdp_buffer_names = [n for n, _ in fsdp_model.named_buffers()]
         self.assertEqual(buffer_names, fsdp_buffer_names)
 
+    @skip_if_lt_x_gpu(2)
+    def test_named_parameters_in_forward(self):
+        """
+        Tests that calling ``named_parameters()`` during forward returns FQNs
+        and ``Tensor`` s corresponding to the original parameters.
+        """
+        param_shapes = [None, None]
+        assert_equal_fn = self.assertEqual
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = nn.Linear(5, 5)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                nonlocal param_shapes
+                param_names = [tup[0] for tup in self.named_parameters()]
+                params = [tup[1] for tup in self.named_parameters()]
+                assert (
+                    param_shapes[0] is not None and param_shapes[1] is not None
+                ), "`param_sizes` should be set"
+                assert_equal_fn(
+                    param_names,
+                    [
+                        "lin.weight",
+                        "lin.bias",
+                    ],
+                )
+                assert_equal_fn(params[0].shape, param_shapes[0])
+                assert_equal_fn(params[1].shape, param_shapes[1])
+                return self.lin(x)
+
+        model = Model().cuda()
+        # Save the *unsharded* original parameter shapes and check the shapes
+        # match in the forward pass
+        param_shapes[0] = model.lin.weight.shape
+        param_shapes[1] = model.lin.bias.shape
+        fsdp_model = FSDP(model, use_orig_params=True)
+        inp = torch.randn((2, 5), device=torch.device("cuda"))
+        fsdp_model(inp)
+
+
+class TestFSDPUseOrigParamsNoSync(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_no_sync(self):
+        """
+        Tests a basic ``no_sync()`` setup by comparing ``use_orig_params=True``
+        against ``use_orig_params=False``.
+        """
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ],
+            },
+            self._test_no_sync,
+        )
+
+    def _test_no_sync(self, sharding_strategy: ShardingStrategy):
+        model = nn.Linear(3, 3, bias=False, device="cuda")
+        fsdp_kwargs = {
+            "sharding_strategy": sharding_strategy,
+        }
+        model_use_flat_params = FSDP(
+            copy.deepcopy(model), use_orig_params=False, **fsdp_kwargs
+        )
+        model_use_orig_params = FSDP(model, use_orig_params=True, **fsdp_kwargs)
+        optim_use_flat_params = torch.optim.AdamW(
+            model_use_flat_params.parameters(), foreach=True
+        )
+        optim_use_orig_params = torch.optim.AdamW(
+            model_use_orig_params.parameters(), foreach=True
+        )
+
+        def _check_param_grad_parity(
+            _baseline_model: nn.Module,
+            _test_model: nn.Module,
+        ):
+            """
+            This assumes that the model is ``nn.Linear(3, 3, bias=False)``
+            (i.e. with a single weight parameter) to be able to directly
+            compare the baseline and test models. On rank 1, the baseline
+            includes 1 element of padding.
+            """
+            for flat_param, orig_param in zip(
+                _baseline_model.parameters(), _test_model.parameters()
+            ):
+                # Baseline is permitted to have padding
+                self.assertGreaterEqual(flat_param.numel(), orig_param.numel())
+                unpadded_param_numel = orig_param.numel()
+                # For `NO_SHARD`, `use_orig_params=True` presents unflattened
+                # parameters, while `False` presents flattened ones
+                torch.testing.assert_close(
+                    flat_param[:unpadded_param_numel], orig_param.flatten()
+                )
+                # Gradient numel is different if right after `no_sync()` since
+                # the gradient is unsharded, while the parameter is sharded
+                unpadded_grad_numel = orig_param.grad.numel()
+                # For `use_orig_params=False`, the unsharded gradient is
+                # flattened, while for `True`, it is unflattened
+                torch.testing.assert_close(
+                    flat_param.grad[:unpadded_grad_numel].reshape(
+                        orig_param.grad.shape
+                    ),
+                    orig_param.grad,
+                )
+
+        inp = torch.randn((2, 3), device="cuda")
+        grad = torch.rand_like(inp)
+
+        # Compute some reference gradients using one forward/backward
+        out_use_flat_params = model_use_flat_params(inp)
+        out_use_orig_params = model_use_orig_params(inp)
+        torch.testing.assert_close(out_use_flat_params, out_use_orig_params)
+        out_use_flat_params.backward(grad)
+        out_use_orig_params.backward(grad)
+        _check_param_grad_parity(model_use_flat_params, model_use_orig_params)
+        ref_grads_use_flat_params = [
+            param.grad.detach().clone() for param in model_use_flat_params.parameters()
+        ]
+        ref_grads_use_orig_params = [
+            param.grad.detach().clone() for param in model_use_orig_params.parameters()
+        ]
+
+        # Run a forward/backward in `no_sync()`
+        optim_use_flat_params.zero_grad(set_to_none=True)
+        optim_use_orig_params.zero_grad(set_to_none=True)
+        for model in (model_use_flat_params, model_use_orig_params):
+            with model.no_sync():
+                out = model(inp)
+                out.backward(grad)
+        _check_param_grad_parity(model_use_flat_params, model_use_orig_params)
+
+        # Run a forward/backward outside `no_sync()`
+        for model in (model_use_flat_params, model_use_orig_params):
+            out = model(inp)
+            out.backward(grad)
+        _check_param_grad_parity(model_use_flat_params, model_use_orig_params)
+
+        # Check that, since we accumulated gradients across 2 iterations, that
+        # the new gradients are 2x the reference gradients
+        grads_use_flat_params = [
+            param.grad.detach().clone() for param in model_use_flat_params.parameters()
+        ]
+        grads_use_orig_params = [
+            param.grad.detach().clone() for param in model_use_orig_params.parameters()
+        ]
+        for grad, ref_grad in zip(grads_use_flat_params, ref_grads_use_flat_params):
+            torch.testing.assert_close(grad, 2 * ref_grad)
+        for grad, ref_grad in zip(grads_use_orig_params, ref_grads_use_orig_params):
+            torch.testing.assert_close(grad, 2 * ref_grad)
+
 
 instantiate_parametrized_tests(TestFSDPUseOrigParamsMultipleParamGroups)
 instantiate_parametrized_tests(TestFSDPUseOrigParamsUnshardReshard)
 instantiate_parametrized_tests(TestFSDPUseOrigParamsParamAccess)
 instantiate_parametrized_tests(TestFSDPUseOrigParamsFQNs)
+instantiate_parametrized_tests(TestFSDPUseOrigParamsNoSync)
 
 if __name__ == "__main__":
     run_tests()

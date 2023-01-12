@@ -32,7 +32,7 @@ if ! command -v aws >/dev/null; then
 fi
 
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-  DRIVER_FN="NVIDIA-Linux-x86_64-515.57.run"
+  DRIVER_FN="NVIDIA-Linux-x86_64-515.76.run"
   wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
   sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
   nvidia-smi
@@ -40,8 +40,8 @@ if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
   # Taken directly from https://github.com/NVIDIA/nvidia-docker
   # Add the package repositories
   distribution=$(. /etc/os-release;echo "$ID$VERSION_ID")
-  curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-  curl -s -L "https://nvidia.github.io/nvidia-docker/${distribution}/nvidia-docker.list" | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+  curl -s -L --retry 3 --retry-all-errors https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+  curl -s -L --retry 3 --retry-all-errors "https://nvidia.github.io/nvidia-docker/${distribution}/nvidia-docker.list" | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
 
   retry sudo apt-get update -qq
   # Necessary to get the `--gpus` flag to function within docker

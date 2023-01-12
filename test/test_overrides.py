@@ -387,6 +387,10 @@ class TestTorchFunctionOverride(TestCase):
         self.assertEqual(torch.mean(t3), 4.0)
         self.assertEqual(bar(t3), 0)
 
+    def test_has_torch_function_non_sequence(self):
+        with self.assertRaisesRegex(TypeError, "expected a sequence"):
+            has_torch_function(object())
+
     def test_mm_semantics(self):
         """Test that a function with multiple arguments can be overrided"""
         t1 = DiagonalTensor(5, 2)
@@ -897,7 +901,6 @@ class TestGradCheckOverride(TestCase):
                 'dtype',
                 'is_floating_point',
                 'is_sparse',
-                'is_sparse_csr',
                 'layout',
                 'new_zeros',
                 'numel',
@@ -1444,7 +1447,7 @@ class TestTorchFunctionMode(TestCase):
 
         x = B(torch.randn(5))
         with A():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
@@ -1456,7 +1459,7 @@ class TestTorchFunctionMode(TestCase):
             pass
 
         x = A(torch.randn(5))
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             g = torch._C._EnableTorchFunction()
             try:
                 self.assertIsInstance(torch.sum(x), A)

@@ -8,15 +8,14 @@ import pprint
 import textwrap
 from typing import Dict, List, Optional, Set, Union
 
-import numpy as np
 import sympy
 
 import torch
 
-from . import config, dependencies, ir
+from . import config, dependencies, ir, metrics
 from .dependencies import MemoryDep, StarDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, dynamo_utils
+from .utils import cache_on_self, cmp, dynamo_utils, has_triton
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -318,7 +317,9 @@ class SchedulerNode(BaseSchedulerNode):
             from .codegen.triton_template import should_use_template
             from .codegen.wrapper import buffer_reuse_key
 
-            for read in self.read_writes.reads:
+            ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+
+            for read in ordered_reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
                 )
@@ -347,6 +348,12 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
+                        # mutations not tracked in cpp kernels
+                        if isinstance(
+                            V.kernel, torch._inductor.codegen.triton.TritonKernel
+                        ):
+                            V.kernel.mutations.add(input_node.get_name())
+                            V.kernel.mutations.add(self.get_name())
                         return
         super().allocate()
 
@@ -357,7 +364,7 @@ class SchedulerNode(BaseSchedulerNode):
     def mark_run(self):
         self.allocate()
 
-    def codegen(self, index_vars):
+    def ranges_from_index_vars(self, index_vars):
         sizes = self._sizes
         assert sum(map(len, sizes)) == sum(map(len, index_vars))
         var_ranges = dict(
@@ -366,6 +373,10 @@ class SchedulerNode(BaseSchedulerNode):
                 itertools.chain.from_iterable(sizes),
             )
         )
+        return var_ranges
+
+    def codegen(self, index_vars):
+        var_ranges = self.ranges_from_index_vars(index_vars)
         try:
             with V.set_ops_handler(
                 SimplifyIndexing(V.get_ops_handler(), var_ranges)
@@ -510,13 +521,17 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
 
-        a_first = np.logical_or(
-            stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
-        ).all()
-        b_first = np.logical_or(
-            stride_lengths[:, a] == 0, stride_lengths[:, a] > stride_lengths[:, b]
-        ).all()
+        stride_len_a = [sl[a] for sl in stride_lengths]
+        stride_len_b = [sl[b] for sl in stride_lengths]
 
+        # equivalent to
+        # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
+        a_first = all(
+            sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+        )
+        b_first = all(
+            sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+        )
         if a_first and not b_first:
             return -1
         if b_first and not a_first:
@@ -525,10 +540,10 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
         # otherwise contiguous
         return cmp(b, a)
 
-    order = list(reversed(range(stride_lengths.shape[1])))
+    order = list(reversed(range(len(stride_lengths[0]))))
     if len(priority_idx) > 0:
         # if we have priority node, only use that node's order
-        stride_lengths = stride_lengths[priority_idx]
+        stride_lengths = [stride_lengths[pi] for pi in priority_idx]
     if config.pick_loop_orders:
         order.sort(key=index_cmp)
     return order
@@ -593,6 +608,7 @@ class Scheduler:
         self.compute_predecessors()
         self.dead_node_elimination()
 
+        metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
@@ -922,9 +938,22 @@ class Scheduler:
         be scheduled before the fusion of node1 and node2.
         """
         node1_names = node1.get_names()
-        remaining_deps = {
-            dep.name for dep in node2.unmet_dependencies - node1.read_writes.writes
-        }
+        computed_deps = set()
+        for rd in node2.unmet_dependencies:
+            for cd in node1.read_writes.writes:
+                # StarDep doesn't match MemoryDep, different indices don't match
+                # However, broadcasting sometimes strips dimensions, and if that's the case
+                # we still can match unmet dep
+                if (
+                    rd.name == cd.name
+                    and type(rd) == type(cd)
+                    and rd.index == cd.index
+                    and len(rd.size) >= len(cd.size)
+                    and rd.size[: len(cd.size)] == cd.size
+                ):
+                    computed_deps.add(rd)
+
+        remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
         if remaining_deps & node1_names:
             # MemoryDeps didn't match and read different locations of the same buffer.
             # Examples here include:
@@ -964,7 +993,7 @@ class Scheduler:
         common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
             node2.read_writes.reads | node2.read_writes.writes
         )
-        return sum(dep.numel_hint() for dep in common_memory_deps)
+        return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
     def score_fusion_key(self, nodes):
         """
@@ -1065,6 +1094,16 @@ class Scheduler:
 
             return CppScheduling(self)
         else:
+            if not has_triton():
+                device_props = torch.cuda.get_device_properties(device)
+                if device_props.major < 7:
+                    raise RuntimeError(
+                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
+                    )
+                else:
+                    raise RuntimeError(
+                        "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
+                    )
             from .codegen.triton import TritonScheduling
 
             return TritonScheduling(self)
@@ -1087,6 +1126,16 @@ class Scheduler:
                     or node.is_template()
                 ):
                     self.flush()
+                if device != self.current_device:
+                    if device.type == "cuda":
+                        if self.current_device and self.current_device.type == "cuda":
+                            V.graph.wrapper_code.codegen_cuda_device_guard_exit()
+                        assert device.index is not None, "device should have an index"
+                        V.graph.wrapper_code.codegen_cuda_device_guard_enter(
+                            device.index
+                        )
+                    elif self.current_device and self.current_device.type == "cuda":
+                        V.graph.wrapper_code.codegen_cuda_device_guard_exit()
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
@@ -1100,6 +1149,9 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
+
+            if config.triton.debug_sync_kernel:
+                self.get_backend(device).codegen_sync()
 
             self.available_buffer_names.update(node.get_names())
 

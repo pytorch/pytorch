@@ -19,7 +19,7 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, IS_SANDCASTLE, IS_WINDOWS
+from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -450,6 +450,8 @@ class TestCheckpoint(TestCase):
         self.assertEqual(retain_stats, checkpoint_retain_stats)
 
 class TestDataLoaderUtils(TestCase):
+    MAX_TIMEOUT_IN_SECOND = 300
+
     def setUp(self):
         super().setUp()
         self.dataset = torch.randn(5, 3, 3, 2)
@@ -460,7 +462,8 @@ class TestDataLoaderUtils(TestCase):
             dataloader = torch.utils.data.DataLoader(RandomDatasetMock(),
                                                      batch_size=2,
                                                      num_workers=4,
-                                                     shuffle=True)
+                                                     shuffle=True,
+                                                     timeout=self.MAX_TIMEOUT_IN_SECOND)
             return next(iter(dataloader))
 
         torch.manual_seed(2018)
@@ -493,7 +496,8 @@ class TestDataLoaderUtils(TestCase):
         dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
                                              batch_size=self.batch_size,
                                              num_workers=2,
-                                             drop_last=False)
+                                             drop_last=False,
+                                             timeout=self.MAX_TIMEOUT_IN_SECOND)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
@@ -501,7 +505,8 @@ class TestDataLoaderUtils(TestCase):
         dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
                                              batch_size=self.batch_size,
                                              num_workers=2,
-                                             drop_last=True)
+                                             drop_last=True,
+                                             timeout=self.MAX_TIMEOUT_IN_SECOND)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
@@ -610,6 +615,7 @@ class TestBottleneck(TestCase):
 from torch.utils.collect_env import get_pretty_env_info
 
 
+@unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
 class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()

@@ -3,7 +3,7 @@
 > NOTE: This README contains information for the `.github` directory but cannot be located there because it will overwrite the
 repo README.
 
-This directory contains workflows and scripts to support our CI infrastructure that runs on Github Actions.
+This directory contains workflows and scripts to support our CI infrastructure that runs on GitHub Actions.
 
 ## Workflows
 

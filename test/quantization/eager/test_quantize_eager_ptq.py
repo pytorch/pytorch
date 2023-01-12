@@ -19,8 +19,10 @@ from torch.ao.quantization import (
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
+    FixedQParamsObserver,
     PerChannelMinMaxObserver,
     default_dynamic_quant_observer,
+    default_weight_observer,
     QConfig,
 )
 
@@ -1022,6 +1024,48 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         mq = torch.ao.quantization.convert(mp)
         self.assertTrue(isinstance(mq[0].dequant, nnq.DeQuantize))
 
+    def test_activations_in_non_leaf_module_list(self):
+        """
+        Ensure activations like `nn.Sigmoid` and `nn.Tanh` are properly handled in
+        `non_leaf_module_list`.
+        """
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = QuantStub()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.softmax = torch.nn.Softmax()
+                self.tanh = torch.nn.Tanh()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.sigmoid(x)
+                x = self.hardsigmoid(x)
+                x = self.softmax(x)
+                x = self.tanh(x)
+                x = self.dequant(x)
+                return x
+
+        qconfig = QConfig(
+            activation=FixedQParamsObserver.with_args(scale=123.0, zero_point=0),
+            weight=default_weight_observer
+        )
+        m = MyModel()
+        m.qconfig = qconfig
+        m = prepare(m, observer_non_leaf_module_list=[
+            torch.nn.Sigmoid,
+            torch.nn.Hardsigmoid,
+            torch.nn.Softmax,
+            torch.nn.Tanh,
+        ])
+
+        # Should use the observer specified in the QConfig instead of the default (FixedQParamsFakeQuantize)
+        self.assertTrue(isinstance(m.sigmoid.activation_post_process, FixedQParamsObserver))
+        self.assertTrue(isinstance(m.hardsigmoid.activation_post_process, FixedQParamsObserver))
+        self.assertTrue(isinstance(m.softmax.activation_post_process, FixedQParamsObserver))
+        self.assertTrue(isinstance(m.tanh.activation_post_process, FixedQParamsObserver))
 
 @skipIfNoFBGEMM
 class TestQuantizeEagerPTQDynamic(QuantizationTestCase):

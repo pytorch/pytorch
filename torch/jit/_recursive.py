@@ -30,8 +30,11 @@ ignored_attributes = [
     "_backward_hooks",
     "_backward_pre_hooks",
     "_forward_hooks",
+    "_forward_hooks_with_kwargs",
     "_forward_pre_hooks",
+    "_forward_pre_hooks_with_kwargs",
     "_state_dict_hooks",
+    "_state_dict_pre_hooks",
     "_load_state_dict_pre_hooks",
     "_load_state_dict_post_hooks",
     "_modules",
@@ -183,7 +186,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         except RuntimeError as re:
             raise RuntimeError(
                 "Error inferring type for {name}: {item}: {re}".format(name=name, item=item, re=re)
-            )
+            ) from re
 
         return attr_type, inferred
 

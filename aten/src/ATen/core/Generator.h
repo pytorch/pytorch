@@ -59,7 +59,7 @@ namespace at {
 class Tensor;
 
 struct TORCH_API Generator {
-  Generator() {}
+  Generator() = default;
 
   explicit Generator(c10::intrusive_ptr<c10::GeneratorImpl> gen_impl)
    : impl_(std::move(gen_impl)) {

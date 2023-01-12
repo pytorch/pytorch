@@ -180,6 +180,16 @@ struct SubstituteInExpr : public OptInDispatch {
     OptInDispatch::handle(expr);
   }
 
+  void handle(FullOp* full_expr) final {
+    auto out = reference_->sameAs(full_expr->output(0)) ? substitute_
+                                                        : full_expr->output(0);
+    expr_ = IrBuilder::create<FullOp>(
+        full_expr->container(),
+        out,
+        full_expr->getFillValue(),
+        full_expr->dtype());
+  }
+
   void handle(ARangeOp* arange_expr) final {
     auto start = reference_->sameAs(arange_expr->start())
         ? substitute_
@@ -197,7 +207,19 @@ struct SubstituteInExpr : public OptInDispatch {
         start,
         end,
         step,
-        arange_expr->getLinearIndex());
+        arange_expr->dtype(),
+        arange_expr->getLinearLogicalIndex());
+  }
+
+  void handle(EyeOp* eye_expr) final {
+    auto out = reference_->sameAs(eye_expr->output(0)) ? substitute_
+                                                       : eye_expr->output(0);
+    expr_ = IrBuilder::create<EyeOp>(
+        eye_expr->container(),
+        out,
+        eye_expr->dtype(),
+        eye_expr->getIndex1(),
+        eye_expr->getIndex2());
   }
 
   void handle(UnaryOp* unary_expr) final {
@@ -244,12 +266,18 @@ struct SubstituteInExpr : public OptInDispatch {
   }
 
   void handle(RNGOp* rng_expr) final {
+    std::vector<Val*> subsituted_params;
+    for (auto v : rng_expr->getParameters()) {
+      subsituted_params.emplace_back(reference_->sameAs(v) ? substitute_ : v);
+    }
     auto out = reference_->sameAs(rng_expr->output(0)) ? substitute_
                                                        : rng_expr->output(0);
     expr_ = IrBuilder::create<RNGOp>(
         rng_expr->container(),
         rng_expr->getRNGOpType(),
         out,
+        rng_expr->dtype(),
+        subsituted_params,
         rng_expr->getRNGOffset(),
         rng_expr->getPhiloxIndex());
   }
@@ -748,7 +776,7 @@ class ValReplacementMutator : private OptOutMutator {
     // grab all leaves towards outputs and grab stmts from there.
     auto stmts = StmtSort::getStmts(fusion, allLeafOuts(fusion), true);
 
-    // Some fusions, such as standalone randlike, can have disconnected DAG, so
+    // Some fusions, such as standalone rand_like, can have disconnected DAG, so
     // we need some mechanism to make sure our replacement set is as complete as
     // possible
     // TODO: I think we need a more general mechanism to support disconnected
@@ -849,6 +877,30 @@ bool isReductionOp(const Expr* expr) {
 
 bool isReductionTvOp(const Expr* expr) {
   return ir_utils::isTvOp(expr) && isReductionOp(expr);
+}
+
+TORCH_CUDA_CU_API std::vector<ViewOp*> getViewOps(Fusion* fusion) {
+  auto all_exprs = fusion->exprs();
+
+  auto all_view_ops = ir_utils::filterByType<ViewOp>(all_exprs);
+
+  std::vector<ViewOp*> view_ops;
+
+  std::copy_if(
+      all_view_ops.begin(),
+      all_view_ops.end(),
+      std::back_inserter(view_ops),
+      [](ViewOp* view) {
+        return std::any_of(
+            view->outputs().begin(), view->outputs().end(), [](Val* v) {
+              if (!v->isA<TensorView>()) {
+                return false;
+              }
+              return v->as<TensorView>()->hasRFactor();
+            });
+      });
+
+  return view_ops;
 }
 
 namespace {

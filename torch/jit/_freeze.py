@@ -136,9 +136,9 @@ def run_frozen_optimizations(
         mod (:class:`ScriptModule`): a frozen module to be optimized
 
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly
-        preserve numerics. These optimizations preserve default rtol and atol of `torch.testing.assert_allclose`
+        preserve numerics. These optimizations preserve default rtol and atol of `torch.testing.assert_close`
         when applied on a single transformation, however in a module where many transformations are applied
-        the rtol or atol may no longer fall within the default `assert_allclose` tolerance. Conv -> Batchnorm folding,
+        the rtol or atol may no longer fall within the default `assert_close` tolerance. Conv -> Batchnorm folding,
         Conv-Add/Sub, and Conv -> Mul/Div folding all may alter numerics.
 
     Returns:

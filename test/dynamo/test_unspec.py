@@ -101,7 +101,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res2 = opt_fn(x, y, z)
-        self.assertTrue(same(res1, res2))
+        self.assertTrue(same(res1, res2, relax_numpy_equality=True))
 
     def test_feed_random_values_into_graph_only(self):
         def fn(shape):
@@ -137,7 +137,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=5)

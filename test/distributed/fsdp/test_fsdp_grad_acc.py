@@ -81,6 +81,10 @@ class TestGradAcc(FSDPTest):
     """Tests ``FullyShardedDataParallel``'s gradient accumulation via both its
     ``no_sync()`` context manager and without the context manager."""
 
+    @property
+    def world_size(self) -> int:
+        return 2
+
     def _test_grad_acc(
         self,
         batch_dim: int,
@@ -88,6 +92,7 @@ class TestGradAcc(FSDPTest):
         cpu_offload: CPUOffload,
         backward_prefetch: Optional[BackwardPrefetch],
         sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
     ):
         """
         Tests gradient accumulation by comparing a run that trains sequentially
@@ -128,11 +133,12 @@ class TestGradAcc(FSDPTest):
                 "cpu_offload": cpu_offload,
                 "backward_prefetch": backward_prefetch,
                 "sharding_strategy": sharding_strategy,
+                "use_orig_params": use_orig_params,
             }
             fsdp_model: FSDP = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_AFTER,
+                CUDAInitMode.CUDA_BEFORE,
                 fsdp_kwargs,
                 deterministic=True,
                 add_bn=False,  # disable BN since the test uses varying batch sizes
@@ -170,7 +176,11 @@ class TestGradAcc(FSDPTest):
             output = fsdp_model(*concat_batch)
             ref_loss = fsdp_model.module.get_loss(concat_batch, output)
             ref_loss.backward()
-            ref_grads = [p.grad.detach().clone() for p in fsdp_model.parameters()]
+            ref_grads = [
+                p.grad.detach().clone()
+                for p in fsdp_model.parameters()
+                if p.grad is not None
+            ]
 
             # Compute and accumulate the gradients
             fsdp_model.zero_grad()
@@ -197,7 +207,11 @@ class TestGradAcc(FSDPTest):
             loss.backward()
             losses.append(loss)
             acc_loss = sum(losses)
-            acc_grads = [p.grad.detach().clone() for p in fsdp_model.parameters()]
+            acc_grads = [
+                p.grad.detach().clone()
+                for p in fsdp_model.parameters()
+                if p.grad is not None
+            ]
 
             # Compare the losses and gradients
             torch.testing.assert_close(ref_loss, acc_loss)
@@ -220,7 +234,11 @@ class TestGradAcc(FSDPTest):
                 None,
                 BackwardPrefetch.BACKWARD_PRE,
                 BackwardPrefetch.BACKWARD_POST,
-            ]
+            ],
+            "cpu_offload": [
+                CPUOffload(offload_params=False),
+                CPUOffload(offload_params=True),
+            ],
         }
 
     @skip_if_lt_x_gpu(2)
@@ -244,10 +262,6 @@ class TestGradAcc(FSDPTest):
         ],
     )
     @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
-    )
-    @parametrize(
         "sharding_strategy",
         [
             ShardingStrategy.FULL_SHARD,
@@ -255,11 +269,12 @@ class TestGradAcc(FSDPTest):
             ShardingStrategy.NO_SHARD,
         ],
     )
+    @parametrize("use_orig_params", [False, True])
     def test_grad_acc(
         self,
         configs: _GradAccConfigs,
-        cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
     ):
         """
         Tests gradient accumulation.
@@ -268,21 +283,19 @@ class TestGradAcc(FSDPTest):
         ``no_sync()`` context manager, in particular by interleaving the two.
         It tests both interleaving starting with (and ending with, resp.)
         inside versus outside ``no_sync()`` to ensure that initial conditions
-        (and final conditions, resp.) do not affect the correctness. This test
-        also checks for compatibility with the CPU offload and backward
-        prefetch options.
+        (and final conditions, resp.) do not affect the correctness.
 
         NOTE: Gradient accumulation without using the ``no_sync()`` context
         manager is not currently compatible with CPU offloading, so those tests
-        are vacuous.
+        just return directly.
         """
         self.run_subtests(
             self._get_subtest_config(),
             self._test_grad_acc,
             batch_dim=1,
             configs=configs.configs,
-            cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
+            use_orig_params=use_orig_params,
         )
 
 

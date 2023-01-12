@@ -592,6 +592,24 @@ class TestMin(TestCase):
         BB = torch.mm(B[j], C)  # 3, 4, 2
         assert list(torch.mm(AA.T, BB).order(i, j).shape) == [3, 3, 2, 2]
 
+    def test_permute_orig(self):
+        d = dims(1)
+        t_fc = torch.rand(1, 2, 3, 4)[d]
+        assert t_fc.permute(dims=(1, 0, 2)).shape == t_fc.permute(1, 0, 2).shape
+
+    def test_order_keyword(self):
+        d = dims(1)
+        t = torch.rand(3)[d]
+        self.assertRaises(TypeError, lambda: t.order(wrong=3))
+
+    def test_big_split(self):
+        total = 0
+        l = []
+        while total < 6400:
+            l.append(torch.randint(2, 10, (1,)).item())
+            total += l[-1]
+        x = torch.randn(total, 1)
+        x.split(l, 0)
 
 skip_functorch_only = ['test_time_mm_fuse', 'test_attn_cuda']
 class TestMinFunctorchOnly(TestMin):

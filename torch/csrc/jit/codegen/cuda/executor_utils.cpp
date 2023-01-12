@@ -63,9 +63,7 @@ std::string kernelPreamble() {
 
 #ifndef USE_ROCM
   ss << nvfuser_resources::fp16_support_cu;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   ss << nvfuser_resources::bf16_support_cu;
-#endif
 #else
   ss << R"(
 #ifndef __noinline__
@@ -155,7 +153,7 @@ bool validateKernelArgTensor(
   }
 
   if (!is_cpu_scalar(arg) && !arg.is_cuda()) {
-    msg << "Argumnet is a CPU tensor which is not supported in fusions.\n";
+    msg << "Argument is a CPU tensor which is not supported in fusions.\n";
     return false;
   }
 
@@ -824,7 +822,7 @@ void bindInputForExprEvaluation(
         if (root_domain[dim]->hasExpandedExtent()) {
           TORCH_INTERNAL_ASSERT(
               tensor_arg_stride == 0,
-              "Execting an expanded dimension on dimension ",
+              "Expecting an expanded dimension on dimension ",
               dim,
               " but found stride ",
               tensor_arg_stride);
@@ -838,18 +836,13 @@ void bindInputForExprEvaluation(
                 *maybe_expanded_size == tensor_arg_size,
                 "Expecting expanded extent of ",
                 *maybe_expanded_size,
-                " but recieved value of ",
+                " but received value of ",
                 tensor_arg_size);
           }
         }
 
         const auto value =
             root_domain[dim]->hasExpandedExtent() ? 1 : tensor_arg_size;
-        if (value == 0 && cg_tensor->uses().empty()) {
-          // If there's no uses, ignore there's a size-0 dimension.
-          continue;
-        }
-        TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
         bool should_bind = true;
         if (check_consistency) {
           const auto prev_value = expr_eval.evaluate(extent);
@@ -1014,7 +1007,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   });
 
 #ifdef USE_ROCM
-  std::vector<const char*> args = {"--std=c++14"};
+  std::vector<const char*> args = {"--std=c++17"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
 #endif
@@ -1023,6 +1016,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   // compile to sass is not allowed prior to CUDA 11.1
   compile_to_sass = false;
 #endif
+
+  if (isOptionDisabled(DisableOption::CompileToSass)) {
+    // Allows manually disabling compilation to sass
+    //  so the intermediate ptx could be checked.
+    compile_to_sass = false;
+  }
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
   // (since older driver doesn't necessrily recognize PTX emitted by new
@@ -1035,7 +1034,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       std::to_string(minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
+      "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
   const bool disable_fma = isOptionDisabled(DisableOption::Fma);

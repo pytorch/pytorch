@@ -5,7 +5,18 @@ import os
 import pathlib
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import yaml
 from typing_extensions import Literal
@@ -34,10 +45,10 @@ from torchgen.context import (
     with_native_function_and_indices,
 )
 from torchgen.gen_functionalization_type import (
-    gen_composite_view_copy_kernel,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
+    GenCompositeViewCopyKernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
@@ -48,6 +59,7 @@ from torchgen.model import (
     BaseOperatorName,
     DEFAULT_KERNEL_NAMESPACE,
     DispatchKey,
+    FRAGMENT_NAMESPACES,
     FunctionSchema,
     is_cuda_dispatch_key,
     is_generic_dispatch_key,
@@ -1405,7 +1417,17 @@ def get_native_function_declarations(
     *,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
+    native_function_decl_gen: Callable[
+        [Union[NativeFunctionsGroup, NativeFunction], BackendIndex], List[str]
+    ] = dest.compute_native_function_declaration,
 ) -> List[str]:
+    """
+    Generate kernel declarations, in `NativeFunction(s).h`.
+    :param grouped_native_functions: a sequence of `NativeFunction` or `NativeFunctionGroup`.
+    :param backend_indices: kernel collections grouped by dispatch key.
+    :param native_function_decl_gen: callable to generate kernel declaration for each `NativeFunction`.
+    :return: a list of string, from the string with all declarations, grouped by namespaces, split by newline.
+    """
     declarations: List[str] = []
     ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
     newline = "\n"
@@ -1424,7 +1446,7 @@ def get_native_function_declarations(
                 len(native_function_namespaces) <= 1
             ), f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
             ns_grouped_kernels[namespace].extend(
-                dest.compute_native_function_declaration(f, backend_idx)
+                native_function_decl_gen(f, backend_idx)
             )
 
     for namespace, kernels in ns_grouped_kernels.items():
@@ -1640,8 +1662,15 @@ def get_native_function_schema_registrations(
         else:
             custom_namespace = namespace
             tab = "\t"
+            # if the namespace is predefined, we should use define a library fragment
+            # instead of a new library
+            torch_library_macro = (
+                "TORCH_LIBRARY_FRAGMENT"
+                if namespace in FRAGMENT_NAMESPACES
+                else "TORCH_LIBRARY"
+            )
             schema_registrations += f"""
-TORCH_LIBRARY({custom_namespace}, m) {{
+{torch_library_macro}({custom_namespace}, m) {{
   {tab.join(schema_registrations_body)}
 }};"""
     return (aten_schema_registrations, schema_registrations)
@@ -1855,7 +1884,9 @@ def gen_per_operator_headers(
                 },
             )
         declarations = get_native_function_declarations(
-            grouped_native_functions=grouped_functions, backend_indices=backend_indices
+            grouped_native_functions=grouped_functions,
+            backend_indices=backend_indices,
+            native_function_decl_gen=dest.compute_native_function_declaration,
         )
         ops_fm.write_with_template(
             f"{name}_native.h",
@@ -2494,7 +2525,11 @@ def gen_source_files(
         lambda: {
             "ops_headers": [
                 "\n".join(
-                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    f"#include <ATen/ops/{f.root_name}_ops.h>\n"
+                    # NB: this include is important as it ensures we
+                    # set the visibility on generated view_copy kernels
+                    # correctly
+                    f"#include <ATen/ops/{f.root_name}_native.h>"
                     for f in (
                         [g.view] if g.view_copy is None else [g.view, g.view_copy]
                     )
@@ -2510,7 +2545,14 @@ def gen_source_files(
                 for g in structured_native_functions
             ],
             "CompositeViewCopyKernel_Definitions": list(
-                mapMaybe(gen_composite_view_copy_kernel, view_groups)
+                mapMaybe(
+                    GenCompositeViewCopyKernel(
+                        backend_indices[
+                            DispatchKey.CompositeExplicitAutogradNonFunctional
+                        ]
+                    ),
+                    view_groups,
+                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(

@@ -3,8 +3,8 @@ from torch.fx import map_arg, Node
 from torch.fx.graph import Graph
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
@@ -111,6 +111,9 @@ def is_copy_node(node, modules):
         torch.flatten,
         torch.mean,
         operator.floordiv,
+        # F.channel_shuffle and torch.channel_shuffle are essentially the same thing
+        # so we only need to put one of them here
+        torch.channel_shuffle,
     ]
     method_list = [
         "clamp",
@@ -131,6 +134,7 @@ def is_copy_node(node, modules):
         torch.nn.MaxPool3d,
         torch.nn.ReLU,
         torch.nn.ReLU6,
+        torch.nn.ChannelShuffle,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
@@ -249,6 +253,11 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 #   2) The replacement static quantized module class for lowering
 STATIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
     nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU),
+    # TODO: LinearLeakyReLU is registered as global but it is only fused and
+    # lowered when ondnn's backend config is used. Maybe need to separate
+    # registration and lowering functions for different backends in the future.
+    nni.LinearLeakyReLU: (nnqr.Linear, nniq.LinearLeakyReLU),
+    nni.LinearTanh: (nnqr.Linear, nniq.LinearTanh),
     nni.ConvReLU1d: (nnqr.Conv1d, nniq.ConvReLU1d),
     nni.ConvReLU2d: (nnqr.Conv2d, nniq.ConvReLU2d),
     nni.ConvReLU3d: (nnqr.Conv3d, nniq.ConvReLU3d),
@@ -280,7 +289,7 @@ WEIGHT_PREPACK_OPS: Set[Callable] = {
 }
 
 # Mapping from a functional to a dictionary, where the key is a 2-tuple of
-# (activation_compute_dtype, weight_dtype) and the value is a 2-tuple of
+# (input_activation_dtype, weight_dtype) and the value is a 2-tuple of
 #   1) The dynamically quantized version of the op
 #   2) The dynamically quantized version of the op fused with relu, if it exists, else None
 DYNAMIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Dict[Tuple[torch.dtype, torch.dtype], Tuple[Callable, Optional[Callable]]]] = {
@@ -502,6 +511,7 @@ def _lower_static_weighted_ref_module(
         setattr(modules[parent_name], module_name, q_module)
 
         # Step 2: Reroute around dq_node, and remove q_node and its args
+        assert(len(ref_node.args) == 1)
         dq_node = ref_node.args[0]
         assert(isinstance(dq_node, Node))
         ref_node.replace_input_with(dq_node, dq_node.args[0])
@@ -533,9 +543,9 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
            input_dynamic_q_node.target != torch.quantize_per_tensor_dynamic:
             continue
 
-        activation_compute_dtype = input_dynamic_q_node.args[1]
-        is_fp16 = activation_compute_dtype == torch.float16
-        is_int8 = activation_compute_dtype in [torch.quint8, torch.qint8]
+        activation_dtype = input_dynamic_q_node.args[1]
+        is_fp16 = activation_dtype == torch.float16
+        is_int8 = activation_dtype in [torch.quint8, torch.qint8]
         if not is_int8 and not is_fp16:
             continue
 
@@ -688,9 +698,9 @@ def _lower_dynamic_weighted_ref_functional(
             continue
 
         reduce_range_node = None
-        (pattern_input, activation_compute_dtype, reduce_range_node) = input_dynamic_q_node.args
-        is_fp16 = activation_compute_dtype == torch.float16
-        is_int8 = activation_compute_dtype in [torch.quint8, torch.qint8]
+        (pattern_input, activation_dtype, reduce_range_node) = input_dynamic_q_node.args
+        is_fp16 = activation_dtype == torch.float16
+        is_int8 = activation_dtype in [torch.quint8, torch.qint8]
         if not is_int8 and not is_fp16:
             continue
 
@@ -698,7 +708,7 @@ def _lower_dynamic_weighted_ref_functional(
         weight_dtype = quantized_weight.args[-1]
 
         # Step 1: Try to select reference pattern with the corresponding quantized op
-        dynamic_quant_dtype_key = (activation_compute_dtype, weight_dtype)
+        dynamic_quant_dtype_key = (activation_dtype, weight_dtype)
         if dynamic_quant_dtype_key not in DYNAMIC_LOWER_FUNCTIONAL_MAP[func_node.target]:
             print(f"Didn't find dtype combination {dynamic_quant_dtype_key} during "
                   f"dynamic quantized op lowering for {func_node.target}")
@@ -825,7 +835,8 @@ def special_pattern_replacement(model: QuantizedGraphModule):
         is_call_function, is_call_method, is_call_module = is_special_pattern_node(ref_node, modules)
         if not (is_call_module or is_call_function or is_call_method):
             continue
-        dq_node_or_nodes = ref_node.args[0]
+        assert len(ref_node.args) > 0 or len(ref_node.kwargs) > 0
+        dq_node_or_nodes = ref_node.args[0] if len(ref_node.args) > 0 else list(ref_node.kwargs.values())[0]
         assert isinstance(dq_node_or_nodes, Node) or isinstance(dq_node_or_nodes, (tuple, list))
         is_dequantize = False
         if isinstance(dq_node_or_nodes, Node):

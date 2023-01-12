@@ -289,6 +289,8 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
       const TensorDomain* producer,
       const TensorDomain* consumer) const;
 
+  std::string toString() const;
+
  private:
   //! Returns if key_a and key(td_b, id_b) are mapped to eachother (equivalent),
   //! or are the same key.
@@ -330,8 +332,6 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
       const TensorDomain* consumer,
       const std::unordered_set<IterDomain*>& root_dims_to_map,
       bool producer_to_consumer) const override;
-
-  std::string toString() const;
 
  private:
   //! Disjoint set of all mapped <TD, ID> keys to determine axes equivalency

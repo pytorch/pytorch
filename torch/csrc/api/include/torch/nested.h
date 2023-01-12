@@ -1,7 +1,9 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/torch.h>
+#include <ATen/core/ATen_fwd.h>
+#include <torch/csrc/api/include/torch/detail/TensorDataContainer.h>
+#include <algorithm>
 
 namespace torch {
 namespace nested {
@@ -12,19 +14,51 @@ namespace nested {
 /// https://pytorch.org/docs/master/nested.html#torch.nested.nested_tensor
 ///
 /// ```
-inline Tensor nested_tensor(
-    TensorList list,
-    c10::optional<ScalarType> dtype = c10::nullopt,
-    c10::optional<Device> device = c10::nullopt,
-    c10::optional<bool> requires_grad = false,
-    c10::optional<bool> pin_memory = false) {
-  std::vector<Tensor> new_list;
-  for (const auto i : c10::irange(list.size())) {
-    new_list.push_back(list[i].clone().detach());
+// implemented on python object to allow torch.nested.nested_tensor to be
+// constructed with arbitrarily nested python objects - for now, only arbitrary
+// python lists and lists of Tensors
+// See torch/csrc/autograd/python_nested_functions_manual.cpp for Python
+// implementation
+// See here for C++ implementation
+inline at::Tensor nested_tensor(
+    at::TensorList nested_tensor_data,
+    const at::TensorOptions& options = {}) {
+  auto out = at::_nested_tensor_from_tensor_list(
+      nested_tensor_data,
+      c10::typeMetaToScalarType(options.dtype()),
+      c10::nullopt,
+      options.device(),
+      options.pinned_memory());
+  if (options.has_requires_grad() && options.requires_grad()) {
+    out.requires_grad_(true);
   }
-  auto out = torch::_nested_tensor_from_tensor_list(
-      new_list, dtype, c10::nullopt, device, pin_memory);
-  if (requires_grad.has_value() && requires_grad.value()) {
+  return out;
+}
+
+inline at::Tensor nested_tensor(
+    at::ArrayRef<detail::TensorDataContainer> nested_tensor_data,
+    const at::TensorOptions& options = {}) {
+  for (const auto& tdc : nested_tensor_data) {
+    TORCH_CHECK(
+        tdc.is_init_list(),
+        "nested_tensor() not implemented for these parameters");
+  }
+  // Construct a TensorList using nested_tensor_data
+  std::vector<at::Tensor> tensor_list(nested_tensor_data.size());
+  std::transform(
+      nested_tensor_data.begin(),
+      nested_tensor_data.end(),
+      tensor_list.begin(),
+      [&](const detail::TensorDataContainer& tdc) {
+        return tdc.convert_to_tensor(options);
+      });
+  auto out = at::_nested_tensor_from_tensor_list(
+      tensor_list,
+      c10::typeMetaToScalarType(options.dtype()),
+      c10::nullopt,
+      options.device(),
+      options.pinned_memory());
+  if (options.has_requires_grad() && options.requires_grad()) {
     out.requires_grad_(true);
   }
   return out;
@@ -36,10 +70,10 @@ inline Tensor nested_tensor(
 /// https://pytorch.org/docs/master/nested.html#torch.nested.as_nested_tensor
 ///
 /// ```
-inline Tensor as_nested_tensor(
-    TensorList list,
-    c10::optional<ScalarType> dtype = c10::nullopt,
-    c10::optional<Device> device = c10::nullopt) {
+inline at::Tensor as_nested_tensor(
+    at::TensorList list,
+    c10::optional<at::ScalarType> dtype = c10::nullopt,
+    c10::optional<at::Device> device = c10::nullopt) {
   return at::_nested_tensor_from_tensor_list(
       list, dtype, c10::nullopt, device, c10::nullopt);
 }
@@ -50,11 +84,11 @@ inline Tensor as_nested_tensor(
 /// https://pytorch.org/docs/master/nested.html#torch.nested.to_padded_tensor
 ///
 /// ```
-inline Tensor to_padded_tensor(
-    const Tensor& self,
+inline at::Tensor to_padded_tensor(
+    const at::Tensor& self,
     double padding,
-    OptionalIntArrayRef output_size = c10::nullopt) {
-  return torch::nested_to_padded_tensor(self, padding, output_size);
+    at::OptionalIntArrayRef output_size = c10::nullopt) {
+  return at::nested_to_padded_tensor(self, padding, output_size);
 }
 
 } // namespace nested

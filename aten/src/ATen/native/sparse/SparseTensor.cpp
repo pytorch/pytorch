@@ -163,10 +163,10 @@ SparseTensor new_with_dims_sparse(
   return self;
 }
 
-SparseTensor new_with_dims_and_tensor_sparse(
+SparseTensor new_with_dims_and_tensor_sparse_symint(
     int64_t sparse_dim,
     int64_t dense_dim,
-    ArrayRef<int64_t> size,
+    c10::SymIntArrayRef size,
     const Tensor& indices,
     const Tensor& values,
     c10::optional<ScalarType> dtype,
@@ -444,7 +444,9 @@ Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& val
 
   Tensor values = expand_values_if_needed(values_);
 
-  auto sparse_dim = indices.sym_size(0);
+  // This guard is intentional: we don't support dynamic shapes along the
+  // indices dimension because that implies variable dimensionality
+  auto sparse_dim = indices.sym_size(0).guard_int(__FILE__, __LINE__);
   auto dense_dim = values.dim() - 1;
 
   return at::_sparse_coo_tensor_with_dims_and_tensors_symint(
@@ -516,7 +518,40 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
   return self;
 }
 
-SparseTensor dense_to_sparse(const Tensor& self) {
+SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize) {
+  if (layout.has_value()) {
+    if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not use specified blocksize");
+    }
+    if (self.layout() == *layout) {
+      return self;
+    }
+    switch (*layout) {
+    case kStrided:
+      return self;
+    case kSparse:
+      return dense_to_sparse(self, self.dim());
+    case kSparseCsr:
+      return self.to_sparse_csr();
+    case kSparseCsc:
+      return self.to_sparse_csc();
+    case kSparseBsr:
+      if (blocksize.has_value()) {
+        return self.to_sparse_bsr(*blocksize);
+      }
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
+      break;
+    case kSparseBsc:
+      if (blocksize.has_value()) {
+        return self.to_sparse_bsc(*blocksize);
+      }
+      break;
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
+    default:
+      break;
+    }
+    AT_ERROR("to_sparse not implemented for ", self.layout(), " to ", *layout, " conversion");
+  }
   return dense_to_sparse(self, self.dim());
 }
 

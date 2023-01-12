@@ -319,7 +319,12 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             mod = torch.jit.script(CatMod(**inp.kwargs).eval())
 
             args = inp.input
-            self.assertTrue(len(args) == 2)
+
+            # This test is hard-coded only to work with two sample inputs
+            # but the OpInfo may have more/less
+            if len(args) != 2:
+                continue
+
             out_size = mod(*args).size()
             inps = list(mod.graph.inputs())
             inps[1].setType(inps[1].type().with_sizes(args[0].size()))

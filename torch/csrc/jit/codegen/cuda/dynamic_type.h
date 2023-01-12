@@ -296,6 +296,14 @@ inline IntOrDouble min(const IntOrDouble& a, const IntOrDouble& b) {
   return (a < b ? a : b).cast<double>();
 }
 
+inline IntOrDouble abs(const IntOrDouble& a) {
+  if (a.is_int()) {
+    return IntOrDouble(std::abs(a.as<int64_t>()));
+  } else {
+    return IntOrDouble(std::abs(a.as<double>()));
+  }
+}
+
 } // namespace IntOrDouble_functions
 
 } // namespace cuda

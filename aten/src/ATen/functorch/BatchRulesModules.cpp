@@ -21,16 +21,16 @@ static Tensor getStepTensor(const Tensor& indices, c10::SymInt bdim_size, c10::S
 std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
     const Tensor& weight, optional<int64_t> weight_bdim,
     const Tensor& indices, optional<int64_t> indices_bdim,
-    int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+    c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
   if (!weight_bdim && indices_bdim) {
     // B*, ED -> B*D
-    const auto result = at::embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse);
+    const auto result = at::embedding_symint(weight, indices, padding_idx, scale_grad_by_freq, sparse);
     return std::make_tuple(result, indices_bdim);
   } else if (weight_bdim && !indices_bdim) {
     // *, BED -> *, E(BD) -> *(BD) -> *BD
     const auto batch_size = weight.size(*weight_bdim);
     const auto weight_ = reshape_dim_into(*weight_bdim, /*embedding_dim*/1, weight);
-    auto result = at::embedding(weight_, indices, padding_idx, scale_grad_by_freq, sparse);
+    auto result = at::embedding_symint(weight_, indices, padding_idx, scale_grad_by_freq, sparse);
     result = reshape_dim_outof(-1, batch_size, result);
     return std::make_tuple(result, result.dim() - 2);
   }
@@ -44,7 +44,7 @@ std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
 
   const auto range = getStepTensor(indices, batch_size, num_embeddings);
   indices_ = indices_ + range;
-  const auto result = at::embedding(weight_, indices_, padding_idx, scale_grad_by_freq, sparse);
+  const auto result = at::embedding_symint(weight_, indices_, padding_idx, scale_grad_by_freq, sparse);
   return std::make_tuple(result, 0);
 }
 
@@ -52,7 +52,7 @@ std::tuple<Tensor,optional<int64_t>>
 embedding_dense_backward_batch_rule(
     const Tensor& grad_, optional<int64_t> grad_bdim,
     const Tensor& indices_, optional<int64_t> indices_bdim,
-    c10::SymInt num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
+    c10::SymInt num_weights, c10::SymInt padding_idx, bool scale_grad_by_freq) {
   Tensor grad = grad_;
   Tensor indices = indices_;
   if (!indices_bdim && grad_bdim) {
@@ -74,7 +74,7 @@ embedding_dense_backward_batch_rule(
   // Fill in the padding. We can't do it in the embedding_dense_backward call
   // because we need to fill in multiple rows!
   if (padding_idx >= 0) {
-    result.select(1, padding_idx).fill_(0);
+    result.select_symint(1, padding_idx).fill_(0);
   }
   return std::make_tuple(result, 0);
 }
@@ -295,7 +295,7 @@ template <typename F, F Func, typename A, typename B, typename C, typename... T>
 struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-      OptionalSymIntArrayRef output_size, c10::SymIntArrayRef input_size,
+      c10::SymIntArrayRef output_size, c10::SymIntArrayRef input_size,
       T... extra_args) {
     auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
     TORCH_INTERNAL_ASSERT(input_size.size() > 0);
@@ -375,11 +375,11 @@ struct CudnnGridSampleBackwardBatchRuleHelper {
 #define CUDNN_GRID_SAMPLE_BW_BATCH_RULE(fn)\
     CudnnGridSampleBackwardBatchRuleHelper<decltype(&ATEN_FN(fn)), &ATEN_FN(fn)>::apply
 
-#define UPSAMPLE_BACKWARD(op, overload) VMAP_SUPPORT2(op, overload, SINGLE_ARG(\
+#define UPSAMPLE_BACKWARD(op) VMAP_SUPPORT(op, SINGLE_ARG(\
     UpsampleBackwardBatchRuleHelper<\
-      decltype(&ATEN_FN2(op, overload)),\
-      &ATEN_FN2(op, overload),\
-      c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
+      decltype(&ATEN_FN(op)),\
+      &ATEN_FN(op),\
+      c10::guts::function_traits<decltype(ATEN_FN(op))>::parameter_types>::apply))
 
 #define UPSAMPLE_BATCH(op) \
   EXISTING_BDIM2(op, vec); \
@@ -401,7 +401,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(cudnn_grid_sampler_backward, CUDNN_GRID_SAMPLE_BW_BATCH_RULE(cudnn_grid_sampler_backward));
 
   VMAP_SUPPORT(cudnn_grid_sampler, GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
-  VMAP_SUPPORT(cross, cross_batch_rule);
 
   EXISTING_BDIM(pixel_shuffle);
   EXISTING_BDIM(pixel_unshuffle);
@@ -430,13 +429,13 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UPSAMPLE_BATCH(upsample_nearest3d);
   UPSAMPLE_BATCH(upsample_trilinear3d);
 
-  UPSAMPLE_BACKWARD(upsample_bicubic2d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_bilinear2d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_linear1d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_nearest1d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_nearest2d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_nearest3d_backward, vec);
-  UPSAMPLE_BACKWARD(upsample_trilinear3d_backward, vec);
+  UPSAMPLE_BACKWARD(upsample_bicubic2d_backward);
+  UPSAMPLE_BACKWARD(upsample_bilinear2d_backward);
+  UPSAMPLE_BACKWARD(upsample_linear1d_backward);
+  UPSAMPLE_BACKWARD(upsample_nearest1d_backward);
+  UPSAMPLE_BACKWARD(upsample_nearest2d_backward);
+  UPSAMPLE_BACKWARD(upsample_nearest3d_backward);
+  UPSAMPLE_BACKWARD(upsample_trilinear3d_backward);
   m.impl("one_hot", one_hot_decomposition_hack);
 }
 }}

@@ -942,7 +942,7 @@ def trace_module(
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
-        example_inputs_is_kwarg (``bool``, optional): This parameter indicate wether the example inputs is a pack
+        example_inputs_is_kwarg (``bool``, optional): This parameter indicate whether the example inputs is a pack
                                            pack of keyword arguments. Default: ``False``.
 
     Returns:

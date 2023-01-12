@@ -22,7 +22,6 @@ static void setupLayerNorm(Fusion* fusion, DataType dtype) {
 
   FusionGuard fg(fusion);
 
-  const int kReductionAxis = 1;
   const float kEps = 1e-5;
 
   Double* eps_ptr = IrBuilder::create<Double>(kEps);
@@ -61,7 +60,6 @@ static void NvFuserScheduler_LayerNorm(
 
   std::vector<int64_t> input_shape{
       benchmark_state.range(0), benchmark_state.range(1)};
-  const float kEps = 1e-5;
 
   // inputs
   at::manual_seed(0);

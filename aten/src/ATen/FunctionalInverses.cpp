@@ -3,6 +3,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+
+#include <utility>
 namespace at {
 namespace functionalization {
 
@@ -24,7 +26,7 @@ Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_v
   }
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef sizes, bool reapply_views) {
+Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool reapply_views) {
   auto result = self;
 
   int64_t nDims = sizes.size();
@@ -40,7 +42,7 @@ Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef sizes, bool reapply_vi
   return result;
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, int64_t dim, IntArrayRef sizes, bool reapply_views) {
+Tensor unsqueeze_copy_to(const Tensor & self, int64_t dim, c10::SymIntArrayRef sizes, bool reapply_views) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
   // unsqueezing in the backward.
@@ -129,7 +131,7 @@ Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tens
 
 Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
     // Pessimism: we can't reapply views for as_strided_scatter.
-    return base.as_strided_scatter_symint(mutated_view, size, stride, storage_offset);
+    return base.as_strided_scatter_symint(mutated_view, size, stride, std::move(storage_offset));
 }
 
 Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -159,10 +161,11 @@ Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const
     }
 }
 
-Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, int64_t index) {
+Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::SymInt index) {
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.select_scatter(mutated_view, dim, index);
+    return base.select_scatter_symint(mutated_view, dim, index);
 }
+
 Tensor FunctionalInverses::detach_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
     // the functionalization pass doesn't care about autograd metadata - as a view, I think detach() is just an identity function
     return mutated_view;
@@ -174,7 +177,7 @@ Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Ten
 
 Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter_symint(mutated_view, dim, start, end, step);
+    return base.slice_scatter_symint(mutated_view, dim, std::move(start), std::move(end), std::move(step));
 }
 
 Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
@@ -205,11 +208,11 @@ Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, con
 }
 
 Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
-    return unsqueeze_copy_to(mutated_view, base.sizes(), reapply_views);
+    return unsqueeze_copy_to(mutated_view, base.sym_sizes(), reapply_views);
 }
 
 Tensor FunctionalInverses::squeeze_copy_dim_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim) {
-    return unsqueeze_copy_to(mutated_view, dim, base.sizes(), reapply_views);
+    return unsqueeze_copy_to(mutated_view, dim, base.sym_sizes(), reapply_views);
 }
 
 Tensor FunctionalInverses::t_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {

@@ -2159,7 +2159,7 @@ struct to_ir {
       if (lhs_type == AnyType::get()) {
         isinstance_types.insert(
             isinstance_types.end(), rhs_types.begin(), rhs_types.end());
-        not_isinstance_types.push_back(AnyType::get());
+        not_isinstance_types.emplace_back(AnyType::get());
         // Edge case: we can still say that all lhs types subtype some
         // rhs type if `lhs` is `Any` and `rhs` is `Any`
         if (isinstance_types.size() != 1 ||
@@ -5472,8 +5472,8 @@ void CompilationUnit::define_hooks(
         typeParser.parseSchemaFromDef(hook_def, true /* skip_self*/);
     // need to add self as the first because we skipped it
     std::vector<Argument> arguments;
-    arguments.emplace_back(Argument(
-        hook_def.decl().params()[0].ident().name(), self->getClassType()));
+    arguments.emplace_back(
+        hook_def.decl().params()[0].ident().name(), self->getClassType());
     arguments.insert(
         arguments.end(), schema.arguments().begin(), schema.arguments().end());
     return schema.cloneWithArguments(arguments);
@@ -5640,7 +5640,7 @@ void CompilationUnit::define_interface(
   for (const Stmt& stmt : classDef.body()) {
     if (stmt.kind() != TK_DEF) {
       throw ErrorReport(stmt)
-          << "interface declartions can only contain method definitions";
+          << "interface declarations can only contain method definitions";
     }
     auto method_def = Def(stmt);
     if (!method_def.decl().return_type().present()) {
@@ -5651,8 +5651,7 @@ void CompilationUnit::define_interface(
         typeParser.parseSchemaFromDef(method_def, /* skip_self*/ true);
     // need to add self as the first because we skipped it
     std::vector<Argument> arguments;
-    arguments.emplace_back(
-        Argument(method_def.decl().params()[0].ident().name(), iface));
+    arguments.emplace_back(method_def.decl().params()[0].ident().name(), iface);
     arguments.insert(
         arguments.end(), schema.arguments().begin(), schema.arguments().end());
     iface->addMethod(schema.cloneWithArguments(std::move(arguments)));

@@ -1,10 +1,10 @@
-import math
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling
 from typing import List, Optional
 
-__all__ = ['AdamW', 'adamw']
+__all__ = ["AdamW", "adamw"]
+
 
 class AdamW(Optimizer):
     r"""Implements AdamW algorithm.
@@ -72,11 +72,20 @@ class AdamW(Optimizer):
         https://openreview.net/forum?id=ryQu7f-RZ
     """
 
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=1e-2, amsgrad=False, *, maximize: bool = False,
-                 foreach: Optional[bool] = None,
-                 capturable: bool = False,
-                 differentiable: bool = False):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=1e-2,
+        amsgrad=False,
+        *,
+        maximize: bool = False,
+        foreach: Optional[bool] = None,
+        capturable: bool = False,
+        differentiable: bool = False,
+    ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -87,25 +96,74 @@ class AdamW(Optimizer):
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
-        defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad,
-                        foreach=foreach, maximize=maximize, capturable=capturable,
-                        differentiable=differentiable)
+        defaults = dict(
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            amsgrad=amsgrad,
+            foreach=foreach,
+            maximize=maximize,
+            capturable=capturable,
+            differentiable=differentiable,
+        )
         super(AdamW, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
-            group.setdefault('amsgrad', False)
-            group.setdefault('maximize', False)
-            group.setdefault('foreach', None)
-            group.setdefault('capturable', False)
-            group.setdefault('differentiable', False)
+            group.setdefault("amsgrad", False)
+            group.setdefault("maximize", False)
+            group.setdefault("foreach", None)
+            group.setdefault("capturable", False)
+            group.setdefault("differentiable", False)
         state_values = list(self.state.values())
-        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
+            state_values[0]["step"]
+        )
         if not step_is_tensor:
             for s in state_values:
-                s['step'] = torch.tensor(float(s['step']))
+                s["step"] = torch.tensor(float(s["step"]))
+
+    def _init_group(self, group, params_with_grad, grads, amsgrad, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps):
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            params_with_grad.append(p)
+            if p.grad.is_sparse:
+                raise RuntimeError("AdamW does not support sparse gradients")
+            grads.append(p.grad)
+
+            state = self.state[p]
+
+            # State initialization
+            if len(state) == 0:
+                state["step"] = (
+                    torch.zeros((1,), dtype=torch.float, device=p.device)
+                    if self.defaults["capturable"]
+                    else torch.tensor(0.0)
+                )
+                # Exponential moving average of gradient values
+                state["exp_avg"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+                # Exponential moving average of squared gradient values
+                state["exp_avg_sq"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+                if amsgrad:
+                    # Maintains max of all exp. moving avg. of sq. grad. values
+                    state["max_exp_avg_sq"] = torch.zeros_like(
+                        p, memory_format=torch.preserve_format
+                    )
+
+            exp_avgs.append(state["exp_avg"])
+            exp_avg_sqs.append(state["exp_avg_sq"])
+
+            if amsgrad:
+                max_exp_avg_sqs.append(state["max_exp_avg_sq"])
+
+            state_steps.append(state["step"])
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -129,132 +187,113 @@ class AdamW(Optimizer):
             exp_avg_sqs = []
             max_exp_avg_sqs = []
             state_steps = []
-            amsgrad = group['amsgrad']
-            beta1, beta2 = group['betas']
-            differentiable = group['differentiable']
+            amsgrad = group["amsgrad"]
+            beta1, beta2 = group["betas"]
 
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                params_with_grad.append(p)
-                if p.grad.is_sparse:
-                    raise RuntimeError('AdamW does not support sparse gradients')
-                grads.append(p.grad)
+            self._init_group(group, params_with_grad, grads, amsgrad, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
 
-                state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = torch.zeros((1,), dtype=torch.float, device=p.device) \
-                        if self.defaults['capturable'] else torch.tensor(0.)
-                    # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    if amsgrad:
-                        # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                exp_avgs.append(state['exp_avg'])
-                exp_avg_sqs.append(state['exp_avg_sq'])
-
-                if amsgrad:
-                    max_exp_avg_sqs.append(state['max_exp_avg_sq'])
-
-                state_steps.append(state['step'])
-
-            adamw(params_with_grad,
-                  grads,
-                  exp_avgs,
-                  exp_avg_sqs,
-                  max_exp_avg_sqs,
-                  state_steps,
-                  amsgrad=amsgrad,
-                  beta1=beta1,
-                  beta2=beta2,
-                  lr=group['lr'],
-                  weight_decay=group['weight_decay'],
-                  eps=group['eps'],
-                  maximize=group['maximize'],
-                  foreach=group['foreach'],
-                  capturable=group['capturable'],
-                  differentiable=group['differentiable'])
+            adamw(
+                params_with_grad,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+                amsgrad=amsgrad,
+                beta1=beta1,
+                beta2=beta2,
+                lr=group["lr"],
+                weight_decay=group["weight_decay"],
+                eps=group["eps"],
+                maximize=group["maximize"],
+                foreach=group["foreach"],
+                capturable=group["capturable"],
+                differentiable=group["differentiable"],
+            )
 
         return loss
 
 
-def adamw(params: List[Tensor],
-          grads: List[Tensor],
-          exp_avgs: List[Tensor],
-          exp_avg_sqs: List[Tensor],
-          max_exp_avg_sqs: List[Tensor],
-          state_steps: List[Tensor],
-          # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-          # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-          foreach: bool = None,
-          capturable: bool = False,
-          differentiable: bool = False,
-          *,
-          amsgrad: bool,
-          beta1: float,
-          beta2: float,
-          lr: float,
-          weight_decay: float,
-          eps: float,
-          maximize: bool):
+def adamw(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    max_exp_avg_sqs: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    foreach: bool = None,
+    capturable: bool = False,
+    differentiable: bool = False,
+    *,
+    amsgrad: bool,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+    maximize: bool,
+):
     r"""Functional API that performs AdamW algorithm computation.
 
     See :class:`~torch.optim.AdamW` for details.
     """
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
-        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
 
     if foreach is None:
         # Placeholder for more complex foreach logic to be added when value is not set
         foreach = False
 
     if foreach and torch.jit.is_scripting():
-        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adamw
     else:
         func = _single_tensor_adamw
 
-    func(params,
-         grads,
-         exp_avgs,
-         exp_avg_sqs,
-         max_exp_avg_sqs,
-         state_steps,
-         amsgrad=amsgrad,
-         beta1=beta1,
-         beta2=beta2,
-         lr=lr,
-         weight_decay=weight_decay,
-         eps=eps,
-         maximize=maximize,
-         capturable=capturable,
-         differentiable=differentiable)
+    func(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        state_steps,
+        amsgrad=amsgrad,
+        beta1=beta1,
+        beta2=beta2,
+        lr=lr,
+        weight_decay=weight_decay,
+        eps=eps,
+        maximize=maximize,
+        capturable=capturable,
+        differentiable=differentiable,
+    )
 
 
-def _single_tensor_adamw(params: List[Tensor],
-                         grads: List[Tensor],
-                         exp_avgs: List[Tensor],
-                         exp_avg_sqs: List[Tensor],
-                         max_exp_avg_sqs: List[Tensor],
-                         state_steps: List[Tensor],
-                         *,
-                         amsgrad: bool,
-                         beta1: float,
-                         beta2: float,
-                         lr: float,
-                         weight_decay: float,
-                         eps: float,
-                         maximize: bool,
-                         capturable: bool,
-                         differentiable: bool):
+def _single_tensor_adamw(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    max_exp_avg_sqs: List[Tensor],
+    state_steps: List[Tensor],
+    *,
+    amsgrad: bool,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+    maximize: bool,
+    capturable: bool,
+    differentiable: bool,
+):
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -263,7 +302,9 @@ def _single_tensor_adamw(params: List[Tensor],
         step_t = state_steps[i]
 
         if capturable:
-            assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
+            assert (
+                param.is_cuda and step_t.is_cuda
+            ), "If capturable=True, params and state_steps must be CUDA tensors."
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
@@ -304,20 +345,24 @@ def _single_tensor_adamw(params: List[Tensor],
                 # Uses the max. for normalizing running avg. of gradient
                 # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
                 # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
-                denom = (max_exp_avg_sqs[i].sqrt() / (bias_correction2_sqrt * step_size_neg)).add_(eps / step_size_neg)
+                denom = (
+                    max_exp_avg_sqs[i].sqrt() / (bias_correction2_sqrt * step_size_neg)
+                ).add_(eps / step_size_neg)
             else:
-                denom = (exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)).add_(eps / step_size_neg)
+                denom = (
+                    exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)
+                ).add_(eps / step_size_neg)
 
             param.addcdiv_(exp_avg, denom)
         else:
-            step = step_t.item()
+            step = _get_value(step_t)
 
             bias_correction1 = 1 - beta1 ** step
             bias_correction2 = 1 - beta2 ** step
 
             step_size = lr / bias_correction1
 
-            bias_correction2_sqrt = math.sqrt(bias_correction2)
+            bias_correction2_sqrt = _dispatch_sqrt(bias_correction2)
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
@@ -330,28 +375,31 @@ def _single_tensor_adamw(params: List[Tensor],
             param.addcdiv_(exp_avg, denom, value=-step_size)
 
 
-def _multi_tensor_adamw(params: List[Tensor],
-                        grads: List[Tensor],
-                        exp_avgs: List[Tensor],
-                        exp_avg_sqs: List[Tensor],
-                        max_exp_avg_sqs: List[Tensor],
-                        state_steps: List[Tensor],
-                        *,
-                        amsgrad: bool,
-                        beta1: float,
-                        beta2: float,
-                        lr: float,
-                        weight_decay: float,
-                        eps: float,
-                        maximize: bool,
-                        capturable: bool,
-                        differentiable: bool):
+def _multi_tensor_adamw(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    max_exp_avg_sqs: List[Tensor],
+    state_steps: List[Tensor],
+    *,
+    amsgrad: bool,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+    maximize: bool,
+    capturable: bool,
+    differentiable: bool,
+):
     if len(params) == 0:
         return
 
     if capturable:
-        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
-            "If capturable=True, params and state_steps must be CUDA tensors."
+        assert all(
+            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
+        ), "If capturable=True, params and state_steps must be CUDA tensors."
 
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
@@ -360,7 +408,9 @@ def _multi_tensor_adamw(params: List[Tensor],
 
     grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
     exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]
-    exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avg_sqs]
+    exp_avg_sqs = [
+        torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avg_sqs
+    ]
     params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in params]
 
     # update steps
@@ -401,25 +451,30 @@ def _multi_tensor_adamw(params: List[Tensor],
             max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
             # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
             # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
-            torch._foreach_div_(max_exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
+            torch._foreach_div_(
+                max_exp_avg_sq_sqrt,
+                torch._foreach_mul(bias_correction2_sqrt, step_size),
+            )
             eps_over_step_size = torch._foreach_div(step_size, eps)
             torch._foreach_reciprocal_(eps_over_step_size)
             denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps_over_step_size)
         else:
             exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-            torch._foreach_div_(exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size))
+            torch._foreach_div_(
+                exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size)
+            )
             eps_over_step_size = torch._foreach_div(step_size, eps)
             torch._foreach_reciprocal_(eps_over_step_size)
             denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
 
         torch._foreach_addcdiv_(params, exp_avgs, denom)
     else:
-        bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
-        bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
+        bias_correction1 = [1 - beta1 ** _get_value(step) for step in state_steps]
+        bias_correction2 = [1 - beta2 ** _get_value(step) for step in state_steps]
 
-        step_size = [(lr / bc) * -1 for bc in bias_correction1]
+        step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
-        bias_correction2_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+        bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
 
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now

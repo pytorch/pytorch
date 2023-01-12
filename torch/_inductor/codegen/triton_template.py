@@ -234,29 +234,27 @@ class TritonTemplateKernel(TritonKernel):
             OUT_H = self.args_dict["OUT_H"]
             OUT_W = self.args_dict["OUT_W"]
             KERNEL_N = self.args_dict["KERNEL_N"]
-            with code.indent():
-                code.splice(
-                    f"""
-                    def grid_{name}(META):
-                        return (
-                            triton.cdiv({BATCH} * {OUT_H} * {OUT_W}, META["BLOCK_M"]),
-                            triton.cdiv({KERNEL_N}, META["BLOCK_N"]),
-                        )
-                    """
-                )
+            code.splice(
+                f"""
+                def grid_{name}(META):
+                    return (
+                        triton.cdiv({BATCH} * {OUT_H} * {OUT_W}, META["BLOCK_M"]),
+                        triton.cdiv({KERNEL_N}, META["BLOCK_N"]),
+                    )
+                """
+            )
         if isinstance(self.node, ir.MatrixMultiply):
             M = self.args_dict["M"]
             N = self.args_dict["N"]
-            with code.indent():
-                code.splice(
-                    f"""
-                    def grid_{name}(META):
-                        return (
-                            triton.cdiv({M}, META["BLOCK_M"]) * triton.cdiv({N}, META["BLOCK_N"]),
-                            META["SPLIT_K"],
-                        )
-                    """
-                )
+            code.splice(
+                f"""
+                def grid_{name}(META):
+                    return (
+                        triton.cdiv({M}, META["BLOCK_M"]) * triton.cdiv({N}, META["BLOCK_N"]),
+                        META["SPLIT_K"],
+                    )
+                """
+            )
         return code.getvalue()
 
     def call_kernel(self, wrapper, name: str):
@@ -272,7 +270,9 @@ class TritonTemplateKernel(TritonKernel):
             ", " + extra_args if extra_args and len(extra_args) > 0 else ""
         )
         args_kwargs = args + ", " + self_const_kwargs
-        wrapper.writeline(self.gen_grid(name))
+        lines = self.gen_grid(name).split("\n")
+        for l in lines:
+            wrapper.writeline(l)
         wrapper.writeline(f"{name}[grid_{name}]({args_kwargs})")
 
 
@@ -330,12 +330,12 @@ def template_codegen(scheduler, scheduler_node, epilogue):
     kernel_buf_replace_name = None
     if could_remove_kernel_buf:
         for node in epilogue:
-            if kernel.args.output_buffers[node.get_name()] != "REMOVED":
+            if not kernel.args.is_removed(node.get_name()):
                 kernel_buf_replace_name = node.get_name()
                 break
         assert kernel_buf_replace_name is not None
 
-    kernel_name = wrapper.next_kernel_name()
+    kernel_name = "triton_template_" + wrapper.next_kernel_suffix()
     # code gen kernel
     wrapper.header.splice(
         kernel.codegen_kernel(

@@ -457,6 +457,75 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
     });
 }
 
+
+template <typename scalar_t>
+void cpu_hflip_vec(at::TensorIterator& iter) {
+
+  auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
+
+    static constexpr int ntensors = 3;
+    std::array<char*, ntensors> data_arr;
+    std::copy_n(base, ntensors, data_arr.data());
+    const int64_t *outer_strides = &strides[ntensors];
+
+    using Vec = Vectorized<scalar_t>;
+
+    constexpr auto stride = sizeof(scalar_t);
+    TORCH_INTERNAL_ASSERT(stride == -strides[0] && stride == strides[1]);
+
+    for (const auto j C10_UNUSED : c10::irange(size1)) {
+
+      // vectorized loop with negative stride for output
+      char** C10_RESTRICT data_ = data_arr.data();
+      int64_t n = size0;
+
+      char* C10_RESTRICT data[ntensors];
+      for (const auto arg : c10::irange(ntensors)) {
+        data[arg] = data_[arg];
+      }
+
+      int64_t i = 0;
+
+      // data[0] unaligned pre-pass
+      int64_t offset = (j * n + (n - i - Vec::size())) % 32;
+      offset = (offset >= n) ? n : offset;
+      for (; i < offset; i++) {
+        scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
+        *out_ptr = *(scalar_t *)(data[1] + i * stride);
+      }
+      // Empirically found that it is faster to process 3 data items together vs 2 or 4
+      for (; i <= n - 3 * Vec::size(); i += 3 * Vec::size()) {
+        auto out1 = Vec::loadu(data[1] + i * stride);
+        auto out2 = Vec::loadu(data[1] + (i + Vec::size()) * stride);
+        auto out3 = Vec::loadu(data[1] + (i + 2 * Vec::size()) * stride);
+        // flip the vector: 1234 -> 4321
+        out1 = flip(out1);
+        out2 = flip(out2);
+        out3 = flip(out3);
+        out1.store(data[0] - (i + Vec::size() - 1) * stride);
+        out2.store(data[0] - (i + 2 * Vec::size() - 1) * stride);
+        out3.store(data[0] - (i + 3 * Vec::size() - 1) * stride);
+      }
+      if (i < n) {
+        for (; i < n; i++) {
+          scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
+          *out_ptr = *(scalar_t *)(data[1] + i * stride);
+        }
+      }
+
+      // advance:
+      for (const auto arg : c10::irange(data_arr.size())) {
+        data_arr[arg] += outer_strides[arg];
+      }
+    }
+  };
+
+  int64_t grain_size = at::internal::GRAIN_SIZE;
+  iter.for_each(loop2d, grain_size);
+  iter.cast_outputs();
+}
+
+
 void flip_kernel(TensorIterator& iter, const bool quantized) {
   if (quantized) {
     AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cpu",
@@ -466,6 +535,29 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         });
     });
   } else {
+    // Special case: horizontal flip with vectorization and input is contiguous
+    // Context: horizontal flip leads to strides[0] < 0 and
+    // thus is_contiguous condition is not satisfied and non-vectorized code path is taken.
+    auto output_strides = iter.strides(0);
+    auto input_strides = iter.strides(1);
+    if (iter.ndim() > 0 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1)) {
+      auto iter_dtype = iter.dtype();
+      if (iter_dtype == kByte) {
+        return cpu_hflip_vec<uint8_t>(iter);
+      } else if (iter_dtype == kFloat) {
+        return cpu_hflip_vec<float>(iter);
+      } else if (iter_dtype == kInt) {
+        return cpu_hflip_vec<int32_t>(iter);
+      } else if (iter_dtype == kShort) {
+        return cpu_hflip_vec<int16_t>(iter);
+      } else if (iter_dtype == kLong) {
+        return cpu_hflip_vec<int64_t>(iter);
+      } else if (iter_dtype == kDouble) {
+        return cpu_hflip_vec<double>(iter);
+      }
+      // other dtypes are handled below with cpu_kernel_vec
+    }
+
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
         [&iter] { cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {

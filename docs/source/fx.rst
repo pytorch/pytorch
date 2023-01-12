@@ -1039,7 +1039,7 @@ Miscellanea
         traced.eval()
 
         x = torch.randn(5, 3)
-        torch.testing.assert_allclose(traced(x), x)
+        torch.testing.assert_close(traced(x), x)
         """
         AssertionError: Tensor-likes are not close!
 
@@ -1071,7 +1071,7 @@ Miscellanea
         traced.eval()
 
         x = torch.randn(5, 3)
-        torch.testing.assert_allclose(traced(x), x)
+        torch.testing.assert_close(traced(x), x)
 
   - Because of this difference, consider marking modules that interact with the ``training`` flag dynamically as leaf modules.
 

@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/compute_at.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/inlining.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
@@ -290,40 +291,115 @@ IterDomain* TensorView::axis(int pos) const {
   return domain()->axis(pos);
 }
 
-void TensorView::setComputeAt(unsigned int pos, bool decrease) {
+void TensorView::inlineAt(
+    int64_t pos,
+    bool best_effort,
+    MaxPosCalculator* calc) {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
-  if (pos <= compute_at_pos_ && !decrease) {
-    return;
+
+  std::unique_ptr<MaxPosCalculator> calc_owner;
+  if (calc == nullptr) {
+    calc_owner = std::make_unique<MaxPosCalculator>();
+    calc = calc_owner.get();
+  }
+
+  if (pos < 0) {
+    pos += int64_t(nDims()) + 1;
   }
 
   TORCH_INTERNAL_ASSERT(
-      (unsigned)pos <= nDims(),
-      "Invalid this computeAt position for T",
+      pos >= 0 && pos <= nDims(),
+      "Invalid inline position for T",
       name(),
       ": ",
       pos);
 
-  compute_at_pos_ = pos;
+  auto max_inline_pos = calc->getMaxPosAll(this, best_effort);
+
+  if (best_effort) {
+    pos = std::min<int64_t>(max_inline_pos, pos);
+  }
+
+  // hoist inner most broadcast
+  while (pos > 0 && axis(pos - 1)->isBroadcast()) {
+    pos--;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      pos <= max_inline_pos,
+      "Invalid inline position for T",
+      name(),
+      ": ",
+      pos,
+      ". Maximum allowed value:",
+      max_inline_pos);
+
+  if (isFusionInput()) {
+    return;
+  }
+
+  if (pos > compute_at_pos_) {
+    compute_at_pos_ = pos;
+    for (auto consumer : ir_utils::consumerTvsOf(this)) {
+      consumer->updateMaxProducerPosition();
+    }
+  }
 }
 
-void TensorView::setMaxProducer(unsigned int pos, bool decrease) {
+namespace {
+
+// Try to find the aligned position on consumer's domain corresponding to the
+//  compute at position of producer domain. No checking on actual
+//  producer-consumer relationship.
+unsigned int getConsumerPosAlignedToProducerCA(
+    TensorView* consumer,
+    TensorView* producer) {
+  // Locate consumer's position that aligns with
+  //  the producer's new compute at axis. We need broadcast axes forwarded so we
+  //  need to replay PasC as CasP will not forward braodcast dims. For example
+  //  if we have:
+  // T2[ iS22{( 3 * 1 )} ] ca_pos( 1 ) = broadcast( T1[ iS1{3} ] ca_pos( 1 )
+  // produce_pos( 1) ) CasP will have the mapping iS1{3} -> iS2{3} and PasC will
+  // have the mapping iS22{( 3 * 1 )} <- iS1{3} We need the latter. Refer to
+  // NVFuserTest.FusionComplexBCast1_CUDA
+
+  auto disjoint_sets =
+      BestEffortReplay::replayPasC(
+          producer, consumer, -1, PairwiseRootDomainMap(producer, consumer))
+          .getDisjointSets();
+
+  // Find the innermost position of consumer that has
+  //  been mapped within the producer ca axis.
+  unsigned int consumer_pos = consumer->nDims();
+  while (consumer_pos > 0) {
+    auto consumer_id = consumer->axis((int)consumer_pos - 1);
+    auto p_dom = producer->domain()->domain();
+    if (std::any_of(
+            p_dom.begin(),
+            p_dom.begin() + producer->getComputeAtPosition(),
+            [&consumer_id, &disjoint_sets](IterDomain* p_id) {
+              return disjoint_sets.permissiveAreMapped(consumer_id, p_id);
+            })) {
+      break;
+    }
+    consumer_pos--;
+  }
+
+  return consumer_pos;
+}
+
+} // namespace
+
+void TensorView::updateMaxProducerPosition() {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
-  if (pos <= max_producer_pos_ && !decrease) {
-    return;
+  for (auto producer : ir_utils::producerTvsOf(this)) {
+    max_producer_pos_ = std::max(
+        max_producer_pos_, getConsumerPosAlignedToProducerCA(this, producer));
   }
-
-  TORCH_INTERNAL_ASSERT(
-      (unsigned)pos <= nDims(),
-      "Invalid max producer position for T",
-      name(),
-      ": ",
-      pos);
-
-  max_producer_pos_ = pos;
 }
 
 TensorView* TensorView::computeAt(
@@ -681,7 +757,7 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
 
   TORCH_CHECK(
       !definition()->isA<GroupedReductionOp>(),
-      "For GroupedReducitonOp, use TensorView::rFactor(const std::vector<int>& axes, const std::vector<TensorView*>& tvs)");
+      "For GroupedReductionOp, use TensorView::rFactor(const std::vector<int>& axes, const std::vector<TensorView*>& tvs)");
 
   // Split tensor view into 2 parts
   auto domain_pair = domain()->rFactor(axes);
