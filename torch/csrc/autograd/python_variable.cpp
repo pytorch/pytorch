@@ -439,14 +439,17 @@ void activateCUDATrace() {
 }
 
 // TODO: Make this take Variable by const reference
-PyObject* THPVariable_Wrap(at::TensorBase var) {
+PyObject* THPVariable_Wrap(at::TensorBase var, PyObject* target_type) {
   if (!var.defined()) {
     Py_RETURN_NONE;
+  }
+  if (C10_LIKELY(target_type == nullptr)) {
+    target_type = THPVariableClass;
   }
 
   if (c10::impl::HermeticPyObjectTLS::get_state()) {
     return THPVariable_NewWithVar(
-        (PyTypeObject*)THPVariableClass,
+        (PyTypeObject*)target_type,
         std::move(var),
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
@@ -492,7 +495,7 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
 
   if (C10_LIKELY(var.device().type() != c10::kXLA)) {
     return THPVariable_NewWithVar(
-        (PyTypeObject*)THPVariableClass, std::move(var), status);
+        (PyTypeObject*)target_type, std::move(var), status);
   }
 
   if (auto clazz = getPythonTensorClass(var.device())) {
@@ -500,7 +503,7 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
   }
 
   return THPVariable_NewWithVar(
-      (PyTypeObject*)THPVariableClass, std::move(var), status);
+      (PyTypeObject*)target_type, std::move(var), status);
 }
 
 bool isResurrectable(THPVariable* self) {
@@ -1802,10 +1805,15 @@ PyObject* THPVariable_pynew(
   auto tensor = torch::utils::base_tensor_ctor(args, kwargs);
   // WARNING: tensor is NOT guaranteed to be a fresh tensor; e.g., if it was
   // given a raw pointer that will refcount bump
+  /*
   return THPVariable_NewWithVar(
       type,
       std::move(tensor),
       c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED);
+  */
+  return THPVariable_Wrap(
+      std::move(tensor),
+      (PyObject*) type);
   END_HANDLE_TH_ERRORS
 }
 
