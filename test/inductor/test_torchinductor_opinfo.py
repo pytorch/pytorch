@@ -200,7 +200,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
-    "constant_pad_nd": {f16, f32, f64},
     "copysign": {f16},
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
@@ -216,7 +215,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.pinv.singular": {f32, f64},
     "masked.norm": {f16},
     "masked.normalize": {f16},
     "masked.var": {f16},
@@ -298,7 +296,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.pinv.singular": {f32, f64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
@@ -420,6 +417,10 @@ inductor_all_samples = {
     "amax",
     "amin",
     "all",
+    "T",
+    "H",
+    "mT",
+    "mH",
 }
 
 
