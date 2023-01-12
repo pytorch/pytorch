@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
+from torch.testing._internal.common_dtype import all_types
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
@@ -3111,6 +3112,13 @@ class CommonTemplate:
             return torch.full_like(a, 7.777) - 1
 
         self.common(fn, (torch.randn(8),))
+
+    def test_full_truncation(self):
+        def fn(a):
+            return a + torch.full_like(a, 7.777)
+
+        for dtype in all_types():
+            self.common(fn, (make_tensor(8, dtype=dtype, device="cpu"),))
 
     def test_index1(self):
         def fn(a, b, c):
