@@ -716,10 +716,8 @@ def logsumexp(
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
     maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)  # type: ignore[arg-type]
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
 
@@ -3458,8 +3456,14 @@ def index_fill_(
 ):
     return _index_fill(x, dim, index, value, inplace=True)
 
+
 def _index_fill(
-        x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike], *, inplace: bool
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    value: Union[NumberType, TensorLike],
+    *,
+    inplace: bool,
 ):
     utils.check(
         index.ndim <= 1,
@@ -3483,12 +3487,20 @@ def _index_fill(
     shape = list(y.shape)
     shape[dim] = index.numel()
     value = value.expand(shape)
-    index_copy = torch.index_copy_ if inplace else torch.index_copy
-    out = index_copy(y, dim, index, value)
+    index_copy = Tensor.index_copy_ if inplace else torch.index_copy
+    out = index_copy(y, dim, index, value)  # type: ignore[operator]
     if inplace:
         return x
     else:
-        return out.squeeze(0) if zero_dim else out
+        if zero_dim:
+            # The clone is necessary so that it returns a fresh tensor rather than a view
+            out = out.squeeze(0).clone()
+        # index_fill preserves the strides. index_copy always returns contiguous tensors
+        if out.stride() != x.stride():
+            new_out = torch.empty_like(x)
+            new_out.copy_(out)
+            out = new_out
+        return out
 
 
 @out_wrapper()
@@ -3514,8 +3526,7 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
-    if index.ndim == 0:
-        index = index.unsqueeze(0)
+    # Treat scalars as elements of \R^1
     if x.ndim == 0:
         # Treat scalars as elements of \R^1
         # We cannot use x[idx] here as it accesses item() (??), hence this awkward construction
@@ -4285,8 +4296,17 @@ def arange(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
+    check(
+        start.dtype == end.dtype,
+        lambda: f"expected dtype {start.dtype} for `end` but got dtype {end.dtype}",
+    )
     if isinstance(weight, Number):
         weight = start.new_full((), weight)  # type: ignore[arg-type]
+    else:
+        check(
+            start.dtype == weight.dtype,
+            lambda: f"expected dtype {start.dtype} for `weight` but got dtype {weight.dtype}",  # type: ignore[union-attr]
+        )
     assert isinstance(weight, Tensor)  # mypy
     # We implement it this way for numerical stability. We assume (in the stability optimisation)
     # that 0 <= weight <= 1. We take the abs to deal with complex numbers
@@ -4751,7 +4771,7 @@ def _uniform_helper(
     return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
 
 
-@register_decomposition(aten.masked_fill)
+@register_decomposition([aten.masked_fill.Scalar, aten.masked_fill.Tensor])
 def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
     python_type = utils.dtype_to_type(a.dtype)
     if isinstance(value, Number):
