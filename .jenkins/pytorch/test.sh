@@ -311,10 +311,6 @@ test_inductor_benchmark_perf() {
   fi
 }
 
-test_inductor_torchbench_smoketest_perf(){
-  test_inductor_benchmark_perf smoketest
-}
-
 test_inductor_huggingface() {
   test_inductor_benchmark huggingface
 }
@@ -345,6 +341,10 @@ test_inductor_torchbench() {
 
 test_inductor_torchbench_perf() {
   PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark_perf torchbench
+}
+
+test_inductor_torchbench_smoketest_perf(){
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark_perf smoketest
 }
 
 test_python_gloo_with_tls() {
