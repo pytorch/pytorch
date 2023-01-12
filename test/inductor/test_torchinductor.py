@@ -5535,7 +5535,7 @@ if HAS_CPU:
                 traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 0
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
                 torch._dynamo.reset()
                 metrics.reset()
@@ -5568,6 +5568,96 @@ if HAS_CPU:
                 if "kernel_cpp_0" in e.name:
                     kernel_profile_events.append(e.name)
             assert len(kernel_profile_events) > 0
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        def test_channel_shuffle_cl_output(self):
+            """code and shape extracted from shufflenet_v2_x1_0"""
+
+            def channel_shuffle(x, groups):
+                batchsize, num_channels, height, width = x.size()
+                channels_per_group = num_channels // groups
+                x = x.view(batchsize, groups, channels_per_group, height, width)
+                x = torch.transpose(x, 1, 2).contiguous()
+                x = x.view(batchsize, -1, height, width)
+                return x.contiguous(memory_format=torch.channels_last)
+
+            for simdlen in (None, 256, 1):
+                with patch.object(config.cpp, "simdlen", simdlen):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    x = torch.randn(64, 58, 28, 28)
+                    opt_fn = torch._dynamo.optimize("inductor")(channel_shuffle)
+                    same(channel_shuffle(x, 2), opt_fn(x, 2))
+                    if simdlen != 1:
+                        assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        def test_transpose_with_norm(self):
+            """a sub-module from TIMM gmlp_s16_224"""
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super(Model, self).__init__()
+                    self.linear = torch.nn.Linear(
+                        in_features=256, out_features=1536, bias=True
+                    )
+                    self.act = torch.nn.GELU()
+                    self.norm = torch.nn.LayerNorm(768)
+                    self.proj = torch.nn.Linear(196, 196)
+                    self.fc = torch.nn.Linear(
+                        in_features=768, out_features=256, bias=True
+                    )
+
+                def forward(self, x):
+                    x = self.linear(x)
+                    x = self.act(x)
+                    u, v = x.chunk(2, dim=-1)
+                    v = self.norm(v)
+                    v = self.proj(v.transpose(-1, -2))
+                    y = u * v.transpose(-1, -2)
+                    return self.fc(y)
+
+            x = torch.randn(128, 196, 256)
+            for simdlen in (None, 256, 1):
+                with patch.object(config.cpp, "simdlen", simdlen):
+                    for eval_mode in [True, False]:
+                        torch._dynamo.reset()
+                        metrics.reset()
+                        m = Model().eval() if eval_mode else Model()
+                        opt_fn = torch._dynamo.optimize("inductor")(m)
+                        same(m(x), opt_fn(x))
+                        if simdlen != 1:
+                            assert metrics.generated_cpp_vec_kernel_count == 7
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        def test_transpose_copy(self):
+            def fn(a):
+                return a.t().contiguous()
+
+            for simdlen in (None, 256, 1):
+                with patch.object(config.cpp, "simdlen", simdlen):
+                    for shape in (
+                        (7, 7),
+                        (8, 8),
+                        (9, 9),
+                        (16, 16),
+                        (17, 17),
+                        (32, 32),
+                        (33, 33),
+                    ):
+                        torch._dynamo.reset()
+                        metrics.reset()
+                        x = torch.randn(shape)
+                        opt_fn = torch._dynamo.optimize("inductor")(fn)
+                        same(fn(x), opt_fn(x))
+                        if simdlen != 1:
+                            assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if HAS_CUDA:
