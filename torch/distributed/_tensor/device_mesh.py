@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import os
 import warnings
 from typing import List, Optional, Sequence, TypeVar, Union
 
@@ -48,13 +49,6 @@ MeshExprT = Union[
     torch.Tensor,
     NDIntList,
 ]
-
-
-def _get_or_create_default_group(device_type):
-    if not is_initialized():
-        _backend = "gloo" if device_type == "cpu" else "nccl"
-        init_process_group(backend=_backend)
-    return _get_default_group()
 
 
 class DeviceMesh(object):
@@ -118,7 +112,7 @@ class DeviceMesh(object):
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
-        default_pg = _get_or_create_default_group(device_type)
+        default_pg = self._get_or_create_default_group()
         self._backend = default_pg._get_backend_name()
         # TODO: if user want to pass pg_options, offer a way to do it
         # check default pg backend, should support device_type
@@ -143,30 +137,10 @@ class DeviceMesh(object):
                 f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
             )
 
-        # TODO: we will support mesh on a subset of WORLD in future
-        if self.mesh.numel() < world_size:
-            raise RuntimeError(
-                "DeviceMesh must include every process in WORLD, "
-                f"but WORLD_SIZE({world_size}) != mesh size({self.mesh.numel()})"
-            )
-
         unique_mesh_values = self.mesh.unique(sorted=True)
         if unique_mesh_values.numel() != self.mesh.numel():
             raise RuntimeError(
                 f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
-            )
-
-        # ranks in mesh must start from 0
-        if unique_mesh_values[0] != 0:
-            raise RuntimeError(
-                "DeviceMesh ranks must start from 0, "
-                f"but found min rank = {unique_mesh_values[0]}"
-            )
-
-        # mesh must be contiguous (i.e. from 0 to N-1)
-        if 2 * unique_mesh_values.sum().item() != world_size * (world_size - 1):
-            raise RuntimeError(
-                f"DeviceMesh is expected to be contiguous, but found {self.mesh.tolist()}"
             )
 
         # coordinates of this rank on the mesh
@@ -243,6 +217,39 @@ class DeviceMesh(object):
                                 f"in {subgroup_ranks}!"
                             )
                         self._dim_groups.append(new_subgroup)
+
+    def _get_or_create_default_group(self):
+        if not is_initialized():
+            # TODO: we will support mesh on a subset of WORLD in future
+            world_size = int(os.getenv("WORLD_SIZE", 1))
+            if self.mesh.numel() < world_size:
+                raise RuntimeError(
+                    "DeviceMesh must include every process in WORLD, "
+                    f"but WORLD_SIZE({world_size}) != mesh size({self.mesh.numel()})"
+                )
+
+            unique_mesh_values = self.mesh.unique(sorted=True)
+            if unique_mesh_values.numel() != self.mesh.numel():
+                raise RuntimeError(
+                    f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
+                )
+
+            # ranks in mesh must start from 0
+            if unique_mesh_values[0] != 0:
+                raise RuntimeError(
+                    "DeviceMesh ranks must start from 0, "
+                    f"but found min rank = {unique_mesh_values[0]}"
+                )
+
+            # mesh must be contiguous (i.e. from 0 to N-1)
+            if 2 * unique_mesh_values.sum().item() != world_size * (world_size - 1):
+                raise RuntimeError(
+                    f"DeviceMesh is expected to be contiguous, but found {self.mesh.tolist()}"
+                )
+
+            _backend = "gloo" if self.device_type == "cpu" else "nccl"
+            init_process_group(backend=_backend)
+        return _get_default_group()
 
     def __enter__(self) -> "DeviceMesh":
         # set global device_mesh to this instance
