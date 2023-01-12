@@ -7,8 +7,6 @@ import operator
 import types
 from typing import Dict, List
 
-import numpy as np
-
 import torch
 from torch import sym_float, sym_int
 
@@ -17,7 +15,7 @@ from ..allowed_functions import is_allowed
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
-from ..source import AttrSource, is_constant_source, TypeSource
+from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -177,22 +175,6 @@ class BuiltinVariable(VariableTracker):
             for i in itertools.chain(args, kwargs.values())
         )
 
-    def unspec_numpy_args(self, *args, **kwargs):
-        return all(
-            isinstance(
-                i,
-                (
-                    variables.UnspecializedNumpyVariable,
-                    variables.UnspecializedPythonVariable,
-                    variables.ConstantVariable,
-                ),
-            )
-            for i in itertools.chain(args, kwargs.values())
-        ) and any(
-            isinstance(x, variables.UnspecializedNumpyVariable)
-            for x in itertools.chain(args, kwargs.values())
-        )
-
     def unspec_python_args(self, *args, **kwargs):
         return check_unspec_python_args(args, kwargs)
 
@@ -203,10 +185,7 @@ class BuiltinVariable(VariableTracker):
         for x in args:
             if isinstance(
                 x,
-                (
-                    variables.UnspecializedNumpyVariable,
-                    variables.UnspecializedPythonVariable,
-                ),
+                (variables.UnspecializedPythonVariable,),
             ):
                 unwrapped_args.append(x.raw_value)
             else:
@@ -214,10 +193,7 @@ class BuiltinVariable(VariableTracker):
         for k, v in kwargs:
             if isinstance(
                 x,
-                (
-                    variables.UnspecializedNumpyVariable,
-                    variables.UnspecializedPythonVariable,
-                ),
+                (variables.UnspecializedPythonVariable,),
             ):
                 unwrapped_kwargs.update({k: v.raw_value})
             else:
@@ -282,16 +258,6 @@ class BuiltinVariable(VariableTracker):
                         FakeItemVariable,
                         tx,
                         proxy,
-                        **options,
-                    )
-                elif self.unspec_numpy_args(*args, **kwargs):
-                    _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
-                    raw_value = self.fn(*_args, **_kwargs)
-                    return wrap_fx_proxy_cls(
-                        variables.UnspecializedNumpyVariable,
-                        tx,
-                        proxy,
-                        raw_value=raw_value,
                         **options,
                     )
                 elif self.unspec_python_args(*args, **kwargs):
@@ -413,7 +379,6 @@ class BuiltinVariable(VariableTracker):
                 isinstance(
                     i,
                     (
-                        variables.UnspecializedNumpyVariable,
                         variables.UnspecializedPythonVariable,
                         variables.ConstantVariable,
                     ),
@@ -433,19 +398,14 @@ class BuiltinVariable(VariableTracker):
                 else:
                     raw_res = min(a.raw_value, raw_b)
 
-                if isinstance(raw_res, np.number):
-                    return variables.UnspecializedNumpyVariable.from_tensor_variable(
-                        result, raw_res
-                    )
-                else:
-                    need_unwrap = any(
-                        x.need_unwrap
-                        for x in [a, b]
-                        if isinstance(x, variables.UnspecializedPythonVariable)
-                    )
-                    return variables.UnspecializedPythonVariable.from_tensor_variable(
-                        result, raw_res, need_unwrap
-                    )
+                need_unwrap = any(
+                    x.need_unwrap
+                    for x in [a, b]
+                    if isinstance(x, variables.UnspecializedPythonVariable)
+                )
+                return variables.UnspecializedPythonVariable.from_tensor_variable(
+                    result, raw_res, need_unwrap
+                )
             # otherwise return tensor
             else:
                 return result
@@ -629,7 +589,12 @@ class BuiltinVariable(VariableTracker):
         return variables.ConstantVariable(val)
 
     def call_super(self, tx, a, b):
-        return variables.SuperVariable(a, b)
+        source = (
+            None
+            if a.source is None or b.source is None
+            else SuperSource(a.source, b.source)
+        )
+        return variables.SuperVariable(a, b, source=source)
 
     def call_next(self, tx, arg):
         if isinstance(arg, variables.ListIteratorVariable):

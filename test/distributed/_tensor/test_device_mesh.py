@@ -28,8 +28,8 @@ class DeviceMeshTest(DTensorTestBase):
         return 4
 
     def test_init_process_group(self):
-        self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        backend = "nccl" if self.device_type == "cuda" else "gloo"
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        backend = "nccl" if device_type == "cuda" else "gloo"
         # skip the test if not enough GPUs
         if backend == "nccl" and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
@@ -37,11 +37,9 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(not is_initialized())
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "25364"
-        # mesh size can be smaller than world_size
         os.environ["WORLD_SIZE"] = f"{self.world_size}"
-        # this means user needs to set rank in env
         os.environ["RANK"] = f"{self.rank}"
-        mesh = DeviceMesh(self.device_type, mesh_tensor)
+        mesh = DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg()
 
@@ -146,11 +144,20 @@ class DeviceMeshTestNDim(DTensorTestBase):
     def world_size(self):
         return 8
 
-    @with_comms
-    def test_mesh_size_requirement(self):
+    def test_mesh_size_requirement_error(self):
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        backend = "nccl" if device_type == "cuda" else "gloo"
+        # skip the test if not enough GPUs
+        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         mesh_tensor = torch.arange(4).reshape(2, 2)
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "25364"
+        os.environ["WORLD_SIZE"] = f"{self.world_size}"
+        os.environ["RANK"] = f"{self.rank}"
         with self.assertRaisesRegex(RuntimeError, "DeviceMesh must include every process in WORLD"):
-            mesh = DeviceMesh(self.device_type, mesh_tensor)
+            mesh = DeviceMesh(device_type, mesh_tensor)
+        self.assertTrue(not is_initialized())
 
     @with_comms
     def test_device_mesh_nd(self):

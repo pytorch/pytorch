@@ -31,7 +31,7 @@ def trace_map(proxy_mode, func_overload, f, xs, *args):
         raise ValueError("map() must loop over a tensor")
     if len(xs.shape) == 0 or xs.shape[0] == 0:
         raise ValueError("map() cannot be traced with scalar tensors or zero dimension tensors")
-    if not all(isinstance(o, (torch.Tensor, torch.nn.Module)) for o in args):
+    if not all(isinstance(o, torch.Tensor) for o in args):
         raise ValueError("map() operands must be a list of tensors or modules")
 
     with disable_proxy_modes_tracing():
@@ -56,7 +56,7 @@ def trace_map(proxy_mode, func_overload, f, xs, *args):
     # because stack([...]) takes a fixed size list which will specialize dynamic shape here.
     # Meanwhile we want to preserve the looped over dimension as symbolic shape, such that:
     # ys: Tensor[s0, ...] = map(xs: Tensor[s0, ...], *args)
-    out = xs.new_empty([xs.shape[0], *outs[0].shape])
+    out = outs[0].new_empty([xs.shape[0], *outs[0].shape])
     out.copy_(torch.stack(outs))
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -90,7 +90,8 @@ def map_proxy_torch_dispatch_mode(f, xs, *args):
 
 @map.py_impl(FakeTensorMode)
 def map_fake_tensor_mode(f, xs, *args):
-    return torch.stack([f(x, *args) for x in xs])
+    outs = [f(x, *args) for x in xs]
+    return outs[0].new_empty([xs.shape[0], *outs[0].shape])
 
 # We cannot directly call fallthrough here due to issue #89037.
 @map.py_impl(DispatchKey.PythonDispatcher)
