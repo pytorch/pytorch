@@ -587,6 +587,17 @@ class TestForeach(TestCase):
             inplace_actual = inplace_op(inplace_inputs, self.is_cuda, is_fastpath, **kwargs)
             self.assertEqual(inplace_actual, expected)
 
+    @onlyCUDA
+    @ops(foreach_reduce_op_db)
+    def test_foreach_reduce_large_input(self, device, dtype, op):
+        # test inputs larger than kChunkSize = 65536
+        ord, N = 2, 65536 * 2
+        n_expected_kernels = 3 if dtype in floating_types_and(torch.half, torch.bfloat16) else 1
+        inputs = [make_tensor((N,), dtype=dtype, device=device, noncontiguous=False)],
+        wrapped_op, ref, _, _ = self._get_funcs(op, n_expected_kernels)
+        self.assertEqual(ref(inputs, ord=ord), wrapped_op(inputs, self.is_cuda, True, ord=ord))
+
+
 instantiate_device_type_tests(TestForeach, globals())
 
 if __name__ == '__main__':
