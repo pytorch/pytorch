@@ -101,8 +101,7 @@ class EnterCudaDeviceContextManagerLine:
 
 
 class ExitCudaDeviceContextManagerLine:
-    def codegen(self, code: IndentedBuffer):
-        pass
+    pass
 
 
 class MemoryPlanningLine:
@@ -506,6 +505,9 @@ class WrapperCodeGen(CodeGen):
                 elif isinstance(line, EnterCudaDeviceContextManagerLine):
                     line.codegen(self.wrapper_call)
                     device_cm_stack.enter_context(self.wrapper_call.indent())
+                    self.wrapper_call.writeline(
+                        f"torch.cuda.set_device({line.device_idx}) # no-op to ensure context"
+                    )
                 elif isinstance(line, ExitCudaDeviceContextManagerLine):
                     device_cm_stack.close()
                 else:
