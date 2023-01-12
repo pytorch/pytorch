@@ -7,12 +7,13 @@ import tempfile
 from operator import methodcaller
 
 import torch
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, skipIfMps, skipIfTorchInductor, IS_WINDOWS)
+    gradgradcheck, skipIfMps, skipIfTorchInductor)
 from unittest.mock import patch, call
 
 
@@ -488,13 +489,12 @@ class TestModule(TestCase):
         self._test_gradients_helper(device, dtype, module_info, training, gradgradcheck)
 
     @onlyCUDA
+    @with_tf32_off # Turn off TF32 to compute at full precision https://github.com/pytorch/pytorch/issues/86798
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
     @skipIfTorchInductor("to be fixed")
     def test_cpu_gpu_parity(self, device, dtype, module_info, training):
-        is_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
-
         # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
         # nicer way for eval mode only.
         # See https://github.com/pytorch/pytorch/issues/79161
@@ -556,13 +556,7 @@ class TestModule(TestCase):
 
             # === Run backwards on CPU and GPU and compare results ===
             def check_backward(cpu_output, gpu_output):
-                if IS_WINDOWS and is_sm86:
-                    # TODO: This makes the grad tensors from GPU (NVIDIA A10G GPU) and CPU (AMD)
-                    # close enough for test_cpu_gpu_parity_nn_Conv3d_cuda_float32 test to pass
-                    # when running in Windows G5 runner
-                    cpu_grad_output = cpu_output.clone().zero_()
-                else:
-                    cpu_grad_output = cpu_output.clone().normal_()
+                cpu_grad_output = cpu_output.clone().normal_()
                 gpu_grad_output = cpu_grad_output.type_as(gpu_output)
 
                 cpu_output.backward(cpu_grad_output, retain_graph=True)
