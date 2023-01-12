@@ -1262,6 +1262,11 @@ def reference_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs):
     t = torch.tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
     yield SampleInput(t, 0, False)
 
+    # tests masking
+    # https://github.com/pytorch/pytorch/pull/91860#pullrequestreview-1241344073
+    t = torch.tensor(float("inf"))
+    yield SampleInput(t, 0, True)
+
 def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
     inputs = [
         ((), {}),
@@ -8446,8 +8451,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # aten.uniform_.default - couldn't find symbolic meta function/decomposition
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
                # aten.uniform was not decomposed
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
@@ -10136,13 +10139,17 @@ op_db: List[OpInfo] = [
                             'TestCommon', device_type='cpu',
                         ),
                     ], ),
-    OpInfo('logaddexp',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.bfloat16),
-           dtypesIfROCM=floating_types_and(torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_logaddexp),
+    BinaryUfuncInfo('logaddexp',
+                    dtypes=floating_types_and(torch.bfloat16),
+                    dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+                    dtypesIfROCM=floating_types_and(torch.bfloat16, torch.float16),
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
+                    supports_rhs_python_scalar=False,
+                    skips=(
+                        # TODO: FIXME: RuntimeError: not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
+                    )),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16),
@@ -17948,6 +17955,11 @@ python_ref_db = [
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
         )
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.logaddexp",
+        torch_opinfo_name="logaddexp",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.floor_divide",
