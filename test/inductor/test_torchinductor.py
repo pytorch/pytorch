@@ -3456,6 +3456,18 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(0, 999, size=[2, 16, 31], dtype=torch.float32),))
 
+    def test_constant_pad_fill_dtype(self):
+        def fn(a, b):
+            return (
+                aten.constant_pad_nd(a, (1, 1), 1.0) & b,
+                aten.constant_pad_nd(a, (1, 1), 0.0) & b,
+            )
+
+        self.common(
+            fn,
+            (torch.randint(2, (4,), dtype=torch.bool), torch.ones(6, dtype=torch.bool)),
+        )
+
     def test_constant_pad_2d(self):
         def fn(a):
             return (
