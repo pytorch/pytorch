@@ -2121,7 +2121,7 @@ def one_layer_rnn_data(
     hh_bias = params[3] if has_biases else None
 
     step_output = []
-    hiddens = []
+    hiddens: List["torch.Tensor"] = []
 
     last_batch_size = batch_sizes[-1] if reverse else batch_sizes[0]
     cur_hidden = hidden.narrow(0, 0, last_batch_size)
@@ -2135,9 +2135,13 @@ def one_layer_rnn_data(
             pass  # don't update cur_hidden
         # this will only happen when reverse=False, since batch sizes are sorted largest -> smallest
         elif reverse:
-            cur_hidden = update_hidden_for_packed_reverse(cur_hidden, last_batch_size, i, hidden)
+            cur_hidden = update_hidden_for_packed_reverse(
+                cur_hidden, last_batch_size, i, hidden
+            )
         else:
-            cur_hidden = update_hidden_for_packed(cur_hidden, last_batch_size, i, hiddens)
+            cur_hidden = update_hidden_for_packed(
+                cur_hidden, last_batch_size, i, hiddens
+            )
 
         cur_hidden = hidden_fn(inp, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias)
         last_batch_size = i
