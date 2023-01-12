@@ -464,7 +464,7 @@ class Module:
         super().__setattr__('_modules', OrderedDict())
 
         if self.call_super_init:
-            super().__init__(*args, **kwargs)
+            super(Module, self).__init__(*args, **kwargs)
 
     forward: Callable[..., Any] = _forward_unimplemented
 
