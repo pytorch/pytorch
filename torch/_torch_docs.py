@@ -1252,7 +1252,11 @@ passed then the default floating point datatype is used, instead.) The returned 
 will have the specified datatype (or default floating point datatype if none is specified)
 and, by default, be on the CPU device and share memory with the buffer.
 
-When :attr:`obj` is none of the above but a Python or NumPy scalar, or a sequence of scalars then the
+When :attr:`obj` is a NumPy scalar, the returned tensor will be a 0-dimensional tensor on
+the CPU and that doesn't share its memory (i.e. ``copy=True``). By default datatype will
+be the PyTorch datatype corresponding to the NumPy's scalar's datatype.
+
+When :attr:`obj` is none of the above but a scalar, or a sequence of scalars then the
 returned tensor will, by default, infer its datatype from the scalar values, be on the
 CPU device, and not share its memory.
 
