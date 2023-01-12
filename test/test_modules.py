@@ -7,6 +7,7 @@ import tempfile
 from operator import methodcaller
 
 import torch
+from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
@@ -363,7 +364,7 @@ class TestModule(TestCase):
                 continue
 
             input_args, input_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
-            if not (_can_be_noncontiguous(input_args) or _can_be_noncontiguous(input_kwargs)):
+            if not (_can_be_noncontiguous(input_args) and _can_be_noncontiguous(input_kwargs)):
                 continue
 
             # === Instantiate the module. ===
