@@ -2034,6 +2034,22 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
+    def test_to_memory_format(self):
+        def fn(a, memory_format):
+            return a.to(memory_format=memory_format)
+
+        self.common(
+            fn,
+            (torch.randn([2, 2, 10, 10]), torch.channels_last),
+        )
+        self.common(
+            fn,
+            (
+                torch.randn([2, 2, 10, 10]).to(memory_format=torch.channels_last),
+                torch.contiguous_format,
+            ),
+        )
+
     @requires_cuda()
     def test_to_device_constant(self):
         def fn(a):
@@ -3660,6 +3676,38 @@ class CommonTemplate:
                 arg190,
             ),
         )
+
+    # The following 3 tests are meant to check the logic that drops
+    # xmask from triton load/store if xnumel = 1 or XBLOCK divides xnumel
+    @requires_cuda()
+    def test_single_elem(self):
+        def fn(a):
+            b = a + 1
+            return (b,)
+
+        self.common(fn, (torch.randn(1),))
+
+    @requires_cuda()
+    def test_single_elem_indirect(self):
+        def fn(a, b):
+            c = a[b] + 1
+            return (c,)
+
+        self.common(
+            fn,
+            (
+                torch.randn(1),
+                torch.tensor([0], dtype=torch.int64),
+            ),
+        )
+
+    @requires_cuda()
+    def test_xblock_divides_xnumel(self):
+        def fn(a):
+            b = a + 1
+            return (b,)
+
+        self.common(fn, (torch.randn(2 * 1024),))
 
     @unittest.skipIf(not has_torchvision_roi_align(), "requires torchvision")
     def test_roi_align(self):
