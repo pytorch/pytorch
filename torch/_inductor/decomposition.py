@@ -37,6 +37,9 @@ decompositions = get_decompositions(
         aten.embedding_dense_backward,
         aten.expand_as,
         aten.eye,
+        aten.full_like,
+        aten.ones_like,
+        aten.zeros_like,
         aten.fill,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
@@ -78,6 +81,7 @@ decompositions = get_decompositions(
         aten.native_layer_norm_backward,
         aten.new_empty,
         aten.new_full,
+        aten.new_zeros,
         aten.new_ones,
         aten.nll_loss_backward,
         aten.nll_loss_forward,
@@ -107,6 +111,8 @@ decompositions = get_decompositions(
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
         aten.bucketize,
+        aten.zero_,
+        aten.zero,
     ]
 )
 

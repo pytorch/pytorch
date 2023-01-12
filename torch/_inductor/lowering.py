@@ -1584,10 +1584,6 @@ def tensor_constructor(fill_value):
     return inner
 
 
-zeros = register_lowering([torch.zeros, aten.zeros])(tensor_constructor(0))
-ones = register_lowering([torch.ones, aten.ones])(tensor_constructor(1))
-
-
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
@@ -1636,12 +1632,9 @@ def constant_like(fill_value):
 
 
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
-zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(zeros))
-ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
+ones_like = create_tensor_like(tensor_constructor(1))
 if not config.fallback_random:
     rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
-
-register_lowering(aten.zero)(zeros_like)
 
 
 def new_constant(fill_value):
@@ -1657,10 +1650,6 @@ def new_constant(fill_value):
         return _full(fill_value, device, dtype, size)
 
     return _new_constant
-
-
-register_lowering(aten.new_zeros)(new_constant(0))
-register_lowering(aten.new_ones)(new_constant(1))
 
 
 @register_lowering(aten.new_empty)
@@ -3437,11 +3426,6 @@ def mutate_to(changed, val):
 @register_lowering(aten.fill_)
 def fill_(x, fill_value):
     return mutate_to(x, full_like(x, fill_value))
-
-
-@register_lowering(aten.zero_)
-def zero_(x):
-    return mutate_to(x, full_like(x, 0))
 
 
 @register_lowering(aten.copy_, type_promotion_kind=None)
