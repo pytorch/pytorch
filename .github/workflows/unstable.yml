@@ -1,8 +1,6 @@
 name: unstable
 
 on:
-  # DEBUG
-  pull_request:
   push:
     branches:
       - master
