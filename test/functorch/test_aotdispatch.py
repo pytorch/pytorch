@@ -2136,7 +2136,6 @@ symbolic_aot_autograd_failures = {
     xfail('sum_to_size', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd', ''),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
     xfail('svd_lowrank', ''),  # could not find kernel
-    xfail('symeig', ''),  # aten.symeig.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
