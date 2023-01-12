@@ -11,6 +11,7 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import (
+    dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -2442,6 +2443,7 @@ def constant_pad_nd(x, padding, fill_value=0):
         mask_sizes.append(size)
         output_size.append(sympy.expand(size + low + high))
     assert len(output_size) == len(sizes)
+    fill_value = dtype_to_type(x.get_dtype())(fill_value)
 
     def mask(index):
         mask = []
