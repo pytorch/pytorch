@@ -311,7 +311,7 @@ test_inductor_benchmark_perf() {
   fi
 }
 
-test_inductor_smoketest_perf(){
+test_inductor_torchbench_smoketest_perf(){
   test_inductor_benchmark_perf smoketest
 }
 
@@ -837,7 +837,9 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   checkout_install_torchbench
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
     test_inductor_torchbench_perf
-  else
+  elif [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
+    test_inductor_torchbench_smoketest_perf
+  else 
     test_inductor_torchbench
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
