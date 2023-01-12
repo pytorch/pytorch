@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo
 )
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from typing import Dict, Any, Tuple
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
 
@@ -651,6 +652,11 @@ class TestOptim(TestCase):
             return
         assert kwarg in ("foreach", "fused")
 
+        # Specifically test that inputting params of different dtypes and devices
+        # is handled equivalently on the foreach and fused implementations as the
+        # single tensor implementations. We need multiple GPUs (vs just a CPU and
+        # GPU) because fused adam only works on GPUs. (Thus we only run the tests
+        # that call into this helper when TEST_MULTIGPU.)
         torch.manual_seed(11012023)
         params = [
             torch.rand(2, 3, dtype=torch.float64, device='cuda:0', requires_grad=True),
@@ -812,6 +818,7 @@ class TestOptim(TestCase):
         ]
         self._test_derived_optimizers(optimizer_pairs_with_flags, "foreach")
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_multi_tensor_optimizers_with_varying_tensors(self):
         optimizer_pairs_with_flags = [
             (optim.Adadelta, dict(weight_decay=0)),
@@ -830,6 +837,7 @@ class TestOptim(TestCase):
         ]
         self._test_derived_optimizers(optimizer_pairs_with_flags, "fused")
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_fused_optimizers_with_varying_tensors(self):
         optimizer_pairs_with_flags = [
             (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
