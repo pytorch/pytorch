@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 import expecttest
-import multiprocessing as mp
+import subprocess
+import sys
 import torch
 import torch.nn as nn
 import torch.optim
@@ -1329,44 +1330,76 @@ class TestProfiler(TestCase):
 
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     def test_kineto_profiler_with_environment_variable(self):
-        proc = mp.Process(target=launch_subprocess)
-        proc.start()
-        proc.join()
+        script = """
+import torch
+import torch.nn as nn
+from torch.profiler import supported_activities, profile
+from torch.autograd.profiler import KinetoStepTracker
 
-def launch_subprocess():
-    import torch
-    niters = 8
-    use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-    net = SimpleNet()
-    opt = torch.optim.SGD(net.parameters(), lr=0.01)
-    opt.zero_grad()
-    inputs = torch.rand(10)
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(10, 5)
+        self.fc2 = nn.Linear(5, 2)
 
-    with profile(activities=supported_activities()):
-        TestProfiler().payload(use_cuda=use_cuda)
+    def forward(self, x):
+        return self.fc2(self.fc1(x))
 
-    initial_step = KinetoStepTracker.current_step()
 
-    def run_batch():
-        out = net(inputs)
-        loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
-        loss.backward()
-        opt.step()
+def payload(use_cuda=False):
+    x = torch.randn(10, 10)
+    if use_cuda:
+        x = x.cuda()
+    y = torch.randn(10, 10)
+    if use_cuda:
+        y = y.cuda()
+    z = torch.mm(x, y)
+    z = z + y
+    if use_cuda:
+        z = z.cpu()
 
+niters = 8
+use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+net = SimpleNet()
+opt = torch.optim.SGD(net.parameters(), lr=0.01)
+opt.zero_grad()
+inputs = torch.rand(10)
+
+with profile(activities=supported_activities()):
+    payload(use_cuda=use_cuda)
+
+initial_step = KinetoStepTracker.current_step()
+
+def run_batch():
+    out = net(inputs)
+    loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+    loss.backward()
+    opt.step()
+
+for _ in range(niters):
+    run_batch()
+
+with profile(
+    activities=supported_activities(),
+    schedule=torch.profiler.schedule(
+        wait=1,
+        warmup=1,
+        active=2),
+) as p:
     for _ in range(niters):
         run_batch()
+        p.step()
+assert KinetoStepTracker.current_step() == initial_step + 2 * niters
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, '-W', 'all', '-c', script],
+                cwd=os.path.dirname(os.path.realpath(__file__))
+            )
+        except subprocess.CalledProcessError as e:
+            if e.returncode != 0:
+                self.assertTrue(False, "something failed")
 
-    with profile(
-        activities=supported_activities(),
-        schedule=torch.profiler.schedule(
-            wait=1,
-            warmup=1,
-            active=2),
-    ) as p:
-        for _ in range(niters):
-            run_batch()
-            p.step()
-    assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
 def find_node_with_name(nodes, name):
     for node in _utils.traverse_dfs(nodes):
