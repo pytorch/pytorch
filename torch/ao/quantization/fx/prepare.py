@@ -1162,10 +1162,14 @@ def insert_observers_for_model(
     # nodes before observer insertion, instead of model.graph.nodes.
     nodes_before_observation = list(model.graph.nodes)
 
+    # Avoid duplicates custom module swaps for multiple nodes with same target.
+    custom_module_names_already_swapped: Set[str] = set()
+
     # reset inputs/outputs counters
     inputs_seen_counter = 0
     outputs_seen_counter = 0
     results_node = None
+
     for node in nodes_before_observation:
 
         if node.op == 'placeholder':
@@ -1268,7 +1272,9 @@ def insert_observers_for_model(
                             # should resolve this inconsistency by inserting DeQuantStubs for all custom
                             # modules, not just for LSTM.
                             _insert_dequant_stubs_for_custom_module_lstm_output(node, model, modules, model.graph)
-                            _swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
+                            if(node.target not in custom_module_names_already_swapped):
+                                custom_module_names_already_swapped.add(node.target)
+                                _swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
                         else:
                             # this returns the new observer node if it was needed
                             maybe_output_obs_node = _maybe_insert_output_observer_for_node(
@@ -1309,7 +1315,9 @@ def insert_observers_for_model(
                                         _remove_output_observer(node, model, modules)
 
                                 if qhandler is not None and qhandler.is_custom_module():
-                                    _swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
+                                    if(node.target not in custom_module_names_already_swapped):
+                                        custom_module_names_already_swapped.add(node.target)
+                                        _swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
 
                 else:  # output
                     _maybe_insert_observers_before_graph_output(
