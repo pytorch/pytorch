@@ -222,6 +222,23 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))
 
+    def test_specializing_numpy_float_in_control_flow(self):
+        # np.float is unspecialized by default,
+        # but it should be specialized when used in control flow.
+        def fn(x, y):
+            if y > 1.0:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        for t in [np.float16, np.float32, np.float64]:
+            y = t(1.23)
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, res))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
