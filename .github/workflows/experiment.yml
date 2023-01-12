@@ -18,4 +18,15 @@ concurrency:
 jobs:
   # There must be at least one job here to satisfy GitHub action workflow syntax
   introduction:
-    name: introduction
+    runs-on: ubuntu-latest
+    steps:
+      - name: Introduce PyTorch experimental workflow
+        shell: bash
+          echo "PyTorch experimental workflow is used to host experimental or flaky jobs"
+          echo " that needs to be run for every commit, but doesn't block PR merging as"
+          echo " part of the standard pull or trunk workflows. In addition, ciflow/experiment"
+          echo " label can be attached to run the workflow as part of the PR, either manually"
+          echo " or automatically via auto label bot."
+          echo
+          echo "Once the jobs are deemed good enough (% red < 20% and TTS < 3h), they can"
+          echo " graduate and move back to pull or trunk."
