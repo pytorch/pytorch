@@ -1720,6 +1720,8 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
       .def_property_readonly(
+          "real_type", [](Argument& self) { return self.real_type(); })
+      .def_property_readonly(
           "N",
           [](Argument& self) -> py::object {
             return (self.N()) ? py::cast(*self.N()) : py::none();
