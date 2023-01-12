@@ -1398,7 +1398,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             )
         except subprocess.CalledProcessError as e:
             if e.returncode != 0:
-                self.assertTrue(False, "something failed")
+                self.assertTrue(False, "Kineto is not working properly with the Dynolog environment variable")
 
 
 def find_node_with_name(nodes, name):
