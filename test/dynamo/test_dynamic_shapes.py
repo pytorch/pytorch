@@ -39,18 +39,6 @@ DynamicShapesExportTests = make_dynamic_cls(test_export.ExportTests)
 DynamicShapesSubGraphTests = make_dynamic_cls(test_subgraphs.SubGraphTests)
 
 
-# DynamicShapesFunctionTests
-unittest.expectedFailure(
-    DynamicShapesFunctionTests.test_len_tensor_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
-
-unittest.expectedFailure(
-    DynamicShapesFunctionTests.test_tensor_len_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
-
-
 unittest.expectedFailure(
     DynamicShapesReproTests.test_do_paste_mask_dynamic_shapes
     # aten.min.dim - couldn't find symbolic meta function/decomposition
@@ -85,7 +73,6 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes
 )
-unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_shapes)
 
 # DynamicShapesUnspecTests
 # Missing decomp
