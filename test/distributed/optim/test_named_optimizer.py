@@ -212,8 +212,7 @@ class NamedOptimizerTest(unittest.TestCase):
         )
 
     def test_load_state_dict(self):
-        """Check that NamedOptimizer exposes the expected state dict
-        interface."""
+        """Check that NamedOptimizer's load_state_dict works as expected."""
         m = TestDummyModel()
         named_optim_1 = _NamedOptimizer(
             m.named_parameters(),
@@ -291,6 +290,57 @@ class NamedOptimizerTest(unittest.TestCase):
             state_dict_after_load["state"]["net4.1.bias"],
             assert_equal=True,
         )
+
+    def test_load_state_dict_conditional_training(self):
+        """Check that NamedOptimizer load_state_dict works under conditional training case."""
+        m = TestDummyModel()
+        named_optim_1 = _NamedOptimizer(
+            m.named_parameters(),
+            torch.optim.SGD,
+            [
+                {"params": m.net1.parameters()},
+                {"params": m.net3.parameters(), "lr": 1e-3},
+            ],
+            lr=1e-2,
+            momentum=0.9,
+        )
+
+        for _ in range(2):
+            x = torch.rand(5, 8)
+            y = m(x)
+            y.sum().backward()
+            named_optim_1.step()
+
+        state_dict_to_load = named_optim_1.state_dict()
+
+        named_optim_2 = _NamedOptimizer(
+            m.named_parameters(),
+            torch.optim.SGD,
+            lr=1e-2,
+            momentum=0.6,
+        )
+
+        for _ in range(2):
+            x = torch.rand(5, 8)
+            y = m(x)
+            y.sum().backward()
+            named_optim_2.step()
+
+        named_optim_2.load_state_dict(state_dict_to_load)
+        state_dict_after_load = named_optim_2.state_dict()
+
+        # Compare "state" in optim state dict
+        self._compare_state_dict_group(
+            state_dict_to_load["state"]["net1.0.weight"],
+            state_dict_after_load["state"]["net1.0.weight"],
+            assert_equal=True,
+        )
+        self._compare_state_dict_group(
+            state_dict_to_load["state"]["net3.weight"],
+            state_dict_after_load["state"]["net3.weight"],
+            assert_equal=True,
+        )
+
 
     def test_load_state_dict_error(self):
         m = TestDummyModel()

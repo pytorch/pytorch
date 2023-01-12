@@ -50,13 +50,6 @@ MeshExprT = Union[
 ]
 
 
-def _get_or_create_default_group(device_type):
-    if not is_initialized():
-        _backend = "gloo" if device_type == "cpu" else "nccl"
-        init_process_group(backend=_backend)
-    return _get_default_group()
-
-
 class DeviceMesh(object):
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
@@ -118,7 +111,7 @@ class DeviceMesh(object):
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
-        default_pg = _get_or_create_default_group(device_type)
+        default_pg = self._get_or_create_default_group()
         self._backend = default_pg._get_backend_name()
         # TODO: if user want to pass pg_options, offer a way to do it
         # check default pg backend, should support device_type
@@ -223,6 +216,12 @@ class DeviceMesh(object):
                                 f"in {subgroup_ranks}!"
                             )
                         self._dim_groups.append(new_subgroup)
+
+    def _get_or_create_default_group(self):
+        if not is_initialized():
+            _backend = "gloo" if self.device_type == "cpu" else "nccl"
+            init_process_group(backend=_backend)
+        return _get_default_group()
 
     def __enter__(self) -> "DeviceMesh":
         # set global device_mesh to this instance
