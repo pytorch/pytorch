@@ -1,6 +1,8 @@
 import contextlib
 
 import warnings
+import threading
+
 from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at,\
     _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack
 
@@ -51,6 +53,20 @@ class TorchDispatchMode:
     def __exit__(self, exc_type, exc_val, exc_tb):
         _pop_mode()
 
+    def check_mode_state_push(self):
+        if not hasattr(self, "tracking"):
+            self.tracking = threading.local()
+        else:
+            if hasattr(self.tracking, "on_stack"):
+                assert self.tracking.on_stack is False, "Illegal attempt to push an already pushed mode onto the stack"
+
+        self.tracking.on_stack = True
+
+    def check_mode_state_pop(self):
+        assert hasattr(self, "tracking"), "Unexpected, popping a mode we are not tracking"
+        assert self.tracking.on_stack is True, "Unexpected, popping a mode that thinks its already off the stack"
+        self.tracking.on_stack = False
+
     @classmethod
     def push(cls, *args, **kwargs):
         warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
@@ -81,6 +97,10 @@ def _pop_mode_temporarily():
         yield old
     finally:
         _push_mode(old)
+
+
+def push_if_not_on_stack(mode):
+    return contextlib.nullcontext() if hasattr(mode, "tracking") and mode.tracking.on_stack else mode
 
 
 @contextlib.contextmanager
