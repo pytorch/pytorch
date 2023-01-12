@@ -1516,6 +1516,7 @@ def _native_batch_norm_legit_functional(
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
+    assert generator is None
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
@@ -1888,21 +1889,23 @@ def _index_add(
     if inplace:
         return x
     else:
-        return out.squeeze(0) if zero_dim else out
+        return out.squeeze(0) if zero_dim else out.contiguous()
 
 
 @register_decomposition(aten.index_copy_)
-@out_wrapper()
 def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=True)
 
 
 @register_decomposition(aten.index_copy)
+@out_wrapper()
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=False)
 
 
-def _index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool):
+def _index_copy(
+    x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
+):
     dim = utils.canonicalize_dims(x.ndim, dim)
     utils.check(
         index.ndim <= 1,
@@ -1917,7 +1920,7 @@ def _index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, 
     if inplace:
         return x
     else:
-        return out.squeeze(0) if zero_dim else out
+        return out.squeeze(0) if zero_dim else out.contiguous()
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
