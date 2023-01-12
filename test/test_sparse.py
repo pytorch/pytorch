@@ -10,7 +10,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
-    parametrize, subtest
+    parametrize, subtest, is_coalesced_indices
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -347,6 +347,7 @@ class TestSparse(TestSparseBase):
             lambda: self.sparse_tensor(indices, values, torch.Size([2, 4, 2, 1])))
 
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     def test_to_dense(self, device, dtype):
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -479,6 +480,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(torch.empty((3, 0), dtype=dtype, device=device), self.safeToDense(x))
 
     @dtypes(torch.double, torch.cdouble)
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     def test_to_dense_hybrid(self, device, dtype):
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
@@ -832,6 +834,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     def test_permute(self, device, dtype, coalesced):
         # trivial checks
         s = torch.rand(3, 3, 3, device=device, dtype=dtype).to_sparse()
@@ -1401,6 +1404,9 @@ class TestSparse(TestSparseBase):
 
     @onlyCPU
     @coalescedonoff
+    # adding a graph break before self.assertFalse(weight._indices().is_contiguous())
+    # makes the test pass so some existent sparse related bug
+    @skipIfTorchDynamo("skip")
     @dtypes(torch.double, torch.cdouble)
     def test_sspaddmm(self, device, dtype, coalesced):
 
@@ -1485,6 +1491,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double)
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     def test_sparse_mm(self, device, dtype, coalesced):
         def test_shape(d1, d2, d3, nnz, transposed):
             if transposed:
@@ -1506,6 +1513,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double)
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     def test_sparse_mul(self, device, dtype, coalesced):
         # https://github.com/pytorch/pytorch/issues/79914
         a = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
@@ -3421,23 +3429,6 @@ class TestSparse(TestSparseBase):
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
         """
 
-        def check_is_coalesced(s):
-            self.assertTrue(s.is_coalesced())
-
-            indices = s.indices()
-            hash_coeffs = torch.tensor(s.shape[:s.sparse_dim()], device=s.device).cumprod(-1).flip(-1)
-            if s.sparse_dim() > 1:
-                hash_coeffs.unsqueeze_(-1)
-                hash_values = (indices * hash_coeffs).sum(0)
-            else:
-                hash_values = indices * hash_coeffs
-
-            # check if indices are sorted
-            self.assertEqual(hash_values, hash_values.sort()[0])
-
-            # check if there are no repeated indices
-            self.assertEqual(hash_values, hash_values.unique())
-
         def ref_sparse_mm(a, b):
             return a.to_dense() @ b.to_dense()
 
@@ -3479,7 +3470,9 @@ class TestSparse(TestSparseBase):
             # cpp implementation
             r2 = torch.sparse.mm(a, b)
             self.assertEqual(r1, r2.to_dense())
-            check_is_coalesced(r2)
+
+            # Check result is truly coalesced
+            self.assertTrue(r2.is_coalesced() and is_coalesced_indices(r2))
 
             if dtype in [torch.double, torch.cdouble]:
                 a.requires_grad_(True)
@@ -4160,18 +4153,9 @@ class TestSparseAny(TestCase):
         """
         for t in self.generate_simple_inputs(
                 from_layout, device=device, dtype=dtype, index_dtype=index_dtype):
-            is_hybrid = t.dense_dim() > 0
-
-            # TODO: The following exception cases all correspond to
-            # not implemented conversions
-            if is_hybrid and from_layout is not torch.sparse_coo:
-                with self.assertRaisesRegex(RuntimeError, "sparse_compressed_to_dense: Hybrid tensors are not supported"):
-                    t.to_dense()
-
-            else:
-                r = t.to_dense()
-                self.assertEqual(r.layout, torch.strided)
-                self.assertEqual(r, t)
+            r = t.to_dense()
+            self.assertEqual(r.layout, torch.strided)
+            self.assertEqual(r, t)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)
@@ -4299,6 +4283,13 @@ class TestSparseAny(TestCase):
                         self.assertEqual(plain_indices.dtype, index_dtype)
                     self.assertEqual(r.values().dtype, dtype)
                 elif r.layout is torch.sparse_coo:
+                    if t.layout is torch.sparse_coo:
+                        self.assertEqual(t.is_coalesced(), r.is_coalesced())
+
+                    # Check r is truly coalesced when r.is_coalesced == True
+                    if r.is_coalesced():
+                        self.assertTrue(is_coalesced_indices(r))
+
                     torch._validate_sparse_coo_tensor_args(r._indices(), r._values(), r.shape)
                     self.assertEqual(r._indices().dtype, torch.int64)
                     self.assertEqual(r._values().dtype, dtype)
@@ -4316,7 +4307,7 @@ class TestSparseAny(TestCase):
         if (from_layout, to_layout) == (torch.sparse_csr, torch.sparse_bsr):
             # See gh-90910
             t = torch.tensor([[0, 0, 1, 0], [0, 1, 0, 0]], dtype=dtype, device=device).to_sparse_csr()
-            r = t.to_sparse_bsr(2, 2)
+            r = t.to_sparse_bsr((2, 2))
             torch._validate_sparse_compressed_tensor_args(r.crow_indices(), r.col_indices(), r.values(), r.shape, r.layout)
             self.assertEqual(r, t)
 
