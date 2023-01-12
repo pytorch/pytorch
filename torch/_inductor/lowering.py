@@ -734,7 +734,7 @@ def as_strided(x, size, stride, storage_offset=None):
         # as_strided ignores views
         x = x.data.unwrap_view()
     x.realize()
-    if not ir.is_contiguous_storage_and_layout(x):
+    if not ir.is_contiguous_storage_and_layout(x, check_channels_last=True):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_contiguous_storage_and_layout(x)
     new_layout = ir.FixedLayout(

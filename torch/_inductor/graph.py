@@ -385,7 +385,7 @@ class GraphLowering(torch.fx.Interpreter):
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
-            if num_users > 1 and isinstance(result, TensorBox):
+            if num_users > 0 and isinstance(result, TensorBox):
                 for user in n.users:
                     if user.target in needs_realized_inputs:
                         result.realize_hint()
@@ -399,14 +399,19 @@ class GraphLowering(torch.fx.Interpreter):
                         #
                         # When we do a better job selecting layout, we should
                         # revisit this.
+                        # Note: for as_strided given a size and stride, we should
+                        # make sure it's input has same size and stride eager model
+                        # to avoid asserting failed error.
                         if user.target in (
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
+                            torch.ops.aten.as_strided.default,
                         ):
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
                             )
+
                     if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()

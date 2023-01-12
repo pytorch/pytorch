@@ -1007,10 +1007,13 @@ def is_storage_and_layout(x):
         return False
 
 
-def is_contiguous_storage_and_layout(x):
+def is_contiguous_storage_and_layout(x, check_channels_last=False):
     try:
         buffer, layout = as_storage_and_layout(x, freeze=False)
-        return layout.is_contiguous()
+        is_contiguous = layout.is_contiguous()
+        if check_channels_last:
+            return is_contiguous or layout.is_channels_last_contiguous()
+        return is_contiguous
     except NotImplementedError:
         return False
 
