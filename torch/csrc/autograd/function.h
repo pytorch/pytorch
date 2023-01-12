@@ -699,7 +699,7 @@ template <typename... Variables>
 edge_list collect_next_edges(Variables&&... variables) {
   detail::MakeNextFunctionList make;
   make.apply(std::forward<Variables>(variables)...);
-  return make.next_edges;
+  return std::move(make.next_edges);
 }
 } // namespace autograd
 } // namespace torch
