@@ -250,8 +250,6 @@ class TORCH_API Context {
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
   static bool isXNNPACKAvailable();
-  void setCheckSparseTensorInvariants(bool e);
-  bool checkSparseTensorInvariants() const;
   // This method is used to release the original weight after pre-packing.
   // It should be called once before loading/running the model.
   // NB: By default it is set to true for mobile builds.
@@ -307,7 +305,6 @@ class TORCH_API Context {
 #endif
   bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
-  bool enable_sparse_tensor_invariant_checks = false;
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
