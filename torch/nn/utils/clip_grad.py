@@ -1,7 +1,5 @@
 import warnings
-from typing import Union, Iterable, List
-
-from torch import Tensor
+from typing import Union, Iterable
 
 import torch
 from torch._six import inf
