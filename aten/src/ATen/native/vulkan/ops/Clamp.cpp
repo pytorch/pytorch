@@ -13,7 +13,7 @@ Tensor _clamp(
     const Tensor& self_arg,
     const c10::optional<Scalar>& min,
     const c10::optional<Scalar>& max,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(min || max, "At least one of 'min' or 'max' must not be None");
 
   api::Context* const context = api::context();
@@ -24,7 +24,7 @@ Tensor _clamp(
   vTensor v_output{
       context,
       v_self.sizes(),
-      v_self.options(),
+      self_arg.scalar_type(),
   };
 
   const struct Block final {
@@ -77,7 +77,7 @@ Tensor& _clamp_(
     Tensor& self_arg,
     const c10::optional<Scalar>& min,
     const c10::optional<Scalar>& max,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(min || max, "At least one of 'min' or 'max' must not be None");
 
   TORCH_CHECK(
@@ -143,7 +143,7 @@ Tensor& clamp_(
 
 Tensor activation(
     const Tensor& self_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -152,7 +152,7 @@ Tensor activation(
   vTensor v_output{
       context,
       v_self.sizes(),
-      v_self.options(),
+      self_arg.scalar_type(),
   };
 
   const struct Block final {
@@ -191,7 +191,7 @@ Tensor activation(
 
 Tensor& activation_(
     Tensor& self_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(
       self_arg.is_vulkan(),
       "Vulkan: In-place operator is only supported on Vulkan tensors.");
@@ -268,7 +268,7 @@ Tensor& hardsigmoid_(Tensor& self) {
 Tensor activation_scalar(
     const Tensor& self_arg,
     const Scalar& scalar_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -277,7 +277,7 @@ Tensor activation_scalar(
   vTensor v_output{
       context,
       v_self.sizes(),
-      v_self.options(),
+      self_arg.scalar_type(),
   };
 
   const struct Block final {
@@ -319,7 +319,7 @@ Tensor activation_scalar(
 Tensor& activation_scalar_(
     Tensor& self_arg,
     const Scalar& scalar_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(
       self_arg.is_vulkan(),
       "Vulkan: In-place operator is only supported on Vulkan tensors.");

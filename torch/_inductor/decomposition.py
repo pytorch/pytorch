@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 
 decompositions = get_decompositions(
     [
+        aten.linspace,
+        aten.logaddexp,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
@@ -35,6 +37,7 @@ decompositions = get_decompositions(
         aten.embedding_dense_backward,
         aten.expand_as,
         aten.eye,
+        aten.fill,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
         aten.gelu,
@@ -43,6 +46,7 @@ decompositions = get_decompositions(
         aten.grid_sampler_2d,
         aten.hardsigmoid,
         aten.hardsigmoid_backward,
+        aten.upsample_bilinear2d,
         aten.hardswish,
         aten.hardswish_backward,
         aten.hardtanh,
@@ -78,7 +82,6 @@ decompositions = get_decompositions(
         aten.nll_loss_backward,
         aten.nll_loss_forward,
         aten.norm,
-        aten.reflection_pad2d_backward,
         aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
@@ -103,8 +106,6 @@ decompositions = get_decompositions(
         aten.unfold_backward,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
-        aten.softplus,
-        aten.softplus_backward,
         aten.bucketize,
     ]
 )
@@ -124,11 +125,6 @@ def clamp(x, min=None, max=None):
     if max is not None:
         x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
     return x
-
-
-@register_decomposition([aten.tanh])
-def tanh(x):
-    return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
 
 
 # TorchInductor-only decomposition. It should not be taken to core.
@@ -509,17 +505,6 @@ def lift(self):
     return self
 
 
-@register_decomposition([aten.fill.Scalar])
-def fill_scalar(self, value):
-    return torch.full_like(self, value)
-
-
-@register_decomposition([aten.fill.Tensor])
-def fill_tensor(self, value: Tensor):
-    assert value.dim() == 0, "aten.fill.Tensor only supports 0-dimension value tensor"
-    return torch.full_like(self, value.item())
-
-
 @register_decomposition([aten.bernoulli.default])
 def bernoulli(self, *, generator=None):
     assert generator is None
@@ -537,7 +522,7 @@ Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
 turning them on and off via `config.fallback_random`.
 """
-extra_random_decomps = get_decompositions([aten.native_dropout])
+extra_random_decomps = get_decompositions([aten.native_dropout, aten.uniform_])
 register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps
 )

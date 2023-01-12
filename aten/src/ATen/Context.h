@@ -8,11 +8,13 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
 #include <c10/core/QEngine.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 #include <cstdint>
@@ -37,6 +39,8 @@ class TORCH_API Context {
       return at::detail::getDefaultCPUGenerator();
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
+    } else if (device_type == at::kMPS) {
+      return at::detail::getMPSHooks().getDefaultMPSGenerator();
     } else {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
@@ -83,6 +87,9 @@ class TORCH_API Context {
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
+  static bool hasMPS() {
+    return detail::getMPSHooks().hasMPS();
+  }
   static bool hasIPU() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::IPU);
   }
@@ -92,8 +99,6 @@ class TORCH_API Context {
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
   }
-  static bool hasMPS();
-
   static bool hasORT() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::ORT);
   }
@@ -239,6 +244,8 @@ class TORCH_API Context {
   void setFloat32MatmulPrecision(Float32MatmulPrecision p);
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
+  bool allowBF16ReductionCuBLAS() const;
+  void setAllowBF16ReductionCuBLAS(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
@@ -282,10 +289,13 @@ class TORCH_API Context {
   bool benchmark_cudnn = false;
 #endif
   Float32MatmulPrecision float32_matmul_precision =
-      at::Float32MatmulPrecision::HIGHEST;
+      c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
+      ? at::Float32MatmulPrecision::HIGH
+      : at::Float32MatmulPrecision::HIGHEST;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
+  bool allow_bf16_reduction_cublas = true;
   bool enabled_mkldnn = true;
   at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
 #ifdef C10_MOBILE
@@ -418,6 +428,13 @@ static inline void manual_seed(uint64_t seed) {
         cuda_gen.set_current_seed(seed);
       }
     }
+  }
+
+  if (hasMPS()) {
+    auto mps_gen = globalContext().defaultGenerator(DeviceType::MPS);
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(mps_gen.mutex());
+    mps_gen.set_current_seed(seed);
   }
 }
 
