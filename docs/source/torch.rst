@@ -656,6 +656,9 @@ Engine Configuration
 Symbolic Numbers
 ----------------
 .. autosummary::
+    :toctree: generated
+    :nosignatures:
+
     sym_float
     sym_int
     sym_max
