@@ -407,6 +407,7 @@ cc_library(
         "@cuda//:cusolver",
         "@cuda//:nvrtc",
         "@cudnn",
+        "@cudnn_frontend",
     ],
     alwayslink = True,
 )

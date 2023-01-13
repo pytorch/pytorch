@@ -1393,12 +1393,6 @@ elseif(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
 endif()
 
-if(USE_EXPERIMENTAL_CUDNN_V8_API)
-  if(USE_CUDA)
-    target_compile_definitions(torch_cuda PRIVATE "-DUSE_EXPERIMENTAL_CUDNN_V8_API")
-  endif()
-endif()
-
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
 if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")

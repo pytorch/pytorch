@@ -111,7 +111,6 @@ void raw_cudnn_convolution_add_relu_fallback_out(
 #if AT_CUDNN_ENABLED()
 #include <ATen/native/cudnn/Macros.h>
 
-#if HAS_CUDNN_V8()
 // v7 functions are preserved here to allow for runtime switching to v7
 // (e.g., TORCH_CUDNN_V8_API_DISABLED=1).
 // Note that v7 forward/backward out can have different behavior from the v8
@@ -148,6 +147,5 @@ void raw_cudnn_convolution_add_relu_out_v7(
     bool benchmark,
     bool deterministic,
     bool allow_tf32);
-#endif
 #endif
 }}
