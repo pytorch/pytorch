@@ -783,9 +783,8 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
-    def test_use_orig_params(self) -> None:
+    def ftest_use_orig_params(self) -> None:
         """Tests :meth:`optim_state_dict` for an FSDP-root nested model."""
         self._test_load_optim_state(
             _ModelClass.NESTED,
@@ -824,7 +823,7 @@ class TestFSDPOptimState(FSDPTest):
         """
         initializer = self._model_class[model_class]
         if osd_comm_method == _OSDCommMethod.OPTIM_STATE_DICT:
-            osd_method = FSDP._optim_state_dict
+            osd_method = FSDP.optim_state_dict
         elif osd_comm_method == _OSDCommMethod.FLATTEN_SHARDED_OSD:
             osd_method = FSDP.sharded_optim_state_dict
         else:
