@@ -19,7 +19,7 @@ import unittest
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma, OpDTypes
+    OpDTypes
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
