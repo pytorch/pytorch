@@ -618,8 +618,6 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
-    sym_float
-    sym_int
 
 Optimizations
 -------------
@@ -658,3 +656,11 @@ Engine Configuration
     :nosignatures:
 
     set_multithreading_enabled
+
+Symbolic Numbers
+----------------
+.. autosummary::
+    sym_float
+    sym_int
+    sym_max
+    sym_min
