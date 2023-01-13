@@ -619,6 +619,40 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
         return False
     return comment.author_login == "facebook-github-bot"
 
+def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str]]:
+    assert pr.is_ghstack_pr()
+    entire_stack: List[Tuple["GitHubPR", str]] = []
+    # For ghstack, cherry-pick commits based from origin
+    orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', pr.head_ref())}"
+    rev_list = repo.revlist(f"{pr.default_branch()}..{orig_ref}")
+    for idx, rev in enumerate(reversed(rev_list)):
+        msg = repo.commit_message(rev)
+        m = RE_PULL_REQUEST_RESOLVED.search(msg)
+        if m is None:
+            raise RuntimeError(f"Could not find PR-resolved string in {msg} of ghstacked PR {pr.pr_num}")
+        if pr.org != m.group('owner') or pr.project != m.group('repo'):
+            raise RuntimeError(f"PR {m.group('number')} resolved to wrong owner/repo pair")
+        stacked_pr_num = int(m.group('number'))
+        if stacked_pr_num != pr.pr_num:
+            stacked_pr = GitHubPR(pr.org, pr.project, stacked_pr_num)
+            if stacked_pr.is_closed():
+                print(f"Skipping {idx+1} of {len(rev_list)} PR (#{stacked_pr_num}) as its already been merged")
+                continue
+            entire_stack.append((stacked_pr, rev))
+        else:
+            entire_stack.append((pr, rev))
+
+    for stacked_pr, rev in entire_stack:
+        commit_sha = stacked_pr.last_commit()['oid']
+        tree_sha = repo._run_git("rev-parse", commit_sha + "^{tree}")
+        if tree_sha not in repo.commit_message(rev):
+            raise RuntimeError(
+                f"PR {stacked_pr.pr_num} is out of sync with the corresponding revision {rev} on " +
+                f"branch {orig_ref} that would be merged into master.  " +
+                "This usually happens because there is a non ghstack change in the PR.  " +
+                f"Please sync them and try again (ex. make the changes on {orig_ref} and run ghstack)."
+            )
+    return entire_stack
 
 @dataclass
 class GitHubComment:
@@ -910,25 +944,10 @@ class GitHubPR:
         land_check_commit: Optional[str] = None
     ) -> List["GitHubPR"]:
         assert self.is_ghstack_pr()
-        additional_prs: List["GitHubPR"] = []
-        # For ghstack, cherry-pick commits based from origin
-        orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', self.head_ref())}"
-        rev_list = repo.revlist(f"{self.default_branch()}..{orig_ref}")
-        for idx, rev in enumerate(reversed(rev_list)):
-            msg = repo.commit_message(rev)
-            m = RE_PULL_REQUEST_RESOLVED.search(msg)
-            if m is None:
-                raise RuntimeError(f"Could not find PR-resolved string in {msg} of ghstacked PR {self.pr_num}")
-            if self.org != m.group('owner') or self.project != m.group('repo'):
-                raise RuntimeError(f"PR {m.group('number')} resolved to wrong owner/repo pair")
-            pr_num = int(m.group('number'))
-            commit_msg = self.gen_commit_message(filter_ghstack=True)
-            if pr_num != self.pr_num:
-                pr = GitHubPR(self.org, self.project, pr_num)
-                if pr.is_closed():
-                    print(f"Skipping {idx+1} of {len(rev_list)} PR (#{pr_num}) as its already been merged")
-                    continue
-                commit_msg = pr.gen_commit_message(filter_ghstack=True)
+        ghstack_prs = get_ghstack_prs(repo, self)  # raises error if out of sync
+        for pr, rev in ghstack_prs:
+            commit_msg = pr.gen_commit_message(filter_ghstack=True)
+            if pr.pr_num != self.pr_num:
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(
                     pr,
@@ -936,11 +955,9 @@ class GitHubPR:
                     skip_mandatory_checks=skip_mandatory_checks,
                     skip_internal_checks=can_skip_internal_checks(self, comment_id),
                     land_check_commit=land_check_commit)
-                additional_prs.append(pr)
-
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
-        return additional_prs
+        return ghstack_prs
 
     def gen_commit_message(self, filter_ghstack: bool = False) -> str:
         """ Fetches title and body from PR description
@@ -1414,6 +1431,9 @@ def merge(pr_num: int, repo: GitRepo,
     explainer = TryMergeExplainer(skip_mandatory_checks, on_green, land_checks, pr.get_labels(), pr.pr_num, org, project)
     on_green, land_checks = explainer.get_flags()
     land_check_commit = None
+
+    if pr.is_ghstack_pr():
+        get_ghstack_prs(repo, pr)  # raises error if out of sync
 
     check_for_sev(org, project, skip_mandatory_checks)
 
