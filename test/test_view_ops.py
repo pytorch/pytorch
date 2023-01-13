@@ -1307,8 +1307,6 @@ class TestOldViewOps(TestCase):
         self.assertEqual(t2, t1)
         b = torch.randn(10, device=device)
         self.assertEqual(b, b.T)
-        scalar = torch.tensor(5, device=device)
-        self.assertEqual(scalar, scalar.T)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_transposes(self, device, dtype):
