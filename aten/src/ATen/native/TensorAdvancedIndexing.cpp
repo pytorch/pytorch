@@ -494,6 +494,7 @@ DEFINE_DISPATCH(scatter_reduce_two_stub);
 
 DEFINE_DISPATCH(scatter_add_expanded_index_stub);
 DEFINE_DISPATCH(scatter_reduce_expanded_index_stub);
+DEFINE_DISPATCH(gather_expanded_index_stub);
 
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
@@ -1485,7 +1486,11 @@ TORCH_IMPL_FUNC(gather_out)
 (const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
   if (index.numel() == 0) return;
   dim = at::maybe_wrap_dim(dim, self.dim());
-  gather_stub(result.device().type(), result, self, dim, index);
+  if (can_use_expanded_index_path(result, dim, index, self, /*is_scatter_like=*/false)) {
+    gather_expanded_index_stub(result.device().type(), result, self, index);
+  } else {
+    gather_stub(result.device().type(), result, self, dim, index);
+  }
 }
 
 Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {

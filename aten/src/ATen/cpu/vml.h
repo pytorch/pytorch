@@ -106,7 +106,7 @@ public:
   ~MklThreadGuard(){
     mkl_set_num_threads_local(old_threads_);
   }
-}
+};
 
 // NB: LP64 MKL is the most commonly used and thus we assume it here. That means
 // we need to expect MKL_INT to be of type int, which implies int32_t in most
