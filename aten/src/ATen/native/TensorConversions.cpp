@@ -1700,7 +1700,7 @@ Tensor sparse_coo_to_sparse(const Tensor& self, const int64_t sparse_dim) {
       sparse_dim >= 0 && sparse_dim <= self.sparse_dim(), "sparse_dim argument for sparse_coo_to_sparse must be between 0 and number of sparse dimensions of original tensor");
   TORCH_CHECK(
      sparse_dim == self.sparse_dim(), "sparse_dim argument for sparse_coo_to_sparse must not be different than sparse dim of original tensor");
-  return self.requires_grad() ? self.clone() : self;
+  return (at::GradMode::is_enabled() && self.requires_grad()) ? self.clone() : self;
 }
 
 Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim) {
@@ -1761,7 +1761,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
     AT_ERROR("sparse_compressed_to_sparse for ", self.layout(), " to ", layout_, " conversion does not support specifying number of dense dimensions");
   }
   if (self.layout() == layout_ && (!blocksize.has_value() || at::sparse_csr::getBlockSize(self) == *blocksize)) {
-    return self.requires_grad() ? self.clone() : self;
+    return (at::GradMode::is_enabled() && self.requires_grad()) ? self.clone() : self;
   }
   switch (layout_) {
   case kStrided:
@@ -1809,7 +1809,7 @@ Tensor sparse_coo_to_sparse(const Tensor& self, c10::optional<c10::Layout> layou
   case kStrided:
     return self.to_dense();
   case kSparse:
-    return self.requires_grad() ? self.clone() : self;
+    return (at::GradMode::is_enabled() && self.requires_grad()) ? self.clone() : self;
   case kSparseCsr:
     return self.to_sparse_csr(dense_dim_opt);
   case kSparseCsc:
