@@ -61,7 +61,7 @@ std::ostream& operator<<(std::ostream& os, const SymBool& s) {
   return os;
 }
 
-double SymBool::guard_bool(const char* file, int64_t line) const {
+bool SymBool::guard_bool(const char* file, int64_t line) const {
   if (!is_symbolic()) {
     return data_;
   }
