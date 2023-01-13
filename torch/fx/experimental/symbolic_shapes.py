@@ -419,10 +419,13 @@ def _make_node_magic(method, func):
         # evaluation.
         if method in always_float_magic_methods:
             pytype = float
-        elif method in ("min", "max"):
-            # This doesn't type-promote in Python, but it's data-dependent, so
-            # we always assume float.
-            pytype = float
+        elif method in ("min", "max") and self.pytype is int and other.pytype is int:
+            # These ops don't type promote. The result type depends on arg
+            # values. But when both args are ints, we can be sure the result is
+            # an int as well. Otherwise, we assume the result is a float and let
+            # one of the cases below handle that. That's not strictly correct,
+            # but it's the best we can do without being data-dependent.
+            pytype = int
         elif method in always_bool_magic_methods:
             # This should return bool, but we have no SymBool, see wrap_node.
             pytype = int
