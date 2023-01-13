@@ -7,7 +7,9 @@ import logging
 import random
 
 import torch
+from torch import nn
 from torch.ao.pruning._experimental.pruner import (
+    SaliencyPruner,
     BaseStructuredSparsifier,
     FakeStructuredSparsity,
 )
@@ -49,6 +51,29 @@ class ImplementedPruner(BaseStructuredSparsifier):
         num_rows = len(module.parametrizations[tensor_name][0].mask)
         prune = random.sample(list(range(num_rows)), num_rows // 3)
         module.parametrizations[tensor_name][0].mask[prune] = False
+
+
+class TestSaliencyPruner(TestCase):
+    def test_update_mask(self):
+        """Test that we prune out the row with the lowest saliency (first row)"""
+        model = SimpleLinear()
+        with torch.no_grad():
+            model.linear1.weight = nn.Parameter(
+                torch.Tensor([[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3]])
+            )
+        pruning_config = [{"tensor_fqn": "linear1.weight", "sparsity_level": 0.5}]
+        pruner = SaliencyPruner({})
+
+        pruner.prepare(model, pruning_config)
+        pruner.enable_mask_update = True
+        pruner.step()
+        pruned_model = pruner.prune()
+
+        expected = torch.Tensor([[2, 2, 2, 2], [3, 3, 3, 3]])
+        pruned = pruned_model.linear1.weight
+
+        assert expected.shape == pruned.shape
+        assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
 
 
 class TestBaseStructuredSparsifier(TestCase):
@@ -398,7 +423,10 @@ class TestBaseStructuredSparsifier(TestCase):
         if y_pruned.shape == y_expected.shape:
             # TODO This rtol is a little high, need to double check if something specific is causing this to fail
             assert torch.isclose(
-                y_expected, y_pruned, rtol=1e-3, atol=1e-3,
+                y_expected,
+                y_pruned,
+                rtol=1e-3,
+                atol=1e-3,
             ).all(), f"fail for {type(model)}"
             # only time this should be equal is when all layers have padding and we can't prune
             assert num_pruned_params <= num_original_params

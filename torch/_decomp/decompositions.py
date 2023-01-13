@@ -988,8 +988,11 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    unnormalized = torch.exp(x - x_max)
+    if x.numel() == 0:
+        unnormalized = torch.exp(x)
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
@@ -1008,8 +1011,11 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    x_max = torch.amax(x, dim, keepdim=True)
-    shifted = x - x_max
+    if x.numel() == 0:
+        shifted = x
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
     if not half_to_float:
@@ -1516,6 +1522,7 @@ def _native_batch_norm_legit_functional(
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
+    assert generator is None
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
@@ -1546,9 +1553,7 @@ def _to_copy(
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
     if memory_format is not None:  # no ref/prim for memory format
-        out = torch.empty_like(x, memory_format=memory_format)
-        out = aten.copy.default(out, x)
-        return out  # type: ignore[call-overload]
+        return torch.clone(x, memory_format=memory_format)
     return x
 
 
@@ -1869,20 +1874,6 @@ def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     return self
 
 
-@register_decomposition(aten.logsumexp.default)
-@pw_cast_for_int_to_real
-def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
-    if self.numel() == 0:
-        return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(self, dim, keepdim=True)
-    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
-    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
-    return result.log().add(maxes_squeezed)
-
-
 # nb: Should use acc_t, not op_math
 @register_decomposition(aten.log_sigmoid_forward)
 @out_wrapper("output", "buffer")
@@ -1910,6 +1901,12 @@ def uniform(
         dtype=x.dtype,
         device=x.device,
     )
+
+
+@register_decomposition(aten.uniform_)
+def uniform_(self, low=0, high=1, generator=None):
+    assert generator is None
+    return self.copy_((high - low) * torch.rand_like(self) + low)
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
@@ -2663,7 +2660,12 @@ def upsample_bicubic2d_default(
         return _upsample_cubic_interp1d(coeffs_x, t_x)
 
     coeffs_y = tuple((get_x_interp(y_ofs) for y_ofs in iys_ofs))
-    return _upsample_cubic_interp1d(coeffs_y, t_y)
+    result = _upsample_cubic_interp1d(coeffs_y, t_y)
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(a)
+    result = result.contiguous(memory_format=memory_format)
+    return result
 
 
 @register_decomposition(aten.upsample_bicubic2d.vec)
