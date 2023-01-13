@@ -36,14 +36,3 @@ runs:
       shell: powershell
       run: |
         Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
-
-    - name: Setup Python3
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.x'
-        check-latest: false
-        cache: pip
-        cache-dependency-path: |
-          **/requirements.txt
-          **/.circleci/docker/requirements-ci.txt
-          **/.github/requirements-gha-cache.txt

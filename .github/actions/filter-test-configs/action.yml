@@ -39,12 +39,29 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eux
-          python3 -m pip install requests==2.26.0 pyyaml==6.0
+
+          if [[ -z "${CONDA_RUN}" ]]; then
+            # If no conda has been setup, try to use system python
+            python3 -m pip install requests==2.26.0 pyyaml==6.0
+          else
+            # Windows miniconda, unfortunately, doesn't have a python3 binary, but
+            # its python is python3
+            if ${CONDA_RUN} which python3; then
+              echo "PYTHON=python3" >> "${GITHUB_ENV}"
+            else
+              echo "PYTHON=python" >> "${GITHUB_ENV}"
+            fi
+          fi
 
     - name: Parse ref
       shell: bash
       id: parse-ref
-      run: .github/scripts/parse_ref.py
+      run: |
+        if [[ -z "${CONDA_RUN}" ]]; then
+          .github/scripts/parse_ref.py
+        else
+          ${CONDA_RUN} ${PYTHON} .github/scripts/parse_ref.py
+        fi
 
     - name: Select all requested test configurations
       shell: bash
@@ -52,12 +69,21 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
       id: filter
       run: |
-        .github/scripts/filter_test_configs.py \
-          --test-matrix "${{ inputs.test-matrix }}" \
-          --pr-number "${{ github.event.pull_request.number }}" \
-          --tag "${{ steps.parse-ref.outputs.tag }}" \
-          --event-name "${{ github.event_name }}" \
-          --schedule "${{ github.event.schedule }}"
+        if [[ -z "${CONDA_RUN}" ]]; then
+          .github/scripts/filter_test_configs.py \
+            --test-matrix "${{ inputs.test-matrix }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --tag "${{ steps.parse-ref.outputs.tag }}" \
+            --event-name "${{ github.event_name }}" \
+            --schedule "${{ github.event.schedule }}"
+        else
+          ${CONDA_RUN} ${PYTHON} .github/scripts/filter_test_configs.py \
+            --test-matrix "${{ inputs.test-matrix }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --tag "${{ steps.parse-ref.outputs.tag }}" \
+            --event-name "${{ github.event_name }}" \
+            --schedule "${{ github.event.schedule }}"
+        fi
 
     - name: Print the filtered test matrix
       shell: bash
