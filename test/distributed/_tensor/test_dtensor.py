@@ -207,7 +207,7 @@ class DTensorTest(DTensorTestBase):
         local_tensor = torch.randn(3, 3)
         local_tensor2 = torch.randn(3, 3)
         sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
-        sharded_tensor2 = DTensor.from_local(local_tensor, device_mesh, shard_spec)
+        sharded_tensor2 = DTensor.from_local(local_tensor2, device_mesh, shard_spec)
         # note that DTensorSpec without real tensor data, so the hash would be the same
         # as long as the mesh, placements and tensor properties are the same
         self.assertEqual(hash(sharded_tensor._spec), hash(sharded_tensor2._spec))
