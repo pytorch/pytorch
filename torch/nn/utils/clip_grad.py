@@ -67,7 +67,7 @@ def clip_grad_norm_(
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     for ((device, _), [grads]) in grouped_grads.items():
         if foreach and device.type in ('cpu', 'cuda'):
-            torch._foreach_mul_(grads, clip_coef_clamped.to(device))  # type: ignore [call-overload]
+            torch._foreach_mul_(grads, clip_coef_clamped.to(device))  # type: ignore[call-overload]
         else:
             clip_coef_clamped_device = clip_coef_clamped.to(device)
             for g in grads:
