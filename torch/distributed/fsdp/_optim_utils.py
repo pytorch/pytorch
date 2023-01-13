@@ -1258,7 +1258,7 @@ def _map_param_key_to_optim_keys(
     return all_optim_state_keys, optim_state_key_to_param_key
 
 
-def _unflatten_process_groups(
+def _unflatten_param_groups(
     state_dict: Dict[str, Any],
     param_key_to_param: Dict[Union[int, str], nn.Parameter],
     param_to_fqns: Dict[nn.Parameter, List[str]],
@@ -1443,7 +1443,7 @@ def _optim_state_dict(
                 # This key is not a parameter state. It is a user-defined state.
                 fsdp_osd_state[key] = copy.copy(value)
 
-        fsdp_osd["param_groups"] = _unflatten_process_groups(
+        fsdp_osd["param_groups"] = _unflatten_param_groups(
             optim_state_dict, param_key_to_param, param_to_fqns
         )
 
