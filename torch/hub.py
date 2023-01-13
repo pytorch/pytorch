@@ -19,14 +19,50 @@ from torch.serialization import MAP_LOCATION
 
 class _Faketqdm(object):  # type: ignore[no-redef]
 
-    def __init__(self, total=None, disable=False,
-                 unit=None, *args, **kwargs):
+    def __init__(self, n=None, total=None, disable=False, *args, **kwargs):
+        """
+        Return a string-based progress bar given some parameters
+
+        Args:
+            n: int
+                Number of finished iterations.
+            total: int
+                The expected total number of iterations. If meaningless (None),
+                only basic progress statistics are displayed (no ETA).
+            disable: bool
+                Whether to display the bar or not.
+
+        Returns
+        -------
+        out  : Formatted meter and stats, ready to display.
+        """
         self.total = total
         self.disable = disable
-        self.n = 0
+        self.n = n
         # Ignore all extra *args and **kwargs lest you want to reinvent tqdm
 
-    def update(self, n):
+    def update(self, n = 1):
+        """
+        Manually update the progress bar, useful for streams
+        such as reading files.
+
+        E.g.:
+        >>> t = tqdm(total=filesize) # Initialise
+        >>> for current_buffer in stream:
+        ...    ...
+        ...    t.update(len(current_buffer))
+        >>> t.close()
+        
+        The last line is highly recommended, but possibly not necessary if
+        `t.update()` will be called in such a way that `filesize` will be
+        exactly reached and printed.
+
+        Args:
+            n  : int or float, optional
+                Increment to add to the internal counter of iterations
+                [default: 1]. If using float, consider specifying `{n:.3f}`
+                or similar in `bar_format`, or specifying `unit_scale`.
+        """
         if self.disable:
             return
 
@@ -38,6 +74,7 @@ class _Faketqdm(object):  # type: ignore[no-redef]
         sys.stderr.flush()
 
     def close(self):
+        """Stops showing the progressbar."""
         self.disable = True
 
     def __enter__(self):
@@ -50,7 +87,12 @@ class _Faketqdm(object):  # type: ignore[no-redef]
         sys.stderr.write('\n')
 
 try:
-    from tqdm import tqdm  # If tqdm is installed use it, otherwise use the fake wrapper
+    # If tqdm is installed use it, otherwise use the fake wrapper
+    # Specifically, we import from tqdm the best version given the
+    # environment: if we are in a CLI, we will show the traditional
+    # tqdm bar, while when we are in a Jupyter Notebook, we will show
+    # an HTML bar.
+    from tqdm.auto import tqdm  
 except ImportError:
     tqdm = _Faketqdm
 
