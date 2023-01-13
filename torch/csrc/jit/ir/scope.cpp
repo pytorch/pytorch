@@ -36,14 +36,10 @@ ScopePtr Scope::intrusive_from_this() {
   return c10::intrusive_ptr<Scope>::reclaim(this);
 }
 
-Scope::Scope() {
-  name_ = Symbol::scope("");
-}
+Scope::Scope() : name_(Symbol::scope("")) {}
 
-Scope::Scope(ScopePtr parent, Symbol name) {
-  name_ = name;
-  parent_ = std::move(parent);
-}
+Scope::Scope(ScopePtr parent, Symbol name)
+    : parent_(std::move(parent)), name_(name) {}
 
 ScopePtr Scope::push(Symbol name) {
   return c10::make_intrusive<Scope>(intrusive_from_this(), name);

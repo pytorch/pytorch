@@ -355,10 +355,10 @@ def min_cut_rematerialization_partition(
         # key in their meta dict, but that isn't always true today (see proxy_tensor.py)
         return 'tensor_meta' in x.meta or ('val' in x.meta and isinstance(x.meta['val'], torch.Tensor))
 
-    # networkx blows up on graphs with no tensor outputs.
+    # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
     # this case, send our graph over to the default partitioner.
-    if not any(is_tensor_node(x) for x in orig_fw_outputs):
+    if len(required_bw_nodes) == 0:
         return default_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
 
     for node in reversed(joint_module.graph.nodes):
