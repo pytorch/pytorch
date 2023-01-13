@@ -360,6 +360,7 @@ Specifying a positive offset::
             [0, 0, 0, 0, 0]])
 """)
 
+
 class check_sparse_tensor_invariants(object):
     """A tool to control checking sparse tensor invariants.
 
