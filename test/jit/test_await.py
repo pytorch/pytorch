@@ -5,7 +5,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.jit_utils import make_global
 from typing import List, Optional
 from torch import Tensor
-from torch.awaits import Await
+from torch._awaits import Await
 
 @torch.jit.script
 class CFX(object):

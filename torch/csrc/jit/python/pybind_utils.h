@@ -465,7 +465,7 @@ inline InferredType tryToInferType(py::handle input) {
 #endif
   }
 
-  auto await_type = py::module::import("torch.awaits").attr("Await");
+  auto await_type = py::module::import("torch._awaits").attr("Await");
   py::bool_ is_await = py::isinstance(input, await_type);
   if (py::cast<bool>(is_await)) {
     auto awptr = input.cast<std::shared_ptr<PythonAwaitWrapper>>();
