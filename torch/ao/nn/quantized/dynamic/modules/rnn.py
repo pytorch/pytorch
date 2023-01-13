@@ -730,6 +730,23 @@ class GRU(RNNBase):
     def from_float(cls, mod):
         return super(GRU, cls).from_float(mod)
 
+    @classmethod
+    def from_reference(cls, ref_mod):
+        assert hasattr(ref_mod, "weight_ih_l0_dtype"), "We are assuming weight_ih_l0 "
+        "exists in LSTM, may need to relax the assumption to support the use case"
+        qmod = cls(
+            ref_mod.input_size,
+            ref_mod.hidden_size,
+            ref_mod.num_layers,
+            ref_mod.bias,
+            ref_mod.batch_first,
+            ref_mod.dropout,
+            ref_mod.bidirectional,
+            # assuming there is layer 0, which should be OK
+            ref_mod.weight_ih_l0_dtype,
+        )
+        qmod.set_weight_bias(ref_mod.get_quantized_weight_bias_dict())
+        return qmod
 
 class RNNCellBase(torch.nn.Module):
     # _FLOAT_MODULE = nn.CellRNNBase

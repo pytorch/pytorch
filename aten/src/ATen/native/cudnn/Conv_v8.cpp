@@ -4,10 +4,6 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
-#if HAS_CUDNN_V8()
-
 #include <ATen/cudnn/cudnn-wrapper.h>
 
 #include <c10/macros/Macros.h>
@@ -787,5 +783,4 @@ void raw_cudnn_convolution_add_relu_out(
 
 }} // at::native
 
-#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
