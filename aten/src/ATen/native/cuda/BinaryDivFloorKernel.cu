@@ -14,7 +14,7 @@
 
 #include <type_traits>
 
-namespace at { namespace native {
+namespace at::native {
 namespace binary_internal {
 
 void div_floor_kernel_cuda(TensorIteratorBase& iter) {
