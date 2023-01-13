@@ -39,6 +39,8 @@ decompositions = get_decompositions(
         aten.eye,
         aten.ones_like,
         aten.zeros_like,
+        aten.zeros,
+        aten.ones,
         aten.fill,
         aten.flip,
         aten._fused_moving_avg_obs_fq_helper,
