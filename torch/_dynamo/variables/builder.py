@@ -10,8 +10,6 @@ import re
 import types
 from typing import Any, Optional, Union
 
-import numpy as np
-
 import torch
 
 from torch import SymInt
@@ -42,11 +40,13 @@ from ..utils import (
     get_fake_value,
     getfile,
     global_key_name,
+    HAS_NUMPY,
     is_namedtuple,
     is_numpy_int_type,
     is_typing,
     istensor,
     istype,
+    np,
     odict_values,
     preserve_rng_state,
     tuple_iterator,
@@ -91,7 +91,6 @@ from .tensor import (
     FakeItemVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
-    UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
 from .torch import (
@@ -114,8 +113,8 @@ class GraphArg:
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
 
-    # UnspecializedNumpyVariable and UnspecializedPythonVariable
-    # often masquerade as tensors.  We MUST NOT generate shape guard code
+    # UnspecializedPythonVariable often masquerades as a tensor.
+    # We MUST NOT generate shape guard code
     # that actually tries to access tensor properties on these values.
     # is_tensor lets us tell if this graph arg actually is a tensor
     # or not.
@@ -478,7 +477,9 @@ class VariableBuilder:
                 ),
                 "apply",
             )
-        elif isinstance(value, (int, float, np.number)):
+        elif isinstance(value, (int, float)) or (
+            HAS_NUMPY and (isinstance(value, np.number))
+        ):
             return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
@@ -683,22 +684,13 @@ class VariableBuilder:
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
             )
 
-            if isinstance(value, np.number):
-                unspec_var = wrap_fx_proxy_cls(
-                    UnspecializedNumpyVariable,
-                    tx=self.tx,
-                    proxy=proxy,
-                    example_value=wrapped_value,
-                    **options,
-                )
-            else:
-                unspec_var = wrap_fx_proxy_cls(
-                    UnspecializedPythonVariable,
-                    tx=self.tx,
-                    proxy=proxy,
-                    example_value=wrapped_value,
-                    **options,
-                )
+            unspec_var = wrap_fx_proxy_cls(
+                UnspecializedPythonVariable,
+                tx=self.tx,
+                proxy=proxy,
+                example_value=wrapped_value,
+                **options,
+            )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
                 fake_tensor_value = None
