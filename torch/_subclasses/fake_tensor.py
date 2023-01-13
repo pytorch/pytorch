@@ -635,13 +635,6 @@ class FakeTensor(torch.Tensor):
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
         assert fake_mode is not None
-
-        # if we've hit this instead of the mode, then a higher pri mode must
-        # have returned NotImplemented. Redispatching will cause an infinite
-        # loop but one of the other args may be a supported subclass
-        if hasattr(fake_mode, "tracking") and fake_mode.tracking.on_stack:
-            return NotImplemented
-
         with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
