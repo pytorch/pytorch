@@ -148,7 +148,7 @@ class DeviceMeshTest(DTensorTestBase):
         mesh_tensor_2d = torch.arange(8).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
-        self.assertEqual(hash(mesh), hash(mesh2))
+        self.assertNotEqual(hash(mesh), hash(mesh2))
         mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
@@ -197,7 +197,10 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     def test_scatter_uneven(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         my_rank = device_mesh.get_rank()
-        tensor_to_split = torch.randn(device_mesh.size() + 3, device_mesh.size() + 1)
+        tensor_to_split = torch.randn(
+            device_mesh.size() + 3, device_mesh.size() + 1,
+            device=self.device_type
+        )
 
         for shard_dim in range(tensor_to_split.ndim):
             shard_placement = Shard(shard_dim)
@@ -286,10 +289,14 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             input_size = [3, 3]
             scattered_tensor = torch.empty(input_size, device=self.device_type)
             input_size[dim] *= self.world_size
+            shard_placement = Shard(dim)
 
-            input_rs_list = (
-                torch.ones(input_size, device=self.device_type) * self.rank
-            ).tensor_split(self.world_size, dim=dim)
+            input_rs_list, _ = shard_placement._split_tensor(
+                torch.ones(input_size, device=self.device_type) * self.rank,
+                mesh.size(),
+                with_padding=True,
+                contiguous=True,
+            )
             res_num = ((0 + self.world_size - 1) * self.world_size) / 2
             mesh.reduce_scatter(scattered_tensor, input_rs_list, mesh_dim=0)
             self.assertEqual(scattered_tensor, torch.ones(3, 3) * res_num)
@@ -366,10 +373,17 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
         dim_to_subgroups = mesh.get_dim_groups()
         for dim, dim_group in enumerate(dim_to_subgroups):
+            input_size = [3, 3, 3]
             dim_group_size = get_world_size(dim_group)
-            local_rs_list = (
-                torch.ones(dim_group_size * 3, 3, device=self.device_type) * self.rank
-            ).tensor_split(dim_group_size, dim=0)
+            input_size[dim] *= dim_group_size
+            shard_placement = Shard(dim)
+
+            local_rs_list, _ = shard_placement._split_tensor(
+                torch.ones(input_size, device=self.device_type) * self.rank,
+                dim_group_size,
+                with_padding=True,
+                contiguous=True,
+            )
             scattered_tensor = torch.empty_like(
                 local_rs_list[mesh.get_coordinate_on_dim(dim)],
                 device=self.device_type,
@@ -379,7 +393,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             ]
             mesh.reduce_scatter(scattered_tensor, local_rs_list, mesh_dim=dim)
             res_num = torch.sum(torch.tensor(global_ranks))
-            self.assertEqual(scattered_tensor, torch.ones(3, 3) * res_num)
+            self.assertEqual(scattered_tensor, torch.ones(3, 3, 3) * res_num)
 
     @with_comms
     def test_all_reduce_nd(self):

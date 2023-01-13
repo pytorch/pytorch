@@ -153,7 +153,7 @@ class Interpreter:
 
     @contextmanager
     def _set_current_node(self, node):
-        with fx_traceback.append_stack_trace(node.stack_trace):
+        with fx_traceback.append_stack_trace(node.stack_trace), fx_traceback.set_current_meta(node.meta):
             yield
 
     @compatibility(is_backward_compatible=True)
@@ -170,7 +170,7 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
-        with fx_traceback.append_stack_trace(n.stack_trace):
+        with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)
             assert isinstance(kwargs, dict)
