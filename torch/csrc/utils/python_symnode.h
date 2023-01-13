@@ -44,6 +44,18 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return c10::make_intrusive<PythonSymNodeImpl>(r);
   }
 
+  c10::SymNode wrap_bool(bool num) override {
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr("wrap_bool")(num);
+    return c10::make_intrusive<PythonSymNodeImpl>(r);
+  }
+
+  c10::SymNode is_non_overlapping_and_dense(c10::ArrayRef<c10::SymNode> sizes, c10::ArrayRef<c10::SymNode> strides) override {
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr("is_non_overlapping_and_dense")(sizes, strides);
+    return c10::make_intrusive<PythonSymNodeImpl>(r);
+  }
+
   bool bool_() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("bool_")().is(py::handle(Py_True));
@@ -59,6 +71,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("is_float")().is(py::handle(Py_True));
   }
 
+  bool is_bool() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("is_bool")().is(py::handle(Py_True));
+  }
+
   int64_t guard_int(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_int")(file, line).cast<int64_t>();
@@ -67,6 +84,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   double guard_float(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_float")(file, line).cast<double>();
+  }
+
+  bool guard_bool(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("guard_bool")(file, line).cast<bool>();
   }
 
   int64_t int_() override {
