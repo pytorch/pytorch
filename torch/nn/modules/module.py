@@ -1335,7 +1335,10 @@ class Module:
 
     def register_forward_pre_hook(
         self,
-        hook: Callable[..., None],
+        hook: Union[
+            Callable[[T, Tuple[Any, ...]], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+        ],
         *,
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -1396,7 +1399,10 @@ class Module:
 
     def register_forward_hook(
         self,
-        hook: Callable[..., None],
+        hook: Union[
+            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
+            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+        ],
         *,
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -1709,7 +1715,7 @@ class Module:
             destination[extra_state_key] = self.get_extra_state()
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
-    # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
+    # back that same object. But if they pass nothing, an `OrderedDict` is created and returned.
     T_destination = TypeVar('T_destination', bound=Dict[str, Any])
 
     @overload
@@ -2082,8 +2088,8 @@ class Module:
 
             >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, param in self.named_parameters():
-            >>>    if name in ['bias']:
-            >>>        print(param.size())
+            >>>     if name in ['bias']:
+            >>>         print(param.size())
 
         """
         gen = self._named_members(
@@ -2133,8 +2139,8 @@ class Module:
 
             >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, buf in self.named_buffers():
-            >>>    if name in ['running_var']:
-            >>>        print(buf.size())
+            >>>     if name in ['running_var']:
+            >>>         print(buf.size())
 
         """
         gen = self._named_members(

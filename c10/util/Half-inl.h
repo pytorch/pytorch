@@ -12,10 +12,10 @@
 #include <hip/hip_fp16.h>
 #endif
 
-#if defined(SYCL_LANGUAGE_VERSION)
-#include <sycl/sycl.hpp> // for SYCL 2020
-#elif defined(CL_SYCL_LANGUAGE_VERSION)
+#if defined(CL_SYCL_LANGUAGE_VERSION)
 #include <CL/sycl.hpp> // for SYCL 1.2.1
+#elif defined(SYCL_LANGUAGE_VERSION)
+#include <sycl/sycl.hpp> // for SYCL 2020
 #endif
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -27,14 +27,16 @@ namespace c10 {
 
 /// Constructors
 
-inline C10_HOST_DEVICE Half::Half(float value) {
+inline C10_HOST_DEVICE Half::Half(float value)
+    :
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-  x = __half_as_short(__float2half(value));
+      x(__half_as_short(__float2half(value)))
 #elif defined(__SYCL_DEVICE_ONLY__)
-  x = sycl::bit_cast<uint16_t>(sycl::half(value));
+      x(sycl::bit_cast<uint16_t>(sycl::half(value)))
 #else
-  x = detail::fp16_ieee_from_fp32_value(value);
+      x(detail::fp16_ieee_from_fp32_value(value))
 #endif
+{
 }
 
 /// Implicit conversions

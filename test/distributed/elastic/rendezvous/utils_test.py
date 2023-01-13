@@ -12,6 +12,7 @@ import socket
 from datetime import timedelta
 from typing import List
 from unittest import TestCase
+from unittest.mock import patch
 
 from torch.distributed.elastic.rendezvous.utils import (
     _PeriodicTimer,
@@ -253,6 +254,26 @@ class UtilsTest(TestCase):
                 time2 = time.monotonic()
 
                 self.assertGreaterEqual(time2 - time1, 0.2)
+
+
+    @patch('socket.getaddrinfo', side_effect=[
+        [(None, None, 0, 'a_host', ('1.2.3.4', 0))],
+        [(None, None, 0, 'a_different_host', ('1.2.3.4', 0))]])
+    def test_matches_machine_hostname_returns_true_if_ip_address_match_between_hosts(
+        self,
+        _0,
+    ) -> None:
+        self.assertTrue(_matches_machine_hostname("a_host"))
+
+
+    @patch('socket.getaddrinfo', side_effect=[
+        [(None, None, 0, 'a_host', ('1.2.3.4', 0))],
+        [(None, None, 0, 'another_host_with_different_ip', ('1.2.3.5', 0))]])
+    def test_matches_machine_hostname_returns_false_if_ip_address_not_match_between_hosts(
+        self,
+        _0,
+    ) -> None:
+        self.assertFalse(_matches_machine_hostname("a_host"))
 
 
 class PeriodicTimerTest(TestCase):

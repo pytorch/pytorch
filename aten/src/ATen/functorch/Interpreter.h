@@ -155,17 +155,31 @@ struct Interpreter {
     return *savedLocalDispatchKeySet_;
   }
 
+  // An Interpreter is alive if we are currently inside the ongoing transform
+  // for the interpreter. For example, vmap(f)(x); inside of f, the vmap's
+  // corresponding Interpreter is alive, even when it is not on the DynamicLayerStack.
+  bool is_alive() const {
+    return *is_alive_;
+  }
+  const std::shared_ptr<bool>& is_alive_ptr() const {
+    return is_alive_;
+  }
+  void set_is_alive(bool alive) {
+    *is_alive_ = alive;
+  }
+
   // Please don't use this
   explicit Interpreter() = default;
 
  private:
   explicit Interpreter(TransformType type, int64_t level, InterpreterMeta meta):
-    type_(type), level_(level), meta_(meta) {}
+    type_(type), level_(level), is_alive_(std::make_shared<bool>(false)), meta_(meta) {}
 
   // fields
   TransformType type_;
   int64_t level_;
   optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
+  std::shared_ptr<bool> is_alive_;
   InterpreterMeta meta_;
 };
 
