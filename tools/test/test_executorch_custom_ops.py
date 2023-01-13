@@ -40,7 +40,7 @@ class TestComputeNativeFunctionStub(expecttest.TestCase):
     def test_function_schema_generates_correct_kernel_tensor_out(self) -> None:
         obj = {"func": "custom::foo.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)"}
         expected = """
-at::Tensor & wrapper_out_foo_out(const at::Tensor & self, at::Tensor & out) {
+at::Tensor & wrapper_CPU_out_foo_out(const at::Tensor & self, at::Tensor & out) {
     return out;
 }
     """
@@ -49,7 +49,7 @@ at::Tensor & wrapper_out_foo_out(const at::Tensor & self, at::Tensor & out) {
     def test_function_schema_generates_correct_kernel_no_out(self) -> None:
         obj = {"func": "custom::foo.Tensor(Tensor self) -> Tensor"}
         expected = """
-at::Tensor wrapper_Tensor_foo(const at::Tensor & self) {
+at::Tensor wrapper_CPU_Tensor_foo(const at::Tensor & self) {
     return self;
 }
     """
@@ -58,7 +58,7 @@ at::Tensor wrapper_Tensor_foo(const at::Tensor & self) {
     def test_function_schema_generates_correct_kernel_no_return(self) -> None:
         obj = {"func": "custom::foo(Tensor self, *, Tensor(a!)[] out) -> ()"}
         expected = f"""
-void wrapper__foo_out(const at::Tensor & self, at::TensorList out) {{
+void wrapper_CPU__foo_out(const at::Tensor & self, at::TensorList out) {{
 {SPACES}
 }}
     """
