@@ -102,7 +102,7 @@ SymBool SymInt::sym_eq(const SymInt& sci) const {
   return res[0]->eq(res[1]);
 }
 
-SymBool SymInt::neq(const SymInt& sci) const {
+SymBool SymInt::sym_neq(const SymInt& sci) const {
   return !sym_eq(sci);
 }
 
@@ -114,7 +114,7 @@ SymBool SymInt::sym_lt(const SymInt& sci) const {
   return res[0]->lt(res[1]);
 }
 
-SymBool SymInt::operatorle(const SymInt& sci) const {
+SymBool SymInt::sym_le(const SymInt& sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ <= sci.data_;
   }
@@ -130,7 +130,7 @@ SymBool SymInt::sym_gt(const SymInt& sci) const {
   return res[0]->gt(res[1]);
 }
 
-SymBool SymInt::ge(const SymInt& sci) const {
+SymBool SymInt::sym_ge(const SymInt& sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ >= sci.data_;
   }

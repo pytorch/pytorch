@@ -234,12 +234,12 @@ bool TensorImpl::compute_contiguous(identity<bool>) const {
     return false;
   }
   IntArrayRef sizes = sizes_and_strides_.sizes_arrayref();
-  IntArrayRef strides = sizes_and_strides_.strides_arrayref() int64_t numel =
-      numel_;
+  IntArrayRef strides = sizes_and_strides_.strides_arrayref();
+  int64_t numel = numel_;
   bool is_contiguous = true;
   if (numel == 0)
     return is_contiguous;
-  T z = 1;
+  int64_t z = 1;
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto& size_d = sizes[d];
@@ -268,7 +268,7 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto& size_d = sizes[d];
-    is_contiguous &= size_d.sym_eq(1) | strides[d].sym_eq(z);
+    is_contiguous = is_contiguous & (size_d.sym_eq(1) | strides[d].sym_eq(z));
     z *= size_d;
   }
   return numel.sym_eq(0) | is_contiguous;
@@ -281,8 +281,8 @@ bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
   IntArrayRef sizes = sizes_and_strides_.sizes_arrayref();
-  IntArrayRef strides =
-      sizes_and_strides_.strides_arrayref() switch (sizes.size()) {
+  IntArrayRef strides = sizes_and_strides_.strides_arrayref();
+  switch (sizes.size()) {
     case 4: {
       int64_t expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
@@ -318,7 +318,7 @@ SymBool TensorImpl::compute_channels_last_contiguous_2d(
       SymBool r = true;
       for (auto& d : {1, 3, 2, 0}) {
         const auto& size_d = sizes[d];
-        r &= size_d == 1 | strides[d] == expected;
+        r = r & (size_d.sym_eq(1) | strides[d].sym_eq(expected));
         expected *= size_d;
       }
       return r;
@@ -339,8 +339,8 @@ bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
   IntArrayRef sizes = sizes_and_strides_.sizes_arrayref();
-  IntArrayRef strides =
-      sizes_and_strides_.strides_arrayref() switch (sizes.size()) {
+  IntArrayRef strides = sizes_and_strides_.strides_arrayref();
+  switch (sizes.size()) {
     case 5: {
       int64_t expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
@@ -363,7 +363,7 @@ bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
   }
 }
 
-SymBool TensorImpl::compute_channels_last_contiguous_3d(identity<SymBool>) {
+SymBool TensorImpl::compute_channels_last_contiguous_3d(identity<SymBool>) const {
   SymIntArrayRef sizes = extra_meta_->sizes_;
   SymIntArrayRef strides = extra_meta_->strides_;
   switch (sizes.size()) {
@@ -372,7 +372,7 @@ SymBool TensorImpl::compute_channels_last_contiguous_3d(identity<SymBool>) {
       SymBool r = true;
       for (auto& d : {1, 4, 3, 2, 0}) {
         const auto& size_d = sizes[d];
-        r &= size_d == 1 | strides[d] == expected;
+        r = r & (size_d.sym_eq(1) | strides[d].sym_eq(expected));
         expected *= size_d;
       }
       return r;
@@ -388,13 +388,13 @@ SymBool TensorImpl::compute_channels_last_contiguous_3d(identity<SymBool>) {
 
 bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
   if (is_sparse()) {
-    return bool_is_non_overlapping_and_dense(false);
+    return false;
   }
   IntArrayRef sizes = sizes_and_strides_.sizes_arrayref();
-  IntArrayRef strides = sizes_and_strides_.strides_arrayref() int64_t dim =
-      sizes.size();
+  IntArrayRef strides = sizes_and_strides_.strides_arrayref();
+  int64_t dim = sizes.size();
   if (dim == 1) {
-    return bool_is_non_overlapping_and_dense(sizes[0] < 2 || strides[0] == 1);
+    return sizes[0] < 2 || strides[0] == 1;
   }
   SmallVector<int64_t, 5> perm;
   perm.resize(dim);
@@ -457,10 +457,10 @@ SymBool TensorImpl::compute_non_overlapping_and_dense(identity<SymBool>) const {
   size_nodes.reserve(sizes.size());
   stride_nodes.reserve(strides.size());
   for (const auto& s : sizes) {
-    size_nodes.emplace_back(s.is_symbolic() ? s : base->wrap_int(s.as_int_unchecked()));
+    size_nodes.emplace_back(s.is_symbolic() ? s.toSymNodeImpl() : base->wrap_int(s.as_int_unchecked()));
   }
   for (const auto& s : strides) {
-    stride_nodes.emplace_back(s.is_symbolic() ? s : base->wrap_int(s.as_int_unchecked()));
+    stride_nodes.emplace_back(s.is_symbolic() ? s.toSymNodeImpl() : base->wrap_int(s.as_int_unchecked()));
   }
   // Do the call
   return SymBool(base->is_non_overlapping_and_dense(size_nodes, stride_nodes));
