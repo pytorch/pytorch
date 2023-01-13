@@ -218,6 +218,7 @@ DYNAMIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[nn.Module]] = {
     nnqr.LSTMCell: nnqd.LSTMCell,
     nnqr.RNNCell: nnqd.RNNCell,
     nnqr.LSTM: nnqd.LSTM,
+    nnqr.GRU: nnqd.GRU,
 }
 
 # Mapping from reference module class to the replacement weight only quantized module class for lowering
