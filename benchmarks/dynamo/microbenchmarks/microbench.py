@@ -139,7 +139,7 @@ def main():
     if args.verbose:
         torch._inductor.config.debug = True
 
-    torch._inductor.config.triton.autotune_pointwise = True
+    torch._inductor.config.triton.autotune = True
 
     rows = []
     for model in (MicroBenchmarks.sum,):

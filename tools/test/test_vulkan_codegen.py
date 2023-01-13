@@ -2,11 +2,11 @@ import os
 import tempfile
 import unittest
 
-from tools.gen_vulkan_spv import VulkanShaderGenerator
+from tools.gen_vulkan_glsl import GLSLGenerator
 from yaml.constructor import ConstructorError
 
 
-class TestVulkanShaderCodegen(unittest.TestCase):
+class TestGLSLCodegen(unittest.TestCase):
     def test_assert_on_duplicate_key_yaml(self) -> None:
         yaml_with_duplicate_keys = """
 conv2d_pw:
@@ -37,7 +37,7 @@ conv2d_pw:
       TILE_SIZE_Y: 4
 """
 
-        generator = VulkanShaderGenerator()  # type: ignore[no-untyped-call]
+        generator = GLSLGenerator()  # type: ignore[no-untyped-call]
         with tempfile.NamedTemporaryFile(mode="w") as fp:
             fp.write(yaml_with_duplicate_keys)
             fp.flush()
@@ -57,7 +57,7 @@ conv2d_pw:
       TILE_SIZE_Z: 2
 """
 
-        generator = VulkanShaderGenerator()  # type: ignore[no-untyped-call]
+        generator = GLSLGenerator()  # type: ignore[no-untyped-call]
         with tempfile.NamedTemporaryFile(mode="w") as fp:
             fp.write(yaml_with_key_mismatch)
             fp.flush()
@@ -77,7 +77,7 @@ conv2d_pw:
 x = $TILE_SIZE_X + $TILE_SIZE_Y
 """
 
-        generator = VulkanShaderGenerator()  # type: ignore[no-untyped-call]
+        generator = GLSLGenerator()  # type: ignore[no-untyped-call]
         with tempfile.NamedTemporaryFile(mode="w") as fp:
             fp.write(yaml_with_key_mismatch)
             fp.flush()

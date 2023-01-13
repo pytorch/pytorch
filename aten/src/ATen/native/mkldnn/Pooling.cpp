@@ -671,7 +671,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
       /*padding*/ {0, 0},
       /*dilation*/{1, 1},
       false,
-      /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
+      /*algo*/ ideep::algorithm::pooling_avg);
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_backward_out(

@@ -8,15 +8,6 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 #endif
 
-#if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
-#if defined(CL_SYCL_LANGUAGE_VERSION)
-#include <CL/sycl.hpp> // for SYCL 1.2.1
-#else
-#include <sycl/sycl.hpp> // for SYCL 2020
-#endif
-#include <ext/oneapi/bfloat16.hpp>
-#endif
-
 namespace c10 {
 
 /// Constructors
@@ -25,9 +16,6 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
 #if defined(__CUDACC__) && !defined(USE_ROCM) && defined(__CUDA_ARCH__) && \
     __CUDA_ARCH__ >= 800
       x(__bfloat16_as_ushort(__float2bfloat16(value)))
-#elif defined(__SYCL_DEVICE_ONLY__) && \
-    defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
-      x(sycl::bit_cast<uint16_t>(sycl::ext::oneapi::bfloat16(value)))
 #else
       // RNE by default
       x(detail::round_to_nearest_even(value))
@@ -39,9 +27,6 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
 inline C10_HOST_DEVICE BFloat16::operator float() const {
 #if defined(__CUDACC__) && !defined(USE_ROCM)
   return __bfloat162float(*reinterpret_cast<const __nv_bfloat16*>(&x));
-#elif defined(__SYCL_DEVICE_ONLY__) && \
-    defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
-  return float(*reinterpret_cast<const sycl::ext::oneapi::bfloat16*>(&x));
 #else
   return detail::f32_from_bits(x);
 #endif
@@ -53,16 +38,6 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(const __nv_bfloat16& value) {
 }
 inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
   return *reinterpret_cast<const __nv_bfloat16*>(&x);
-}
-#endif
-
-#if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
-inline C10_HOST_DEVICE BFloat16::BFloat16(
-    const sycl::ext::oneapi::bfloat16& value) {
-  x = *reinterpret_cast<const unsigned short*>(&value);
-}
-inline C10_HOST_DEVICE BFloat16::operator sycl::ext::oneapi::bfloat16() const {
-  return *reinterpret_cast<const sycl::ext::oneapi::bfloat16*>(&x);
 }
 #endif
 

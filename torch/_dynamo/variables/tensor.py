@@ -316,7 +316,20 @@ class TensorVariable(VariableTracker):
             else:
                 unimplemented(f"Tensor.{name}")
         elif name == "__len__":
-            return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
+            if self.size:
+                assert not config.dynamic_shapes
+                return ConstantVariable(self.size[0], **options)
+            else:
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        len,
+                        (self.as_proxy(),),
+                        {},
+                    ),
+                    **options,
+                )
         elif name == "__setitem__":
             tx.output.guards.update(options["guards"])
             tx.output.create_proxy(
