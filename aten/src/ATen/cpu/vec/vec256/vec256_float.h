@@ -196,6 +196,9 @@ public:
   Vectorized<float> exp() const {
     return Vectorized<float>(Sleef_expf8_u10(values));
   }
+  Vectorized<float> exp2() const {
+    return Vectorized<float>(Sleef_exp2f8_u10(values));
+  }
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f8_u10(values));
   }

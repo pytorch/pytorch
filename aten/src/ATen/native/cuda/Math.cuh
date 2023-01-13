@@ -427,9 +427,19 @@ const auto polygamma_string = zeta_string + jiterator_stringify(
 ); // polygamma_string
 
 const auto exp2_string = jiterator_stringify(
+  namespace std { template<class _Tp> class complex; }
+
   template <typename T>
   T exp2_kernel(T a) {
     return exp2(a);
+  }
+
+  template <typename T>
+  std::complex<T> exp2_kernel(std::complex<T> x) {
+    // There is no std::exp2 overload for complex, so instead
+    // use the identity 2^x = e^(ln(2) * x)
+    const auto ln_2 = static_cast<T>(0.693147180559945309417232121458176);
+    return exp(ln_2 * x);
   }
 ); // exp2_string
 
