@@ -3805,6 +3805,10 @@
   dispatch:
     CUDA: _cusparselt_linear
 
+- func: _cusparselt_create_meta(Tensor mask) -> Tensor
+  dispatch:
+    CPU: _cusparselt_create_meta
+
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 

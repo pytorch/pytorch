@@ -3,49 +3,53 @@ The following source file implements a sparse linear operator using cusparseLt
 */
 
 #include <ATen/Functions.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Half.h>
-#include <torch/custom_class.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <c10/core/ScalarType.h>
+#include <c10/util/Half.h>
+#include <torch/custom_class.h>
 #include <iostream>
 
 #include <iostream>
 
+#include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm_sparse.h>
-#include <cutlass/util/host_tensor.h>
-#include <cutlass/util/reference/host/gemm.h>
 #include <cutlass/util/host_reorder.h>
+#include <cutlass/util/host_tensor.h>
 #include <cutlass/util/host_uncompress.h>
+#include <cutlass/util/reference/host/gemm.h>
 #include <cutlass/util/reference/host/tensor_compare.h>
 #include <cutlass/util/reference/host/tensor_copy.h>
 #include <cutlass/util/reference/host/tensor_fill.h>
 #include <cutlass/util/tensor_view_io.h>
-#include <cuda_runtime.h>
 
-#include <typeinfo>
 #include <limits>
+#include <typeinfo>
 
-#define CUTLASS_CHECK(status)                                                                    \
-  {                                                                                              \
-    cutlass::Status error = status;                                                              \
-    if (error != cutlass::Status::kSuccess) {                                                    \
-      std::cerr << "Got cutlass error: " << cutlassGetStatusString(error) << " at: " << __LINE__ \
-                << std::endl;                                                                    \
-      exit(EXIT_FAILURE);                                                                        \
-    }                                                                                            \
+#define CUTLASS_CHECK(status)                                             \
+  {                                                                       \
+    cutlass::Status error = status;                                       \
+    if (error != cutlass::Status::kSuccess) {                             \
+      std::cerr << "Got cutlass error: " << cutlassGetStatusString(error) \
+                << " at: " << __LINE__ << std::endl;                      \
+      exit(EXIT_FAILURE);                                                 \
+    }                                                                     \
   }
 
-// The code section below describes datatype for input, output matrices and computation between
-// elements in input matrices, which will all be used as template parameters for cutlass::gemm::device::SparseGemm
-using ElementInputA = cutlass::half_t;             // <- data type of elements in input matrix A
-using ElementInputB = cutlass::half_t;             // <- data type of elements in input matrix B
-using ElementOutput = cutlass::half_t;                      // <- data type of elements in output matrix D
+// The code section below describes datatype for input, output matrices and
+// computation between elements in input matrices, which will all be used as
+// template parameters for cutlass::gemm::device::SparseGemm
+using ElementInputA =
+    cutlass::half_t; // <- data type of elements in input matrix A
+using ElementInputB =
+    cutlass::half_t; // <- data type of elements in input matrix B
+using ElementOutput =
+    cutlass::half_t; // <- data type of elements in output matrix D
 
-// The code section below describes matrix layout of input and output matrices. Row Major for
-// Matrix A, Column Major for Matrix B and Row Major for Matrix C
+// The code section below describes matrix layout of input and output matrices.
+// Row Major for Matrix A, Column Major for Matrix B and Row Major for Matrix C
 using LayoutInputA = cutlass::layout::RowMajor;
 using LayoutInputB = cutlass::layout::RowMajor;
 using LayoutOutput = cutlass::layout::RowMajor;
@@ -71,7 +75,8 @@ using Gemm = cutlass::gemm::device::SparseGemm<
     cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>,
     3>;
 
-// Data type and layout of meta data matrix E can be inferred from template Gemm.
+// Data type and layout of meta data matrix E can be inferred from template
+// Gemm.
 using ElementInputE = typename Gemm::ElementE;
 using LayoutInputE = cutlass::layout::RowMajor;
 using ReorderedLayoutInputE = typename Gemm::LayoutE;
@@ -120,14 +125,35 @@ int run(
   // Create a tuple of problem size for matrix multiplication
   cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
 
-  TORCH_CHECK(meta.size(0) == problem_size.m(), "meta.size(0) expected to be ", problem_size.m(), " but got ", meta.size(0));
-  TORCH_CHECK(meta.size(1) == (problem_size.k() / kSparse / kElementsPerElementE), "meta.size(0) expected to be ", (problem_size.k() / kSparse / kElementsPerElementE), " but got ", meta.size(0));
-  TORCH_CHECK(meta.dtype() == at::kShort, "Expected meta dtype to be int16, but got ", meta.dtype());
+  TORCH_CHECK(
+      meta.size(0) == problem_size.m(),
+      "meta.size(0) expected to be ",
+      problem_size.m(),
+      " but got ",
+      meta.size(0));
+  TORCH_CHECK(
+      meta.size(1) == (problem_size.k() / kSparse / kElementsPerElementE),
+      "meta.size(0) expected to be ",
+      (problem_size.k() / kSparse / kElementsPerElementE),
+      " but got ",
+      meta.size(0));
+  TORCH_CHECK(
+      meta.dtype() == at::kShort,
+      "Expected meta dtype to be int16, but got ",
+      meta.dtype());
 
-  TORCH_CHECK(tensor_a.device() == tensor_b.device(), "Check 0: Expected all Tensors to live on the GPU.");
-  TORCH_CHECK(tensor_b.device() == tensor_c.device(), "Check 1: Expected all Tensors to live on the GPU.");
-  TORCH_CHECK(tensor_c.device() == tensor_d.device(), "Check 2: Expected all Tensors to live on the GPU.");
-  TORCH_CHECK(tensor_d.device() == meta.device(),     "Check 3: Expected all Tensors to live on the GPU.");
+  TORCH_CHECK(
+      tensor_a.device() == tensor_b.device(),
+      "Check 0: Expected all Tensors to live on the GPU.");
+  TORCH_CHECK(
+      tensor_b.device() == tensor_c.device(),
+      "Check 1: Expected all Tensors to live on the GPU.");
+  TORCH_CHECK(
+      tensor_c.device() == tensor_d.device(),
+      "Check 2: Expected all Tensors to live on the GPU.");
+  TORCH_CHECK(
+      tensor_d.device() == meta.device(),
+      "Check 3: Expected all Tensors to live on the GPU.");
 
   // TODO
   // Try various valid 2:4 meta configurations
@@ -140,7 +166,7 @@ int run(
 
   // Initialize alpha and beta for dot product computation
   float alpha = 1;
-  float beta  = 0;
+  float beta = 0;
 
   LayoutInputA layout_a(tensor_a.stride(0));
   LayoutInputB layout_b(tensor_b.stride(0));
@@ -149,25 +175,32 @@ int run(
 
   // Split K dimension into 1 partitions
   int split_k_slices = 1;
-  auto tensor_a_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutInputA>((cutlass::half_t*)tensor_a.data_ptr<at::Half>(), layout_a);
-  auto tensor_b_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutInputB>((cutlass::half_t*)tensor_b.data_ptr<at::Half>(), layout_b);
-  auto tensor_c_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutOutput>((cutlass::half_t*)tensor_c.data_ptr<at::Half>(), layout_c);
-  auto tensor_d_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutOutput>((cutlass::half_t*)tensor_d.data_ptr<at::Half>(), layout_d);
+  auto tensor_a_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutInputA>(
+      (cutlass::half_t*)tensor_a.data_ptr<at::Half>(), layout_a);
+  auto tensor_b_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutInputB>(
+      (cutlass::half_t*)tensor_b.data_ptr<at::Half>(), layout_b);
+  auto tensor_c_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutOutput>(
+      (cutlass::half_t*)tensor_c.data_ptr<at::Half>(), layout_c);
+  auto tensor_d_device_ref = cutlass::TensorRef<cutlass::half_t, LayoutOutput>(
+      (cutlass::half_t*)tensor_d.data_ptr<at::Half>(), layout_d);
 
   ReorderedLayoutInputE layout_e;
-  auto tensor_e_reordered_pt_device_ref = cutlass::TensorRef<uint16_t, ReorderedLayoutInputE>((uint16_t*)meta.data_ptr<int16_t>(), layout_e);
+  auto tensor_e_reordered_pt_device_ref =
+      cutlass::TensorRef<uint16_t, ReorderedLayoutInputE>(
+          (uint16_t*)meta.data_ptr<int16_t>(), layout_e);
 
-  // Create a tuple of gemm kernel arguments. This is later passed as arguments to launch
-  // instantiated CUTLASS kernel
-  typename Gemm::Arguments arguments{problem_size,  // <- problem size of matrix multiplication
-                                     tensor_a_device_ref,  // <- reference to matrix A on device
-                                     tensor_b_device_ref,  // <- reference to matrix B on device
-                                     tensor_c_device_ref,  // <- reference to matrix C on device
-                                     tensor_d_device_ref,  // <- reference to matrix D on device
-                                     // tensor_e_reordered.device_ref(),  // <- reference to matrix E on device
-                                     tensor_e_reordered_pt_device_ref,  // <- reference to matrix E on device
-                                     {alpha, beta},          // <- tuple of alpha and beta
-                                     split_k_slices};        // <- k-dimension split factor
+  // Create a tuple of gemm kernel arguments. This is later passed as arguments
+  // to launch instantiated CUTLASS kernel
+  typename Gemm::Arguments arguments{
+      problem_size, // <- problem size of matrix multiplication
+      tensor_a_device_ref, // <- reference to matrix A on device
+      tensor_b_device_ref, // <- reference to matrix B on device
+      tensor_c_device_ref, // <- reference to matrix C on device
+      tensor_d_device_ref, // <- reference to matrix D on device
+      // tensor_e_reordered.device_ref(),  // <- reference to matrix E on device
+      tensor_e_reordered_pt_device_ref, // <- reference to matrix E on device
+      {alpha, beta}, // <- tuple of alpha and beta
+      split_k_slices}; // <- k-dimension split factor
 
   Gemm gemm_op;
 
@@ -195,11 +228,88 @@ namespace at {
 namespace native {
 
 // TODO: Pull back in device and cuda version constraints.
-Tensor _cusparselt_linear(const Tensor& sparse, const Tensor& dense, const Tensor& meta) {
+Tensor _cusparselt_linear(
+    const Tensor& sparse,
+    const Tensor& dense,
+    const Tensor& meta) {
   auto result = sparse.new_empty({sparse.size(0), dense.size(1)}); //.fill_(1);
   run(sparse, dense, result, result, meta);
   return result;
 }
 
+uint16_t _mask_to_meta(bool pos0, bool pos1, bool pos2, bool pos3) {
+  auto pos_tuple = std::make_tuple(pos0, pos1, pos2, pos3);
+  // NOTE:
+  // See
+  // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-sparse-matrix-storage
+  // There are only 6 valid configurations (4 choose 2) and for each there is a
+  // special number.
+  if (pos_tuple == std::make_tuple(1, 1, 0, 0)) {
+    return 4; // 0100
+  }
+  if (pos_tuple == std::make_tuple(1, 0, 1, 0)) {
+    return 8; // 1000
+  }
+  if (pos_tuple == std::make_tuple(1, 0, 0, 1)) {
+    return 9; // 1001
+  }
+  if (pos_tuple == std::make_tuple(0, 1, 1, 0)) {
+    return 12; // 1100
+  }
+  if (pos_tuple == std::make_tuple(0, 1, 0, 1)) {
+    return 13; // 1101
+  }
+  if (pos_tuple == std::make_tuple(0, 0, 1, 1)) {
+    return 14; // 1110
+  }
+  TORCH_CHECK(
+      false,
+      "Unsupported mask configuration: ",
+      pos0,
+      pos1,
+      pos2,
+      pos3,
+      ". Please follow 2 by 4 pattern.");
+  return 0;
 }
+
+Tensor _cusparselt_create_meta(const Tensor& mask) {
+  const int64_t length_m = mask.size(0);
+  const int64_t length_k = mask.size(1);
+  TORCH_CHECK(
+      length_k % 16 == 0, "Expected size(1) of mask to be divisible by 16.");
+  TORCH_CHECK(mask.is_contiguous(), "Expected mask to be contiguous.");
+  TORCH_CHECK(mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
+  auto options = mask.options();
+  options = options.dtype(at::kShort);
+  auto result = at::empty({length_m, length_k / 16}, options);
+  const bool* mask_ptr = mask.data_ptr<bool>();
+  int16_t* result_ptr = result.data_ptr<int16_t>();
+  for (int64_t i = 0; i < length_m; i++) {
+    for (int64_t j = 0; j < length_k; j += 16) {
+      result_ptr[i * (length_k / 16) + (j / 16)] = 0;
+      uint16_t result_val = 0;
+      for (int64_t k = 3; k >= 0; k--) {
+        bool pos0 = mask_ptr[i * length_k + j + k * 4];
+        bool pos1 = mask_ptr[i * length_k + j + k * 4 + 1];
+        bool pos2 = mask_ptr[i * length_k + j + k * 4 + 2];
+        bool pos3 = mask_ptr[i * length_k + j + k * 4 + 3];
+        // std::cout << "i: " << i << " j: " << j << " value: ";
+        // std::cout << pos0 << ", ";
+        // std::cout << pos1 << ", ";
+        // std::cout << pos2 << ", ";
+        // std::cout << pos3;
+        uint16_t meta_val = _mask_to_meta(pos0, pos1, pos2, pos3);
+        // std::cout << " Want: " << (meta_val << (4 * k)) << std::endl;
+        // std::cout << std::endl;
+        result_val += (meta_val << (4 * k));
+      }
+      result_ptr[i * (length_k / 16) + (j / 16)] = result_val;
+    }
+  }
+
+  return result;
 }
+
+} // namespace native
+} // namespace at
