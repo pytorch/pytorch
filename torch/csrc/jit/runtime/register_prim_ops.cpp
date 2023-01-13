@@ -415,16 +415,16 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         TORCH_SELECTIVE_SCHEMA("aten::sym_size(Tensor self) -> SymInt[]"),
         sym_size,
         aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA(
-            "aten::sym_size.int(Tensor self, int dim) -> SymInt"),
-        sym_size_int,
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA(
-            "aten::sym_stride.int(Tensor self, int dim) -> SymInt"),
-        sym_stride_int,
-        aliasAnalysisFromSchema()),
+    // OperatorGeneratorArgs(
+    //     TORCH_SELECTIVE_SCHEMA(
+    //         "aten::sym_size.int(Tensor self, int dim) -> SymInt"),
+    //     sym_size_int,
+    //     aliasAnalysisFromSchema()),
+    // OperatorGeneratorArgs(
+    //     TORCH_SELECTIVE_SCHEMA(
+    //         "aten::sym_stride.int(Tensor self, int dim) -> SymInt"),
+    //     sym_stride_int,
+    //     aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::stride(Tensor self) -> int[]"),
         [](Stack& stack) {
@@ -432,15 +432,15 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           push(stack, arg.strides());
         },
         aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::sym_numel(Tensor self) -> SymInt"),
-        sym_numel,
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA(
-            "aten::sym_storage_offset(Tensor self) -> SymInt"),
-        sym_storage_offset,
-        aliasAnalysisFromSchema()),
+    // OperatorGeneratorArgs(
+    // //     TORCH_SELECTIVE_SCHEMA("aten::sym_numel(Tensor self) -> SymInt"),
+    // //     sym_numel,
+    // //     aliasAnalysisFromSchema()),
+    // // OperatorGeneratorArgs(
+    // //     TORCH_SELECTIVE_SCHEMA(
+    // //         "aten::sym_storage_offset(Tensor self) -> SymInt"),
+    // //     sym_storage_offset,
+    // //     aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::sym_stride(Tensor self) -> SymInt[]"),
         sym_stride,

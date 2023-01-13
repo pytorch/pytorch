@@ -5036,7 +5036,7 @@
   variants: function
   device_check: NoCheck
   device_guard: False
-  # tags: canonical   # I am not sure about how this op is used
+  tags: canonical
   manual_cpp_binding: True
 
 - func: slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
