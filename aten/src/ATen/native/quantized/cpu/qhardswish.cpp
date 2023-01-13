@@ -32,9 +32,6 @@ std::vector<DTYPE> create_hswish_lookup_table(
   DTYPE dtype_min = std::numeric_limits<DTYPE>::min();
   DTYPE dtype_max = std::numeric_limits<DTYPE>::max();
 
-  static_assert(
-      std::is_same<DTYPE, int8_t>() || std::is_same<DTYPE, uint8_t>());
-
   std::vector<DTYPE> lookup_table(256, 0);
   const float scaled_min = (float)(int32_t)dtype_min;
   const float scaled_max = (float)(int32_t)dtype_max;
@@ -81,6 +78,11 @@ void hardswish_int8(const Tensor& qx, Tensor& qy) {
   const auto i_scale = qx.q_scale();
   const auto o_zero_point = qy.q_zero_point();
   const auto o_scale = qy.q_scale();
+
+  static_assert(
+      std::is_same<typename DTYPE::underlying, int8_t>() ||
+      std::is_same<typename DTYPE::underlying, uint8_t>());
+
   std::vector<typename DTYPE::underlying> lookup_table =
       create_hswish_lookup_table<typename DTYPE::underlying>(
           i_zero_point, i_scale, o_zero_point, o_scale);
@@ -126,5 +128,5 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
       TORCH_FN(quantized_hardswish));
 }
 
-}
-} // namespace at::native
+} // namespace native
+} // namespace at
