@@ -3,7 +3,7 @@ import argparse
 
 import numpy as np
 import onnx
-import onnxruntime
+import onnxruntime  # type: ignore[import]
 import torch
 import transformers  # type: ignore[import]
 from torch import _dynamo as torchdynamo
@@ -13,7 +13,9 @@ from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
 try:
     from onnxruntime.capi import _pybind_state as ORTC  # type: ignore[import]
-    from onnxruntime.training.torchdynamo.ort_backend import _get_onnx_devices  # type: ignore[import]
+    from onnxruntime.training.torchdynamo.ort_backend import (  # type: ignore[import]
+        _get_onnx_devices,
+    )
 
     HAS_ORT_TRAINING = True
 except ImportError:

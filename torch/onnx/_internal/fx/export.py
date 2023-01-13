@@ -2,7 +2,7 @@ import copy
 import inspect
 import itertools
 import operator
-from typing import Callable, Dict, Tuple, Union, Optional
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import onnx
 
