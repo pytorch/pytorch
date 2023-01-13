@@ -6,12 +6,13 @@ from torch._dynamo.utils import same
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.distributed.distributed_c10d import _get_default_group, register_process_group
+from torch._C._distributed_c10d import ReduceOp
 
 def matmul_cat_col(a, b, c, d, e, f, *, all_reduce):
     x = torch.matmul(a, b)
     y = torch.matmul(c, d)
     z = torch.cat((x, y))
-    all_reduce(z)
+    all_reduce(z, reduce_op="sum")
     g = torch.matmul(e, f)
     out = torch.add(z, g.repeat(2, 1))
     return (out, )
@@ -20,8 +21,12 @@ def compile(func, example_inputs):
     graph = make_fx(func)(*example_inputs)
     return inductor_compile_fx(graph, example_inputs)
 
-def eager_all_reduce(x, group_id):
-    return dist.all_reduce(x, async_op=False, group=group_id)
+def eager_all_reduce(x, group_id, reduce_op):
+    op = {
+        "sum": ReduceOp.SUM
+    }
+    assert reduce_op in op, f"add support for {reduce_op}"
+    return dist.all_reduce(x, async_op=False, group=group_id, op=op[reduce_op])
 
 if __name__ == '__main__':
     os.environ["RANK"] = os.getenv("RANK", "0")
@@ -32,13 +37,13 @@ if __name__ == '__main__':
     world_size = int(os.getenv("WORLD_SIZE"))
     torch.cuda.set_device(rank)
     dist.init_process_group(backend='nccl')
-    
+
     # this is a useless thing to do for the simple case of using default pg.
     # however, i did it to demonstrate the API proposed, whereby pg as int is passed
     # to collective APIs and pg object is recovered in execution layer
     pg = _get_default_group()
     pg_id = register_process_group(pg)
-    
+
     inputs = (torch.ones(4, 4, device="cuda") + rank,) * 6
     correct_out = matmul_cat_col(*inputs, all_reduce=partial(eager_all_reduce, group_id=pg_id))
 

@@ -4039,6 +4039,7 @@ class LoopBodyBlock:
             code.strip().replace("def forward(", f"def {name}("),
         )
 
+
 class Wait(ExternKernelAlloc):
     """
     Wait should not be used by itself.  It should always be constructed in tandem
@@ -4061,6 +4062,8 @@ class Wait(ExternKernelAlloc):
     def get_mutation_names(self):
         assert isinstance(self.layout, MutationLayout)
         return (self.layout.target.get_name(),)
+
+
 """
 what do i want to do?
 learn more about stream handling in inductor
@@ -4083,6 +4086,8 @@ buf3 = some_final_kernel(buf1)
 what's the first blocker?
 - how to call nccl APIs from inductor py!
 """
+
+
 class AllReduce(ExternKernelAlloc):
     def __init__(
         self,
@@ -4096,7 +4101,8 @@ class AllReduce(ExternKernelAlloc):
     def create(
         cls,
         x: "TensorBox",
-        group_id: int
+        group_id: int,
+        reduce_op: str,
     ):
         # Force input to become a materialized buffer (compile a kernel if needed)
         x = cls.realize_input(x)
@@ -4109,7 +4115,7 @@ class AllReduce(ExternKernelAlloc):
                 device=x.get_device(), dtype=x.get_dtype(), size=[1], stride=[1]
             ),
             inputs=[x],
-            constant_args=[group_id],
+            constant_args=[group_id, reduce_op],
         )
 
         # Return a 'Wait' to the user that called 'all_reduce' in the first place.  It consumes the 'work'
@@ -4126,6 +4132,11 @@ class AllReduce(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         wrapper.header.writeline("import torch.distributed as dist")
+        wrapper.header.writeline("from torch._C._distributed_c10d import ReduceOp")
         (x,) = [t.codegen_reference() for t in self.inputs]
         group_id = f"{repr(self.constant_args[0])}"
-        wrapper.writeline(f"{self.get_name()} = dist.all_reduce({x}, async_op=True, group={group_id})")
+        reduce_op = self.constant_args[1]
+        c10d_op = {"sum": "ReduceOp.SUM"}
+        wrapper.writeline(
+            f"{self.get_name()} = dist.all_reduce({x}, async_op=True, group={group_id}, op={c10d_op[reduce_op]})"
+        )

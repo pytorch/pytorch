@@ -25,7 +25,7 @@ namespace at {
 namespace native {
 
 // Can we skip having a c++ impl? i will try doing a python_dispatcher impl
-at::Tensor all_reduce(at::Tensor const& self, int64_t group_id) {
+at::Tensor all_reduce(at::Tensor const& self, int64_t group_id, const c10::string_view reduce_op) {
     return self;
 }
 
