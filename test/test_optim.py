@@ -729,6 +729,7 @@ class TestOptim(TestCase):
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device
                 ).reshape(3, 2)
 
+                torch.manual_seed(1)
                 model = torch.nn.Sequential(
                     torch.nn.Linear(2, 3),
                     torch.nn.Sigmoid(),
