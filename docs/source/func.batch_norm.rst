@@ -69,7 +69,7 @@ have a net where you want the BatchNorm to not use running stats, you can run
 
 .. code-block:: python
 
-    from functorch.experimental import replace_all_batch_norm_modules_
+    from torch.func import replace_all_batch_norm_modules_
     replace_all_batch_norm_modules_(net)
 
 Option 4: eval mode
