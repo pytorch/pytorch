@@ -13,7 +13,6 @@ from itertools import product
 from functools import partial
 from collections import OrderedDict
 from tempfile import NamedTemporaryFile
-from unittest import SkipTest
 
 import torch
 
