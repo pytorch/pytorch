@@ -91,11 +91,6 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void trace_gpu_device_synchronization() const override {}
   void trace_gpu_stream_synchronization(uintptr_t stream) const override {}
   void trace_gpu_event_synchronization(uintptr_t event) const override {}
-
-  void mode_state_push_trampoline(
-      std::shared_ptr<SafePyObject> mode) const override{};
-  void mode_state_pop_trampoline(
-      std::shared_ptr<SafePyObject> mode) const override{};
 };
 
 void PyInterpreter::disarm() noexcept {

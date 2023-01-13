@@ -243,8 +243,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 struct VISIBILITY_HIDDEN PythonAwaitWrapper
     : std::enable_shared_from_this<PythonAwaitWrapper> {
   explicit PythonAwaitWrapper(c10::intrusive_ptr<c10::ivalue::Await> aw)
-    : aw_(std::move(aw)) {}
-  // TODO: leave only ivalue::Await constructor, everything else move to init.cpp
+      : aw_(std::move(aw)) {}
   explicit PythonAwaitWrapper(py::handle input) {
     // eager mode (no type inference) nowait
     args_ = py::tuple(1u);
@@ -256,8 +255,7 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
 
   explicit PythonAwaitWrapper(py::function pf, py::tuple args) {
     // eager mode (no type inference) awaitable
-    pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(
-        std::move(pf));
+    pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pf));
     args_ = std::move(args);
     std::function<IValue()> f = [fg(pyfg_), &args(args_)]() {
       pybind11::gil_scoped_acquire ag;
@@ -288,7 +286,8 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
   }
 
   const py::function fn() {
-    TORCH_CHECK(pyfg_, "Await constructed as awaitable_nowait does not have fn");
+    TORCH_CHECK(
+        pyfg_, "Await constructed as awaitable_nowait does not have fn");
     return pyfg_->func_;
   }
 
@@ -304,6 +303,7 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
   // Only for eager mode fx tracing
   std::shared_ptr<torch::jit::PythonFunctionGuard> pyfg_;
   py::tuple args_;
+
  private:
   std::shared_ptr<PythonAwaitWrapper> getPtr() {
     return shared_from_this();

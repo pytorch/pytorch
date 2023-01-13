@@ -38,11 +38,10 @@ import torch
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
 import torch.package._mangling as package_mangling
-from torch._C import Future as CFuture
-from torch._C import Await as CAwait
+from torch._C import Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
-from torch.futures import Future
 from torch.awaits import Await
+from torch.futures import Future
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final

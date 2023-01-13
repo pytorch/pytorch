@@ -17,12 +17,13 @@ class CFX(object):
         return self.a
 
     @torch.jit.unused
-    # Even for jit.unused we need to be decl-scriptable, as jit adds stub with the same decl. If to add fx types here - during decl resolve jit will try to compile it and fail.
+    # Even for jit.unused we need to be decl-scriptable, as jit adds stub with the same decl.
+    # If to add fx types here - during decl resolve jit will try to compile it and fail.
     def __fx_create_arg__(self, tracer):
         return tracer.create_node(
             "call_function",
             CFX,
-            args=(tracer.create_arg(self.a),tracer.create_arg(self.b)),
+            args=(tracer.create_arg(self.a), tracer.create_arg(self.b)),
             kwargs={},
         )
 
@@ -120,6 +121,7 @@ class TestAwait(JitTestCase):
                 return self.__a
 
         make_global(C)
+
         @torch.jit.script
         def delayed(c: C) -> Tensor:
             return c.a()
@@ -140,16 +142,19 @@ class TestAwait(JitTestCase):
 
     def test_awaitable_to_await(self):
         class C(object):
+            __slots__ = ["_a", "_b"]
+
             def __init__(self, a: Tensor, b: Tensor):
                 self._a = a
                 self._b = b
 
 
         make_global(C)
+
         # Can not stay in the class as Jit does not support Recursive annotations
         # (self in wait_impl can not be annotated as C as C is not defined by this time)
         def C_wait_impl(self: C):
-                return self._a + self._b
+            return self._a + self._b
 
         @torch.jit.script
         def fn(x: Tensor):
@@ -166,20 +171,24 @@ class TestAwait(JitTestCase):
         self.assertTrue(torch.allclose(script_out, out))
 
     def test_await_class_return(self):
+
         class C(object):
+            __slots__ = ["a", "b"]
+
             def __init__(self, a: Tensor, b: Tensor):
-                self._a = a
-                self._b = b
+                self.a = a
+                self.b = b
 
 
         make_global(C)
+
         # Can not stay in the class as Jit does not support Recursive annotations
         # (self in wait_impl can not be annotated as C as C is not defined by this time)
         def C_wait_impl(self: C) -> C:
-                return C(self._a * 2, self._b * 3)
+            return C(self.a * 2, self.b * 3)
 
         def fn_arg_C(x: C) -> Tensor:
-          return x._a + x._b
+            return x.a + x.b
 
         @torch.jit.script
         def fn(x: Tensor):
@@ -201,18 +210,20 @@ class TestAwait(JitTestCase):
             def __init__(self, a: Tensor, b: Tensor):
                 self._a = a
                 self._b = b
+
             def b(self):
                 return self._b
 
 
         make_global(C)
+
         # Can not stay in the class as Jit does not support Recursive annotations
         # (self in wait_impl can not be annotated as C as C is not defined by this time)
         def C_wait_impl(self: C) -> C:
-                return C(self._a * 2, self._b * 3)
+            return C(self._a * 2, self._b * 3)
 
         def fn_arg_C(x: C) -> Tensor:
-          return x._a + x._b
+            return x._a + x._b
 
         @torch.jit.script
         def fn(x: Tensor):
@@ -220,7 +231,7 @@ class TestAwait(JitTestCase):
             _a = torch.eye(2)
             ai = aw._a
             awb = aw.b()
-            c = C(2*x, 2*x)
+            c = C(2 * x, 2 * x)
             return _a + ai + x + c._a + c.b()
 
         inp = torch.zeros(2)
@@ -280,7 +291,7 @@ class TestAwait(JitTestCase):
         t = torch.jit.awaitable_wait(aw)
         self.assertTrue(t.v == 3)
 
-    def test_await_fx(self):
+    def test_await_fx_simple(self):
         def delayed(x: Tensor) -> Tensor:
             return 2 * (x + 1)
 
@@ -362,7 +373,7 @@ class TestAwait(JitTestCase):
             return y + k
 
         inp = torch.randn(2)
-        tm = torch.jit.trace(main, (inp,inp))
+        tm = torch.jit.trace(main, (inp, inp))
         inp_check = torch.ones(2)
         self.assertEqual(main(inp_check, inp_check), tm(inp_check, inp_check))
 

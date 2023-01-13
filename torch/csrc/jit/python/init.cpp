@@ -1855,23 +1855,14 @@ void initJITBindings(PyObject* module) {
           "wait",
           &PythonAwaitWrapper::wait,
           py::call_guard<py::gil_scoped_release>())
+      .def("set_result", &PythonAwaitWrapper::markCompleted)
+      .def("is_nowait", &PythonAwaitWrapper::is_nowait)
+      .def("fn", &PythonAwaitWrapper::fn)
+      .def("args", &PythonAwaitWrapper::args)
+      .def("type", &PythonAwaitWrapper::type)
       .def(
-          "set_result",
-          &PythonAwaitWrapper::markCompleted)
-      .def(
-          "is_nowait",
-          &PythonAwaitWrapper::is_nowait)
-      .def(
-          "fn",
-          &PythonAwaitWrapper::fn)
-      .def(
-          "args",
-          &PythonAwaitWrapper::args)
-      .def(
-          "type",
-          &PythonAwaitWrapper::type)
-      .def("__getattr__",
-          [](PythonAwaitWrapper& self, const std::string& name) -> py::object{
+          "__getattr__",
+          [](PythonAwaitWrapper& self, const std::string& name) -> py::object {
             // LazyAwaitable semantic
             return py::getattr(self.wait(), name.c_str(), py::none());
           })
@@ -1921,7 +1912,8 @@ void initJITBindings(PyObject* module) {
     for (const auto i : c10::irange(1, args.size())) {
       args_tup[i - 1] = args[i];
     }
-    return std::make_shared<PythonAwaitWrapper>(py::cast<py::function>(args[0]), std::move(args_tup));
+    return std::make_shared<PythonAwaitWrapper>(
+        py::cast<py::function>(args[0]), std::move(args_tup));
   });
   m.def("awaitable_nowait", [](py::handle input) {
     return std::make_shared<PythonAwaitWrapper>(std::move(input));

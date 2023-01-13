@@ -309,31 +309,32 @@ RegisterOperators reg(
                " import");
          },
          aliasAnalysisFromSchema()),
-     Operator(
-         "aten::wait(Future(t) self) -> t",
-         [](Stack& stack) {
-           TORCH_CHECK(
-               false, "wait is implemented directly in the interpreter");
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         "aten::awaitable_wait(Await(t) self) -> t",
-         [](Stack& stack) {
-           auto aw = stack.back().toAwait();
-           aw->wait();
-           stack.pop_back();
-           stack.emplace_back(aw->value());
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         "aten::awaitable_nowait(t self) -> Await(t)",
-         [](Stack& stack) {
-           auto aw = c10::make_intrusive<c10::ivalue::Await>(stack.back().type());
-           aw->markCompleted(pop(stack));
-           push(stack, std::move(aw));
-         },
-         aliasAnalysisSpecialCase()),
-    });
+    Operator(
+        "aten::wait(Future(t) self) -> t",
+        [](Stack& stack) {
+          TORCH_CHECK(
+              false, "wait is implemented directly in the interpreter");
+        },
+        aliasAnalysisSpecialCase()),
+    Operator(
+        "aten::awaitable_wait(Await(t) self) -> t",
+        [](Stack& stack) {
+          auto aw = stack.back().toAwait();
+          aw->wait();
+          stack.pop_back();
+          stack.emplace_back(aw->value());
+        },
+        aliasAnalysisSpecialCase()),
+    Operator(
+        "aten::awaitable_nowait(t self) -> Await(t)",
+        [](Stack& stack) {
+          auto aw =
+              c10::make_intrusive<c10::ivalue::Await>(stack.back().type());
+          aw->markCompleted(pop(stack));
+          push(stack, std::move(aw));
+        },
+        aliasAnalysisSpecialCase()),
+});
 
 RegisterOperators logging_operators(
     {Operator(
