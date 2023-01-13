@@ -940,10 +940,7 @@ def _rekey_sharded_optim_state_dict(
         _get_param_to_param_id_from_optim_input(model, optim_input)
         if using_optim_input
         else _get_param_to_param_key(
-            optim,
-            is_named_optimizer,
-            param_to_fqns,
-            flat_param_to_fqn
+            optim, is_named_optimizer, param_to_fqns, flat_param_to_fqn
         )
     )
     # All parameter keys in `param_to_param_key` should be in
@@ -951,8 +948,12 @@ def _rekey_sharded_optim_state_dict(
     # passed to the optimizer
     assert len(param_to_param_key) <= len(param_to_fqns)
 
-    unflat_param_names_to_flat_param_key: Dict[Tuple[str, ...], Union[int, str]] = {}  # for "state"
-    unflat_param_name_to_flat_param_key: Dict[str, Union[int, str]] = {}  # for "param_groups"
+    unflat_param_names_to_flat_param_key: Dict[
+        Tuple[str, ...], Union[int, str]
+    ] = {}  # for "state"
+    unflat_param_name_to_flat_param_key: Dict[
+        str, Union[int, str]
+    ] = {}  # for "param_groups"
     for param, unflat_param_names in param_to_fqns.items():
         if param not in param_to_param_key:
             # This parameter was not passed to the optimizer
@@ -1099,7 +1100,6 @@ def _get_param_key_to_param(
             param_to_fqns is not None and flat_param_to_fqn is not None
         ), "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
 
-
     param_key_to_param: Dict[Union[str, int], nn.Parameter] = {}
     pid = 0
     for param_group in optim.param_groups:
@@ -1135,7 +1135,10 @@ def _get_param_to_param_key(
     param_id_to_param = _get_param_key_to_param(
         optim, is_named_optimizer, param_to_fqns, flat_param_to_fqn
     )
-    return {param: cast(Union[int, str], param_id) for param_id, param in param_id_to_param.items()}
+    return {
+        param: cast(Union[int, str], param_id)
+        for param_id, param in param_id_to_param.items()
+    }
 
 
 def _get_param_to_param_id_from_optim_input(
@@ -1355,10 +1358,7 @@ def _optim_state_dict(
             _get_param_id_to_param_from_optim_input(model, optim_input)
             if using_optim_input
             else _get_param_key_to_param(
-                optim,
-                is_named_optimizer,
-                param_to_fqns,
-                flat_param_to_fqn
+                optim, is_named_optimizer, param_to_fqns, flat_param_to_fqn
             )
         ),
     )
