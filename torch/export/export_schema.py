@@ -87,7 +87,7 @@ class SymIntArgument:
 @dataclass
 class ReturnArgument:  # Union, ONLY EXACTLY ONE of the following fields can be set
     as_tensor: TensorArgument = None
-    # List[TensorArgument],    # !!! ATM, no operator has return type as Tensor[], might need this latter?
+    # as_tensors: List[TensorArgument] = None    # !!! ATM, no operator has return type as Tensor[], might need this latter?
     as_symint: SymIntArgument = None
 
 
@@ -245,9 +245,12 @@ class NodeMetadata:
 # Maps to fx.Node
 @dataclass
 class Node:
-    op: str         # One of ['placeholder', 'call_function', 'get_attr', 'output'],
+    op: str         # In fx, it can be one of ['placeholder', 'call_function', 'get_attr', 'output']
+                    # Only call_function can be present here
                     # call_method and call_module are not supported, as they shouldn't apprear in the Caononical FX Graph
+                    # placeholder and output are serialized as inputs and outputs of the Graph
                     # !!! Consider using an enum instead of string
+                    # !!! Consider removeing this field, as it can only be call_function
 
     target: str      # fully qualified name to the target, e.g. aten.add.Tensnor
                      # !!! Consider using a structured operator name instead of string
@@ -266,17 +269,17 @@ class Node:
 @dataclass(init=False)
 class Graph:
 
-    inputs: List[Node]    # Maps to fx.graph's placeholder nodes.
-                          # Placeholder nodes are stored separately, to clearly distinguish them from other nodes.
-                          # !!! Consider making inputs a List[IValue] instead of List[Node], need to think about where to store the metadata for placeholder nodes
+    inputs: List[TensorArgument]    # Maps to fx.graph's placeholder nodes.
+                                    # !!! Do we allow SymInt as graph input?
+                                    # !!! need to think about where to store the metadata for placeholder nodes
 
-    output: Node    # Maps to fx.graph's output node.
-                    # Output node are stored separately, to clearly distinguish them from other nodes.
-                    # A graph can only have a single output node.
-                    # !!! Consider making outputs a List[IValue] instead of a Node, need to thinking about where to store the metadata for output node
+    outputs: List[TensorArgument]   # Maps to fx.graph's output node.
+                                    # !!! Do we allow SymInt as graph output?
+                                    # !!! need to thinking about where to store the metadata for original output node
 
-    nodes: List[Node]     # maps to remaining nodes in fx.graph
+    nodes: List[Node]     # maps to computations nodes in fx.graph
                           # Placeholder nodes and output node are not included in this list.
+                          # Only call_function can be included in this list
 
     # Tensor values that appear in the graph
     # They could be graph inputs, graph outputs, or intermediate values produced by nodes

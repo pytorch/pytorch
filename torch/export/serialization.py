@@ -135,13 +135,13 @@ class ExportInterpreter(Interpreter):
         elif isinstance(arg, (list, tuple)):
             # ints
             if all(isinstance(a, int) for a in arg):
-                return ex.Argument(as_ints = arg)
+                return ex.Argument(as_ints = [a for a in arg])
             # floats
             elif all(isinstance(a, float) for a in arg):
-                return ex.Argument(as_floats = arg)
+                return ex.Argument(as_floats = [a for a in arg])
             # bools
             elif all(isinstance(a, bool) for a in arg):
-                return ex.Argument(as_bools = arg)
+                return ex.Argument(as_bools = [a for a in arg])
             elif all(isinstance(a, torch.fx.Node) for a in arg):
                 ex_args = [handle_fx_node(a) for a in arg]
 
@@ -175,19 +175,13 @@ class ExportInterpreter(Interpreter):
         assert isinstance(target, str), "placeholder node's target should be a string"
 
         fx_node = self.current_node
-        node = ex.Node(
-            op = "placeholder",
-            target = target,  # name of the placeholder
-            args = [],
-            kwargs = {},
-            outputs = [
-                ex.ReturnArgument(
-                    as_tensor = ex.TensorArgument(name = target)
-                )
-            ],
-            metadata = export_node_meta(fx_node.meta),
+
+        self.ex_graph.inputs.append(
+            ex.TensorArgument(name = target)
         )
-        self.ex_graph.inputs.append(node)
+
+        # Need somewhere to store the metadata
+        # metadata = export_node_meta(fx_node.meta)
 
         fake_tensor = fx_node.meta.get("val", None)
         ivalue = ex.IValue(
@@ -311,27 +305,11 @@ class ExportInterpreter(Interpreter):
         assert len(fx_node.args) == 1, "fx_node's args should have one arg"
         node_args = fx_node.args[0]
 
-        node = ex.Node(
-            op = fx_node.op,
-            target = fx_node.target,
-            args = [
-                ex.Argument(
-                    as_tensor = ex.TensorArgument(
-                        name = str(arg),
-                    )
-                ) for arg in node_args
-            ],
-            kwargs = {},
-            outputs = [
-                ex.ReturnArgument(
-                    as_tensor = ex.TensorArgument(
-                        name = str(arg),
-                    )
-                ) for arg in node_args
-            ],
-            metadata = export_node_meta(self.current_node.meta),
-        )
+        self.ex_graph.outputs = [ex.TensorArgument(name = str(arg)) for arg in node_args]
 
-        self.ex_graph.output = node
+        # don't need to add them to ivalue, as they should been added in the producer node
+
+        # !!! need to store the metadata somewhere
+        # metadata = export_node_meta(self.current_node.meta),
 
         return result
