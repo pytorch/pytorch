@@ -386,6 +386,92 @@ SymBool TensorImpl::compute_channels_last_contiguous_3d(identity<SymBool>) const
   }
 }
 
+bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
+  if (is_sparse()) {
+    return false;
+  }
+  return is_channels_last_strides_2d(sizes_and_strides_.sizes_arrayref(), sizes_and_strides_.strides_arrayref());
+}
+
+// Keep this in sync with MemoryFormat.h
+SymBool TensorImpl::compute_strides_like_channels_last_2d(identity<SymBool>) const {
+  if (is_sparse()) {
+    return false;
+  }
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  switch (sizes.size()) {
+    case 4: {
+      SymInt min = 0;
+      SymBool r = true;
+      // special case for trivial C dimension. default to NCHW
+      r = r & strides[1].sym_neq(0);
+      // loop strides indices
+      for (auto& d : {1, 3, 2, 0}) {
+        r = r & sizes[d].sym_neq(0) & strides[d].sym_ge(min);
+        // Fallback to NCHW as default layout for ambiguous cases
+        // This is the flaw of implicit memory_format from strides.
+        // N111 tensor with identical strides for size 1 dimension;
+        // Two cases could lead us here:
+        // a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
+        // b. N11W contiguous Tensor sliced on the W-dimension.
+        // ([N,1,1,1]@[W,W,W,W])
+        if (d == 0) {
+          r = r & min.sym_neq(strides[1]);
+        }
+        // This is necessary to:
+        // 1. distinguish the memory_format of N1H1;
+        //     [H, 1, 1, 1] channels_last stride
+        //     [H, H, 1, 1] contiguous stride
+        // 2. permutation of 1C1W:
+        //     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
+        //     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as channels_last
+        min = strides[d] * sizes[d].max(1);
+      }
+      return r;
+    }
+    case 3:
+      // TODO dim == 3 case will be enabled once it is fully tested
+      return false;
+  }
+  return false;
+}
+
+bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
+  if (is_sparse()) {
+    return false;
+  }
+  return is_channels_last_strides_3d(sizes_and_strides_.sizes_arrayref(), sizes_and_strides_.strides_arrayref());
+}
+
+// Keep this in sync with MemoryFormat.h
+SymBool TensorImpl::compute_strides_like_channels_last_3d(identity<SymBool>) const {
+  if (is_sparse()) {
+    return false;
+  }
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  switch (sizes.size()) {
+    case 5: {
+      SymInt min = 0;
+      SymBool r = true;
+      r = r & strides[1].sym_neq(0);
+      for (auto& d : {1, 4, 3, 2, 0}) {
+        r = r & sizes[d].sym_neq(0) & strides[d].sym_ge(min);
+        if (d == 0) {
+          r = r & min.sym_neq(strides[1]);
+        }
+        min = strides[d] * sizes[d].max(1);
+      }
+      return true;
+    }
+    case 4:
+      // TODO dim == 4 case will be enabled once it is fully tested
+      return false;
+  }
+  return false;
+}
+
 bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
   if (is_sparse()) {
     return false;
