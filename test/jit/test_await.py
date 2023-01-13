@@ -32,16 +32,16 @@ def cfx_delayed(c: CFX) -> Tensor:
 
 @torch.fx.wrap
 def cfx_wrapped(c: CFX) -> Await[Tensor]:
-    return torch.jit.awaitable(cfx_delayed, c)
+    return torch.jit._awaitable(cfx_delayed, c)
 
 
 class TestAwait(JitTestCase):
     def test_await_python(self):
         def foo(x: int) -> int:
             return x + 13
-        aw: Await[int] = torch.jit.awaitable(foo, 13)
-        self.assertTrue(aw.fn()(*aw.args()) == torch.jit.awaitable_wait(aw))
-        nw = torch.jit.awaitable_nowait(33)
+        aw: Await[int] = torch.jit._awaitable(foo, 13)
+        self.assertTrue(aw.fn()(*aw.args()) == torch.jit._awaitable_wait(aw))
+        nw = torch.jit._awaitable_nowait(33)
         self.assertTrue(nw.is_nowait())
         self.assertTrue(nw.args() == (33,))
 
@@ -49,7 +49,7 @@ class TestAwait(JitTestCase):
         def foo() -> Tensor:
             return torch.randn()
         awaits = torch.jit.annotate(List[Await[Tensor]], [])
-        awaits.append(torch.jit.awaitable(foo))
+        awaits.append(torch.jit._awaitable(foo))
 
     def test_script(self):
         def delayed(z: int) -> int:
@@ -57,9 +57,9 @@ class TestAwait(JitTestCase):
 
         @torch.jit.script
         def fn(x: Tensor):
-            aw: Await[int] = torch.jit.awaitable(delayed, 99)
+            aw: Await[int] = torch.jit._awaitable(delayed, 99)
             a = torch.eye(2)
-            b = torch.jit.awaitable_wait(aw)
+            b = torch.jit._awaitable_wait(aw)
             return a + b + x
 
         inp = torch.zeros(2)
@@ -72,9 +72,9 @@ class TestAwait(JitTestCase):
     def test_nowait(self):
         @torch.jit.script
         def fn(x: Tensor):
-            aw = torch.jit.awaitable_nowait(13)
+            aw = torch.jit._awaitable_nowait(13)
             a = torch.eye(2)
-            b = torch.jit.awaitable_wait(aw)
+            b = torch.jit._awaitable_wait(aw)
             return a + b + x
 
         inp = torch.zeros(2)
@@ -95,9 +95,9 @@ class TestAwait(JitTestCase):
 
         @torch.jit.script
         def fn(x: Tensor):
-            aw = torch.jit.awaitable_nowait(C(torch.zeros(2), torch.ones(2)))
+            aw = torch.jit._awaitable_nowait(C(torch.zeros(2), torch.ones(2)))
             _a = torch.eye(2)
-            c = torch.jit.awaitable_wait(aw)
+            c = torch.jit._awaitable_wait(aw)
             return _a + c.a() + x
 
         make_global(C)
@@ -129,9 +129,9 @@ class TestAwait(JitTestCase):
         @torch.jit.script
         def fn(x: Tensor):
             c = C(torch.zeros(2), torch.ones(2))
-            aw = torch.jit.awaitable(delayed, c)
+            aw = torch.jit._awaitable(delayed, c)
             _a = torch.eye(2)
-            c2_t = torch.jit.awaitable_wait(aw)
+            c2_t = torch.jit._awaitable_wait(aw)
             return _a + c2_t + x
         inp = torch.zeros(2)
 
@@ -158,9 +158,9 @@ class TestAwait(JitTestCase):
 
         @torch.jit.script
         def fn(x: Tensor):
-            aw = torch.jit.awaitable(C_wait_impl, C(torch.zeros(2), torch.ones(2)))
+            aw = torch.jit._awaitable(C_wait_impl, C(torch.zeros(2), torch.ones(2)))
             _a = torch.eye(2)
-            c_wait_impl_res = torch.jit.awaitable_wait(aw)
+            c_wait_impl_res = torch.jit._awaitable_wait(aw)
             return _a + c_wait_impl_res + x
 
         inp = torch.zeros(2)
@@ -192,9 +192,9 @@ class TestAwait(JitTestCase):
 
         @torch.jit.script
         def fn(x: Tensor):
-            aw: Await[C] = torch.jit.awaitable(C_wait_impl, C(x, x))
+            aw: Await[C] = torch.jit._awaitable(C_wait_impl, C(x, x))
             _a = torch.eye(2)
-            y = fn_arg_C(torch.jit.awaitable_wait(aw))
+            y = fn_arg_C(torch.jit._awaitable_wait(aw))
             return _a + y + x
 
         inp = torch.zeros(2)
@@ -227,7 +227,7 @@ class TestAwait(JitTestCase):
 
         @torch.jit.script
         def fn(x: Tensor):
-            aw: Await[C] = torch.jit.awaitable(C_wait_impl, C(x, x))
+            aw: Await[C] = torch.jit._awaitable(C_wait_impl, C(x, x))
             _a = torch.eye(2)
             ai = aw._a
             awb = aw.b()
@@ -257,16 +257,16 @@ class TestAwait(JitTestCase):
 
         @torch.jit.script
         def delayed(c: C) -> Await[Tensor]:
-            return torch.jit.awaitable_nowait(c.a())
+            return torch.jit._awaitable_nowait(c.a())
 
         @torch.jit.script
         def fn(x: Tensor) -> Await[Await[Tensor]]:
-            return torch.jit.awaitable(delayed, C(x, x))
+            return torch.jit._awaitable(delayed, C(x, x))
 
         @torch.jit.script
         def main(x: Tensor) -> Tensor:
             awaw = fn(x)
-            return torch.jit.awaitable_wait(torch.jit.awaitable_wait(awaw))
+            return torch.jit._awaitable_wait(torch.jit._awaitable_wait(awaw))
 
         inp = torch.zeros(2)
 
@@ -287,8 +287,8 @@ class TestAwait(JitTestCase):
             t.v = t.v + 1
             return t
 
-        aw = torch.jit.awaitable(delayed, Tree(2))
-        t = torch.jit.awaitable_wait(aw)
+        aw = torch.jit._awaitable(delayed, Tree(2))
+        t = torch.jit._awaitable_wait(aw)
         self.assertTrue(t.v == 3)
 
     def test_await_fx_simple(self):
@@ -300,10 +300,10 @@ class TestAwait(JitTestCase):
                 super().__init__()
 
             def process(self, aw: Await[Tensor]):
-                return torch.jit.awaitable_wait(aw)
+                return torch.jit._awaitable_wait(aw)
 
             def forward(self, x: Tensor):
-                aw = torch.jit.awaitable(delayed, x)
+                aw = torch.jit._awaitable(delayed, x)
                 y = 3 * x
                 r = self.process(aw)
                 return r + y
@@ -317,9 +317,9 @@ class TestAwait(JitTestCase):
 
         @torch.jit.script
         def main(x: Tensor) -> Tensor:
-            aw = torch.jit.awaitable(delayed, x)
+            aw = torch.jit._awaitable(delayed, x)
             assert isinstance(aw, torch.jit.Await)
-            return torch.jit.awaitable_wait(aw)
+            return torch.jit._awaitable_wait(aw)
 
         inp = torch.zeros(2)
 
@@ -332,7 +332,7 @@ class TestAwait(JitTestCase):
         def delayed(x: Tensor) -> Tensor:
             return 2 * (x + 1)
         t = torch.ones(2, dtype=torch.int64)
-        aw = torch.jit.awaitable(delayed, t)
+        aw = torch.jit._awaitable(delayed, t)
         self.assertTrue(isinstance(aw, torch._C.Await))
         self.assertTrue(t.dtype == aw.dtype)
 
@@ -342,7 +342,7 @@ class TestAwait(JitTestCase):
 
         @torch.jit.script
         def main(x: Tensor) -> Await[Tensor]:
-            aw = torch.jit.awaitable(delayed, x)
+            aw = torch.jit._awaitable(delayed, x)
             assert isinstance(aw, torch.jit.Await)
             return aw
 
@@ -350,10 +350,10 @@ class TestAwait(JitTestCase):
 
         sm = torch.jit.script(main)
         out_aw = main(inp)
-        out = torch.jit.awaitable_wait(out_aw)
+        out = torch.jit._awaitable_wait(out_aw)
 
         script_out_aw = sm(inp)
-        script_out = torch.jit.awaitable_wait(script_out_aw)
+        script_out = torch.jit._awaitable_wait(script_out_aw)
 
         self.assertTrue(torch.allclose(script_out, out))
 
@@ -365,11 +365,11 @@ class TestAwait(JitTestCase):
             return 2 * (torch.cos(x) + 1)
 
         def main(x: Tensor, y: Tensor) -> Tensor:
-            aw = torch.jit.awaitable(delayed, x)
+            aw = torch.jit._awaitable(delayed, x)
 
             assert isinstance(aw, torch.Await)
             z = gap(y)
-            k = torch.jit.awaitable_wait(aw)
+            k = torch.jit._awaitable_wait(aw)
             return y + k
 
         inp = torch.randn(2)
@@ -383,7 +383,7 @@ class TestAwait(JitTestCase):
                 super().__init__()
 
             def process(self, aw: Await[Tensor]):
-                return torch.jit.awaitable_wait(aw)
+                return torch.jit._awaitable_wait(aw)
 
             def forward(self, x: Tensor, y: Tensor):
                 aw = cfx_wrapped(CFX(x, y))

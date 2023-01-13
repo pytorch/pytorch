@@ -349,7 +349,7 @@ class Tracer(TracerBase):
                 return super().create_arg(
                     self.create_proxy(
                         "call_function",
-                        torch.jit.awaitable_nowait,
+                        torch.jit._awaitable_nowait,
                         await_args,
                         {},
                     )
@@ -366,7 +366,7 @@ class Tracer(TracerBase):
                 return super().create_arg(
                     self.create_proxy(
                         "call_function",
-                        torch.jit.awaitable,
+                        torch.jit._awaitable,
                         (fn_attr, *await_args),
                         {},
                     )

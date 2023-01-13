@@ -1855,11 +1855,10 @@ void initJITBindings(PyObject* module) {
           "wait",
           &PythonAwaitWrapper::wait,
           py::call_guard<py::gil_scoped_release>())
-      .def("set_result", &PythonAwaitWrapper::markCompleted)
-      .def("is_nowait", &PythonAwaitWrapper::is_nowait)
       .def("fn", &PythonAwaitWrapper::fn)
       .def("args", &PythonAwaitWrapper::args)
       .def("type", &PythonAwaitWrapper::type)
+      .def("is_nowait", &PythonAwaitWrapper::is_nowait)
       .def(
           "__getattr__",
           [](PythonAwaitWrapper& self, const std::string& name) -> py::object {
@@ -1906,7 +1905,7 @@ void initJITBindings(PyObject* module) {
     }
     return self_value->overlaps(*other_value);
   });
-  m.def("awaitable", [](const py::args& args, const py::kwargs& kwargs) {
+  m.def("_awaitable", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
     py::tuple args_tup(args.size() - 1);
     for (const auto i : c10::irange(1, args.size())) {
@@ -1915,13 +1914,14 @@ void initJITBindings(PyObject* module) {
     return std::make_shared<PythonAwaitWrapper>(
         py::cast<py::function>(args[0]), std::move(args_tup));
   });
-  m.def("awaitable_nowait", [](py::handle input) {
+  m.def("_awaitable_nowait", [](py::handle input) {
     return std::make_shared<PythonAwaitWrapper>(std::move(input));
   });
-  m.def("awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {
-    TORCH_CHECK(py_aw, "Await can't be None");
-    return py_aw->wait();
-  });
+  m.def(
+      "_awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {
+        TORCH_CHECK(py_aw, "Await can't be None");
+        return py_aw->wait();
+      });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
 

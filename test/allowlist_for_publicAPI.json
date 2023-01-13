@@ -254,6 +254,9 @@
     "pca_lowrank",
     "svd_lowrank"
   ],
+  "torch.awaits": [
+    "Await"
+  ],
   "torch.futures": [
     "Future"
   ],

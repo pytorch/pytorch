@@ -273,14 +273,6 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
     return toPyObject(aw_->wait());
   }
 
-  void markCompleted(const py::object& pyValue) {
-    DCHECK(PyGILState_Check());
-    IValue value = toIValue(pyValue, PyObjectType::get());
-
-    py::gil_scoped_release release;
-    aw_->markCompleted(std::move(value));
-  }
-
   bool is_nowait() {
     return pyfg_ == nullptr;
   }
