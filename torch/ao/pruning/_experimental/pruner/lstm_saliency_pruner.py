@@ -1,4 +1,5 @@
-from .base_structured_sparsifier import BaseStructuredSparsifier
+import torch
+from .base_structured_sparsifier import BaseStructuredSparsifier, FakeStructuredSparsity
 
 class LSTMSaliencyPruner(BaseStructuredSparsifier):
     """
@@ -7,20 +8,27 @@ class LSTMSaliencyPruner(BaseStructuredSparsifier):
 
     def update_mask(self, module, tensor_name, **kwargs):
         weights = getattr(module, tensor_name)
-        mask = getattr(module.parametrizations, tensor_name)[0].mask
 
         for p in getattr(module.parametrizations, tensor_name):
             if isinstance(p, FakeStructuredSparsity):
                 mask = p.mask
-                masks = torch.split(mask, len(mask) // 4)
 
-                pruned_small = []
-                for small in masks:
-                    # use negative weights so we can use topk (we prune out the smallest)
-                    saliency = -small.norm(dim=tuple(range(1, small.dim())), p=1)
-                    num_to_pick = int(len(small) * kwargs["sparsity_level"])
-                    prune = saliency.topk(num_to_pick).indices
-                    small.data[prune] = False
+                # select weights based on magnitude
+                if weights.dim() > 1:
+                    # take norm over all but first dim
+                    dims = tuple(range(1, weights.dim()))
+                    saliency = weights.abs().norm(dim=dims, p=1)
+                else:
+                    # 1d param: use weights directly
+                    saliency = weights.abs()
 
-                new_mask = torch.cat(masks)
-                mask.data = new_mask.data
+                # handle weights in 4 groups
+                split_size = len(mask) // 4
+                masks = torch.split(mask, split_size)
+                saliencies = torch.split(saliency, split_size)
+
+                for keep_mask, sal in zip(masks, saliencies):
+                    # mask smallest k values to be removed
+                    k = int(len(keep_mask) * kwargs["sparsity_level"])
+                    prune = sal.topk(k, largest=False, sorted=False).indices
+                    keep_mask.data[prune] = False  # modifies underlying p.mask directly

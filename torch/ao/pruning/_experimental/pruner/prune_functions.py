@@ -358,13 +358,13 @@ def prune_conv2d_pool_flatten_linear(
             linear.in_features = linear.weight.shape[1]
 
 
-def prune_lstm_layernorm_linear(
-    lstm: nn.LSTM, getitem: Callable, layernorm: nn.LayerNorm, linear: nn.Linear
+def prune_lstm_linear(
+    lstm: nn.LSTM, getitem: Callable, linear: nn.Linear
 ) -> None:
-    prune_lstm_linear(lstm, getitem, linear)
+    prune_lstm_layernorm_linear(lstm, getitem, None, linear)
 
 
-def prune_lstm_linear(lstm: nn.LSTM, getitem: Callable, linear: nn.Linear) -> None:
+def prune_lstm_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: nn.LayerNorm, linear: nn.Linear) -> None:
     for i in range(lstm.num_layers):
         if parametrize.is_parametrized(lstm, f"weight_ih_l{i}"):
             mask = lstm.parametrizations[f"weight_ih_l{i}"][0].mask
@@ -437,6 +437,12 @@ def prune_lstm_linear(lstm: nn.LSTM, getitem: Callable, linear: nn.Linear) -> No
                     else:
                         linear.weight = nn.Parameter(linear.weight[:, M_ho])
                         linear.in_features = linear.weight.shape[1]
+
+                    # if layernorm module, prune weight and bias
+                    if layernorm is not None:
+                        layernorm.normalized_shape = (linear.in_features, )
+                        layernorm.weight = nn.Parameter(layernorm.weight[M_ho])
+                        layernorm.bias = nn.Parameter(layernorm.bias[M_ho])
 
             # otherwise need to prune the columns of the input of the next LSTM layer
             else:
