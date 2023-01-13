@@ -343,14 +343,14 @@ class Tracer(TracerBase):
 
         if isinstance(a, torch.Await):
             is_nowait = a.is_nowait()  # type: ignore[attr-defined]
-            args = a.args()  # type: ignore[attr-defined]
+            await_args: Tuple[Any, ...] = a.args()  # type: ignore[attr-defined]
 
             if is_nowait:
                 return super().create_arg(
                     self.create_proxy(
                         "call_function",
                         torch.jit.awaitable_nowait,
-                        args,
+                        await_args,
                         {},
                     )
                 )
@@ -367,7 +367,7 @@ class Tracer(TracerBase):
                     self.create_proxy(
                         "call_function",
                         torch.jit.awaitable,
-                        (fn_attr, *args),
+                        (fn_attr, *await_args),
                         {},
                     )
                 )
