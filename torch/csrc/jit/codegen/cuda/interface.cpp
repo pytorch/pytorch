@@ -43,6 +43,9 @@ class NVFuserEnabler {
 
  public:
   static bool nvfuserCanBeEnabled() {
+#if defined(FBCODE_CAFFE2)
+    return false;
+#endif
     return at::globalContext().hasCUDA() &&
         NVFuserPassManager::isRegistered() && getExecutorMode();
   }
