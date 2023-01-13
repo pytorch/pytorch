@@ -1456,6 +1456,7 @@ class TestSparseCSR(TestCase):
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @unittest.skipIf(not has_triton(), "Triton is not available")
+    @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16)
     @dtypesIfCUDA(*[torch.half] if SM53OrLater else [],

@@ -75,6 +75,8 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
     blocksize = {values.size(-2), values.size(-1)};
   }
 
+// No stable support for ROCM in Triton yet.
+#ifndef USE_ROCM
   // Triton works only with blocksizes which are powers of 2.
   const auto is_power_of_2 = [](int64_t v) -> bool {
     return !(v & (v - 1));
@@ -96,6 +98,7 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
       return at::_triton_bsr_dense_mm_out(result, compressed, strided);
     }
   }
+#endif
 
   // (..., r, c) -> (..., r / b0, c / b1, b0, b1)
   // NOTE: this function ALWAYS creates a view upon successful execution.
