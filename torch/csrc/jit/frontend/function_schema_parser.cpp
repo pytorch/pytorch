@@ -206,9 +206,9 @@ struct SchemaParser {
       }
     }
     c10::ArrayRef<c10::ScalarType> types = {};
-    if (real_type->kind() == c10::TypeKind.TensorType) {
-      auto res = argument_types_.find(name);
-      if (res != argument_types_.end()) {
+    if (real_type->kind() == c10::TypeKind::TensorType) {
+      auto res = argument_types.find(name);
+      if (res != argument_types.end()) {
         types = res->second;
       }
     }
