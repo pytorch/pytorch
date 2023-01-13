@@ -277,6 +277,11 @@ struct ConcretePyInterpreterVTable final
     CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
   }
 
+  void mode_state_push_trampoline(
+      std::shared_ptr<c10::SafePyObject> mode) const override;
+  void mode_state_pop_trampoline(
+      std::shared_ptr<c10::SafePyObject> mode) const override;
+
   static ConcretePyInterpreterVTable* instance() {
     static ConcretePyInterpreterVTable s;
     return &s;
@@ -728,11 +733,10 @@ static PyObject* THPVariable_as_subclass(
   ParsedArgs<1> parsed_args{};
   auto r = parser.parse(_self, args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  TORCH_CHECK_TYPE(
-      PyType_Check(cls),
-      "cls must be a type (got ",
-      Py_TYPE(cls)->tp_name,
-      ")");
+  if (!PyType_Check(cls)) {
+    throw torch::TypeError(
+        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+  }
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       self.alias(),
@@ -751,11 +755,10 @@ static PyObject* THPVariable_make_subclass(
   ParsedArgs<7> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  TORCH_CHECK_TYPE(
-      PyType_Check(cls),
-      "cls must be a type (got ",
-      Py_TYPE(cls)->tp_name,
-      ")");
+  if (!PyType_Check(cls)) {
+    throw torch::TypeError(
+        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+  }
   // guard completely turns off torch dispatch modes, doesn't just pop off the
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
@@ -1060,10 +1063,11 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   }
   THPUtils_assertRet(
       -1, data, "Deleting tensor data is not allowed. Delete tensor instead!");
-  TORCH_CHECK_TYPE(
-      THPVariable_Check(data),
-      "Variable data has to be a tensor, but got ",
-      Py_TYPE(data)->tp_name);
+  if (!THPVariable_Check(data)) {
+    throw torch::TypeError(
+        "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
+  }
+
   THPVariable_Unpack(self).set_data(THPVariable_Unpack(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -2806,6 +2810,44 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
 
   return c10::SymIntArrayRef(start, len);
   END_HANDLE_TH_ERRORS_PYBIND
+}
+
+void ConcretePyInterpreterVTable::mode_state_push_trampoline(
+    const std::shared_ptr<SafePyObject> mode) const {
+  PyObject* mode_obj = mode->ptr(getPyInterpreter());
+  const char* check_mode_push_name = "check_mode_state_push";
+  py::gil_scoped_acquire acquire;
+
+  py::object run_function =
+      PyObject_FastGetAttrString(mode_obj, check_mode_push_name);
+  if (!run_function) {
+    TORCH_INTERNAL_ASSERT(0);
+  }
+
+  const auto ret = py::reinterpret_steal<py::object>(
+      PyObject_CallMethod(mode_obj, check_mode_push_name, ""));
+  if (ret.ptr() == nullptr) {
+    throw python_error();
+  }
+}
+
+void ConcretePyInterpreterVTable::mode_state_pop_trampoline(
+    const std::shared_ptr<SafePyObject> mode) const {
+  PyObject* mode_obj = mode->ptr(getPyInterpreter());
+  const char* check_mode_pop_name = "check_mode_state_pop";
+  py::gil_scoped_acquire acquire;
+
+  const auto run_function =
+      PyObject_FastGetAttrString(mode_obj, check_mode_pop_name);
+  if (!run_function) {
+    TORCH_INTERNAL_ASSERT(0);
+  }
+
+  const auto ret = py::reinterpret_steal<py::object>(
+      PyObject_CallMethod(mode_obj, check_mode_pop_name, ""));
+  if (ret.ptr() == nullptr) {
+    throw python_error();
+  }
 }
 
 } // anonymous namespace
