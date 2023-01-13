@@ -672,13 +672,13 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
               const int64_t width = std::min(WIDTH, n - i);                        \
               /* If either tensor is contiguous use it, otherwise copy into */     \
               /* a contiguous buffer so compute can still be vectorized */         \
-              scalar_t * in_buffer = in_stride == 1 ? in_data : &buffer[0];        \
-              scalar_t * out_buffer = out_stride == 1 ? out_data : &buffer[0];     \
-              if (in_buffer != in_data)                                            \
+              scalar_t * in_buffer = in_stride == 1 ? &in_data[i] : &buffer[0];    \
+              scalar_t * out_buffer = out_stride == 1 ? &out_data[i] : &buffer[0]; \
+              if (in_stride != 1)                                                  \
                 for (const auto j : c10::irange(width))                            \
                   in_buffer[j] = in_data[in_stride * (i + j)];                     \
               vml::v##op(out_buffer, in_buffer, width);                            \
-              if (out_buffer != out_data)                                          \
+              if (out_stride != 1)                                                 \
                 for (const auto j : c10::irange(width))                            \
                     out_data[out_stride * (i + j)] = out_buffer[j];                \
             }                                                                      \
