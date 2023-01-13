@@ -172,10 +172,9 @@ struct ConstantPropagator {
       std::shared_ptr<Graph> graph,
       bool aliasing_types,
       bool ignore_custom_classes)
-      : graph_(std::move(graph)) {
-    aliasing_types_ = aliasing_types;
-    ignore_custom_classes_ = ignore_custom_classes;
-  }
+      : graph_(std::move(graph)),
+        aliasing_types_(aliasing_types),
+        ignore_custom_classes_(ignore_custom_classes) {}
 
   void propagateNode(Node* n) {
     std::vector<IValue> outputs;
