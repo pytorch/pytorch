@@ -1501,7 +1501,7 @@ class TestSparseCSR(TestCase):
             grid_size = (None, 2, 4)
             grid_gen = itertools.product(grid_size, repeat=3)
             for is_sparse_rowspace, grid in itertools.product((True, False), grid_gen):
-                res_tri = torch.sparse.triton_ops.bsr_dense_mm(
+                res_tri = torch.sparse._triton_ops.bsr_dense_mm(
                     bsr,
                     dense.transpose(-2, -1),
                     max_grid=grid,
