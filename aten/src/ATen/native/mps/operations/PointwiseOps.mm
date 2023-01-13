@@ -34,7 +34,7 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, tensor1, tensor2}, false);
+    string key = op_name + getTensorsStringKey({self, tensor1, tensor2});
 
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
