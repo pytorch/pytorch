@@ -95,7 +95,6 @@ include_patterns = [
     'test/test_torch.py',
     'test/test_type_hints.py',
     'test/test_type_info.py',
-    'test/test_utils.py',
 ]
 exclude_patterns = [
     'torch/include/**',
@@ -166,6 +165,7 @@ include_patterns = [
     'torch/_dynamo/optimizations/training.py',
     'torch/_inductor/graph.py',
     'torch/_C/_dynamo/**/*.py',
+    'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]
 exclude_patterns = [
 ]
