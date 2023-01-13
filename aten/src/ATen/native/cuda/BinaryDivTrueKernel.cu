@@ -58,5 +58,4 @@ void div_true_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(div_true_stub, &binary_internal::div_true_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
