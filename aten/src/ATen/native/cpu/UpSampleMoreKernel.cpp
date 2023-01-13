@@ -19,33 +19,6 @@ namespace {
 
 using scale_t = std::vector<c10::optional<double>>;
 
-// For compilation, and it will not be used by data types other than BFloat16.
-template <typename scalar_in, typename scalar_out>
-void inline apply_grad_input(scalar_out* buffer_ptr, scalar_in* gin, int64_t size) {
-  return;
-}
-
-template <>
-void inline apply_grad_input(float* buffer_ptr, BFloat16* gin, int64_t size) {
-  using bVec = vec::Vectorized<BFloat16>;
-  using fVec = vec::Vectorized<float>;
-  int64_t d = 0;
-  for (; d < size - (size % bVec::size()); d += bVec::size()) {
-    bVec gin_bvec = bVec::loadu(gin + d);
-    fVec gin_fvec0, gin_fvec1;
-    std::tie(gin_fvec0, gin_fvec1) = convert_bfloat16_float(gin_bvec);
-    gin_fvec0 += fVec::loadu(buffer_ptr + d);
-    gin_fvec1 += fVec::loadu(buffer_ptr + d + fVec::size());
-    fVec(0).store(buffer_ptr + d);
-    fVec(0).store(buffer_ptr + d + fVec::size());
-    convert_float_bfloat16(gin_fvec0, gin_fvec1).store(gin + d);
-  }
-  for (; d < size; d++) {
-    gin[d] += buffer_ptr[d];
-    buffer_ptr[d] = 0;
-  }
-}
-
 template <typename scalar_in, typename scalar_out>
 void inline nearest_channels_last_acc(scalar_in* gin, scalar_out* gout, int64_t size) {
   using Vec = vec::Vectorized<scalar_in>;
@@ -139,11 +112,12 @@ void cpu_upsample_nearest_backward(
   int64_t output_slice_size = output_depth * output_height * output_width;
   int64_t input_slice_size = input_depth * input_height * input_width;
 
+  using opmath_t = at::opmath_type<scalar_t>;
   auto loop1d = [&](int64_t begin, int64_t end) {
     if (std::is_same<scalar_t, BFloat16>::value) {
-      std::unique_ptr<float[]> buffer_data = std::make_unique<float[]>(input_slice_size);
+      std::unique_ptr<opmath_t[]> buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
       auto buffer_data_ptr = buffer_data.get();
-      memset(buffer_data_ptr, 0, sizeof(float) * input_slice_size);
+      memset(buffer_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
 
       for (const auto c : c10::irange(begin, end)) {
         for (const auto ow : c10::irange(output_width)) {
@@ -168,9 +142,9 @@ void cpu_upsample_nearest_backward(
 
   auto loop2d = [&](int64_t begin, int64_t end) {
     if (std::is_same<scalar_t, BFloat16>::value) {
-        std::unique_ptr<float[]> buffer_data = std::make_unique<float[]>(input_slice_size);
+        std::unique_ptr<opmath_t[]> buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
         auto buffer_data_ptr = buffer_data.get();
-        memset(buffer_data_ptr, 0, sizeof(float) * input_slice_size);
+        memset(buffer_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
 
         for (const auto c : c10::irange(begin, end)) {
           for (const auto oh : c10::irange(output_height)) {
@@ -201,9 +175,9 @@ void cpu_upsample_nearest_backward(
 
   auto loop3d = [&](int64_t begin, int64_t end) {
     if (std::is_same<scalar_t, BFloat16>::value) {
-      std::unique_ptr<float[]> buffer_data = std::make_unique<float[]>(input_slice_size);
+      std::unique_ptr<opmath_t[]> buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
       auto buffer_data_ptr = buffer_data.get();
-      memset(buffer_data_ptr, 0, sizeof(float) * input_slice_size);
+      memset(buffer_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
 
       for (const auto c : c10::irange(begin, end)) {
         for (const auto od : c10::irange(output_depth)) {
@@ -290,11 +264,12 @@ void cpu_upsample_nearest_backward_channels_last(
   int64_t output_width = output_sizes[ndim - 1];
   int64_t input_slice_size = input_depth * input_height * input_width * channels;
 
+  using opmath_t = at::opmath_type<scalar_t>;
   auto loop2d = [&](int64_t begin, int64_t end) {
     if (std::is_same<scalar_t, BFloat16>::value) {
-      std::unique_ptr<float[]> buffer_data = std::make_unique<float[]>(input_slice_size);
+      std::unique_ptr<opmath_t[]> buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
       auto buffer_data_ptr = buffer_data.get();
-      memset(buffer_data_ptr, 0, sizeof(float) * input_slice_size);
+      memset(buffer_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
 
       for (const auto n : c10::irange(begin, end)) {
         for (const auto oh : c10::irange(output_height)) {
@@ -303,7 +278,7 @@ void cpu_upsample_nearest_backward_channels_last(
             int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[1]);
             scalar_t* grad_output_ptr = grad_output_data +
                 (n * output_height * output_width + oh * output_width + ow) * channels;
-            float* buffer_ptr = buffer_data.get() + (ih * input_width + iw) * channels;
+            opmath_t* buffer_ptr = buffer_data.get() + (ih * input_width + iw) * channels;
             nearest_channels_last_acc(buffer_ptr, grad_output_ptr, channels);
           }
         }
@@ -329,9 +304,9 @@ void cpu_upsample_nearest_backward_channels_last(
 
   auto loop3d = [&](int64_t begin, int64_t end) {
     if (std::is_same<scalar_t, BFloat16>::value) {
-      std::unique_ptr<float[]> buffer_data = std::make_unique<float[]>(input_slice_size);
+      std::unique_ptr<opmath_t[]> buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
       auto buffer_data_ptr = buffer_data.get();
-      memset(buffer_data_ptr, 0, sizeof(float) * input_slice_size);
+      memset(buffer_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
 
       for (const auto n : c10::irange(begin, end)) {
         for (int64_t od = 0; od < output_depth; od++) {
@@ -344,7 +319,7 @@ void cpu_upsample_nearest_backward_channels_last(
                   (n * output_depth * output_height * output_width +
                   od * output_height * output_width + oh * output_width + ow) * channels;
 
-              float* buffer_ptr = buffer_data.get() + (id * input_height * input_width + ih * input_width + iw) * channels;
+              opmath_t* buffer_ptr = buffer_data.get() + (id * input_height * input_width + ih * input_width + iw) * channels;
               nearest_channels_last_acc(buffer_ptr, grad_output_ptr, channels);
             }
           }
@@ -502,7 +477,7 @@ void cpu_upsample_linear_backward(
 
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t iw0, iw1;
-      scalar_t w0lambda, w1lambda;
+      opmath_t w0lambda, w1lambda;
       for (const auto c : c10::irange(begin, end)) {
         for (const auto ow : c10::irange(output_width)) {
           compute_source_index_and_lambda(
@@ -513,7 +488,6 @@ void cpu_upsample_linear_backward(
         }
         auto gin = grad_input_data + c * input_slice_size;
         apply_grad_input(buffer_data_ptr, gin, input_slice_size);
-
       }
     } else {
       const opmath_t width_scale = area_pixel_compute_scale<opmath_t>(
@@ -551,7 +525,7 @@ void cpu_upsample_linear_backward(
 
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t ih0, ih1, iw0, iw1;
-        scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
+      opmath_t h0lambda, h1lambda, w0lambda, w1lambda;
       for (const auto c : c10::irange(begin, end)) {
         for (const auto oh : c10::irange(output_height)) {
           compute_source_index_and_lambda(
@@ -616,7 +590,7 @@ void cpu_upsample_linear_backward(
 
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t id0, id1, ih0, ih1, iw0, iw1;
-      scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
+      opmath_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
       for (const auto c : c10::irange(begin, end)) {
         for (const auto od : c10::irange(output_depth)) {
           compute_source_index_and_lambda(
@@ -734,14 +708,14 @@ void cpu_upsample_linear_backward_channels_last(
   int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
-
+  int64_t input_slice_size = input_depth * input_height * input_width * channels;
   using opmath_t = at::opmath_type<scalar_t>;
 
   auto loop2d = [&](int64_t begin, int64_t end) {
     if (std::is_same<scalar_t, BFloat16>::value) {
-      std::unique_ptr<opmath_t[]> buffer_data = std::make_unique<opmath_t[]>(input_height * input_width * channels);
+      std::unique_ptr<opmath_t[]> buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
       auto buffer_data_ptr = buffer_data.get();
-      memset(buffer_data_ptr, 0, sizeof(opmath_t)*input_height * input_width * channels);
+      memset(buffer_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
 
       const opmath_t height_scale = area_pixel_compute_scale<opmath_t>(
           input_height, output_height, align_corners, scales[0]);
@@ -754,7 +728,7 @@ void cpu_upsample_linear_backward_channels_last(
 
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t ih0, ih1, iw0, iw1;
-      scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
+      opmath_t h0lambda, h1lambda, w0lambda, w1lambda;
       for (const auto n : c10::irange(begin, end)) {
         for (const auto oh : c10::irange(output_height)) {
           compute_source_index_and_lambda(
@@ -764,14 +738,14 @@ void cpu_upsample_linear_backward_channels_last(
                 iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
             scalar_t* grad_output_ptr = grad_output_data +
                 (n * output_height * output_width + oh * output_width + ow) * channels;
-            linear_channels_last_acc(input_indexr(n, ih0, iw0), grad_output_ptr, opmath_t(h0lambda) * w0lambda, channels); /* i00 */
-            linear_channels_last_acc(input_indexr(n, ih0, iw1), grad_output_ptr, opmath_t(h0lambda) * w1lambda, channels); /* i01 */
-            linear_channels_last_acc(input_indexr(n, ih1, iw0), grad_output_ptr, opmath_t(h1lambda) * w0lambda, channels); /* i10 */
-            linear_channels_last_acc(input_indexr(n, ih1, iw1), grad_output_ptr, opmath_t(h1lambda) * w1lambda, channels); /* i11 */
+            linear_channels_last_acc(input_indexr(n, ih0, iw0), grad_output_ptr, h0lambda * w0lambda, channels); /* i00 */
+            linear_channels_last_acc(input_indexr(n, ih0, iw1), grad_output_ptr, h0lambda * w1lambda, channels); /* i01 */
+            linear_channels_last_acc(input_indexr(n, ih1, iw0), grad_output_ptr, h1lambda * w0lambda, channels); /* i10 */
+            linear_channels_last_acc(input_indexr(n, ih1, iw1), grad_output_ptr, h1lambda * w1lambda, channels); /* i11 */
           }
         }
-        auto gin = grad_input_data + n * input_height * input_width * channels;
-        apply_grad_input(buffer_data_ptr, gin, input_height * input_width * channels);
+        auto gin = grad_input_data + n * input_slice_size;
+        apply_grad_input(buffer_data_ptr, gin, input_slice_size);
 
       }
     } else {
@@ -808,9 +782,9 @@ void cpu_upsample_linear_backward_channels_last(
 
   auto loop3d = [&](int64_t begin, int64_t end) {
     if (std::is_same<scalar_t, BFloat16>::value) {
-      std::unique_ptr<opmath_t[]> buffer_data = std::make_unique<opmath_t[]>(input_depth * input_height * input_width * channels);
+      std::unique_ptr<opmath_t[]> buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
       auto buffer_data_ptr = buffer_data.get();
-      memset(buffer_data_ptr, 0, sizeof(opmath_t) * input_depth * input_height * input_width * channels);
+      memset(buffer_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
 
       const opmath_t depth_scale = area_pixel_compute_scale<opmath_t>(
           input_depth, output_depth, align_corners, scales[0]);
@@ -825,7 +799,7 @@ void cpu_upsample_linear_backward_channels_last(
 
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t id0, id1, ih0, ih1, iw0, iw1;
-      scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
+      opmath_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
       for (const auto n : c10::irange(begin, end)) {
         for (const auto od : c10::irange(output_depth)) {
           compute_source_index_and_lambda(
@@ -838,19 +812,19 @@ void cpu_upsample_linear_backward_channels_last(
                   iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
               scalar_t* grad_output_ptr = grad_output_data + (n * output_depth * output_height * output_width +
                   od *  output_height * output_width + oh * output_width + ow) * channels;
-              linear_channels_last_acc(input_indexr(n, id0, ih0, iw0), grad_output_ptr, opmath_t(d0lambda) * h0lambda * w0lambda, channels); /* i000 */
-              linear_channels_last_acc(input_indexr(n, id0, ih0, iw1), grad_output_ptr, opmath_t(d0lambda) * h0lambda * w1lambda, channels); /* i001 */
-              linear_channels_last_acc(input_indexr(n, id0, ih1, iw0), grad_output_ptr, opmath_t(d0lambda) * h1lambda * w0lambda, channels); /* i010 */
-              linear_channels_last_acc(input_indexr(n, id0, ih1, iw1), grad_output_ptr, opmath_t(d0lambda) * h1lambda * w1lambda, channels); /* i011 */
-              linear_channels_last_acc(input_indexr(n, id1, ih0, iw0), grad_output_ptr, opmath_t(d1lambda) * h0lambda * w0lambda, channels); /* i100 */
-              linear_channels_last_acc(input_indexr(n, id1, ih0, iw1), grad_output_ptr, opmath_t(d1lambda) * h0lambda * w1lambda, channels); /* i101 */
-              linear_channels_last_acc(input_indexr(n, id1, ih1, iw0), grad_output_ptr, opmath_t(d1lambda) * h1lambda * w0lambda, channels); /* i110 */
-              linear_channels_last_acc(input_indexr(n, id1, ih1, iw1), grad_output_ptr, opmath_t(d1lambda) * h1lambda * w1lambda, channels); /* i111 */
+              linear_channels_last_acc(input_indexr(n, id0, ih0, iw0), grad_output_ptr, d0lambda * h0lambda * w0lambda, channels); /* i000 */
+              linear_channels_last_acc(input_indexr(n, id0, ih0, iw1), grad_output_ptr, d0lambda * h0lambda * w1lambda, channels); /* i001 */
+              linear_channels_last_acc(input_indexr(n, id0, ih1, iw0), grad_output_ptr, d0lambda * h1lambda * w0lambda, channels); /* i010 */
+              linear_channels_last_acc(input_indexr(n, id0, ih1, iw1), grad_output_ptr, d0lambda * h1lambda * w1lambda, channels); /* i011 */
+              linear_channels_last_acc(input_indexr(n, id1, ih0, iw0), grad_output_ptr, d1lambda * h0lambda * w0lambda, channels); /* i100 */
+              linear_channels_last_acc(input_indexr(n, id1, ih0, iw1), grad_output_ptr, d1lambda * h0lambda * w1lambda, channels); /* i101 */
+              linear_channels_last_acc(input_indexr(n, id1, ih1, iw0), grad_output_ptr, d1lambda * h1lambda * w0lambda, channels); /* i110 */
+              linear_channels_last_acc(input_indexr(n, id1, ih1, iw1), grad_output_ptr, d1lambda * h1lambda * w1lambda, channels); /* i111 */
             }
           }
         }
-        auto gin = grad_input_data + n * input_depth * input_height * input_width * channels;
-        apply_grad_input(buffer_data_ptr, gin, input_height * input_width * channels);
+        auto gin = grad_input_data + n * input_slice_size;
+        apply_grad_input(buffer_data_ptr, gin, input_slice_size);
       }
     } else {
       const opmath_t depth_scale = area_pixel_compute_scale<opmath_t>(

@@ -5,6 +5,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/DispatchStub.h>
 
 /**
@@ -459,6 +460,33 @@ static inline void compute_source_index_and_lambda(
       static_cast<opmath_t>(1)
     );
     lambda0 = static_cast<scalar_t>(1.) - lambda1;
+  }
+}
+
+// For compilation, and it will not be used by data types other than BFloat16.
+template <typename scalar_in, typename scalar_out>
+void inline apply_grad_input(scalar_out* buffer_ptr, scalar_in* gin, int64_t size) {
+  return;
+}
+
+template <>
+void inline apply_grad_input(float* buffer_ptr, BFloat16* gin, int64_t size) {
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  int64_t d = 0;
+  for (; d < size - (size % bVec::size()); d += bVec::size()) {
+    bVec gin_bvec = bVec::loadu(gin + d);
+    fVec gin_fvec0, gin_fvec1;
+    std::tie(gin_fvec0, gin_fvec1) = convert_bfloat16_float(gin_bvec);
+    gin_fvec0 += fVec::loadu(buffer_ptr + d);
+    gin_fvec1 += fVec::loadu(buffer_ptr + d + fVec::size());
+    fVec(0).store(buffer_ptr + d);
+    fVec(0).store(buffer_ptr + d + fVec::size());
+    convert_float_bfloat16(gin_fvec0, gin_fvec1).store(gin + d);
+  }
+  for (; d < size; d++) {
+    gin[d] += buffer_ptr[d];
+    buffer_ptr[d] = 0;
   }
 }
 
