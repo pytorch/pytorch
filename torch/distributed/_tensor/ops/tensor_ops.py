@@ -39,7 +39,6 @@ def prop_create_like(op_schema: OpSchema) -> OutputSharding:
         placements=tuple(
             Replicate() if isinstance(p, _Partial) else p for p in input_spec.placements
         ),
-        ndim=input_spec.ndim,
         shape=input_spec.shape,
     )
     return OutputSharding(output_spec=output_spec)
@@ -75,7 +74,6 @@ def new_factory_rule(op_schema: OpSchema) -> OutputSharding:
             mesh=input.mesh,
             placements=[Replicate()] * input.mesh.ndim,
             shape=size,
-            ndim=len(size),
         )
     )
 
@@ -138,7 +136,6 @@ def prop_bucketize(op_schema: OpSchema) -> OutputSharding:
                         DTensorSpec(
                             mesh=boundaries.mesh,
                             placements=[Replicate()] * len(boundaries.placements),
-                            ndim=boundaries.ndim,
                             shape=boundaries.shape,
                         ),
                     ),
@@ -173,7 +170,6 @@ def _prop_all_but_dim(
         mesh=input_spec.mesh,
         placements=output_placements,
         shape=out_shape,
-        ndim=input_spec.ndim,
     )
 
     if input_spec.placements == output_placements:
@@ -182,7 +178,6 @@ def _prop_all_but_dim(
         suggested_input_spec = DTensorSpec(
             mesh=input_spec.mesh,
             placements=output_placements,
-            ndim=input_spec.ndim,
             shape=input_spec.shape,
         )
         out = OutputSharding(
@@ -278,7 +273,6 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
                 mesh=input.mesh,
                 placements=input.placements,
                 shape=input.shape,
-                ndim=input.ndim,
             )
         )
     else:
@@ -293,13 +287,11 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
                             mesh=input.mesh,
                             placements=input_suggestion,
                             shape=input.shape,
-                            ndim=input.ndim,
                         ),
                         DTensorSpec(
                             mesh=src.mesh,
                             placements=input_suggestion,
                             shape=src.shape,
-                            ndim=src.ndim,
                         ),
                     )
                     + op_schema.args_schema[2:],
@@ -443,7 +435,6 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
                 mesh=values_spec.mesh,
                 placements=value_placements,
                 shape=value_shape,
-                ndim=len(value_shape),
             )
         )
         return result
@@ -460,7 +451,6 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
                                 Replicate() if need_reshard_on_values[i] else v
                                 for i, v in enumerate(values_spec.placements)
                             ],
-                            ndim=values_spec.ndim,
                             shape=values_spec.shape,
                         ),
                         multi_indices_spec,

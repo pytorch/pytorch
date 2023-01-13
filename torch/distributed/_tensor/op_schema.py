@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch.utils._pytree import tree_map
 from torch.distributed._tensor.placement_types import DTensorSpec
 
 
@@ -11,6 +12,21 @@ KwargsType = Dict[str, object]
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
 # be the same set of possiblities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
+
+
+def _rebuild_tensor_from_dtensor_meta(arg) -> object:
+    """"
+    This is used to propagate tensor metadata, must be under fake mode
+    """
+    if isinstance(arg, DTensorSpec):
+        assert arg.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
+        return torch.empty_strided(
+            arg.tensor_meta.shape,
+            arg.tensor_meta.stride,
+            device=arg.mesh.device_type
+        )
+    else:
+        return arg
 
 
 @dataclass
@@ -94,6 +110,17 @@ class OpSchema(object):
             and self.args_schema == other.args_schema
             and self.kwargs_schema == other.kwargs_schema
         )
+
+    def gen_fake_args(self) -> ArgsType:
+        """
+        gen_fake_args: generate fake args for the operator, this is mainly used
+            by sharding propagation rules to generate fake args for the operator
+            to run the local tensor operator and get the output spec.
+        """
+        return tree_map(_rebuild_tensor_from_dtensor_meta, self.args_spec)
+
+    def gen_fake_kwargs(self) -> KwargsType:
+        return tree_map(_rebuild_tensor_from_dtensor_meta, self.kwargs_schema)
 
 @dataclass
 class OutputSharding:

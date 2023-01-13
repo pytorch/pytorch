@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
 import warnings
-from typing import Callable, cast, Dict, Optional, Sequence
+from typing import Callable, cast, Dict, Optional, Sequence, Tuple
 
 import torch
 
@@ -151,6 +151,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         placements: Sequence[Placement],
         *,
         size: torch.Size,
+        stride: Tuple[int, ...],
         requires_grad: bool = False,
     ) -> "DTensor":
         """

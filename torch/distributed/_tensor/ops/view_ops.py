@@ -615,7 +615,6 @@ def register_prop_rule_map(
                 mesh=input_dtensor_spec.mesh,
                 placements=shard_out,
                 shape=torch.Size(global_out_shape),
-                ndim=len(global_out_shape),
             )
             local_out_shape = output_dtensor_spec.local_shape
 
@@ -651,7 +650,6 @@ def register_prop_rule_map(
                             DTensorSpec(
                                 placements=suggested_placements,
                                 mesh=input_dtensor_spec.mesh,
-                                ndim=input_dtensor_spec.ndim,
                                 shape=input_dtensor_spec.shape,
                             ),
                         )

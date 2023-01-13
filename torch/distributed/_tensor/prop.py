@@ -1,12 +1,17 @@
 from typing import Callable, Dict
 
 from torch._ops import OpOverload
+from torch._subclasses import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 
 
 class ShardingPropagator(object):
     def __init__(self) -> None:
         self.op_to_rules: Dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
+        self.decomposition_table: Dict[OpOverload, Callable] = {}
+        self.fake_mode = FakeTensorMode()
+        # self.compiled_decomp_cache: Dict[Callable, torch.fx.Graph]
 
     def register_sharding_prop_rule(
         self, op_overload: OpOverload, rule_func: Callable[[OpSchema], OutputSharding]
@@ -16,12 +21,26 @@ class ShardingPropagator(object):
         """
         self.op_to_rules[op_overload] = rule_func
 
+    def register_decomposition(
+        self, op_overload: OpOverload, decomp_func: Callable
+    ):
+        """
+        Register a decomposition for an op
+        """
+        self.decomposition_table[op_overload] = decomp_func
+
     def propagate_op_sharding(
         self, op_overload: OpOverload, op_schema: OpSchema
     ) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.
         """
+
+        op_to_trace = self.decomposition_table[op_overload] if op_overload in self.decomposition_table else op_overload
+
+        with self.fake_mode:
+            op_g = make_fx
+
         sharding_prop_func = self.op_to_rules.get(op_overload, None)
 
         if sharding_prop_func is None:
@@ -61,6 +80,14 @@ class ShardingPropagator(object):
             )
         else:
             return output_sharding
+
+    def _propagate_op_sharding_with_decomposition(self, decomp_func, op_schema: OpSchema) -> OutputSharding:
+        pass
+        
+
+    def propagate_tensor_meta(self):
+        pass
+
 
 
 class _CachingPropagator(ShardingPropagator):

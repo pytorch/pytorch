@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, List, Optional, Sequence, Tuple
+from typing import cast, List, Optional, Sequence, Tuple, NamedTuple
 
 import torch
 import torch.distributed.distributed_c10d as c10d
@@ -283,6 +283,14 @@ class _Partial(Placement):
         return f"_Partial(reduce_op={self.reduce_op})"
 
 
+
+def _TensorMeta(NamedTuple):
+    """
+    The meta info of the DTensor used for sharding prop
+    """
+    shape: torch.Size
+    stride: Tuple[int, ...]
+
 # used internally to propagate the placements
 @dataclass
 class DTensorSpec(object):
@@ -292,25 +300,20 @@ class DTensorSpec(object):
     # construction of the DTensor, prop rule could read it, and
     # would need to set in output spec when calculate the output
     # sharding
-    shape: torch.Size
-    # ndim of the current dist tensor, if passed in, this would be
-    # validated with shape, if not passed in, will be generated from
-    # the shape
-    ndim: int = -1
-
-    def __post_init__(self) -> None:
-        if self.ndim == -1:
-            self.ndim = len(self.shape)
+    # optional field, only to be set when necessary
+    tensor_meta: Optional[_TensorMeta] = None
+    # shape: torch.Size
+    # stride: Tuple[int, ...]
 
     def __hash__(self) -> int:
-        return hash((self.mesh, tuple(self.placements), self.shape))
+        return hash((self.mesh, tuple(self.placements), self.tensor_meta))
 
     def __eq__(self, __o: object) -> bool:
         return (
             isinstance(__o, DTensorSpec)
             and self.mesh == __o.mesh
             and self.placements == __o.placements
-            and self.shape == __o.shape
+            and self.tensor_meta == __o.tensor_meta
         )
 
     @property
@@ -362,6 +365,15 @@ class DTensorSpec(object):
             for idx, placement in enumerate(self.placements)
             if placement.is_partial()
         ]
+
+    @property
+    def shape(self) -> torch.Size:
+        assert self.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
+        return self.tensor_meta.shape
+
+    @property
+    def ndim(self) -> int:
+        return len(self.shape)
 
     @property
     def local_shape(self) -> Tuple[int, ...]:
@@ -423,7 +435,6 @@ class DTensorSpec(object):
         mesh: DeviceMesh,
         dim_map: List[int],
         sums: List[int],
-        shape: torch.Size,
     ) -> "DTensorSpec":
         """
         Construct a DTensorSpec from dim_map list and pending sum.
@@ -434,7 +445,6 @@ class DTensorSpec(object):
                 tensor dimension, see `dim_map` property doc for details
             sums (List[int]): a list of integer that represents the dist tensor have
                 pending sum on which device mesh dimension.
-            shape (torch.Size): shape of the DTensor associated with this spec.
 
         Return:
             a class:`DTensorSpec` object
@@ -460,4 +470,4 @@ class DTensorSpec(object):
                     )
                 placements[m] = Shard(i)
 
-        return cls(mesh, placements, shape=shape, ndim=len(dim_map))
+        return cls(mesh, placements)
