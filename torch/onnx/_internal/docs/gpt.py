@@ -5,15 +5,15 @@ import numpy as np
 import onnx
 import onnxruntime
 import torch
-import transformers
+import transformers  # type: ignore[import]
 from torch import _dynamo as torchdynamo
 from torch.onnx._internal import fx as fx_onnx
 from torch.utils._pytree import tree_flatten
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
 try:
-    from onnxruntime.capi import _pybind_state as ORTC
-    from onnxruntime.training.torchdynamo.ort_backend import _get_onnx_devices
+    from onnxruntime.capi import _pybind_state as ORTC  # type: ignore[import]
+    from onnxruntime.training.torchdynamo.ort_backend import _get_onnx_devices  # type: ignore[import]
 
     HAS_ORT_TRAINING = True
 except ImportError:

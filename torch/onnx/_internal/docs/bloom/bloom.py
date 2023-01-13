@@ -1,11 +1,10 @@
 import argparse
 
 import onnx
-import onnxruntime
+import onnxruntime  # type: ignore[import]
 import torch
 from torch.onnx._internal import fx as fx_onnx
-import transformers
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore[import]
 
 """
 
