@@ -449,3 +449,10 @@ def _verify_params_across_processes(
     logger: Optional[Logger],
 ): ...
 def _make_nccl_premul_sum(factor: Union[float, List[Tensor]]) -> ReduceOp: ...
+
+class Backend:
+    def __init__(
+        self,
+        rank: int,
+        size: int,
+    ): ...

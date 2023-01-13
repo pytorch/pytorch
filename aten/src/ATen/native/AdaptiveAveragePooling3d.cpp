@@ -4,6 +4,8 @@
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
+#include <ATen/native/AdaptivePooling.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -242,6 +244,8 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
     const Tensor& input) {
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
+
+  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
 
   /* sizes */
   int64_t sizeD = input.size(-4);

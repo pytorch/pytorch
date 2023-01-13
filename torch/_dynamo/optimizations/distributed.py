@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 import torch
-import torch.fx.traceback as fx_traceback
 from torch import fx
 from torch.fx.node import Node
 from ..utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
@@ -161,7 +160,7 @@ class DDPOptimizer:
                 for name, p in target.named_parameters():
                     param = target.get_parameter(name)
                     if p.requires_grad and not self._ignore_parameter(param):
-                        buckets[0].size += p._storage().nbytes()
+                        buckets[0].size += p.untyped_storage().nbytes()
                         buckets[0].params.append(f"{node.target}_{name}")
                         buckets[0].param_ids.append(id(param))
             elif node.op == "get_attr":
@@ -169,7 +168,7 @@ class DDPOptimizer:
                 if maybe_param.requires_grad and not self._ignore_parameter(
                     maybe_param
                 ):
-                    buckets[0].size += maybe_param._storage().nbytes()
+                    buckets[0].size += maybe_param.untyped_storage().nbytes()
                     buckets[0].params.append(node.target)
                     buckets[0].param_ids.append(id(maybe_param))
 
@@ -274,7 +273,7 @@ class DDPOptimizer:
             # 5) We end up with a compilation mode that takes a real submodule and fake tensors,
             # to match what aot_autograd exepcts. See Note: [Fake Modules and AOTAutograd]
             def run_node(self, n: Node) -> Any:
-                with fx_traceback.append_stack_trace(n.stack_trace):
+                with self._set_current_node(n):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)
                     new_args = []
                     assert fake_mode

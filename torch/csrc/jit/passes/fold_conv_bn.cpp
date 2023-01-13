@@ -310,8 +310,7 @@ void FoldConvBatchNormHelper::analyze(
                 "Conv and BN modules didn't have all required parameters or attributes...");
             continue;
           }
-          conv_bn_paths_[g].push_back(
-              std::make_tuple(conv_module_path, bn_module_path));
+          conv_bn_paths_[g].emplace_back(conv_module_path, bn_module_path);
           // We are using a separate vector for saving Values we want to rewrite
           // to make sure that the order in which we perform these
           // transformations is deterministic. Iterating through keys of

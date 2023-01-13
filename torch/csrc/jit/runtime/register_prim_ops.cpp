@@ -1275,7 +1275,7 @@ static std::vector<c10::optional<Operator>> createOperators(
 
 RegisterOperators reg(([]() {
   auto v = createOperators(opGenArgs);
-  v.push_back(Operator(
+  v.emplace_back(Operator(
       prim::tolist,
       // This operator has to be unschematized because the return type
       // depends on the type hint and input. The implementation of this

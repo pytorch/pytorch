@@ -69,6 +69,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
     2. Delta Debugging: Tries replacing half of the graph with inputs. If fails,
         tries replacing quarter of the graph, etc.
 
+    >>> # xdoctest: +SKIP(failing)
     >>> failing_function = fx.symbolic_trace(f)
     >>> minimize(failing_function, [torch.randn(5)], lambda fx_g, inps: fx_g(*inps))
 

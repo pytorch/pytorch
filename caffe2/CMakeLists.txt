@@ -836,13 +836,9 @@ endif()
 
 # Pass path to PocketFFT
 if(AT_POCKETFFT_ENABLED)
-  if(CMAKE_VERSION VERSION_LESS "3.11")
-    target_include_directories(torch_cpu PRIVATE "${POCKETFFT_INCLUDE_DIR}")
-  else()
-    set_source_files_properties(
-        "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
-        PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
-  endif()
+  set_source_files_properties(
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/mkl/SpectralOps.cpp"
+      PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND BUILD_LIBTORCH_CPU_WITH_DEBUG)
@@ -1126,6 +1122,12 @@ install(FILES
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 if(BUILD_TEST)
+  if(BUILD_EXECUTORCH)
+    add_subdirectory(
+            ${TORCH_ROOT}/test/edge
+            ${CMAKE_BINARY_DIR}/test_edge_op_registration
+    )
+  endif()
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
@@ -1389,12 +1391,6 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   target_compile_options(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
   target_compile_definitions(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
-endif()
-
-if(USE_EXPERIMENTAL_CUDNN_V8_API)
-  if(USE_CUDA)
-    target_compile_definitions(torch_cuda PRIVATE "-DUSE_EXPERIMENTAL_CUDNN_V8_API")
-  endif()
 endif()
 
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING

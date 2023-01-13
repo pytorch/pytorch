@@ -7,24 +7,24 @@ toq = torch.ops.quantized
 
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.intrinsic.qat as nniqat
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.qat as nnqat
 import torch.ao.nn.qat.dynamic as nnqatd
-from torch.ao.quantization.backend_config import get_native_backend_config_dict
+from torch.ao.quantization.backend_config import get_native_backend_config
 import torch.ao.quantization.fx._lower_to_native_backend as \
     _lower_to_native_backend
 import torch.ao.quantization.quantization_mappings as quantization_mappings
 
 from .ns_types import NSNodeTargetType
 
-from typing import Set, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 
 def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
-    # note: this set is modified below by items from backend_config_dict
+    # note: this set is modified below by items from backend_config
     sets_of_related_ops: List[Set[NSNodeTargetType]] = [
         # conv modules
         set([
@@ -327,42 +327,36 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     ]
 
     # for each floating point op, add versions of the op added by
-    # backend_config_dict
-    backend_config_dict = get_native_backend_config_dict()
+    # backend_config
+    backend_config = get_native_backend_config()
 
-    new_connections = [
+    new_connections: List[Tuple[Callable, Callable]] = [
         # technical debt edge case
         (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear),
     ]
 
-    for config in backend_config_dict['configs']:
+    for pattern, config in backend_config._pattern_complex_format_to_config.items():
 
-        if 'pattern' not in config:
-            continue
-
-        # format: (c, (b, a))
-        pattern = config['pattern']
+        # pattern format: (c, (b, a))
         first_element = pattern
         # look from the end, because pattern is in reverse order
         while isinstance(first_element, (list, tuple)):
             first_element = first_element[-1]
 
-        if 'fused_module' in config:
+        if config.fused_module is not None:
             # case 1: pattern fuses a pattern of ops into an op
             # example: nn.Conv1d, nn.ReLU fused into nni.ConvReLU1d
-            new_connections.append((first_element, config['fused_module']))
+            new_connections.append((first_element, config.fused_module))
 
-        if 'qat_module' in config:
+        if config.qat_module is not None:
             # case 2: pattern swaps a module into a QAT module
             # example: nni.ConvReLU1d swapped into nniqat.ConvReLU1d
-            new_connections.append((first_element, config['qat_module']))
+            new_connections.append((first_element, config.qat_module))
 
-        if 'reference_quantized_module_for_root' in config:
+        if config.reference_quantized_module is not None:
             # case 3: reference version of floating point module, such as
             # nn.Conv2d and nnqr.Conv2d
-            new_connections.append(
-                (first_element, config['reference_quantized_module_for_root'])
-            )
+            new_connections.append((first_element, config.reference_quantized_module))
 
     #
     # Add reference module swaps from default lowering path
@@ -413,7 +407,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             new_connections.append((source, target))
 
 
-    # add the new connections from backend_config_dict
+    # add the new connections from backend_config
     for item1, item2 in new_connections:
         for set_of_related_ops in sets_of_related_ops:
             if item1 in set_of_related_ops or item2 in set_of_related_ops:
@@ -607,6 +601,8 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.LinearReLU,
         nniqat.LinearBn1d,
         nniqd.LinearReLU,
+        nni.LinearLeakyReLU,
+        nni.LinearTanh,
     ])
 
     MODS_IO_TYPE_INT8: Set[NSNodeTargetType] = set([
@@ -637,6 +633,8 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniq.ConvReLU2d,
         nniq.ConvReLU3d,
         nniq.LinearReLU,
+        nniq.LinearLeakyReLU,
+        nniq.LinearTanh,
     ])
 
     MODS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = set([

@@ -14,7 +14,7 @@ For CPU Backend, by default, if optimization blocklist is None or empty, ``optim
     - **Dropout removal** (blocklisting option `MobileOptimizerType::REMOVE_DROPOUT`): This optimization pass removes ``dropout`` and ``dropout_`` nodes from this module when training is false.
     - **Conv packed params hoisting** (blocklisting option `MobileOptimizerType::HOIST_CONV_PACKED_PARAMS`): This optimization pass moves convolution packed params to the root module, so that the convolution structs can be deleted. This decreases model size without impacting numerics.
 
-for Vulkan Backend, by default, if optimization blocklist is None or empty, ``optimize_for_mobile`` will run the folllwing optimization:
+for Vulkan Backend, by default, if optimization blocklist is None or empty, ``optimize_for_mobile`` will run the following optimization:
     - **Automatic GPU Transfer** (blocklisting option `MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER`): This optimization pass rewrites the graph such that inputs are transferred to Vulkan backend, and outputs are transferred to CPU backend
 
 ``optimize_for_mobile`` will also invoke freeze_module pass which only preserves ``forward`` method. If you have other method to that needed to be preserved,  add them into the preserved method list and pass into the method.
