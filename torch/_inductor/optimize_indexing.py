@@ -84,6 +84,7 @@ class ValueRanges(object):
 
 class ValueRangeAnalysis(object):
     def __init__(self):
+        self.name = "ValueRangeAnalysis"
         boolean_operators = (
             "eq",
             "ne",
@@ -277,7 +278,8 @@ class ValueRangeAnalysis(object):
         return ValueRanges.increasing_map(x, fn)
 
     def __getattr__(self, name):
-        log.warning(f"unhandled ValueRange op {name}")
+        log.error(f"unhandled ValueRange op {name}")
+        raise 1
         return self.default_handler
 
 
