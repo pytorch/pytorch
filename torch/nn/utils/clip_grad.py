@@ -65,9 +65,8 @@ def clip_grad_norm_(
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     if foreach:
-        clip_coef_clamped_scalar = clip_coef_clamped.item()
         for [grads] in grouped_tensors.values():
-            torch._foreach_mul_(grads, clip_coef_clamped_scalar)
+            torch._foreach_mul_(grads, clip_coef_clamped.to(grads[0].device))
     else:
         for g in grads:
             g.detach().mul_(clip_coef_clamped.to(g.device))
