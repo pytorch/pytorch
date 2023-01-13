@@ -2,6 +2,7 @@
 
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/complex.h>
@@ -34,9 +35,6 @@
 #include <mkl.h>
 #endif
 
-#define DL_RUNTIME_BUG(op, type_)
-#define DL_RUNTIME_BUG_BFLOAT16()
-
 namespace at {
 namespace vml {
 inline namespace CPU_CAPABILITY {
@@ -58,44 +56,11 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
 
 // NB: We ignore numerical errors by convention and leave them to the user
 
-// We unfortunately need to duplicate code here to deal with the SSE-AVX
-// transition bug (see [Note SSE-AVX transitions]). As soon as we can expect
-// users to use a version of glibc newer than 2.23 we will be able to ditch
-// this. This duplication is also necessary since not all functions (e.g. rsqrt)
-// might be part of cmath.
-
-// for BFloat16, we need specialize it, the reason is that avx/avx2 and glic=2.23,
-// we can't give DL_RUNTIME_BUG volatile type in x = std::op(x);
-
-#define IMPLEMENT_VML_BUG(op)                                                     \
-  template <typename scalar_t>                                                    \
-  inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
-    DL_RUNTIME_BUG(op, scalar_t)                                                  \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      map([](const Vectorized<scalar_t>& x) { return x.op(); },                   \
-          out + begin,                                                            \
-          in + begin,                                                             \
-          end - begin);                                                           \
-    });                                                                           \
-  }                                                                               \
-  template <>                                                                     \
-  inline void v##op<c10::BFloat16>(                                               \
-      c10::BFloat16* out, const c10::BFloat16* in, int64_t size) {                \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      DL_RUNTIME_BUG_BFLOAT16()                                                   \
-      using vecscalar_t = vec_scalar_t<c10::BFloat16>;                            \
-      map([](const Vectorized<vecscalar_t>& x) { return x.op(); },                \
-          out + begin,                                                            \
-          in + begin,                                                             \
-          end - begin);                                                           \
-    });                                                                           \
-  }
-
 #define IMPLEMENT_VML(op)                                                         \
   template <typename scalar_t>                                                    \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {            \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
-      using vecscalar_t = vec_scalar_t<scalar_t>;                                 \
+      using vecscalar_t = at::opmath_type<scalar_t>;                              \
       map([](const Vectorized<vecscalar_t>& x) { return x.op(); },                \
           out + begin,                                                            \
           in + begin,                                                             \
@@ -109,7 +74,7 @@ IMPLEMENT_VML(asin)
 IMPLEMENT_VML(atan)
 IMPLEMENT_VML(ceil)
 IMPLEMENT_VML(cos)
-// IMPLEMENT_VML_BUG(cosh)
+// IMPLEMENT_VML(cosh)
 IMPLEMENT_VML(erf)
 IMPLEMENT_VML(erfc)
 IMPLEMENT_VML(erfinv)
@@ -125,7 +90,7 @@ IMPLEMENT_VML(log1p)
 IMPLEMENT_VML(log2)
 IMPLEMENT_VML(neg)
 IMPLEMENT_VML(sin)
-// IMPLEMENT_VML_BUG(sinh)
+// IMPLEMENT_VML(sinh)
 IMPLEMENT_VML(sqrt)
 IMPLEMENT_VML(round)
 IMPLEMENT_VML(rsqrt)

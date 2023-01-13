@@ -2,8 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& bincount_mps_impl(const Tensor& self,
                           const Tensor& weights,
@@ -151,5 +150,4 @@ Tensor _bincount_mps(const Tensor& self, const c10::optional<Tensor>& weights_op
   return bincount_mps_impl(self, weights_, output);
 }
 
-}
-}
+} // namespace at::native
