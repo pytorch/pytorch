@@ -162,6 +162,13 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
+        
+        # This function needs to be modified to fix test_hooks_inner
+        # mod is our TestModule() instance,
+        # and mod._forward_hooks contains our hook.
+
+        # our challenge is to have dynamo trace the code for our hook(s) before
+        # continuing on to trace the forward itself.
 
         @contextmanager
         def record_nn_module_stack():

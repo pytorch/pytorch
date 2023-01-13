@@ -80,6 +80,13 @@ class OptimizedModule(torch.nn.Module):
         return getattr(self._orig_mod, name)
 
     def forward(self, *args, **kwargs):
+        # This needs to be modified to fix test_hooks_outer.
+        # 
+        # Dynamo special cases the torch.compile(module) scenario,
+        # which means its hooks need special handling too.
+        #
+        # Suggest starting with test_hooks_inner and then building on
+        # that to solve _outer.
         return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
