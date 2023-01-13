@@ -207,7 +207,7 @@ class TORCH_API TensorBase {
     impl_ = x.impl_;
     return *this;
   };
-  TensorBase& operator=(TensorBase&& x) noexcept & {
+  TensorBase& operator=(TensorBase&& x) & {
     impl_ = std::move(x.impl_);
     return *this;
   }
