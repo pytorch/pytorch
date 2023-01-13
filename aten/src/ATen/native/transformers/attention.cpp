@@ -658,7 +658,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 }
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal){
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 

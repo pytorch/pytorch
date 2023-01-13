@@ -557,7 +557,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
 #endif
   const auto dim_per_head = D / num_head;
-  if ((query.is_same(key) && key.is_same(value)) && dim_per_head % 8 == 0 ) {
+  if ((query.is_same(key) && key.is_same(value)) && dim_per_head % 8 == 0 && !need_weights) {
 
     // We have not done linear projection yet but the input for SDP
     // Is expected to be 4 dimensional. We "cheaply" create view tensors
@@ -566,7 +566,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     auto k = key.view({key.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
     auto v = value.view({value.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
 
-    sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, need_weights, false};
+    sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, false};
     auto backend = select_sdp_backend(kernel_params);
     if (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
@@ -581,9 +581,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
                       .transpose(1, 2);
 
       auto y = at::_scaled_dot_product_attention(
-          chunks[0], chunks[1], chunks[2], mask, 0.0, need_weights, false);
-      auto past_sdp =
-          std::get<0>(y).transpose(1, 2).reshape({x_size_0, -1, embed_dim});
+          chunks[0], chunks[1], chunks[2], mask, 0.0, false);
+      auto past_sdp = y.transpose(1, 2).reshape({x_size_0, -1, embed_dim});
       return std::make_tuple(
           at::linear(past_sdp, proj_weight, proj_bias), Tensor());
     }
