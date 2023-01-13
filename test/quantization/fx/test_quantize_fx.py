@@ -7908,8 +7908,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         if torch.backends.quantized.engine not in ('fbgemm', 'qnnpack'):
             return
         qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
-        module_type_strs = ['LSTM']
-        module_types = [torch.nn.LSTM]
+        module_type_strs = ['LSTM', 'GRU']
+        module_types = [torch.nn.LSTM, torch.nn.GRU]
         niter = 10
         sample_input = torch.tensor([[100, -155],
                                      [-155, 100],
