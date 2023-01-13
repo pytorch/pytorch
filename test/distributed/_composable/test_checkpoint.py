@@ -1,21 +1,20 @@
 # Owner(s): ["oncall: distributed"]
 
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import (
-    TestCase,
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-)
-
-import torch
-import torch.nn as nn
-from torch.distributed._composable import checkpoint
-
 import unittest
 from collections import deque
 from contextlib import ContextDecorator
 from copy import deepcopy
+
+import torch
+import torch.nn as nn
+from torch.distributed._composable import checkpoint
+from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 class MemoryDelta(ContextDecorator):
