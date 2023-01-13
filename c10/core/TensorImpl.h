@@ -2672,7 +2672,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   SymBool compute_channels_last_contiguous_3d_dim5(identity<SymBool> type_id) {
-    return !extra_meta_->is_channels_last_contiguous_ &
+    return ~extra_meta_->is_channels_last_contiguous_ &
         compute_channels_last_contiguous_3d(type_id);
   }
 
@@ -2682,7 +2682,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   SymBool compute_channels_last_2d_dim5(identity<SymBool> type_id) {
-    return !extra_meta_->is_channels_last_3d_contiguous_ &
+    return ~extra_meta_->is_channels_last_3d_contiguous_ &
         compute_strides_like_channels_last_2d(type_id);
   }
 
@@ -2691,7 +2691,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   SymBool compute_channels_last_3d_dim5(identity<SymBool> type_id) {
-    return !extra_meta_->is_channels_last_ &
+    return ~extra_meta_->is_channels_last_ &
         compute_strides_like_channels_last_3d(type_id);
   }
 

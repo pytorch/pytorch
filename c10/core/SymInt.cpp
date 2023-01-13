@@ -103,7 +103,7 @@ SymBool SymInt::sym_eq(const SymInt& sci) const {
 }
 
 SymBool SymInt::sym_neq(const SymInt& sci) const {
-  return !sym_eq(sci);
+  return ~sym_eq(sci);
 }
 
 SymBool SymInt::sym_lt(const SymInt& sci) const {

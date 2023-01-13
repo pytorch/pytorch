@@ -86,6 +86,15 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual SymNode sym_max(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymNode sym_or(const SymNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode sym_and(const SymNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode sym_not() {
+    TORCH_CHECK(false, "NYI");
+  };
   // NB: self is ignored here, only the arguments are used
   virtual SymNode is_non_overlapping_and_dense(ArrayRef<SymNode> sizes, ArrayRef<SymNode> strides) {
     TORCH_CHECK(false, "NYI");

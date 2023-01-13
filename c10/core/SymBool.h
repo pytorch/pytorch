@@ -40,7 +40,7 @@ class C10_API SymBool {
 
   SymBool operator&(const SymBool& other) const { return sym_and(other); }
   SymBool operator|(const SymBool& other) const { return sym_or(other); }
-  SymBool operator!() const { return sym_not(); }
+  SymBool operator~() const { return sym_not(); }
 
   // Insert a guard for the bool to be its concrete value, and then return
   // that value.  Note that C++ comparison operations default to returning
