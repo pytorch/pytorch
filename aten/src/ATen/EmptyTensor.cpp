@@ -164,9 +164,7 @@ TensorBase _empty_generic(
   auto tensor = detail::make_tensor_base<TensorImpl>(
       std::move(storage_impl), ks, dtype);
   // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
-    tensor.unsafeGetTensorImpl()->generic_set_sizes_contiguous(size);
-  }
+  tensor.unsafeGetTensorImpl()->generic_set_sizes_contiguous(size);
 
   if (memory_format_opt.has_value()) {
     // Restriding a just-created empty contiguous tensor does nothing.

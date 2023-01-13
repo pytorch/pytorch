@@ -522,9 +522,14 @@ class FlatParamHandle:
         is ``None``, in which case we assume the gradient reduction dtype
         matches the forward/backward parameter dtype.
         """
-        low_prec_param_dtype_specified = mp_param_dtype is not None
-        low_prec_reduce_dtype_specified = mp_reduce_dtype is not None
-        if low_prec_param_dtype_specified and not low_prec_reduce_dtype_specified:
+        # Save whether these dtypes were specified so that we permit the
+        # parameter dtype to change up until the lazy initialization
+        self._low_prec_param_dtype_specified = mp_param_dtype is not None
+        self._low_prec_reduce_dtype_specified = mp_reduce_dtype is not None
+        if (
+            self._low_prec_param_dtype_specified
+            and not self._low_prec_reduce_dtype_specified
+        ):
             # Special case: infer gradient reduction mixed precision
             self._fwd_bwd_param_dtype = mp_param_dtype
             self._reduce_dtype = self._fwd_bwd_param_dtype
@@ -770,6 +775,21 @@ class FlatParamHandle:
         reshard methods in this class for the allocation and free pattern.
         """
         flat_param = self.flat_param
+        if flat_param.dtype != self._orig_param_dtype:
+            # Entering this branch means that the user changed the parameter
+            # dtype after FSDP initialization, in which case we may need to
+            # refresh some saved dtype attributes (dtypes specified as a part
+            # of mixed precision take precedence).
+            if not self._low_prec_param_dtype_specified:
+                self._fwd_bwd_param_dtype = flat_param.dtype
+            # For `reduce_dtype`, require `param_dtype` was not specified since
+            # then we infer the `reduce_dtype` from the specified `param_dtype`
+            if (
+                not self._low_prec_reduce_dtype_specified
+                and not self._low_prec_param_dtype_specified
+            ):
+                self._reduce_dtype = flat_param.dtype
+            self._orig_param_dtype = flat_param.dtype
         cpu_device = torch.device("cpu")
         if self._offload_params:
             p_assert(
@@ -1465,11 +1485,16 @@ class FlatParamHandle:
                 f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
-            if param.shape != view.shape:
+            if param.shape != view.shape or (
+                param.dtype != view.dtype and not self.uses_sharded_strategy
+            ):
                 # NOTE: This is a hack using `.data` to side step the
-                # check that parameter/gradient sizes match. Here,
-                # `param` has the sharded size; `grad` has the unsharded size.
-                # This happens when running in `no_sync()`.
+                # check that parameter/gradient sizes and dtypes match. Here,
+                # `param` can have the sharded size, and `grad` can have the
+                # unsharded size. Orthgonally, `param` can have the full
+                # precision dtype from `reshard()`, and `grad` can have the
+                # parameter low precision dtype. Both of these mismatches
+                # happen when running in `no_sync()`.
                 if param.grad is None:
                     param.grad = torch.empty_like(param)
                 param.grad.data = view
@@ -1489,7 +1514,10 @@ class FlatParamHandle:
             )  # did not save FQN info in `_shared_param_infos`
             param = getattr(module, param_name)
             prim_param = getattr(prim_module, prim_param_name)
-            if param.shape != prim_param.grad.shape:
+            if (
+                param.shape != prim_param.grad.shape
+                or param.dtype != prim_param.grad.dtype
+            ):
                 # NOTE: This is the same hack to use `.data` to side step the
                 # size check.
                 if param.grad is None:
@@ -1552,7 +1580,7 @@ class FlatParamHandle:
                 # Allow the original data to be freed via garbage collection
                 param.data = torch.empty(
                     0,
-                    dtype=param.dtype,
+                    dtype=self.flat_param.dtype,  # in case `flat_param` changed dtype
                     device=self.flat_param.device,
                     requires_grad=False,
                 )
@@ -1609,7 +1637,7 @@ class FlatParamHandle:
                 numel_in_shard = param_end - param_start + 1
                 assert flat_param._is_grad_none is not None  # mypy
                 if param.requires_grad and not flat_param._is_grad_none[i]:
-                    if self._keep_low_precision_grads:
+                    if self._keep_low_precision_grads or param.dtype != grad.dtype:
                         # NOTE: This is a hack using `.data` to side step the
                         # check that parameter/gradient dtypes match. Here,
                         # `param` has full precision; `grad` has low precision.

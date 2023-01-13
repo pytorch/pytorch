@@ -76,10 +76,10 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual SymNode neg() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymNode min(const SymNode& other) {
+  virtual SymNode sym_min(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymNode max(const SymNode& other) {
+  virtual SymNode sym_max(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymNode clone() {

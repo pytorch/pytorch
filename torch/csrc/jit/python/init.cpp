@@ -1175,8 +1175,8 @@ void initJITBindings(PyObject* module) {
       SYMNODE_BINARY(lt)
       SYMNODE_BINARY(le)
       SYMNODE_BINARY(ge)
-      SYMNODE_BINARY(min)
-      SYMNODE_BINARY(max)
+      SYMNODE_BINARY(sym_min)
+      SYMNODE_BINARY(sym_max)
       SYMNODE_UNARY(ceil)
       SYMNODE_UNARY(floor)
       SYMNODE_UNARY(neg)
@@ -1719,6 +1719,8 @@ void initJITBindings(PyObject* module) {
   py::class_<Argument>(m, "Argument")
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
+      .def_property_readonly(
+          "real_type", [](Argument& self) { return self.real_type(); })
       .def_property_readonly(
           "N",
           [](Argument& self) -> py::object {

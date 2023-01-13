@@ -3964,7 +3964,7 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
-@register_decomposition(aten.empty.memory_format)
+# @register_decomposition(aten.empty.memory_format)
 @out_wrapper()
 def empty(
     *shape,

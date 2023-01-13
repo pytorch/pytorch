@@ -913,9 +913,6 @@ def forward(self, images_1, handedness_1):
         def f(a):
             r = a.item()
             r.node.shape_env.expr_subs[r.node.expr].append(((r >= 0).node.expr, True))
-            r.node.shape_env.expr_subs[r.node.expr].append(((r == 0).node.expr, False))
-            r.node.shape_env.expr_subs[r.node.expr].append(((r == 1).node.expr, False))
-            r.node.shape_env.expr_subs[r.node.expr].append(((r == -1).node.expr, False))
             return torch.empty(r)
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
@@ -1315,7 +1312,6 @@ symbolic_tensor_failures = {
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('max_pool2d_with_indices_backward', ''),  # (symint math failure) Given input size: (s0xs1x2). Calculated ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbolic meta funct...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2) must be tupl...
