@@ -111,7 +111,7 @@ class InlineDeviceGuard {
   InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) = delete;
 
   ~InlineDeviceGuard() {
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) && CUDA_VERSION >= 12000
     if (original_device_.is_cuda() && original_device_.index() >= 0) {
       if (at::cuda::detail::hasPrimaryContext(original_device_.index())) {
         impl_.uncheckedSetDevice(original_device_);
