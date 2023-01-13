@@ -573,19 +573,19 @@ struct cpu_scatter_gather_base_kernel {
   }
 };
 
-template <typename scalar_t, SCATTER_GATHER_OP reduce>
+template <typename scalar_t, ReductionType reduce>
 inline void init(scalar_t* ptr, int64_t size, bool include_self) {
   if (!include_self) {
     using acc_t = vec::vec_scalar_t<scalar_t>;
     using Vec = vec::Vectorized<acc_t>;
 
     acc_t val;
-    if (reduce == SCATTER_GATHER_OP::REDUCE_ADD ||
-        reduce == SCATTER_GATHER_OP::REDUCE_MEAN) {
+    if (reduce == ReductionType::SUM ||
+        reduce == ReductionType::MEAN) {
       val = static_cast<acc_t>(0);
-    } else if (reduce == SCATTER_GATHER_OP::REDUCE_MULTIPLY) {
+    } else if (reduce == ReductionType::PROD) {
       val = static_cast<acc_t>(1);
-    } else if (reduce == SCATTER_GATHER_OP::REDUCE_MAXIMUM) {
+    } else if (reduce == ReductionType::MAX) {
       val = std::numeric_limits<acc_t>::lowest();
     } else {
       val = std::numeric_limits<acc_t>::max();
@@ -598,14 +598,14 @@ inline void init(scalar_t* ptr, int64_t size, bool include_self) {
   }
 }
 
-template <typename vec_t, SCATTER_GATHER_OP reduce>
+template <typename vec_t, ReductionType reduce>
 inline vec_t update(const vec_t& x, const vec_t& y) {
-  if (reduce == SCATTER_GATHER_OP::REDUCE_ADD ||
-      reduce == SCATTER_GATHER_OP::REDUCE_MEAN) {
+  if (reduce == ReductionType::SUM ||
+      reduce == ReductionType::MEAN) {
     return x + y;
-  } else if (reduce == SCATTER_GATHER_OP::REDUCE_MULTIPLY) {
+  } else if (reduce == ReductionType::PROD) {
     return x * y;
-  } else if (reduce == SCATTER_GATHER_OP::REDUCE_MAXIMUM) {
+  } else if (reduce == ReductionType::MAX) {
     return vec::maximum(x, y);
   } else {
     return vec::minimum(x, y);
@@ -635,7 +635,7 @@ inline vec_t update(const vec_t& x, const vec_t& y) {
 //
 //   step 2: spmm reduce, parallel on M and vectorize on K
 //
-template <typename scalar_t, SCATTER_GATHER_OP reduce>
+template <typename scalar_t, ReductionType reduce>
 void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
   int64_t* index_data = index.data_ptr<int64_t>();
   scalar_t* self_data = self.data_ptr<scalar_t>();
@@ -735,7 +735,7 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
             K);
       }
 
-      if (reduce == SCATTER_GATHER_OP::REDUCE_MEAN) {
+      if (reduce == ReductionType::MEAN) {
         int64_t count = include_self ? 1 : 0;
         count += off_end - off_start;
         if (count != 0) {
@@ -791,30 +791,30 @@ void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index,
 void scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
   AT_DISPATCH_FLOATING_TYPES_AND(
     ScalarType::BFloat16, self.scalar_type(), "scatter_add_expanded_index", [&] {
-      cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_ADD>(self, index, src, /*include_self*/true);
+      cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::SUM>(self, index, src, /*include_self*/true);
   });
 }
 
 void scatter_reduce_expanded_index_kernel(
     const Tensor& self, const Tensor& index, const Tensor& src,
-    const SCATTER_GATHER_OP& reduce, bool include_self) {
+    const ReductionType& reduce, bool include_self) {
   AT_DISPATCH_FLOATING_TYPES_AND(
     ScalarType::BFloat16, self.scalar_type(), "scatter_reduce_expanded_index", [&] {
       switch (reduce) {
-      case SCATTER_GATHER_OP::REDUCE_ADD :
-        cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_ADD>(self, index, src, include_self);
+      case ReductionType::SUM :
+        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::SUM>(self, index, src, include_self);
         break;
-      case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
-        cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_MULTIPLY>(self, index, src, include_self);
+      case ReductionType::PROD :
+        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::PROD>(self, index, src, include_self);
         break;
-      case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
-        cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_MAXIMUM>(self, index, src, include_self);
+      case ReductionType::MAX :
+        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::MAX>(self, index, src, include_self);
         break;
-      case SCATTER_GATHER_OP::REDUCE_MINIMUM :
-        cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_MINIMUM>(self, index, src, include_self);
+      case ReductionType::MIN :
+        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::MIN>(self, index, src, include_self);
         break;
-      case SCATTER_GATHER_OP::REDUCE_MEAN :
-        cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_MEAN>(self, index, src, include_self);
+      case ReductionType::MEAN :
+        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::MEAN>(self, index, src, include_self);
         break;
       }
   });
@@ -850,13 +850,13 @@ void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index
 }
 
 void scatter_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
-                               const Tensor& src, const SCATTER_GATHER_OP& reduce) {
+                               const Tensor& src, const ReductionType& reduce) {
   switch (reduce) {
-  case SCATTER_GATHER_OP::REDUCE_ADD :
+  case ReductionType::SUM :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_add_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+  case ReductionType::PROD :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_multiply_", reduce_multiply);
     break;
@@ -866,25 +866,25 @@ void scatter_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tens
 }
 
 void scatter_reduce_two_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
-                                   const Tensor& src, const SCATTER_GATHER_OP& reduce) {
+                                   const Tensor& src, const ReductionType& reduce) {
   switch (reduce) {
-  case SCATTER_GATHER_OP::REDUCE_ADD :
+  case ReductionType::SUM :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_sum_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+  case ReductionType::PROD :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_prod_", reduce_multiply);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
+  case ReductionType::MAX :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_amax_", reduce_maximum);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MINIMUM :
+  case ReductionType::MIN :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_amin_", reduce_minimum);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MEAN :
+  case ReductionType::MEAN :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_mean_", reduce_mean);
     break;
@@ -892,13 +892,13 @@ void scatter_reduce_two_cpu_kernel(const Tensor& self, const int64_t dim, const 
 }
 
 void scatter_scalar_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
-                                      const Scalar& value, const SCATTER_GATHER_OP& reduce) {
+                                      const Scalar& value, const ReductionType& reduce) {
   switch (reduce) {
-  case SCATTER_GATHER_OP::REDUCE_ADD :
+  case ReductionType::SUM :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
                                        "scatter_scalar_reduce_add_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+  case ReductionType::PROD :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
                                        "scatter_scalar_reduce_multiply_", reduce_multiply);
     break;
