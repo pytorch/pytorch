@@ -86,6 +86,24 @@ static PyObject* Tensor_new(
   END_HANDLE_TH_ERRORS
 }
 
+// TODO(dberard) document this
+static PyObject* LegacyTensor_new(
+    PyTypeObject* type,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  auto& tensor_type = *((PyTensorType*)type);
+  if (tensor_type.is_cuda && !torch::utils::cuda_enabled()) {
+    throw unavailable_type(tensor_type);
+  }
+  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(
+      torch::tensors::get_default_dispatch_key(),
+      torch::tensors::get_default_scalar_type(),
+      args,
+      kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 // TODO: Deprecate this instancecheck entirely.  It's here to make
 // instanceof(t, torch.FloatTensor) work, but we are not going to keep
 // adding torch.QuantizedIntTensor classes for every new tensor type
@@ -184,7 +202,8 @@ static PyTypeObject tensor_type_prototype = {
 static void py_initialize_tensor_type(
     PyTypeObject& type,
     const char* name,
-    PyObject* tp_dict) {
+    PyObject* tp_dict,
+    newfunc tp_new_fn) {
   // NOTE: we don't use the typical static declaration of PyTypeObject because
   // we need to initialize as many types as there are VariableType instances.
   // We copy the basic object fields from a prototype definition and initialize
@@ -194,7 +213,7 @@ static void py_initialize_tensor_type(
   // (Py_TPFLAGS_BASETYPE omitted). Subclassing torch.Tensor still allowed.
   type.tp_flags = Py_TPFLAGS_DEFAULT;
   type.tp_name = name;
-  type.tp_new = Tensor_new;
+  type.tp_new = tp_new_fn;
   if (PyType_Ready(&type) < 0) {
     throw python_error();
   }
@@ -302,6 +321,8 @@ static THPObjectPtr get_tensor_dict() {
 // importing torch.
 static std::vector<PyTensorType*> tensor_types;
 
+static PyTensorType legacy_tensor_type;
+
 void set_default_storage_type(Backend backend, ScalarType dtype) {
   THPObjectPtr storage = get_storage_obj(backend, dtype);
 
@@ -361,6 +382,15 @@ static void initialize_aten_types(std::vector<PyTensorType*>& tensor_types) {
   set_default_tensor_type(Backend::CPU, ScalarType::Float);
 }
 
+static void initialize_and_bind_legacy_tensor(THPObjectPtr& tensor_dict) {
+  set_name(legacy_tensor_type, "torch.LegacyTensor");
+
+  py_initialize_tensor_type(legacy_tensor_type.py_type, legacy_tensor_type.name, tensor_dict.get(), LegacyTensor_new);
+
+  std::vector<PyTensorType*> legacy_vector = {&legacy_tensor_type};
+  py_bind_tensor_types(legacy_vector);
+}
+
 void initialize_python_bindings() {
   // Initialize the at::Type* pointers, name, and properties of the PyTensorType
   // vector. After this call, the vector must not be resized.
@@ -380,13 +410,15 @@ void initialize_python_bindings() {
   // etc.
   for (auto& tensor_type : tensor_types) {
     py_initialize_tensor_type(
-        tensor_type->py_type, tensor_type->name, tensor_dict.get());
+        tensor_type->py_type, tensor_type->name, tensor_dict.get(), Tensor_new);
   }
 
   // Add the type objects to their corresponding modules. e.g. torch.FloatTensor
   // is added to the `torch` module as `FloatTensor`. Also add all the type
   // objects to the set torch._tensor_classes.
   py_bind_tensor_types(tensor_types);
+
+  initialize_and_bind_legacy_tensor(tensor_dict);
 }
 
 static void py_bind_tensor_types(
@@ -410,7 +442,7 @@ static void py_bind_tensor_types(
     if (!module_obj)
       throw python_error();
 
-    PyObject* type_obj = (PyObject*)tensor_type;
+    PyObject* type_obj = (PyObject*) tensor_type;
     Py_INCREF(type_obj);
     if (PyModule_AddObject(module_obj.get(), type_name.c_str(), type_obj) < 0) {
       throw python_error();

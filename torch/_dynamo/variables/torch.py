@@ -335,6 +335,8 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(
                 torch.backends.cudnn.is_acceptable(tensor_inp), **options
             )
+        elif self.value is torch.Tensor:
+            return TorchVariable(torch.LegacyTensor, **options).call_function(tx, args, kwargs)
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")
