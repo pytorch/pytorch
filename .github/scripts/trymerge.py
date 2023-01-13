@@ -620,6 +620,9 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
     return comment.author_login == "facebook-github-bot"
 
 def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str]]:
+    '''
+    Get the open PRs in the stack that are below this PR.  Throws error if any of the PRs are out of sync.
+    '''
     assert pr.is_ghstack_pr()
     entire_stack: List[Tuple["GitHubPR", str]] = []
     # For ghstack, cherry-pick commits based from origin
