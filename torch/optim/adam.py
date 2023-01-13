@@ -1,9 +1,9 @@
-from collections import defaultdict
-from typing import cast, List, Optional, Dict, Tuple
+from typing import cast, List, Optional, Dict
 
 import torch
 from torch import Tensor
 from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling, _dispatch_sqrt
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['Adam', 'adam']
 
@@ -105,6 +105,10 @@ class Adam(Optimizer):
         capturable (bool, optional): whether this instance is safe to capture in a CUDA graph.
             Passing True can impair ungraphed performance, so if you don't intend to
             graph capture this instance, leave it False (default: False)
+        differentiable (bool, optional): whether autograd should occur through the optimizer step
+            in training otherwise, the step() function runs in a torch.no_grad() context.
+            Setting to True can impair performance, so leave it False if you don't intend to run
+            autograd through this instance (default: False)
         fused (bool, optional): whether the fused implementation (CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. Since the fused implementation is usually significantly faster than
@@ -564,31 +568,6 @@ def _multi_tensor_adam(params: List[Tensor],
         torch._foreach_addcdiv_(params_, exp_avgs, denom, step_size)
 
 
-# TODO(crcrpar): Move this to another place when adding another fused optimizer.
-# TODO(crcrpar): Make this generic when there's more fused optimizers.
-# TODO(crcrpar): Think of rewriting this in C++.
-@torch.no_grad()
-def _group_params_by_device_and_dtype(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    max_exp_avg_sqs: List[Tensor],
-    state_steps: List[Tensor],
-) -> Dict[Tuple[str, torch.dtype], List[List[Tensor]]]:
-    per_device_and_dtype_tensors = defaultdict(lambda: [[] for _ in range(6)])
-    for i, (p, step) in enumerate(zip(params, state_steps)):
-        key = (str(p.device), p.dtype)
-        per_device_and_dtype_tensors[key][0].append(p)
-        per_device_and_dtype_tensors[key][1].append(grads[i])
-        per_device_and_dtype_tensors[key][2].append(exp_avgs[i])
-        per_device_and_dtype_tensors[key][3].append(exp_avg_sqs[i])
-        if max_exp_avg_sqs:
-            per_device_and_dtype_tensors[key][4].append(max_exp_avg_sqs[i])
-        per_device_and_dtype_tensors[key][5].append(step)
-    return per_device_and_dtype_tensors
-
-
 def _fused_adam(
     params: List[Tensor],
     grads: List[Tensor],
@@ -609,7 +588,7 @@ def _fused_adam(
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
 ) -> None:
-    grouped_tensors = _group_params_by_device_and_dtype(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device, dtype) in grouped_tensors:
         (
             device_params,
