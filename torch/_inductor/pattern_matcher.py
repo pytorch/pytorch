@@ -299,15 +299,21 @@ class ReplacementPatternEntry(PatternEntry):
                     fargs, fkwargs = torch.fx.map_arg(
                         (args, kwargs), lambda n: n.meta["val"]
                     )
-                    with V.fake_mode:
+                    try:
+                        with V.fake_mode:
+                            result.meta["val"] = target(*fargs, **fkwargs)
+                    except AssertionError:
+                        # AssertionError: tensor's device must be `meta`, got cuda instead
                         result.meta["val"] = target(*fargs, **fkwargs)
                 return result
 
         norm_args = self.signature.bind(*match.args, **match.kwargs)
         with graph.inserting_before(node):
-            node.replace_all_uses_with(
-                Replacer(self.replacement_graph).run(*norm_args.arguments.values())
+            replacement = Replacer(self.replacement_graph).run(
+                *norm_args.arguments.values()
             )
+            replacement.meta.update(node.meta)
+            node.replace_all_uses_with(replacement)
         assert match.nodes[-1] is node
         match.erase_nodes(graph)
 
