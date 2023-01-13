@@ -8,9 +8,9 @@ __all__ = ['Await']
 
 W = TypeVar("W")
 
-class _PyAwaitMeta(type(torch._C.Await), type(Generic)):
+class _PyAwaitMeta(type(torch._C.Await), type(Generic)):  # type: ignore[misc, no-redef]
+
     pass
 
 class Await(torch._C.Await, Generic[W], metaclass=_PyAwaitMeta):
-    def __init__(self, f):
-        super().__init__()
+    pass

@@ -342,8 +342,8 @@ class Tracer(TracerBase):
             return self.create_node("get_attr", qualname, (), {})
 
         if isinstance(a, torch.Await):
-            is_nowait = a.is_nowait()
-            args = a.args()
+            is_nowait = a.is_nowait()  # type: ignore[attr-defined]
+            args = a.args()  # type: ignore[attr-defined]
 
             if is_nowait:
                 return super().create_arg(
@@ -361,7 +361,7 @@ class Tracer(TracerBase):
                     if not hasattr(self.root, qualname):
                         break
                     i += 1
-                setattr(self.root, qualname, a.fn())
+                setattr(self.root, qualname, a.fn())  # type: ignore[attr-defined]
                 fn_attr = self.create_proxy("get_attr", qualname, (), {})
                 return super().create_arg(
                     self.create_proxy(
