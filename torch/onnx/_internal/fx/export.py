@@ -454,6 +454,7 @@ def export(
     # TODO(wechi): There are several symbolic tracing mechanisms to convert
     # nn.Module to FX graph. We should choose the right one after they are
     # matured.
+    print(args)
     graph_module, graph_guard = torch._dynamo.export(fn, *args, aten_graph=True)
     # Export FX graph to ONNX ModelProto.
     #
