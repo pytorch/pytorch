@@ -12,6 +12,8 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <type_traits>
 #include <utility>
+#include <c10/core/SymIntArrayRef.h>
+#include <c10/util/Logging.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -719,8 +721,17 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
       bool compute_logsumexp =
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
-      return at::_scaled_dot_product_efficient_attention(
+      auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, compute_logsumexp, is_causal);
+      // We need to make an empty tensor in the shape of attention weights
+      // for the sake of meta tensors.
+      if (query_.is_nested()) {
+        // TODO: Need to fix when we have empty for nested tensors.
+        return out_and_lse;
+      }
+      return std::make_tuple(
+          std::move(std::get<0>(out_and_lse)),
+          at::empty_symint({0}, query_.options()));
     }
     case sdp::SDPBackend::math:
       return at::_scaled_dot_product_attention_math(
@@ -742,6 +753,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
         query_.is_contiguous() && key.is_contiguous() &&
@@ -786,6 +798,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
       attn = at::dropout(attn, dropout_p, true);
     }
     const auto output = at::matmul(attn, value);
+    // If you don't need it then you don't get it.
+    // TODO: Need to fix when we have empty for nested tensors.
+    attn = need_attn_weights || query_.is_nested()
+        ? attn
+        : at::empty_symint({0}, query_.options());
     return std::make_tuple(output, attn);
 }
 

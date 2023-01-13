@@ -13,8 +13,7 @@
 #include <c10/util/Optional.h>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 void* pageAlignedBlockPtr(
@@ -206,11 +205,11 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
     NSUInteger sourceOffset = 0;
 
     void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size_to_copy, &alignedLength);
+    sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
     id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                           length:alignedLength
                                          options:options
                                      deallocator:nil];
-    sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
 
     stream->copy_and_sync(sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking);
     [sourceBuffer release];
@@ -255,10 +254,10 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
 
   // If dst is contiguous and there is no byte offset, we can save directly the result of
   // gather into dst. This reduces the overhead of doing an additional blit for most cases
-  bool returnGatherOutput = (dst_.is_contiguous() && !dst_byte_offset);
+  bool returnGatherOutput = (dst_.is_contiguous() && !dst_byte_offset && src_.dtype() == dst_.dtype());
   Tensor src;
 
-  if (!src_.is_contiguous()) {
+  if (src_.is_view() || !src_.is_contiguous()) {
     Tensor emptyShell = Tensor();
     src = gatherViewTensor(src_, returnGatherOutput ? dst_ : emptyShell);
 
@@ -281,18 +280,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   // If the memory is not contiguous, it means that the tensor has strides and we would not be
   // able to do the copy using a single blit
   if (!dst_.is_contiguous()) {
-    Tensor tmp;
-    if (src.dtype() != dst_.dtype()) {
-      id<MTLBuffer> tmpBuffer = sourceBuffer;
-      if (src.element_size() < dst_.element_size()) {
-        tmp = at::native::empty_mps(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS);
-        tmpBuffer = getMTLBufferStorage(tmp);
-      }
-
-      copy_cast_mps(dst_, src, tmpBuffer, sourceBuffer);
-    }
-
-    return scatterViewTensor((src.dtype() != dst_.dtype() && tmp.has_storage()) ? tmp : src, dst_);
+    return scatterViewTensor(src, dst_);
   }
   src._set_conj(src_.is_conj());
   src._set_neg(src_.is_neg());
@@ -346,5 +334,5 @@ Tensor _copy_from_mps(const at::Tensor& self, const at::Tensor& dst, bool non_bl
 {
   return mps::mps_copy_(const_cast<Tensor&>(dst), self, non_blocking);
 }
-} // namespace native
-} // namespace at
+
+} // namespace at::native

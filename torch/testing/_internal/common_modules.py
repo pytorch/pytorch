@@ -50,7 +50,10 @@ for namespace in MODULE_NAMESPACES:
     for module_name in namespace.__all__:  # type: ignore[attr-defined]
         module_cls = getattr(namespace, module_name)
         namespace_name = namespace.__name__.replace('torch.', '').replace('.modules', '')
-        MODULE_CLASS_NAMES[module_cls] = f'{namespace_name}.{module_name}'
+
+        # Deal with any aliases by preferring earlier names.
+        if module_cls not in MODULE_CLASS_NAMES:
+            MODULE_CLASS_NAMES[module_cls] = f'{namespace_name}.{module_name}'
 
 
 # Specifies the modes (i.e. train, eval) to test over.
@@ -111,20 +114,22 @@ class modules(_TestParametrizer):
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    for decorator in module_info.get_decorators(generic_cls.__name__, test.__name__,
-                                                                device_cls.device_type, dtype):
-                        test_wrapper = decorator(test_wrapper)
+                    decorator_fn = partial(module_info.get_decorators, generic_cls.__name__,
+                                           test.__name__, device_cls.device_type, dtype)
 
-                    yield (test_wrapper, test_name, param_kwargs)
+                    yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
                     print("Failed to instantiate {0} for module {1}!".format(test_name, module_info.name))
                     raise ex
 
 
-def get_module_fully_qualified_name(module_cls):
-    """ Returns the common name of the module class formatted for use in test names. """
-    return MODULE_CLASS_NAMES[module_cls]
+def get_module_common_name(module_cls):
+    if module_cls in MODULE_CLASS_NAMES:
+        # Example: "nn.Linear"
+        return MODULE_CLASS_NAMES[module_cls]
+    else:
+        return module_cls.__name__
 
 
 class FunctionInput(object):
@@ -184,11 +189,11 @@ class ModuleInfo(object):
         self.module_memformat_affects_out = module_memformat_affects_out
         self.train_and_eval_differ = train_and_eval_differ
 
-    def get_decorators(self, test_class, test_name, device, dtype):
+    def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         result = [set_single_threaded_if_parallel_tbb]
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
-                if decorator.is_active(test_class, test_name, device, dtype):
+                if decorator.is_active(test_class, test_name, device, dtype, param_kwargs):
                     result.extend(decorator.decorators)
             else:
                 result.append(decorator)
@@ -196,7 +201,7 @@ class ModuleInfo(object):
 
     @property
     def name(self):
-        return get_module_fully_qualified_name(self.module_cls)
+        return get_module_common_name(self.module_cls)
 
     @property
     def formatted_name(self):
@@ -253,7 +258,9 @@ def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, t
 
 
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, training, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    def make_input(shape, device=device, dtype=dtype, requires_grad=requires_grad):
+        return make_tensor(shape, device=device, dtype=dtype,
+                           requires_grad=False).log_softmax(dim=1).requires_grad_(requires_grad)
     make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     cases: List[Tuple[str, dict]] = [
@@ -278,7 +285,7 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, tr
 
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(make_input((15, 10)).log_softmax(dim=1),
+                        forward_input=FunctionInput(make_input((15, 10)),
                                                     torch.empty(15, device=device).uniform_().mul(10).floor().long()),
                         desc=desc,
                         reference_fn=reference_fn)
@@ -655,6 +662,27 @@ def module_inputs_torch_nn_Sigmoid(module_info, device, dtype, requires_grad, tr
         )
     ]
 
+
+def module_inputs_torch_nn_TransformerEncoder(module_info, device, dtype, requires_grad, training, **kwargs):
+    # Reuse the TransformerEncoderLayer samples since the forward args are nearly the same.
+    for layer_module_input in module_inputs_torch_nn_TransformerEncoderLayer(
+            None, device, dtype, requires_grad, training):
+        # Construct a TransformerEncoderLayer object to pass to TransformerEncoder.
+        l_args, l_kwargs = (layer_module_input.constructor_input.args,
+                            layer_module_input.constructor_input.kwargs)
+        encoder_layer = torch.nn.TransformerEncoderLayer(*l_args, **l_kwargs)
+        num_layers = 2
+        # Note: TransformerEncoderLayer takes a "src_mask" while
+        # TransformerEncoder takes a "mask"; rename kwarg appropriately.
+        forward_input = layer_module_input.forward_input
+        if 'src_mask' in forward_input.kwargs:
+            forward_input.kwargs['mask'] = forward_input.kwargs['src_mask']
+            del forward_input.kwargs['src_mask']
+        yield ModuleInput(
+            constructor_input=FunctionInput(encoder_layer, num_layers),
+            forward_input=forward_input,
+            desc=layer_module_input.desc
+        )
 
 def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -1397,6 +1425,18 @@ module_db: List[ModuleInfo] = [
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                supports_gradgrad=False),
+    # TransformerEncoder takes the same inputs as TransformerEncoderLayer
+    ModuleInfo(torch.nn.TransformerEncoder,
+               train_and_eval_differ=True,
+               module_inputs_func=module_inputs_torch_nn_TransformerEncoder,
+               skips=(
+                   # No channels_last support for TransformerEncoderLayer currently.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   # Doesn't support device / dtype kwargs directly because it is just a
+                   # container of TransformerEncoderLayers.
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_factory_kwargs'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,

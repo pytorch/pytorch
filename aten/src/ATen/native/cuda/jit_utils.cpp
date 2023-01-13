@@ -38,7 +38,7 @@
 #endif
 
 
-namespace at { namespace cuda { namespace jit {
+namespace at::cuda::jit {
 
 // hiprtc already includes some traits, so this removes duplicate definitions of
 // integral_constant, is_same, is_integral, enable_if, is_floating_point, is_arithmetic.
@@ -1657,4 +1657,4 @@ void launch_jitted_pwise_function(
 }
 
 
-}}} // at::cuda::jit
+} // at::cuda::jit

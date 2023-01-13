@@ -8,26 +8,25 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at {
-    namespace native {
-        namespace {
-            const char shifted_chebyshev_polynomial_v_name[] = "shifted_chebyshev_polynomial_v_forward";
+namespace at::native {
+namespace {
+const char shifted_chebyshev_polynomial_v_name[] = "shifted_chebyshev_polynomial_v_forward";
 
-            void shifted_chebyshev_polynomial_v_kernel_cuda(TensorIteratorBase& iterator) {
+void shifted_chebyshev_polynomial_v_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "shifted_chebyshev_polynomial_v_cuda", [&]() {
-                    opmath_jitted_gpu_kernel_with_scalars<shifted_chebyshev_polynomial_v_name, scalar_t, scalar_t>(iterator, shifted_chebyshev_polynomial_v_string);
-                });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "shifted_chebyshev_polynomial_v_cuda", [&]() {
+        opmath_jitted_gpu_kernel_with_scalars<shifted_chebyshev_polynomial_v_name, scalar_t, scalar_t>(iterator, shifted_chebyshev_polynomial_v_string);
+    });
 #else
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "shifted_chebyshev_polynomial_v_cuda", [&]() {
-                    gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t n) -> scalar_t {
-                        return shifted_chebyshev_polynomial_v_forward<scalar_t, true>(x, n);
-                    });
-                });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "shifted_chebyshev_polynomial_v_cuda", [&]() {
+        gpu_kernel_with_scalars(iterator, []GPU_LAMBDA(scalar_t x, scalar_t n) -> scalar_t {
+            return shifted_chebyshev_polynomial_v_forward<scalar_t, true>(x, n);
+        });
+    });
 #endif
-            } // shifted_chebyshev_polynomial_v_kernel_cuda
-        } // namespace (anonymous)
+} // shifted_chebyshev_polynomial_v_kernel_cuda
 
-        REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel_cuda);
-    } // namespace native
-} // namespace at
+} // namespace (anonymous)
+
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel_cuda);
+} // namespace at::native
