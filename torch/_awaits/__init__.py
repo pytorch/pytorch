@@ -12,4 +12,8 @@ class _PyAwaitMeta(type(torch._C.Await), type(Generic)):  # type: ignore[misc, n
     pass
 
 class Await(torch._C.Await, Generic[W], metaclass=_PyAwaitMeta):
+    r"""
+    Wrapper around a ``torch._C.Await`` which encapsulates delayed execution
+    of a callable.
+    """
     pass
