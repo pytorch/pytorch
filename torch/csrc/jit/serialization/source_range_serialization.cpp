@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <algorithm>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // "Whether to emit compact debug_pkl when saving a model to .pt file."
 // "Compact file is smaller but cannot be loaded by old torch binaries."
@@ -252,5 +251,4 @@ TORCH_API void setShouldUseFormatWithStringTable(
   should_use_format_with_string_table_ = should_use_format_with_string_table;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

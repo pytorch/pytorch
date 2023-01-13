@@ -10,7 +10,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -446,4 +446,4 @@ void weight_norm_backward_kernel(
 REGISTER_DISPATCH(weight_norm_stub, &weight_norm_kernel);
 REGISTER_DISPATCH(weight_norm_backward_stub, &weight_norm_backward_kernel);
 
-}} // at::native
+} // at::native
