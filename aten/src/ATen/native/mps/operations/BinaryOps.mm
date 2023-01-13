@@ -332,12 +332,15 @@ TORCH_IMPL_FUNC(remainder_out_mps) (const Tensor& self, const Tensor& other, con
     // Rounding is a no-op for integral types, and also a reasonable workaround
     // For MPSGraph bug on Apple Silicon, that throws `Function floorOp_i64 was not found in the library`
     // See https://github.com/pytorch/pytorch/issues/84995
+
     auto divTensor =  [mpsGraph divisionWithPrimaryTensor:primaryCastTensor
                                           secondaryTensor:secondaryCastTensor
                                                      name:nil];
-    //if (([divTensor dataType] & MPSDataTypeFloatBit) != 0) {
-      divTensor =  [mpsGraph floorWithTensor:divTensor name:nil];
-    //}
+    bool isFloatOutput = ([divTensor dataType] & MPSDataTypeFloatBit) != 0;
+    if (isFloatOutput) {
+      divTensor = [mpsGraph floorWithTensor:divTensor name:nil];
+    }
+
     auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:divTensor
                                                secondaryTensor:secondaryCastTensor
                                                           name:nil];
