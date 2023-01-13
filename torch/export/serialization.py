@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from torch._subclasses.fake_tensor import FakeTensor
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Union
 import torch.export.export_schema as ex
 from torch.fx.interpreter import Interpreter
 import operator
@@ -27,15 +27,16 @@ def export_storage(storage: torch.Storage) -> ex.Storage:
 def export_tensor_meta(t: torch.Tensor) -> ex.TensorMeta:
     # t can be a real Tensor or a FakeTensor, they share the same format for ex.TensorMeta
 
+    def export_symint(x) -> ex.SymInt:
+        return ex.SymInt(as_int=x) if isinstance(x, int) else ex.SymInt(as_sym=x)
+
     return ex.TensorMeta(
         dtype = t.dtype,
-        sizes = t.size(),    # TODO: need to store as ex.SymInt
-
+        sizes = [export_symint(x) for x in t.size()],
         requires_grad = t.requires_grad,
-
         device = t.device,
-        strides = t.stride(),   # TODO: need to store as ex.SymInt
-        storage_offset = t.storage_offset(),    # TODO: need to store as ex.SymInt
+        strides = [export_symint(x) for x in t.stride()],
+        storage_offset = export_symint(t.storage_offset()),
         layout = t.layout,
     )
 
@@ -100,39 +101,60 @@ class ExportInterpreter(Interpreter):
             )
 
     def _export_arg(self, arg: Any) -> ex.Argument:
-        if isinstance(arg, torch.fx.Node):
+
+        def handle_fx_node(arg) -> Union[ex.TensorArgument, ex.SymIntArgument]:
+            assert isinstance(arg, torch.fx.Node)
             name = arg.name
             if name in self.ex_graph.symint_values:
                 return ex.SymIntArgument(name = name)
             else:
-                return ex.TensorArgument(name = arg.name)
+                return ex.TensorArgument(name = name)
+
+
+        if isinstance(arg, torch.fx.Node):
+            ex_arg = handle_fx_node(arg)
+            if isinstance(ex_arg, ex.SymIntArgument):
+                return ex.Argument(as_symint=ex_arg)
+            elif isinstance(ex_arg, ex.TensorArgument):
+                return ex.Argument(as_tensor=ex_arg)
+
         elif isinstance(arg, bool):
-            return arg
+            return ex.Argument(as_bool=arg)
         elif isinstance(arg, str):
-            return arg
+            return ex.Argument(as_str=arg)
         elif isinstance(arg, int):
-            return arg
+            return ex.Argument(as_int=arg)
         elif isinstance(arg, float):
-            return arg
+            return ex.Argument(as_float=arg)
         elif arg is None:
             return None
         elif isinstance(arg, torch.device):
-            return ex.Device(
-                type = arg.type,
-                index = arg.index
+            return ex.Argument(
+                as_device = ex.Device(type = arg.type, index = arg.index)
             )
         elif isinstance(arg, (list, tuple)):
             # ints
             if all(isinstance(a, int) for a in arg):
-                return arg
+                return ex.Argument(as_ints = arg)
             # floats
             elif all(isinstance(a, float) for a in arg):
-                return arg
+                return ex.Argument(as_floats = arg)
             # bools
             elif all(isinstance(a, bool) for a in arg):
-                return arg
+                return ex.Argument(as_bools = arg)
             elif all(isinstance(a, torch.fx.Node) for a in arg):
-                return [self._export_arg(a) for a in arg]
+                ex_args = [handle_fx_node(a) for a in arg]
+
+                if all(isinstance(a, ex.TensorArgument) for a in ex_args):
+                    return ex.Argument(
+                        as_tensors = ex_args
+                    )
+                elif all(isinstance(a, ex.SymIntArgument) for a in ex_args):
+                    return ex.Argument(
+                        as_symints = ex_args
+                    )
+                else:
+                    raise RuntimeError(f"List of fx nodes have different arg types")
             else:
                 raise RuntimeError(f"Unsupported list/tuple argument type: {type(arg)}")
         else:
@@ -159,9 +181,9 @@ class ExportInterpreter(Interpreter):
             args = [],
             kwargs = {},
             outputs = [
-                ex.TensorArgument(
-                    name = target,
-                ),
+                ex.ReturnArgument(
+                    as_tensor = ex.TensorArgument(name = target)
+                )
             ],
             metadata = export_node_meta(fx_node.meta),
         )
@@ -223,7 +245,11 @@ class ExportInterpreter(Interpreter):
                 )
                 self.ex_graph.ivalues.append(ivalue)
 
-                ex_outputs.append(ex.TensorArgument(name = name))
+                ex_outputs.append(
+                    ex.ReturnArgument(
+                        as_tensor=ex.TensorArgument(name = name)
+                    )
+                )
 
         elif result_types[0] == "SymInt":
             output_symints: Dict[str, int] = {}
@@ -236,9 +262,12 @@ class ExportInterpreter(Interpreter):
                 output_symints[fx_node.name] = result
 
             for name, symint in output_symints.items():
-                self.ex_graph.symint_values[name] = symint
-
-                ex_outputs.append(ex.SymIntArgument(name = name))
+                self.ex_graph.symint_values[name] = ex.SymInt(as_int=symint)
+                ex_outputs.append(
+                    ex.ReturnArgument(
+                        as_symint=ex.SymIntArgument(name = name)
+                    )
+                )
 
 
         if isinstance(fx_node.target, torch._ops.OpOverload):
@@ -286,14 +315,18 @@ class ExportInterpreter(Interpreter):
             op = fx_node.op,
             target = fx_node.target,
             args = [
-                ex.TensorArgument(
-                    name = str(arg),
+                ex.Argument(
+                    as_tensor = ex.TensorArgument(
+                        name = str(arg),
+                    )
                 ) for arg in node_args
             ],
             kwargs = {},
             outputs = [
-                ex.TensorArgument(
-                    name = str(arg),
+                ex.ReturnArgument(
+                    as_tensor = ex.TensorArgument(
+                        name = str(arg),
+                    )
                 ) for arg in node_args
             ],
             metadata = export_node_meta(self.current_node.meta),

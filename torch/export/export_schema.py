@@ -53,19 +53,18 @@ class Device:
     type: str
     index: int
 
-
-SymInt = Union[
-    int,
-    str
-]
+@dataclass
+class SymInt:  # Union, ONLY EXACTLY ONE of the following fields can be set
+    as_int: int = None
+    as_sym: str = None
 
 # !!! To support t.item(), we need to introduce SymFloat
-# SymFloat = Union[
-#     float,
-#     str
-# ]
+# @dataclass
+# class SymFloat:  # Union, ONLY EXACTLY ONE of the following fields can be set
+#     as_flaot: float = None
+#     as_sym: str = None
 
-Scalar = Union[int, float, bool]
+# Scalar = Union[int, float, bool]
 
 # This is a Tensor Arugment used in the args of an node
 # We intentionally don't store the tensor's storage, nor the tensor's meta data here,
@@ -85,45 +84,50 @@ class SymIntArgument:
 #  Permissible return types for operators
 # !!! Notice: this assumes that a node can only return Tensor(s) and Symint(s), and not other int/float/bool types...
 # !!! What about .item()? Do we need to handle this?
-ReturnArgument = Union[
-    TensorArgument,
+@dataclass
+class ReturnArgument:  # Union, ONLY EXACTLY ONE of the following fields can be set
+    as_tensor: TensorArgument = None
     # List[TensorArgument],    # !!! ATM, no operator has return type as Tensor[], might need this latter?
-    SymIntArgument,
-]
+    as_symint: SymIntArgument = None
 
 
 # Permissible argument types for operators
-Argument = Union[
+# !!! This is a Union struct, but there is no good python construct to model this
+@dataclass
+class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
     # None          # !!! This is used for nullable arguments, is this the right way to handle None?
 
-    TensorArgument,
-    List[TensorArgument],   # Tensor[], used by aten.cat, and condition ops
+    as_tensor: TensorArgument = None
+    as_tensors: List[TensorArgument] = None   # Tensor[], used by aten.cat, and condition ops
 
-    SymIntArgument,         # Symint can be an argument, there are symint in native_function.yaml
-    List[SymIntArgument],   # Symint[] can be an argement, there are symint[] in native_function.yaml
+    as_symint: SymIntArgument = None         # Symint can be an argument, there are symint in native_function.yaml
+    as_symints: List[SymIntArgument] = None   # Symint[] can be an argement, there are symint[] in native_function.yaml
 
-    Scalar,         # !!! Scalar is already an union type: Union[int, float, bool], check if serialization library can handle this
+    # as_scalar: Scalar = None      # !!! Looks like we don't need Scalar type during serialization,
+                                    # it will always be a concrete type, one of int, float, bool
+                                    # !!! Scalar is already an union type: Union[int, float, bool], check if serialization library can handle this
     # List[Scalar], # !!! for Scalar[], used in native_function.yaml, but not used in canonical aten ops yet... Consider if we need this
-    bool,
-    List[bool],     # for bool[]
-                    # !!! There are use of bool[3] in canonical aten ops, consider if we can simplify this
-    int,
-    List[int],      # for int[]
-    float,
-    List[float],    # for float[]
-    str,
+
+    as_bool: bool = None
+    as_bools: List[bool] = None     # for bool[]
+                                    # !!! There are use of bool[3] in canonical aten ops, consider if we can simplify this
+
+    as_int: int = None
+    as_ints: List[int] = None      # for int[]
+    as_float: float = None
+    as_floats: List[float] = None    # for float[]
+    as_str: str = None
     # List[str],    # !!! There is no str[] in native_function.yaml. Consider if this is needed for expressiveness
 
     # Graph,            # !!! Consider how to handle condition op, which need to pass in a graph for the branch
     # List[Graph],      # !!! What about list of graphs? Do we need this?
-    "GraphModule",     #  !!! ATM, torch.cond models branch as GraphModule
+    as_gm: "GraphModule" = None     #  !!! ATM, torch.cond models branch as GraphModule
 
     # !!! Following types doesn't have a list version in native_function.yaml
-    ScalarType,
-    MemoryFormat,
-    Layout,
-    Device,
-]
+    as_scalar_type: ScalarType = None
+    as_memory_format: MemoryFormat = None
+    as_layout: Layout = None
+    as_device: Device = None
 
 # !!! How to model optional fields? Is it an operator schema annotation, or an argument type?
 #     Tensor?
