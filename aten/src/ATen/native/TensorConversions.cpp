@@ -1697,9 +1697,7 @@ Tensor sparse_compressed_to_sparse_csc(const Tensor& self, c10::optional<int64_t
 
 Tensor sparse_coo_to_sparse(const Tensor& self, const int64_t sparse_dim) {
   TORCH_CHECK(
-      sparse_dim >= 0 && sparse_dim <= self.sparse_dim(), "sparse_dim argument for sparse_coo_to_sparse must be between 0 and number of sparse dimensions of original tensor");
-  TORCH_CHECK(
-     sparse_dim == self.sparse_dim(), "sparse_dim argument for sparse_coo_to_sparse must not be different than sparse dim of original tensor");
+     sparse_dim == self.sparse_dim(), "sparse dim argument for sparse_coo_to_sparse must not be different than sparse dim of original tensor");
   return self;
 }
 
