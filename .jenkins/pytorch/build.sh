@@ -192,9 +192,20 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  tools/bazel build --config=no-tty //...
+  # Bazel build is run on a linux.2xlarge (or c5.2xlarge) runner with 8 CPU and 16GB of memory.
+  # The build job sometimes fails with 'runner lost communication with the server' flaky error
+  # which indicates that something there crashes the runner process. The most likely reason is
+  # that the build runs out of memory. So trying to follow https://bazel.build/docs/user-manual
+  # to limit the memory the CPU and memory usage, so that we will know even if it crashes with
+  # OOM error instead of crashing the runner and losing all the logs.
+  #
+  # Leave 1 CPU free and use only up to 80% of memory
+  BAZEL_MEM_LIMIT="--local_ram_resources=HOST_RAM*.8"
+  BAZEL_CPU_LIMIT="--local_cpu_resources=HOST_CPUS-1"
+
+  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   # Build torch, the Python module, and tests for CPU-only
-  tools/bazel build --config=no-tty --config=cpu-only :torch :_C.so :all_tests
+  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :_C.so :all_tests
 
 else
   # check that setup.py would fail with bad arguments
