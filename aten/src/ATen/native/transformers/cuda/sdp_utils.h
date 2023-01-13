@@ -27,7 +27,6 @@ struct sdp_params {
   const at::Tensor& value;
   bool has_attn_mask;
   double dropout;
-  bool need_attn_weights;
   bool is_causal;
 };
 
@@ -92,18 +91,6 @@ inline bool check_tensor_dtype(
         ", and Value dtype: ",
         params.value.dtype(),
         " instead.");
-    }
-    return false;
-  }
-  return true;
-}
-
-inline bool check_for_attn_weights(sdp_params params, bool debug) {
-  // This can be returned form flash attention but care is needed
-  // to convert from flash_attn format to attn_weights
-  if (params.need_attn_weights) {
-    if (debug) {
-      TORCH_WARN("Both fused kernels do not support need_attn_weights=True.");
     }
     return false;
   }
@@ -370,11 +357,10 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   return false;
 #endif
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints {{
+  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints {{
       check_runtime_disabled_flash,
       check_requires_grad,
       check_tensor_shapes,
-      check_for_attn_weights,
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
@@ -410,7 +396,6 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
-      check_for_attn_weights,
       check_tensor_shapes,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
