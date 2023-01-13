@@ -1605,6 +1605,26 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
     else:
         work.wait()
 
+"""
+To enable mostly the usual process-group functionality for users, and have access to it inside inductor,
+but keep native_func API primitive, we indirect a process group to its ID as it transits between tracing/API layer
+and execution.
+
+This is the simplest way to do it, but it might not be sufficient-
+certainly we could do this in C++ ProcessGroup instead.
+"""
+_registered_process_groups = {}
+
+def register_process_group(group):
+    assert isinstance(group, ProcessGroup), "Must pass a valid process group"
+    g_id = id(group)
+    _registered_process_groups[g_id] = group
+    return g_id
+
+def lookup_process_group(g_id):
+    assert g_id in _registered_process_groups, "must call `register_process_group` before using a process group by ID"
+    return _registered_process_groups[g_id]
+
 @exception_handler
 def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     """
@@ -1624,6 +1644,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
+        ranks (list[int], optional): list of ranks to use, must be used without specifying a 'group' argument.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -1655,6 +1676,8 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     """
     _check_single_tensor(tensor, "tensor")
+    if isinstance(group, int):
+        group = lookup_process_group(g_id=group)
     if _rank_not_in_group(group):
         _warn_not_in_group("all_reduce")
         return

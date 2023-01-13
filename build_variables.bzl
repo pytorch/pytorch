@@ -1312,6 +1312,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/quantized/QTensorImpl.cpp",
     "aten/src/ATen/quantized/Quantizer.cpp",
     "aten/src/ATen/native/Activation.cpp",
+    "aten/src/ATen/native/Collectives.cpp",
     "aten/src/ATen/native/AdaptiveAveragePooling.cpp",
     "aten/src/ATen/native/AdaptiveAveragePooling3d.cpp",
     "aten/src/ATen/native/AdaptiveMaxPooling2d.cpp",
