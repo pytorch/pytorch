@@ -120,7 +120,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
-        self.scheduler = None
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -176,7 +175,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
-            if not getattr(buffer, "cpp_kernel", False):
+            if not isinstance(
+                buffer,
+                (ir.MatrixMultiply, ir.BatchMatrixMultiply, ir.MatrixMultiplyAdd),
+            ):
                 self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
@@ -294,7 +296,6 @@ class GraphLowering(torch.fx.Interpreter):
                 out = lowerings[target](*args, **kwargs)
                 return out
             except Exception as e:
-                log.exception("Error from lowering")
                 raise LoweringException(e, target, args, kwargs) from e
 
     def get_attr(self, target, args, kwargs):
@@ -470,7 +471,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.init_wrapper_code()
 
         self.scheduler = Scheduler(self.buffers)
-        assert self.scheduler is not None  # mypy can't figure this out
         self.scheduler.codegen()
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()

@@ -18,13 +18,8 @@ log = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class ValueRanges(object):
-    lower: Union[sympy.Expr, sympy.Number, int, float, bool]
-    upper: Union[sympy.Expr, sympy.Number, int, float, bool]
-
-    def __contains__(self, x):
-        # TODO This needs to be generalised if lower/upper are sympy.Expr
-        assert not isinstance(x, sympy.Expr)
-        return self.lower <= x <= self.upper
+    lower: Union[sympy.Symbol, sympy.Number, int, float, bool]
+    upper: Union[sympy.Symbol, sympy.Number, int, float, bool]
 
     @classmethod
     def wrap(cls, arg):
@@ -34,50 +29,34 @@ class ValueRanges(object):
         return ValueRanges(arg, arg)
 
     @classmethod
-    def increasing_map(cls, x, fn):
+    def unary_map(cls, x, fn):
         """map lower and upper bound with fn"""
         x = cls.wrap(x)
         return ValueRanges(fn(x.lower), fn(x.upper))
 
     @classmethod
-    def decreasing_map(cls, x, fn):
-        """map lower bound to upper bound and upper bound to lower bound"""
-        x = cls.wrap(x)
-        return ValueRanges(fn(x.upper), fn(x.lower))
-
-    @classmethod
-    def monotone_map(cls, x, fn):
+    def checked_unary_map(cls, x, fn):
         """check the max and min of computed upper and lower bound for the output"""
-        x = cls.wrap(x)
-        l = fn(x.lower)
-        u = fn(x.upper)
-        return ValueRanges(min(l, u), max(l, u))
+        out = cls.unary_map(x, fn)
+        return ValueRanges(min(out.lower, out.upper), max(out.lower, out.upper))
 
     @classmethod
-    def convex_min_zero_map(cls, x, fn):
-        """the max is at one of the ends"""
-        x = ValueRanges.wrap(x)
-        if 0 in x:
-            return ValueRanges(0, max(fn(x.lower), fn(x.upper)))
-        else:
-            return cls.monotone_map(x, fn)
-
-    @classmethod
-    def coordinatewise_increasing_map(cls, x, y, fn):
+    def binary_map(cls, x, y, fn):
         """map upper and lower bounds accessing corresponding values of inputs"""
         x, y = cls.wrap(x), cls.wrap(y)
+
         return ValueRanges(
             fn(x.lower, y.lower),
             fn(x.upper, y.upper),
         )
 
     @classmethod
-    def coordinatewise_monotone_map(cls, x, y, fn):
+    def binary_map_products(cls, a, b, fn):
         """compute the product of all lower and upper bounds and take min and max"""
-        x, y = cls.wrap(x), cls.wrap(y)
+        a, b = cls.wrap(a), cls.wrap(b)
         products = [
-            fn(a, b)
-            for a, b in itertools.product([x.lower, x.upper], [y.lower, y.upper])
+            fn(x, y)
+            for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper])
         ]
         return ValueRanges(min(products), max(products))
 
@@ -130,8 +109,8 @@ class ValueRangeAnalysis(object):
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
         def is_bool(val):
-            return isinstance(val, bool) or (
-                hasattr(val, "is_Boolean") and val.is_Boolean
+            return (
+                isinstance(val, bool) or hasattr(low, "is_Boolean") and low.is_Boolean
             )
 
         x = ValueRanges.wrap(x)
@@ -157,124 +136,77 @@ class ValueRangeAnalysis(object):
 
     @staticmethod
     def reciprocal(x):
-        x = ValueRanges.wrap(x)
-        if 0 in x:
-            return ValueRanges(-math.inf, math.inf)
-        else:
-            return ValueRanges.decreasing_map(x, lambda y: 1 / y)
-
-    @staticmethod
-    def square(x):
-        return ValueRanges.convex_min_zero_map(x, lambda y: y * y)
+        return ValueRanges.checked_unary_map(x, lambda y: 1 / y)
 
     @staticmethod
     def abs(x):
-        return ValueRanges.convex_min_zero_map(x, abs)
+        return ValueRanges.checked_unary_map(x, abs)
 
     @staticmethod
     def neg(x):
-        return ValueRanges.decreasing_map(x, operator.neg)
+        return ValueRanges.checked_unary_map(x, lambda x: -x)
 
     @staticmethod
     def truediv(a, b):
-        b = ValueRanges.wrap(b)
-        if 0 in b:
-            return ValueRanges(-math.inf, math.inf)
-        else:
-            return ValueRangeAnalysis.mul(a, ValueRanges(1 / b.upper, 1 / b.lower))
+        return ValueRanges.binary_map_products(a, b, operator.truediv)
 
     @staticmethod
     def div(a, b):
-        # We think of this as floor(a / b)
-        out = ValueRangeAnalysis.truediv(a, b)
-        return ValueRangeAnalysis.floor(out)
+        return ValueRanges.binary_map_products(a, b, operator.truediv)
 
     @staticmethod
     def add(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, operator.add)
+        return ValueRanges.binary_map(a, b, operator.add)
 
     @staticmethod
     def mul(a, b):
-        return ValueRanges.coordinatewise_monotone_map(a, b, operator.mul)
+        return ValueRanges.binary_map_products(a, b, operator.mul)
 
     @staticmethod
     def sub(a, b):
-        b = ValueRanges.wrap(b)
-        return ValueRangeAnalysis.add(a, ValueRanges(-b.upper, -b.lower))
+        return ValueRanges.binary_map_products(a, b, operator.sub)
 
     @staticmethod
     def exp(x):
-        return ValueRanges.increasing_map(x, sympy.functions.elementary.exponential.exp)
+        return ValueRanges.unary_map(x, sympy.functions.elementary.exponential.exp)
+
+    @staticmethod
+    def square(x):
+        return ValueRanges.checked_unary_map(x, lambda y: y * y)
 
     @staticmethod
     def log(x):
-        return ValueRanges.increasing_map(
+        return ValueRanges.checked_unary_map(
             x, lambda y: -math.inf if y <= 0 else sympy.log(y)
         )
 
     @staticmethod
     def sqrt(x):
-        return ValueRanges.increasing_map(x, sympy.sqrt)
+        return ValueRanges.unary_map(x, sympy.sqrt)
 
     @staticmethod
     def pow(a, b):
-        def is_integer(val):
-            return (
-                isinstance(val, int)
-                or (isinstance(val, float) and val == int(val))
-                or (hasattr(val, "is_integer") and val.is_integer)
-            )
-
-        a = ValueRanges.wrap(a)
-        b = ValueRanges.wrap(b)
-        if a.lower < 0 and not is_integer(b.lower):
-            # The function is not defined
-            return ValueRanges(-math.inf, math.inf)
-        elif 0 in a and b.lower <= 0:
-            return ValueRanges(-math.inf, math.inf)
-        return ValueRanges.coordinatewise_monotone_map(a, b, operator.pow)
+        return ValueRanges.binary_map_products(a, b, operator.pow)
 
     @staticmethod
     def minimum(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, min)
+        return ValueRanges.binary_map(a, b, min)
 
     @staticmethod
     def maximum(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, max)
+        return ValueRanges.binary_map(a, b, max)
 
     @staticmethod
     def where(a, b, c):
-        b = ValueRanges.wrap(b)
-        c = ValueRanges.wrap(c)
         return ValueRanges(min(b.lower, c.lower), max(b.upper, c.upper))
 
     @staticmethod
     def floor(x):
-        return ValueRangeAnalysis.floor_ceil(
-            x, sympy.functions.elementary.integers.floor
-        )
+        return ValueRanges.unary_map(x, sympy.functions.elementary.integers.floor)
 
     @staticmethod
     def ceil(x):
-        return ValueRangeAnalysis.floor_ceil(
-            x, sympy.functions.elementary.integers.ceiling
-        )
-
-    @staticmethod
-    def floor_ceil(x, fn_int):
-        def is_integer(val):
-            return isinstance(val, int) or (
-                hasattr(val, "is_integer") and val.is_integer
-            )
-
-        if is_integer(x):
-            fn = fn_int
-        else:
-
-            def fn(x):
-                return sympy.core.numbers.Float(fn_int(x))
-
-        return ValueRanges.increasing_map(x, fn)
+        return ValueRanges.unary_map(x, sympy.functions.elementary.integers.ceiling)
 
     def __getattr__(self, name):
         log.warning(f"unhandled ValueRange op {name}")
@@ -284,7 +216,6 @@ class ValueRangeAnalysis(object):
 def dominated_nodes(
     initial_queue: Union[torch.fx.Node, Iterable[torch.fx.Node]], skip_filter=None
 ):
-    """Returns the set of nodes whose values depend on those within initial_queue"""
     if isinstance(initial_queue, torch.fx.Node):
         initial_queue = [initial_queue]
 

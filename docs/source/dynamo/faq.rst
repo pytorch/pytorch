@@ -67,7 +67,7 @@ inference.
 
 Future work will include tracing communication operations into graphs,
 coordinating these operations with compute optimizations, and optimizing
-the communication operations.
+the communciation operations.
 
 Why is my code crashing?
 ------------------------

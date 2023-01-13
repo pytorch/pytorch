@@ -7,7 +7,6 @@
 #include <vector>
 
 #include <ATen/Parallel.h>
-#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/SmallVector.h>
@@ -17,7 +16,7 @@ namespace at {
 namespace native {
 inline namespace CPU_CAPABILITY {
 
-template<typename T> using acc_t = at::opmath_type<T>;
+template<typename T> using acc_t = vec::vec_scalar_t<T>;
 
 constexpr int64_t kChunkSize = 16;
 

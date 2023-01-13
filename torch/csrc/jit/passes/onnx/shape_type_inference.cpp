@@ -317,14 +317,7 @@ Node* CloneNodeToGraph(
           }
           case ::c10::prim::PackPadded: {
             auto input = n_graph->addInput();
-            if (v == v_n->output(0)) {
-              // Only the first output requires this workaround.
-              // In `peephole` pass, user nodes are modified to consume the
-              // input instead.
-              input->copyMetadata(v_n->input(0));
-            } else {
-              input->copyMetadata(v);
-            }
+            input->copyMetadata(v_n->input(0));
             return input;
           }
           default: {
