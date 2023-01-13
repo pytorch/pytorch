@@ -685,6 +685,24 @@ class TestFloorDiv(TestCase):
                 self.assertEqual(func(x, y), other_func(func, x, y))
 
     @skipIfNoSympy
+    def test_floordiv_simplify(self):
+        # Checks that we eval exprs without free vars no matter which
+        # simplify/eval func is called.
+        expr = FloorDiv(6.28, (FloorDiv(6.28, 3.14)))
+        shape_env = ShapeEnv()
+
+        # Makes sure the expr is not automatically simplified.
+        self.assertEqual(type(expr), FloorDiv)
+        # Simplifies only the outer expr.
+        self.assertEqual(type(expr.doit(deep=False)), sympy.floor)
+        # Simplifies everything.
+        self.assertEqual(expr.doit(deep=True), 3)
+        # Tests other functions that should use doit.
+        self.assertEqual(sympy.simplify(expr), 3)
+        self.assertEqual(shape_env.simplify(expr), 3)
+        self.assertEqual(shape_env.evaluate_expr(expr), 3)
+
+    @skipIfNoSympy
     def test_floordiv_assumptions(self):
         # We define two Symbols (with different names) for each type to make
         # sure the behavior is consistent regardless of whether both arguments
