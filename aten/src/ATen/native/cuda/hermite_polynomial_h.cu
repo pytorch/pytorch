@@ -8,8 +8,7 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at {
-    namespace native {
+namespace at::native {
         namespace {
             const char hermite_polynomial_h_name[] = "hermite_polynomial_h_forward";
 
@@ -29,5 +28,4 @@ namespace at {
         } // namespace (anonymous)
 
         REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel_cuda);
-    } // namespace native
-} // namespace at
+} // namespace at::native

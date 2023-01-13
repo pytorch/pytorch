@@ -10,7 +10,7 @@
 #include <ATen/ops/equal_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 bool cuda_equal(const Tensor& self, const Tensor &src) {
   if (!at::namedinference::are_names_equal(
@@ -29,4 +29,4 @@ bool cuda_equal(const Tensor& self, const Tensor &src) {
   return at::cuda::eq(self, src).all().item().to<bool>();
 }
 
-}} // namespace at::native
+} // namespace at::native

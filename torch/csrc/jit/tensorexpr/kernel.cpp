@@ -23,9 +23,7 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 std::string buildErrorMessage(const std::string& s) {
   static const std::string generic_error_message =
@@ -388,9 +386,7 @@ bool matmulIsSupported(const torch::jit::Node* node) {
   return true;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 
 static at::ScalarType tensorType(BufPtr b) {
   return static_cast<at::ScalarType>(b->dtype().scalar_type());

@@ -3,8 +3,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 typedef MPSGraphTensor* (^UnaryOpBlock)(MPSGraph*, MPSGraphTensor*);
@@ -270,5 +269,4 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
     });
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

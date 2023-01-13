@@ -9,7 +9,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -96,4 +96,4 @@ void sampled_addmm_sparse_csr_kernel(
 
 REGISTER_DISPATCH(sampled_addmm_sparse_csr_stub, &sampled_addmm_sparse_csr_kernel);
 
-}} // at::native
+} // at::native

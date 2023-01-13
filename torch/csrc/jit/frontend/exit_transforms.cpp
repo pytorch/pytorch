@@ -8,8 +8,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // WILL states that a node/block must hit the exit, MIGHT that it may happen,
 // WONT that it will not happen. THROWS states that a node/block always throws,
@@ -846,5 +845,5 @@ void TransformExits(std::shared_ptr<Graph>& graph) {
   inlineConsecutiveIfs(graph->block());
   convertWithBlocksToEnterExitNodes(graph);
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

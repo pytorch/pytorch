@@ -4,9 +4,7 @@
 
 #include <sstream>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 CodeGen::CodeGen(
     StmtPtr stmt,
@@ -319,6 +317,4 @@ void CodeGen::allocIntermediateBufs() {
   GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

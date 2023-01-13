@@ -16,7 +16,7 @@
 
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 static constexpr int launch_bound2 = 4;
 
@@ -469,4 +469,4 @@ REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
 REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda);
 
-}} // namespace at::native
+} // namespace at::native

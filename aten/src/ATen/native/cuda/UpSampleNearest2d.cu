@@ -22,8 +22,7 @@
 #include <ATen/ops/upsample_nearest2d_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 #define MAX_THREADS 512
@@ -485,5 +484,4 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_cuda) (
       grad_input, grad_output, output_size, input_size, scales_h, scales_w);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

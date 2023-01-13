@@ -13,8 +13,7 @@
 
 using namespace at::mps;
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor relu_mps(const Tensor& self) {
   using namespace mps;
@@ -2322,5 +2321,4 @@ Tensor hardswish_backward_mps(const Tensor& grad_output, const Tensor& self) {
   }
   return grad_input;
 }
-} // namespace native
-} // namespace at
+} // namespace at::native
