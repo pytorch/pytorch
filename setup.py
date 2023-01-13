@@ -12,7 +12,8 @@
 #     maximum number of compile jobs we should use to compile your code
 #
 #   USE_CUDA=0
-#     disables CUDA build
+#     disable
+#s CUDA build
 #
 #   CFLAGS
 #     flags to apply to both C and C++ files to be compiled (a quirk of setup.py
