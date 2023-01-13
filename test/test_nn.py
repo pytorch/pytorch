@@ -1661,6 +1661,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_clip_grad_norm(self, device_type, norm_type, foreach):
         if device_type == 'cuda' and not TEST_CUDA:
             raise SkipTest('CUDA not available')
+        elif device_type == 'cpu' and TEST_CUDA:
+            raise SkipTest('Running CUDA only')
 
         l = nn.Linear(10, 10).to(device_type)
         max_norm = 2
@@ -1719,6 +1721,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_clip_grad_value(self, device_type, foreach):
         if device_type == 'cuda' and not TEST_CUDA:
             raise SkipTest('CUDA not available')
+        elif device_type == 'cpu' and TEST_CUDA:
+            raise SkipTest('Running CUDA only')
 
         l = nn.Linear(10, 10).to(device_type)
         clip_value = 2.5
