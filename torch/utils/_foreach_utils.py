@@ -6,9 +6,8 @@ from torch import Tensor
 from torch.autograd.grad_mode import no_grad
 
 
-# _group_tensors_by_device_and_dtype is a util function that splits tensors into groups by device and dtype,
-# which is useful before sending tensors off to a foreach implementation, which requires tensors to be on
-# one device and dtype.
+# This util function splits tensors into groups by device and dtype, which is useful before sending
+# tensors off to a foreach implementation, which requires tensors to be on one device and dtype.
 # If tensorlistlist contains more than one tensorlist, the following assumptions are made BUT NOT verified:
 #   - tensorlists CAN be None
 #   - all tensors in the first specified list cannot be None
