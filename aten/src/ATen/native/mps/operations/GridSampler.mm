@@ -125,7 +125,7 @@ void grid_sampler_2d_mps_impl(Tensor &output, const Tensor& input, const Tensor&
 Tensor grid_sampler_2d_mps(const Tensor& input, const Tensor& grid,
                            int64_t interpolation_mode, int64_t padding_mode,
                            bool align_corners) {
-  if (!is_macos_13_or_newer()) {
+  if (!is_macos_13_or_newer(/*subVersion=*/1)) {
     TORCH_WARN_ONCE("MPS: grid_sampler_2d op is supported natively starting from macOS 13.1. ",
                     "Falling back on CPU. This may have performance implications.");
 
