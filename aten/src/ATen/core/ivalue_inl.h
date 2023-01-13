@@ -98,6 +98,10 @@ inline c10::intrusive_ptr<ivalue::Await> IValue::toAwait() && {
   AT_ASSERT(isAwait(), "Expected Await but got ", tagKind());
   return moveToIntrusivePtr<ivalue::Await>();
 }
+inline c10::intrusive_ptr<ivalue::Await> IValue::toAwait() const& {
+  AT_ASSERT(isAwait(), "Expected Await but got ", tagKind());
+  return toIntrusivePtr<ivalue::Await>();
+}
 inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() && {
   AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
   return moveToIntrusivePtr<c10::RRefInterface>();
