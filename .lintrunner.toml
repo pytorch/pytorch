@@ -6,7 +6,6 @@ exclude_patterns = [
     'build_test_custom_build/**',
     'build/**',
     'caffe2/**',
-    'docs/caffe2/**',
     'docs/cpp/src/**',
     'docs/src/**',
     'functorch/docs/**',
