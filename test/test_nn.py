@@ -11482,7 +11482,8 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @deviceCountAtLeast(2)
-    def test_clip_grad_norm_multi_device(self, devices):
+    @parametrize_test('foreach', (False, True))
+    def test_clip_grad_norm_multi_device(self, devices, foreach):
         class TestModel(nn.Module):
             def __init__(self):
                 super(TestModel, self).__init__()
@@ -11498,8 +11499,8 @@ class TestNNDeviceType(NNTestCase):
                 p.grad = torch.ones_like(p)
             for p in ref_model.parameters():
                 p.grad = torch.ones_like(p)
-            norm = clip_grad_norm_(test_model.parameters(), 0.5, norm_type=norm_type)
-            expected = clip_grad_norm_(ref_model.parameters(), 0.5, norm_type=norm_type)
+            norm = clip_grad_norm_(test_model.parameters(), 0.5, norm_type=norm_type, foreach=foreach)
+            expected = clip_grad_norm_(ref_model.parameters(), 0.5, norm_type=norm_type, foreach=foreach)
             self.assertEqual(norm, expected)
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
