@@ -171,6 +171,7 @@ enum PostOps {
   NoPostOp,
   Relu,
   LeakyRelu,
+  Tanh,
 };
 
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
@@ -207,6 +208,11 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
       double output_scale,
       int64_t output_zero_point,
       double negative_slope);
+
+  at::Tensor apply_tanh(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point);
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 

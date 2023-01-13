@@ -552,9 +552,10 @@ def get_args_parser() -> ArgumentParser:
         default="127.0.0.1",
         type=str,
         action=env,
-        help="Address of the master node (rank 0). It should be either the IP address or the "
-        "hostname of rank 0. For single node multi-proc training the --master_addr can simply be "
-        "127.0.0.1; IPv6 should have the pattern `[0:0:0:0:0:0:0:1]`.",
+        help="Address of the master node (rank 0) that only used for static rendezvous. It should "
+        "be either the IP address or the hostname of rank 0. For single node multi-proc training "
+        "the --master_addr can simply be 127.0.0.1; IPv6 should have the pattern "
+        "`[0:0:0:0:0:0:0:1]`.",
     )
     parser.add_argument(
         "--master_port",
@@ -562,7 +563,16 @@ def get_args_parser() -> ArgumentParser:
         type=int,
         action=env,
         help="Port on the master node (rank 0) to be used for communication during distributed "
-        "training.",
+        "training. It is only used for static rendezvous.",
+    )
+    parser.add_argument(
+        "--local_addr",
+        default=None,
+        type=str,
+        action=env,
+        help="Address of the local node. If specified, will use the given address for connection. "
+        "Else, will look up the local node address instead. Else, it will be default to local "
+        "machine's FQDN.",
     )
 
     #
@@ -657,6 +667,12 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     assert 0 < min_nodes <= max_nodes
     assert args.max_restarts >= 0
 
+    if hasattr(args, "master_addr") and args.rdzv_backend != "static":
+        log.warning(
+            "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
+            "is not specified."
+        )
+
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
@@ -693,6 +709,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         redirects=Std.from_str(args.redirects),
         tee=Std.from_str(args.tee),
         log_dir=args.log_dir,
+        local_addr=args.local_addr,
     )
 
     with_python = not args.no_python

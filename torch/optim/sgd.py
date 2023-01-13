@@ -88,6 +88,10 @@ class SGD(Optimizer):
             \end{aligned}
 
         The Nesterov version is analogously modified.
+
+        Moreover, the initial value of the momentum buffer is set to the
+        gradient value at the first step. This is in contrast to some other
+        frameworks that initialize it to all zeros.
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
@@ -116,6 +120,25 @@ class SGD(Optimizer):
             group.setdefault('foreach', None)
             group.setdefault('differentiable', False)
 
+    def _init_group(self, group, params_with_grad, d_p_list, momentum_buffer_list):
+        has_sparse_grad = False
+
+        for p in group['params']:
+            if p.grad is not None:
+                params_with_grad.append(p)
+                d_p_list.append(p.grad)
+                if p.grad.is_sparse:
+                    has_sparse_grad = True
+
+                state = self.state[p]
+                if 'momentum_buffer' not in state:
+                    momentum_buffer_list.append(None)
+                else:
+                    momentum_buffer_list.append(state['momentum_buffer'])
+
+        return has_sparse_grad
+
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -133,20 +156,8 @@ class SGD(Optimizer):
             params_with_grad = []
             d_p_list = []
             momentum_buffer_list = []
-            has_sparse_grad = False
 
-            for p in group['params']:
-                if p.grad is not None:
-                    params_with_grad.append(p)
-                    d_p_list.append(p.grad)
-                    if p.grad.is_sparse:
-                        has_sparse_grad = True
-
-                    state = self.state[p]
-                    if 'momentum_buffer' not in state:
-                        momentum_buffer_list.append(None)
-                    else:
-                        momentum_buffer_list.append(state['momentum_buffer'])
+            has_sparse_grad = self._init_group(group, params_with_grad, d_p_list, momentum_buffer_list)
 
             sgd(params_with_grad,
                 d_p_list,

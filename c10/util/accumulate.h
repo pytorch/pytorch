@@ -53,7 +53,7 @@ inline int64_t multiply_integers(const C& container) {
       container.begin(),
       container.end(),
       static_cast<int64_t>(1),
-      std::multiplies<int64_t>());
+      std::multiplies<>());
 }
 
 /// Product of integer elements referred to by iterators; accumulates into the
@@ -69,7 +69,7 @@ inline int64_t multiply_integers(Iter begin, Iter end) {
   // is not large enough to hold the result, computation can overflow. We use
   // `int64_t` here to avoid this.
   return std::accumulate(
-      begin, end, static_cast<int64_t>(1), std::multiplies<int64_t>());
+      begin, end, static_cast<int64_t>(1), std::multiplies<>());
 }
 
 /// Return product of all dimensions starting from k

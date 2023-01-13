@@ -7,6 +7,12 @@ import torch.ao.nn.quantized as nnq
 
 from torch.nn.utils import fuse_conv_bn_weights
 
+__all__ = [
+    "ConvReLU1d",
+    "ConvReLU2d",
+    "ConvReLU3d",
+]
+
 _reverse_repeat_padding = nnq.modules.conv._reverse_repeat_padding
 
 # TODO: factor out the common parts to ConvNd

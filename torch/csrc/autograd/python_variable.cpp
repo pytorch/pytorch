@@ -38,6 +38,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/utils/tensor_numpy.h>
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
@@ -680,7 +681,7 @@ PyObject* THPVariable_pynew(
 
 static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   const auto& var = THPVariable_Unpack(self);
-  THPVariable_Wrap(var);
+  Py_DECREF(THPVariable_Wrap(var));
   Py_RETURN_NONE;
 }
 
@@ -693,24 +694,23 @@ static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
   const auto& new_base = THPVariable_Unpack(arg);
 
   // Ensure that self is indeed a backward differentiable view
+  // If not, we return an undefined Tensor (None) and let the user handle it.
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
-  TORCH_CHECK(
-      diff_view_meta && diff_view_meta->has_bw_view(),
-      "_view_func can only be called on "
-      "a Tensor that is a backward differentiable view.");
-  const auto& view_info = diff_view_meta->get_backward_view();
-  // Ensure that the newly provided base is similar to the original base
-  TORCH_CHECK(
-      torch::autograd::utils::has_same_meta(new_base, view_info.base_),
-      "The new base passed to _view_func must have the same metadata as the Tensors's base");
-
-  // Do the actual view replay
-  if (view_info.has_view_fn()) {
-    return THPVariable_Wrap(view_info.view_fn()(new_base));
-  } else {
-    return THPVariable_Wrap(new_base.as_strided(
-        self.sizes(), self.strides(), self.storage_offset()));
+  at::Tensor out;
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
+    const auto& view_info = diff_view_meta->get_backward_view();
+    // Ensure that the newly provided base is similar to the original base
+    if (torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
+      // Do the actual view replay
+      if (view_info.has_view_fn()) {
+        out = view_info.view_fn()(new_base);
+      } else {
+        out = new_base.as_strided(
+            self.sizes(), self.strides(), self.storage_offset());
+      }
+    }
   }
+  return THPVariable_Wrap(out);
   END_HANDLE_TH_ERRORS
 }
 
@@ -2205,6 +2205,7 @@ bool THPVariable_initModule(PyObject* module) {
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);
+  torch::utils::validate_numpy_for_dlpack_deleter_bug();
   return true;
 }
 

@@ -24,8 +24,7 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 __device__ inline int min(int a, int b) {
@@ -652,4 +651,3 @@ Tensor max_pool3d_with_indices_backward_cuda(
 }
 
 } // at::native
-} // at

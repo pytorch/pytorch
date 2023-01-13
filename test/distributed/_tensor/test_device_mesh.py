@@ -1,5 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import os
+import sys
 
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -8,6 +10,7 @@ from torch.distributed._tensor.placement_types import Shard
 from torch.distributed.distributed_c10d import (
     get_global_rank,
     get_world_size,
+    is_initialized,
     new_group,
     ProcessGroup,
 )
@@ -16,12 +19,29 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.common_distributed import TEST_SKIPS
 
 
 class DeviceMeshTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return 4
+
+    def test_init_process_group(self):
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        backend = "nccl" if device_type == "cuda" else "gloo"
+        # skip the test if not enough GPUs
+        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        self.assertTrue(not is_initialized())
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "25364"
+        os.environ["WORLD_SIZE"] = f"{self.world_size}"
+        os.environ["RANK"] = f"{self.rank}"
+        mesh = DeviceMesh(device_type, mesh_tensor)
+        self.assertTrue(is_initialized())
+        self.destroy_pg()
 
     @with_comms
     def test_device_mesh_2d(self):
@@ -118,6 +138,27 @@ class DeviceMeshTest(DTensorTestBase):
                 dim_groups=[dim_groups[0]],
             )
 
+
+class DeviceMeshTestNDim(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    def test_mesh_size_requirement_error(self):
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        backend = "nccl" if device_type == "cuda" else "gloo"
+        # skip the test if not enough GPUs
+        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "25364"
+        os.environ["WORLD_SIZE"] = f"{self.world_size}"
+        os.environ["RANK"] = f"{self.rank}"
+        with self.assertRaisesRegex(RuntimeError, "DeviceMesh must include every process in WORLD"):
+            mesh = DeviceMesh(device_type, mesh_tensor)
+        self.assertTrue(not is_initialized())
+
     @with_comms
     def test_device_mesh_nd(self):
         # construct a cuda device mesh
@@ -186,7 +227,10 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     def test_scatter_uneven(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         my_rank = device_mesh.get_rank()
-        tensor_to_split = torch.randn(device_mesh.size() + 3, device_mesh.size() + 1)
+        tensor_to_split = torch.randn(
+            device_mesh.size() + 3, device_mesh.size() + 1,
+            device=self.device_type
+        )
 
         for shard_dim in range(tensor_to_split.ndim):
             shard_placement = Shard(shard_dim)
@@ -275,10 +319,14 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             input_size = [3, 3]
             scattered_tensor = torch.empty(input_size, device=self.device_type)
             input_size[dim] *= self.world_size
+            shard_placement = Shard(dim)
 
-            input_rs_list = (
-                torch.ones(input_size, device=self.device_type) * self.rank
-            ).tensor_split(self.world_size, dim=dim)
+            input_rs_list, _ = shard_placement._split_tensor(
+                torch.ones(input_size, device=self.device_type) * self.rank,
+                mesh.size(),
+                with_padding=True,
+                contiguous=True,
+            )
             res_num = ((0 + self.world_size - 1) * self.world_size) / 2
             mesh.reduce_scatter(scattered_tensor, input_rs_list, mesh_dim=0)
             self.assertEqual(scattered_tensor, torch.ones(3, 3) * res_num)
@@ -355,10 +403,17 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
         dim_to_subgroups = mesh.get_dim_groups()
         for dim, dim_group in enumerate(dim_to_subgroups):
+            input_size = [3, 3, 3]
             dim_group_size = get_world_size(dim_group)
-            local_rs_list = (
-                torch.ones(dim_group_size * 3, 3, device=self.device_type) * self.rank
-            ).tensor_split(dim_group_size, dim=0)
+            input_size[dim] *= dim_group_size
+            shard_placement = Shard(dim)
+
+            local_rs_list, _ = shard_placement._split_tensor(
+                torch.ones(input_size, device=self.device_type) * self.rank,
+                dim_group_size,
+                with_padding=True,
+                contiguous=True,
+            )
             scattered_tensor = torch.empty_like(
                 local_rs_list[mesh.get_coordinate_on_dim(dim)],
                 device=self.device_type,
@@ -368,7 +423,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             ]
             mesh.reduce_scatter(scattered_tensor, local_rs_list, mesh_dim=dim)
             res_num = torch.sum(torch.tensor(global_ranks))
-            self.assertEqual(scattered_tensor, torch.ones(3, 3) * res_num)
+            self.assertEqual(scattered_tensor, torch.ones(3, 3, 3) * res_num)
 
     @with_comms
     def test_all_reduce_nd(self):
