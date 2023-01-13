@@ -161,6 +161,11 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
             a.eig()
 
+    def test_chain_matmul_removed_error(self, device):
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            torch.chain_matmul(a, a)
+
     def test_lstsq_removed_error(self, device):
         a = make_tensor(5, 5, device=device, dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
@@ -3409,21 +3414,6 @@ class TestLinalg(TestCase):
         a[5, 5] = 0
         self.assertEqual(matrix_rank(a).item(), 9)
         self.assertEqual(matrix_rank(a, hermitian=True).item(), 9)
-
-    @onlyNativeDeviceTypes
-    @dtypes(torch.double)
-    # This tests only the cases where torch.chain_matmul differs from torch.linalg.multi_dot which this is an "alias" for.
-    def test_chain_matmul(self, device, dtype):
-        # chain_matmul accepts a single input tensor while multi_dot does not
-        t = make_tensor((2, 2), dtype=dtype, device=device)
-        self.assertEqual(t, torch.chain_matmul(t))
-        with self.assertRaisesRegex(RuntimeError, r"chain_matmul\(\): Expected one or more matrices"):
-            torch.chain_matmul()
-
-        # chain_matmul expects all tensors to be 2D whereas multi_dot allows the first and last tensors to
-        # be either 1D or 2D
-        with self.assertRaisesRegex(RuntimeError, r"Tensor dimension is 1, expected 2 instead"):
-            torch.chain_matmul(make_tensor(1, dtype=dtype, device=device), make_tensor(1, dtype=dtype, device=device))
 
     @onlyNativeDeviceTypes
     @dtypes(torch.double, torch.cdouble)

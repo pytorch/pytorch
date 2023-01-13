@@ -1214,10 +1214,11 @@ from . import masked
 
 # Import removed ops with error message about removal
 from ._linalg_utils import (  # type: ignore[misc]
-    matrix_rank,
+    chain_matmul,
     eig,
-    solve,
     lstsq,
+    matrix_rank,
+    solve,
 )
 
 class _TorchCompileInductorWrapper:

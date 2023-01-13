@@ -125,7 +125,6 @@ all_generated_ops:
 - aten::ceil.Scalar
 - aten::ceil.float
 - aten::celu
-- aten::chain_matmul
 - aten::channel_shuffle
 - aten::chunk
 - aten::clamp

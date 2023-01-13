@@ -427,7 +427,7 @@ class BlasLapackOpsModule(torch.nn.Module):
             torch.addr(torch.zeros(3, 3), v, v),
             torch.baddbmm(m, a, b),
             torch.bmm(a, b),
-            torch.chain_matmul(torch.randn(3, 3), torch.randn(3, 3), torch.randn(3, 3)),
+            # torch.chain_matmul(torch.randn(3, 3), torch.randn(3, 3), torch.randn(3, 3)),  # deprecated
             # torch.cholesky(a), # deprecated
             # torch.cholesky_inverse(torch.randn(3, 3)), # had some error
             # torch.cholesky_solve(torch.randn(3, 3), torch.randn(3, 3)),

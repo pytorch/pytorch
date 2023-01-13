@@ -42,7 +42,6 @@
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/ceil.h>
-#include <ATen/ops/chain_matmul_native.h>
 #include <ATen/ops/det_native.h>
 #include <ATen/ops/diag_embed.h>
 #include <ATen/ops/dot.h>
@@ -1067,43 +1066,6 @@ Tensor linalg_multi_dot(TensorList tensors) {
 Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
   multi_dot_impl(tensors, result);
   return result;
-}
-
-Tensor chain_matmul(TensorList matrices) {
-  TORCH_WARN_ONCE(
-      "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
-      "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
-      "multiple parameters."
-  );
-  checkAllSameDim(matrices, 2);
-
-  TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
-
-  if (matrices.size() == 1) {
-    return matrices[0].clone();
-  }
-
-  return at::native::linalg_multi_dot(matrices);
-}
-
-Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
-  TORCH_WARN_ONCE(
-      "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
-      "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
-      "multiple parameters."
-  );
-  checkAllSameDim(matrices, 2);
-
-  TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
-
-  if (matrices.size() == 1) {
-    at::native::resize_output(result, matrices[0].sizes());
-    return result.copy_(matrices[0]);
-  }
-
-  return at::native::linalg_multi_dot_out(matrices, result);
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {

@@ -381,7 +381,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(addbmm, lower_precision_fp)
   KERNEL(baddbmm, lower_precision_fp)
   KERNEL(bmm, lower_precision_fp)
-  KERNEL(chain_matmul, lower_precision_fp)
   KERNEL(linalg_multi_dot, lower_precision_fp)
   KERNEL(_thnn_fused_lstm_cell, lower_precision_fp)
   KERNEL(_thnn_fused_gru_cell, lower_precision_fp)
