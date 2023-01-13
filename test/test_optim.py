@@ -657,7 +657,6 @@ class TestOptim(TestCase):
         # single tensor implementations. We need multiple GPUs (vs just a CPU and
         # GPU) because fused adam only works on GPUs. (Thus we only run the tests
         # that call into this helper when TEST_MULTIGPU.)
-        torch.manual_seed(11012023)
         params = [
             torch.rand(2, 3, dtype=torch.float64, device='cuda:0', requires_grad=True),
             torch.rand(2, 3, dtype=torch.float32, device='cuda:0', requires_grad=True),
@@ -667,10 +666,12 @@ class TestOptim(TestCase):
             torch.rand(2, 3, dtype=torch.float32, device='cuda:1', requires_grad=True),
             torch.rand(2, 3, dtype=torch.float16, device='cuda:1', requires_grad=True),
             torch.rand(2, 3, dtype=torch.bfloat16, device='cuda:1', requires_grad=True),
+            torch.randint(1024, (2, 3), dtype=torch.int64, device='cuda:1', requires_grad=False),
         ]
 
         for p in params:
-            p.grad = torch.rand_like(p, device=p.device, dtype=p.dtype)
+            if p.requires_grad:
+                p.grad = torch.rand_like(p, device=p.device, dtype=p.dtype)
 
         for optimizer_constructor, kwargs in optimizer_with_kwargs:
             res, state = [], []
@@ -680,10 +681,11 @@ class TestOptim(TestCase):
 
                 params_clone = []
                 for p in params:
-                    p_clone = torch.clone(p).detach()
-                    p_clone.requires_grad = True
-                    p_clone.grad = torch.clone(p.grad).detach()
-                    params_clone.append(p_clone)
+                    p_clone = p.clone().detach()
+                    if p.requires_grad:
+                        p_clone.requires_grad = True
+                        p_clone.grad = p.grad.clone().detach()
+                        params_clone.append(p_clone)
 
                 optimizer = optimizer_constructor(params_clone, **kwargs_clone)
                 optimizer.step()
@@ -727,7 +729,6 @@ class TestOptim(TestCase):
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device
                 ).reshape(3, 2)
 
-                torch.manual_seed(1)
                 model = torch.nn.Sequential(
                     torch.nn.Linear(2, 3),
                     torch.nn.Sigmoid(),
@@ -821,6 +822,34 @@ class TestOptim(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_multi_tensor_optimizers_with_varying_tensors(self):
         optimizer_pairs_with_flags = [
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=True, fused=False)),
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=False, fused=False)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=True, fused=False)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=False, fused=False)),
+            (optim.AdamW, dict(weight_decay=1.0, amsgrad=True)),
+            (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
+            (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
+            (optim.AdamW, dict(weight_decay=0.0, amsgrad=False)),
+            # TODO: add NAdam, which currently is not accurate enough for the standard atols.
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),
+            ),
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
+            ),
+            (optim.RAdam, dict(weight_decay=0)),
+            (optim.RAdam, dict(weight_decay=1)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
+            (optim.RMSprop, dict(weight_decay=0, momentum=1, centered=False)),
+            (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
+            (optim.ASGD, dict(weight_decay=0)),
+            (optim.ASGD, dict(weight_decay=1)),
+            (optim.Adamax, dict(weight_decay=0)),
+            (optim.Adamax, dict(weight_decay=1)),
             (optim.Adadelta, dict(weight_decay=0)),
             (optim.Adadelta, dict(weight_decay=1)),
             (optim.Adagrad, dict(weight_decay=0)),
