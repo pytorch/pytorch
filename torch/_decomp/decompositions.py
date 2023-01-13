@@ -1903,19 +1903,6 @@ def uniform(
     )
 
 
-@register_decomposition(aten.geometric_)
-def geometric_(self, p, generator=None):
-    assert generator is None
-    tiny = torch.finfo(self.dtype).tiny
-    return self.copy_(
-        torch.floor(
-            torch.log(torch.clamp(torch.rand_like(self), min=tiny))
-            / torch.log1p(torch.tensor(-p))
-        )
-        + 1
-    )
-
-
 @register_decomposition(aten.uniform_)
 def uniform_(self, low=0, high=1, generator=None):
     assert generator is None

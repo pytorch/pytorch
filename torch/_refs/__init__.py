@@ -5114,6 +5114,19 @@ def bucketize(
     return start.to(dtype=out_dtype)
 
 
+@register_decomposition(aten.geometric)
+@out_wrapper()
+def geometric(self, p, generator=None):
+    assert generator is None
+    tiny = torch.finfo(self.dtype).tiny
+    return self.copy_(
+        torch.floor(
+            torch.log(torch.clamp(torch.rand_like(self), min=tiny)) / math.log1p(-p)
+        )
+        + 1
+    )
+
+
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)
@@ -5189,6 +5202,7 @@ triu_ = _make_inplace(triu)
 true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
+geometric_ = _make_inplace(geometric)
 
 # Views
 # We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function
