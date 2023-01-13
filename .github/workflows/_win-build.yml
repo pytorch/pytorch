@@ -71,6 +71,18 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
+      - name: Setup conda
+        shell: bash
+        run: |
+          # Windows conda is baked into the AMI at this location
+          CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
+
+          {
+            echo "CONDA_RUN=${CONDA} run --no-capture-output";
+            echo "CONDA_BUILD=${CONDA} run conda-build";
+            echo "CONDA_INSTALL=${CONDA} install";
+          } >> "${GITHUB_ENV}"
+
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -112,7 +124,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
-          TORCH_CUDA_ARCH_LIST: "7.0"
+          TORCH_CUDA_ARCH_LIST: "8.6"
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |

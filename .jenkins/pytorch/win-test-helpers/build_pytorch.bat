@@ -80,10 +80,8 @@ set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 set DISTUTILS_USE_SDK=1
 set PATH=%TMP_DIR_WIN%\bin;%PATH%
 
-:: Target only our CI GPU machine's CUDA arch to speed up the build, we can overwrite with env var
-:: default on circleci is Tesla T4 which has capability of 7.5, ref: https://developer.nvidia.com/cuda-gpus
-:: jenkins has M40, which is 5.2
-if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
+:: The latest Windows CUDA test is running on AWS G5 runner with A10G GPU
+if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=8.6
 
 :: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
 set SCCACHE_IDLE_TIMEOUT=0
