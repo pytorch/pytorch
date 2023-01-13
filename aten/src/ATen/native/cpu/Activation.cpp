@@ -177,14 +177,13 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
     const Vectorized<float> negcoef_vec(negcoef);
     const Vectorized<float> negiptcoef_vec(negiptcoef);
     const Vectorized<float> poscoef_vec(poscoef);
-    const Vectorized<float> one_vec(static_cast<float>(1));
     const Vectorized<float> zero_vec(static_cast<float>(0));
     cpu_kernel_vec(
       it,
       [negcoef, negiptcoef, poscoef](BFloat16 a) -> BFloat16 {
-        return float(a) <= float(0) ? (std::exp(float(a) * negiptcoef) - float(1)) * negcoef : float(a) * poscoef;
+        return float(a) <= float(0) ? (std::expm1(float(a) * negiptcoef)) * negcoef : float(a) * poscoef;
       },
-      [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vectorized<BFloat16> a) -> Vectorized<BFloat16> {
+      [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec](Vectorized<BFloat16> a) -> Vectorized<BFloat16> {
         Vectorized<float> a0, a1;
         std::tie(a0, a1) = convert_bfloat16_float(a);
         auto cmp0 = (a0 > zero_vec);
@@ -192,8 +191,8 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
         if (!cmp0.zero_mask() && !cmp1.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
           return convert_float_bfloat16(a0 * poscoef_vec, a1 * poscoef_vec);
         } else {
-          auto res0 = Vectorized<float>::blendv(((a0 * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a0 * poscoef_vec, cmp0);
-          auto res1 = Vectorized<float>::blendv(((a1 * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a1 * poscoef_vec, cmp1);
+          auto res0 = Vectorized<float>::blendv((a0 * negiptcoef_vec).expm1() * negcoef_vec, a0 * poscoef_vec, cmp0);
+          auto res1 = Vectorized<float>::blendv((a1 * negiptcoef_vec).expm1() * negcoef_vec, a1 * poscoef_vec, cmp1);
           return convert_float_bfloat16(res0, res1);
         }
       }
@@ -207,19 +206,18 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
       const Vec negcoef_vec(negcoef);
       const Vec negiptcoef_vec(negiptcoef);
       const Vec poscoef_vec(poscoef);
-      const Vec one_vec(static_cast<scalar_t>(1));
       const Vec zero_vec(static_cast<scalar_t>(0));
       cpu_kernel_vec(
           it,
           [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
-            return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
+            return a <= scalar_t(0) ? std::expm1(a * negiptcoef) * negcoef : a * poscoef;
           },
-          [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vec a) -> Vec {
+          [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec](Vec a) -> Vec {
             auto cmp = (a > zero_vec);
             if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
               return a * poscoef_vec;
             } else {
-              return Vec::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
+              return Vec::blendv((a * negiptcoef_vec).expm1() * negcoef_vec, a * poscoef_vec, cmp);
             }
           });
     });
