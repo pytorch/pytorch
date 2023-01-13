@@ -20,8 +20,7 @@ template <>
 struct pybind11::detail::type_caster<torch::jit::tensorexpr::ArgValue>
     : public type_caster_base<torch::jit::tensorexpr::ArgValue> {};
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 using namespace torch::jit::tensorexpr;
 
 ArgValue convertPyToArgValue(py::handle inp) {
@@ -921,5 +920,5 @@ void initTensorExprBindings(PyObject* module) {
   });
 #endif
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit
