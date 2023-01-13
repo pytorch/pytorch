@@ -1662,22 +1662,22 @@
 - name: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_dense_backward(grad, self)
 
-- name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None) -> Tensor
+- name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_csr(Tensor self) -> Tensor
+- name: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_csc(Tensor self) -> Tensor
+- name: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
+- name: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_bsc(Tensor self, int[2] blocksize) -> Tensor
+- name: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
@@ -2077,6 +2077,7 @@
 
 - name: _upsample_bicubic2d_aa(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   self: _upsample_bicubic2d_aa_backward_symint(grad, output_size, self.sym_sizes(), align_corners, scales_h, scales_w)
+  result: auto_linear
 
 - name: upsample_trilinear3d(Tensor self, SymInt[3] output_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
   self: upsample_trilinear3d_backward_symint(grad, output_size, self.sym_sizes(), align_corners, scales_d, scales_h, scales_w)
@@ -2455,6 +2456,7 @@
 
 - name: _upsample_bicubic2d_aa_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   grad_output: _upsample_bicubic2d_aa_symint(grad, output_size, align_corners, scales_h, scales_w)
+  result: auto_linear
 
 - name: upsample_trilinear3d_backward(Tensor grad_output, SymInt[3] output_size, SymInt[5] input_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
   grad_output: upsample_trilinear3d_symint(grad, output_size, align_corners, scales_d, scales_h, scales_w)
