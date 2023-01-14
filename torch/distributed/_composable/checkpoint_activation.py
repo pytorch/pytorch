@@ -213,7 +213,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
 
     """
 
-    def forward_pre_hook(module: nn.Module, inputs: Tuple[Any]) -> None:
+    def forward_pre_hook(module: nn.Module, inputs: Tuple[Any, ...]) -> None:
         if checkpoint.state(module).enable_hook:
             checkpoint.state(module).orig_grad_enabled = torch.is_grad_enabled()
             if checkpoint.state(module).use_reentrant:
@@ -253,7 +253,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
                 saved_tensor_hooks.__enter__()
                 checkpoint.state(module).saved_tensor_hooks = saved_tensor_hooks
 
-    def forward_hook(module: nn.Module, inputs: Tuple[Any], output: Any) -> Any:
+    def forward_hook(module: nn.Module, inputs: Tuple[Any, ...], output: Any) -> Any:
         if checkpoint.state(module).enable_hook:
             torch.set_grad_enabled(checkpoint.state(module).orig_grad_enabled)
             if checkpoint.state(module).use_reentrant:
