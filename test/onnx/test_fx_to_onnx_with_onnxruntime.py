@@ -75,7 +75,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 self.sigmoid = torch.nn.Sigmoid()
 
             def forward(self, x):
-                return torch.amax(self.sigmoid(x), dim=1, keepdim=True)
+                x = torch.ops.aten.add(x, 1, alpha=2)
+                return self.sigmoid(x)
 
         self.run_test_with_fx_to_onnx_exporter(SigmoidAMAXModel(), (x,))
 

@@ -184,7 +184,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
     torchscript_evaluator = TorchScriptEvaluator(graph_context)
 
     # assume atenlib API
-    atenlib = {"aten::sigmoid": ops.core.aten_sigmoid, "aten::amax": ops.core.aten_amax}
+    atenlib = {"aten::sigmoid": ops.core.aten_sigmoid, "aten::add": ops.core.aten_add}
 
     # In the following loop, a TorchScript graph is created to
     # represent the input FX graph with ONNX symbols (e.g., onnx::add).
@@ -392,6 +392,8 @@ def _ts_graph_to_onnx_model_in_protobuf(
         function_proto_list.append(onnx_function.to_function_proto())
     onnx_model.functions.extend(function_proto_list)
     print("ONNX model: \n", onnx_model)
+    onnx_model = onnx.shape_inference.infer_shapes(onnx_model)
+    print("after ONNX model: \n", onnx_model)
     onnx.checker.check_model(onnx_model, full_check=True)
     print("[Success] ONNX model")
     model_bytes = onnx_model.SerializeToString()
