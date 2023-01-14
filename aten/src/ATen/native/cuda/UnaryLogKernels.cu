@@ -10,7 +10,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
 
-namespace at { namespace native {
+namespace at::native {
 
 const char log_name[] = "log_kernel";
 void log_kernel_cuda(TensorIteratorBase& iter) {
@@ -115,4 +115,4 @@ REGISTER_DISPATCH(log10_stub, &log10_kernel_cuda);
 REGISTER_DISPATCH(log2_stub, &log2_kernel_cuda);
 REGISTER_DISPATCH(log1p_stub, &log1p_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

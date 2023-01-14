@@ -1237,7 +1237,7 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
             return pg.recv([tensor], group_src_rank, tag)
 
 
-def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
+def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> None:
     """
     Sends a tensor synchronously.
 
@@ -1269,7 +1269,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         group.send([tensor], group_dst_rank, tag).wait()
 
 
-def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
+def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
     """
     Receives a tensor synchronously.
 

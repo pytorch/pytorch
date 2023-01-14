@@ -18,6 +18,7 @@ from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
+import psutil
 import torch
 
 import torch._dynamo
@@ -91,26 +92,18 @@ CI_SKIP_AOT_EAGER_TRAINING = [
 
 CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     *CI_SKIP_AOT_EAGER_TRAINING,
-    "drq",  # assert type(inner_out) == type(user_out)
     "hf_T5_base",  # fp64_OOM
     "mobilenet_v2_quantized_qat",  # setStorage
     "resnet50_quantized_qat",  # setStorage
-    "soft_actor_critic",  # assert type(inner_out) == type(user_out)
     "tacotron2",  # aten._thnn_fused_lstm_cell.default
-    "tts_angular",  # _VF.lstm
-    "AllenaiLongformerBase",  # assert type(inner_out) == type(user_out)
-    "DebertaV2ForQuestionAnswering",  # OOM
-    "botnet26t_256",  # assert type(inner_out) == type(user_out)
+    "DebertaV2ForQuestionAnswering",  # OOMs (but on CI only; graph breaks?)
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
-    "eca_botnext26ts_256",  # assert type(inner_out) == type(user_out)
-    "eca_halonext26ts",  # assert type(inner_out) == type(user_out)
-    "hrnet_w18",  # torch._C._nn.upsample_nearest2d
     "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
-    "sebotnet33ts_256",  # assert type(inner_out) == type(user_out)
+    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "twins_pcpvt_base",  # timeout
 ]
 
-CI_SKIP_INDCUTOR_INFERENCE = [
+CI_SKIP_INDUCTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
     "DALLE2_pytorch",
@@ -135,7 +128,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
 ]
 
 CI_SKIP_INDUCTOR_TRAINING = [
-    *CI_SKIP_INDCUTOR_INFERENCE,
+    *CI_SKIP_INDUCTOR_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
@@ -870,6 +863,10 @@ def cast_to(dtype, model, inputs):
     return model, inputs
 
 
+def cast_to_bf16(model, inputs):
+    return cast_to(torch.bfloat16, model, inputs)
+
+
 def cast_to_fp16(model, inputs):
     return cast_to(torch.float16, model, inputs)
 
@@ -949,8 +946,7 @@ class BenchmarkRunner:
         self._args = None
 
     def setup_amp(self):
-        if self.args.amp and self.args.training:
-            assert self.args.devices == ["cuda"], "AMP is supported only for CUDA"
+        if self.args.amp and self.args.training and self.args.devices == ["cuda"]:
             # AMP training can lead to small loss values which can undeflow
             # gradient values returning in zero gradients. To solve this
             # problem, PyTorch introduces GradScaler. GradScaler is a stateful
@@ -973,6 +969,8 @@ class BenchmarkRunner:
             #  harder.
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
+        elif self.args.bfloat16 and self.args.devices == ["cpu"]:
+            self.autocast = torch.cpu.amp.autocast
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
@@ -1057,6 +1055,8 @@ class BenchmarkRunner:
             model, example_inputs = cast_to_fp32(model, example_inputs)
         elif self.args.float16:
             model, example_inputs = cast_to_fp16(model, example_inputs)
+        elif self.args.bfloat16:
+            model, example_inputs = cast_to_bf16(model, example_inputs)
 
         try:
             self.model_iter_fn(model, example_inputs)
@@ -1070,6 +1070,8 @@ class BenchmarkRunner:
             model, example_inputs = cast_to_fp32(model, example_inputs)
         elif self.args.float16:
             model, example_inputs = cast_to_fp16(model, example_inputs)
+        elif self.args.bfloat16:
+            model, example_inputs = cast_to_bf16(model, example_inputs)
         return model, example_inputs
 
     def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
@@ -1238,7 +1240,6 @@ class BenchmarkRunner:
                     )
                     accuracy_status = "fail_to_run"
                     return record_status(accuracy_status)
-
             if not same(
                 correct_result,
                 new_result,
@@ -1271,6 +1272,10 @@ class BenchmarkRunner:
                 latency = t1 - t0
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
+                elif current_device == "cpu":
+                    total = psutil.virtual_memory().total
+                    percentage = psutil.Process(os.getpid()).memory_percent()
+                    peak_mem = percentage * total / 10**9
             except Exception as e:
                 log.exception(f"Failed for {mode} {e}")
                 return sys.exit(-1)
@@ -1471,7 +1476,10 @@ def parse_args(args=None):
         help="Whether to randomize the input values. Dimensions will be kept the same.",
     )
     parser.add_argument(
-        "--threads", "-t", type=int, help="number of threads to use for eager"
+        "--threads",
+        "-t",
+        type=int,
+        help="number of threads to use for eager and inductor",
     )
     parser.add_argument(
         "--nopython", action="store_true", help="Turn graph breaks into errors"
@@ -1507,6 +1515,17 @@ def parse_args(args=None):
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
+    )
+    parser.add_argument(
+        "--dynamic-ci-skips-only",
+        action="store_true",
+        help=(
+            "Run only the models that would have been skipped in CI "
+            "if dynamic-shapes, compared to running without dynamic-shapes.  "
+            "This is useful for checking if more models are now "
+            "successfully passing with dynamic shapes.  "
+            "Implies --dynamic-shapes and --ci"
+        ),
     )
     parser.add_argument(
         "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
@@ -1667,6 +1686,9 @@ def parse_args(args=None):
 
     group_prec = parser.add_mutually_exclusive_group()
     group_prec.add_argument("--float16", action="store_true", help="cast model to fp16")
+    group_prec.add_argument(
+        "--bfloat16", action="store_true", help="cast model to bf16"
+    )
     group_prec.add_argument("--float32", action="store_true", help="cast model to fp32")
     group_prec.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
@@ -1777,6 +1799,14 @@ def run(runner, args, original_dir=None):
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
+    if args.dynamic_ci_skips_only:
+        args.dynamic_shapes = True
+        args.ci = True
+        # We only have a CI skip list for aot_eager right now.  When inductor
+        # comes online, add that skip list too.
+        assert (
+            args.backend == "aot_eager"
+        ), "--dynamic-ci-skips only works with aot_eager backend at the moment"
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
@@ -1785,18 +1815,25 @@ def run(runner, args, original_dir=None):
         args.quiet = True
         args.repeat = 2
         if args.backend == "aot_eager":
-            args.exclude = (
-                CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
-                if args.training and args.dynamic_shapes
-                else CI_SKIP_AOT_EAGER_TRAINING
-                if args.training
-                else CI_SKIP_AOT_EAGER_INFERENCE
-            )
+            if args.dynamic_ci_skips_only:
+                assert args.training and args.dynamic_shapes
+                args.filter = list(
+                    set(CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING)
+                    - set(CI_SKIP_AOT_EAGER_TRAINING)
+                )
+            else:
+                args.exclude = (
+                    CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
+                    if args.training and args.dynamic_shapes
+                    else CI_SKIP_AOT_EAGER_TRAINING
+                    if args.training
+                    else CI_SKIP_AOT_EAGER_INFERENCE
+                )
         elif args.inductor:
             args.exclude = (
                 CI_SKIP_INDUCTOR_TRAINING
                 if args.training
-                else CI_SKIP_INDCUTOR_INFERENCE
+                else CI_SKIP_INDUCTOR_INFERENCE
             )
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
@@ -2021,7 +2058,18 @@ def run(runner, args, original_dir=None):
         optimize_ctx = nothing
         output_filename = "nothing.csv"
     elif args.backend:
-        optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
+        if args.backend == "ipex":
+            if args.bfloat16:
+                optimize_ctx = torch._dynamo.optimize(
+                    backends.ipex_bf16, nopython=args.nopython
+                )
+            else:
+                assert args.float32, "IPEX only supports fp32 and bf16 for now."
+                optimize_ctx = torch._dynamo.optimize(
+                    backends.ipex_fp32, nopython=args.nopython
+                )
+        else:
+            optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
@@ -2136,6 +2184,8 @@ def run(runner, args, original_dir=None):
                 model, example_inputs = cast_to_fp32(model, example_inputs)
             elif args.float16:
                 model, example_inputs = cast_to_fp16(model, example_inputs)
+            elif args.bfloat16:
+                model, example_inputs = cast_to_bf16(model, example_inputs)
 
             if args.log_operator_inputs:
                 log_operator_inputs(
