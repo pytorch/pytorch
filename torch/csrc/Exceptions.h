@@ -167,7 +167,7 @@ struct python_error : public std::exception {
     Py_XINCREF(traceback);
   }
 
-  python_error(python_error&& other)
+  python_error(python_error&& other) noexcept
       : type(other.type),
         value(other.value),
         traceback(other.traceback),
