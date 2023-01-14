@@ -1,8 +1,10 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import torch
 import argparse
-from torch.onnx._internal import _fx as fx_onnx
+
 import onnx
+import onnxruntime  # type: ignore[import]
+import torch
+from torch.onnx._internal import fx as fx_onnx
+from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore[import]
 
 """
 
@@ -26,11 +28,17 @@ Does it work with export (torch.jit.trace)?
 sentence = "Question: Can I run BLOOM on a single GPU? Answer:"
 
 # Load model
-def load_model(model_name: str = "bigscience/bloom-560m", large_model_support: bool = True):
-    large_model_support_kwargs = {
-        "device_map": "auto",  # requires `pip install accelerate`
-        "offload_state_dict": True,
-    } if large_model_support else {}
+def load_model(
+    model_name: str = "bigscience/bloom-560m", large_model_support: bool = True
+):
+    large_model_support_kwargs = (
+        {
+            "device_map": "auto",  # requires `pip install accelerate`
+            "offload_state_dict": True,
+        }
+        if large_model_support
+        else {}
+    )
 
     print(f"large_model_support_kwargs: {large_model_support_kwargs}")
 
@@ -64,8 +72,6 @@ def run_model(model, inputs, tokenizer):
 
 # Export to ONNX
 def run_ort(model_path, inputs):
-    import onnxruntime
-
     ort_session = onnxruntime.InferenceSession(model_path)
     return ort_session.run(
         None,
@@ -74,6 +80,7 @@ def run_ort(model_path, inputs):
             "attention_mask": inputs["attention_mask"].cpu().numpy(),
         },
     )
+
 
 # Export to ONNX
 def run_onnx_export(model, inputs, tokenizer):

@@ -2,7 +2,7 @@ import copy
 import inspect
 import itertools
 import operator
-from typing import Callable, Dict, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import onnx
 
@@ -505,10 +505,10 @@ def export_without_kwargs(
 
     class GraphCaptureCompiler:
         def __init__(self):
-            self.captured_graph = None
+            self.captured_graph: Optional[torch.fx.GraphModule] = None
             self.captured_graph_count = 0
 
-        def compile(self, gm, _):
+        def compile(self, gm: torch.fx.GraphModule, _):
             assert self.captured_graph_count == 0
             self.captured_graph = gm
             self.captured_graph_count += 1
@@ -517,6 +517,7 @@ def export_without_kwargs(
     compiler = GraphCaptureCompiler()
     torch._dynamo.optimize(compiler.compile, nopython=True)(Wrapper(fn))(*bound_args)
     torch._dynamo.reset()
+    assert compiler.captured_graph
     # Export FX graph to ONNX ModelProto.
     return _export(
         compiler.captured_graph,

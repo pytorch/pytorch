@@ -1,17 +1,21 @@
 # Import generic wrappers
-import numpy as np
-import onnx
-import onnxruntime
-import torch
-import transformers
-from torch import _dynamo as torchdynamo
-from torch.utils._pytree import tree_flatten
-from transformers import AutoModel, AutoTokenizer
 import argparse
 
+import numpy as np
+import onnx
+import onnxruntime  # type: ignore[import]
+import torch
+import transformers  # type: ignore[import]
+from torch import _dynamo as torchdynamo
+from torch.onnx._internal import fx as fx_onnx
+from torch.utils._pytree import tree_flatten
+from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
+
 try:
-    from onnxruntime.capi import _pybind_state as ORTC
-    from onnxruntime.training.torchdynamo.ort_backend import _get_onnx_devices
+    from onnxruntime.capi import _pybind_state as ORTC  # type: ignore[import]
+    from onnxruntime.training.torchdynamo.ort_backend import (  # type: ignore[import]
+        _get_onnx_devices,
+    )
 
     HAS_ORT_TRAINING = True
 except ImportError:
@@ -35,7 +39,7 @@ _NP_DTYPE = {
 
 
 def create_ort_tensors(pytorch_tensors):
-    ort_tensors = ORTC.OrtValueVector()  # type: ignore
+    ort_tensors = ORTC.OrtValueVector()
     ort_tensors.reserve(len(pytorch_tensors))
 
     dtypes = []
@@ -104,14 +108,14 @@ def test_gpt2_one_shot(model_name):
     flat_outputs, _ = tree_flatten(outputs)
 
     # Export tiny GPT2.
-    from torch.onnx._internal._fx import export, export_without_kwargs
-
     # onnx_model = export(model, **inputs)
     input_ids = inputs["input_ids"]
     attention_mask = inputs["attention_mask"]
-    onnx_model_text = export_without_kwargs(model, **inputs, use_binary_format=False)
+    onnx_model_text = fx_onnx.export_without_kwargs(
+        model, **inputs, use_binary_format=False
+    )
     onnx.save(onnx_model_text, "gpt2.onnx")
-    onnx_model = export_without_kwargs(model, **inputs, use_binary_format=True)
+    onnx_model = fx_onnx.export_without_kwargs(model, **inputs, use_binary_format=True)
 
     ref_outputs, _ = tree_flatten(model(**inputs, return_dict=False))
     ort_outputs = run_ort(
@@ -127,6 +131,7 @@ def test_gpt2_auto_regressive(model_name):
     # search that involves loops and control flows.
 
     import logging
+
     torch._dynamo.config.log_level = logging.DEBUG
     torch._dynamo.config.output_code = True
     # torch._dynamo.config.output_graph_code = True
