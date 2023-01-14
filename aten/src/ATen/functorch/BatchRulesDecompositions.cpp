@@ -61,7 +61,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(atleast_3d);
   OP_DECOMPOSE2(atleast_3d, Sequence);
   OP_DECOMPOSE(batch_norm);
-  OP_DECOMPOSE2(bitwise_and, Scalar);
   OP_DECOMPOSE2(bitwise_and_, Scalar);
   OP_DECOMPOSE2(bitwise_or, Scalar);
   OP_DECOMPOSE2(bitwise_or_, Scalar);

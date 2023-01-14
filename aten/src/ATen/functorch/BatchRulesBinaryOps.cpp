@@ -358,7 +358,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(addcdiv);
   POINTWISE_BOXED(addcmul);
   BINARY_POINTWISE(atan2);
-  BINARY_POINTWISE2(bitwise_and, Tensor);
+  BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_and_, Tensor);
   BINARY_POINTWISE2(bitwise_or, Tensor);
   BINARY_POINTWISE2(bitwise_or_, Tensor);
