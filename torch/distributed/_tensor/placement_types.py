@@ -231,6 +231,8 @@ class _Partial(Placement):
     ) -> torch.Tensor:
         # out-of-place all_reduce to replicate, since the current partial DTensor
         # might get used by other ops as well, so we can't inplace modify it
+        return torch.ops.c10d.traceable_allreduce(tensor)
+
         cloned_local = CommTensor(tensor.clone(memory_format=torch.contiguous_format))
         mesh.all_reduce(
             cloned_local, c10d.ReduceOp(self.reduce_op), mesh_dim=mesh_dim  # type: ignore[call-arg]
