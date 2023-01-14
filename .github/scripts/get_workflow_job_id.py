@@ -7,25 +7,24 @@ import json
 import os
 import re
 import urllib
+import urllib.parse
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Tuple, Optional
 from urllib.request import Request, urlopen
 
-def parse_json_and_links(conn):
+def parse_json_and_links(conn: Any) -> Tuple[Any, Dict[str, Dict[str, str]]]:
     links = {}
     # Extract links which GH uses for pagination
     # see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Link
     if "Link" in conn.headers:
         for elem in re.split(", *<", conn.headers["Link"]):
             try:
-                url, params = elem.split(";", 1)
+                url, params_ = elem.split(";", 1)
             except ValueError:
                 continue
             url = urllib.parse.unquote(url.strip("<> "))
-            params = urllib.parse.parse_qs(params.strip(), separator=";")
-            for k,v in params.items():
-                if type(v) is list and len(v)==1:
-                    params[k] = v[0].strip('""')
+            qparams = urllib.parse.parse_qs(params_.strip(), separator=";")
+            params = {k: v[0].strip('"') for k, v in qparams.items() if type(v) is list and len(v) > 0}
             params["url"] = url
             if "rel" in params:
                 links[params["rel"]] = params
@@ -33,8 +32,8 @@ def parse_json_and_links(conn):
     return json.load(conn), links
 
 def fetch_url(url: str, *,
-               headers: Optional[Dict[str, str]] = None,
-               reader: Callable[[Any], Any] = lambda x: x.read()) -> Any:
+              headers: Optional[Dict[str, str]] = None,
+              reader: Callable[[Any], Any] = lambda x: x.read()) -> Any:
     if headers is None:
         headers = {}
     try:
@@ -61,9 +60,10 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Any]:
+def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Dict[str, str]]:
     response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
     jobs = response["jobs"]
+    assert type(jobs) is list
     while "next" in links.keys():
         response, links = fetch_url(links["next"]["url"], headers=headers, reader=parse_json_and_links)
         jobs.extend(response["jobs"])
