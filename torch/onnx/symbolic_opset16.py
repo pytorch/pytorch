@@ -51,6 +51,11 @@ def grid_sampler(
     padding_mode_enum,
     align_corners,
 ):
+    # Check the input and grid tensor rank beforehand.
+    if len(input.shape) == 5:
+        return symbolic_helper._onnx_unsupported(
+            "GridSample with 5D volumetric input."
+        )
     mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
     padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
     return g.op(

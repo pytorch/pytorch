@@ -2,6 +2,7 @@
 
 import io
 import itertools
+import unittest
 
 import onnx
 import pytorch_test_common
@@ -70,6 +71,27 @@ def check_onnx_opsets_operator(
         model = onnx.load(io.BytesIO(f.getvalue()))
         check_onnx_opset_operator(model, ops[opset_version], opset_version)
 
+def assert_onnx_export_exception(
+    module,
+    x,
+    opset_versions,
+    training=torch.onnx.TrainingMode.EVAL,
+    input_names=None,
+    dynamic_axes=None,
+    error: torch.onnx.errors.OnnxExporterError = torch.onnx.errors.UnsupportedOperatorError,
+):
+    for opset_version in opset_versions:
+        f = io.BytesIO()
+        args = (
+            module,
+            x,
+            f,
+            opset_version,
+            training,
+            input_names,
+            dynamic_axes,
+        )
+        unittest.assertRaises(error, torch.onnx.export, args)
 
 class TestONNXOpset(pytorch_test_common.ExportTestCase):
     def test_opset_fallback(self):
@@ -521,6 +543,29 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                 ops,
                 opset_versions=[16],
                 training=torch.onnx.TrainingMode.EVAL,
+            )
+        
+        # 5D volumetric input is not supported.
+        d_in = 2
+        d_out = 3
+        for mode, padding_mode, align_corners in itertools.product(
+            ("bilinear", "nearest", "bicubic"),
+            ("zeros", "border", "reflection"),
+            (True, False),
+        ):
+            args = (
+                torch.randn(n, c, d_in, h_in, w_in),  # x
+                torch.randn(n, d_out, h_out, w_out, 2),  # grid,
+                mode,
+                padding_mode,
+                align_corners,
+            )
+            assert_onnx_export_exception(
+                MyModule(),
+                args,
+                opset_versions=[16],
+                training=torch.onnx.TrainingMode.EVAL,
+                error=torch.onnx.errors.UnsupportedOperatorError,
             )
 
 
