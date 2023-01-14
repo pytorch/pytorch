@@ -7,27 +7,25 @@ import json
 import os
 import re
 import sys
-import time
 import urllib
+import urllib.parse
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Tuple, Optional
 from urllib.request import Request, urlopen
 
-def parse_json_and_links(conn):
+def parse_json_and_links(conn: Any) -> Tuple[Any, Dict[str, Dict[str, str]]]:
     links = {}
     # Extract links which GH uses for pagination
     # see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Link
     if "Link" in conn.headers:
         for elem in re.split(", *<", conn.headers["Link"]):
             try:
-                url, params = elem.split(";", 1)
+                url, params_ = elem.split(";", 1)
             except ValueError:
                 continue
             url = urllib.parse.unquote(url.strip("<> "))
-            params = urllib.parse.parse_qs(params.strip(), separator=";")
-            for k,v in params.items():
-                if type(v) is list and len(v)==1:
-                    params[k] = v[0].strip('""')
+            qparams = urllib.parse.parse_qs(params_.strip(), separator=";")
+            params = {k: v[0].strip('"') for k, v in qparams.items() if type(v) is list and len(v) > 0}
             params["url"] = url
             if "rel" in params:
                 links[params["rel"]] = params
@@ -35,8 +33,8 @@ def parse_json_and_links(conn):
     return json.load(conn), links
 
 def fetch_url(url: str, *,
-               headers: Optional[Dict[str, str]] = None,
-               reader: Callable[[Any], Any] = lambda x: x.read()) -> Any:
+              headers: Optional[Dict[str, str]] = None,
+              reader: Callable[[Any], Any] = lambda x: x.read()) -> Any:
     if headers is None:
         headers = {}
     try:
@@ -63,9 +61,10 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Any]:
+def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Dict[str, str]]:
     response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
     jobs = response["jobs"]
+    assert type(jobs) is list
     while "next" in links.keys():
         response, links = fetch_url(links["next"]["url"], headers=headers, reader=parse_json_and_links)
         jobs.extend(response["jobs"])
@@ -87,7 +86,7 @@ def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Any]:
 # looking for RUNNER_NAME will uniquely identify the job we're currently
 # running.
 
-def find_job_id() -> str:
+def find_job_id(args: Any) -> str:
     # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
     PYTORCH_REPO = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
     PYTORCH_GITHUB_API = f"https://api.github.com/repos/{PYTORCH_REPO}"
@@ -97,7 +96,6 @@ def find_job_id() -> str:
         "Authorization": "token " + GITHUB_TOKEN,
     }
 
-    args = parse_args()
     url = f"{PYTORCH_GITHUB_API}/actions/runs/{args.workflow_run_id}/jobs?per_page=100"
     jobs = fetch_jobs(url, REQUEST_HEADERS)
 
@@ -112,11 +110,12 @@ def find_job_id() -> str:
     raise RuntimeError(f"Can't find job id for runner {args.runner_name}")
 
 def main() -> None:
+    args = parse_args()
     try:
-        print(find_job_id())
+        print(find_job_id(args))
     except Exception as e:
         print(repr(e), file=sys.stderr)
-        print(f"UNKNOWN-{int(time.time())}")
+        print(f"workflow-{args.workflow_run_id}")
 
 if __name__ == "__main__":
     main()
