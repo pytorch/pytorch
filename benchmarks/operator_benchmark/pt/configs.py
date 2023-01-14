@@ -62,6 +62,33 @@ conv_2d_configs_long = op_bench.cross_product_configs(
     tags=["long"]
 )
 
+# Configs for Conv2dPointwise
+conv_2d_pw_configs_short = op_bench.config_list(
+    attr_names=[
+        'IC', 'OC', 'stride', 'N', 'H', 'W', 'G', 'pad',
+    ],
+    attrs=[
+        [256, 256, 1, 1, 16, 16, 1, 0],
+    ],
+    cross_product_configs={
+        'device': ['cpu', 'cuda'],
+    },
+    tags=['short']
+)
+
+conv_2d_pw_configs_long = op_bench.cross_product_configs(
+    IC=[128, 256],
+    OC=[128, 256],
+    stride=[1, 2],
+    N=[4],
+    H=[32],
+    W=[32],
+    G=[1],
+    pad=[0],
+    device=['cpu', 'cuda'],
+    tags=["long"]
+)
+
 # Configs for Conv3d and ConvTranspose3d
 conv_3d_configs_short = op_bench.config_list(
     attr_names=[
