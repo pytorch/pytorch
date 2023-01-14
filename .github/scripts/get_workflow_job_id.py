@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import re
+import sys
+import time
 import urllib
 
 from typing import Any, Callable, Dict, List, Optional
@@ -85,7 +87,7 @@ def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Any]:
 # looking for RUNNER_NAME will uniquely identify the job we're currently
 # running.
 
-def main() -> None:
+def find_job_id() -> str:
     # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
     PYTORCH_REPO = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
     PYTORCH_GITHUB_API = f"https://api.github.com/repos/{PYTORCH_REPO}"
@@ -105,10 +107,16 @@ def main() -> None:
 
     for job in jobs:
         if job["runner_name"] == args.runner_name:
-            print(job["id"])
-            return
+            return job["id"]
 
-    exit(1)
+    raise RuntimeError(f"Can't find job id for runner {args.runner_name}")
+
+def main() -> None:
+    try:
+        print(find_job_id())
+    except Exception as e:
+        print(repr(e), file=sys.stderr)
+        print(f"UNKNOWN-{int(time.time())}")
 
 if __name__ == "__main__":
     main()
