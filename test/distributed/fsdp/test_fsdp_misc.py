@@ -593,6 +593,37 @@ class TestFSDPMiscWorldSize1(FSDPTest):
                 nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.SHARD_GRAD_OP
             )
 
+    @skip_if_lt_x_gpu(1)
+    def test_training_device_mismatch_errors(self):
+        """
+        Tests that, when training starts, if FSDP parameters are not on the
+        expected device, then an informative error is raised. This applies for
+        both no parameter CPU offloading and parameter CPU offloading.
+        """
+        # Incorrectly not moving from CPU -> GPU
+        model = torch.nn.Linear(10, 10)
+        fsdp_model = FSDP(model)
+        inp = torch.randn((2, 10))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "An FSDP-managed module unexpectedly has parameters on cpu. Make "
+            "sure to move the module to cuda:0 before training.",
+        ):
+            fsdp_model(inp)
+
+        # Incorrectly moving from CPU -> GPU
+        model = torch.nn.Linear(10, 10)
+        fsdp_model = FSDP(model, cpu_offload=CPUOffload(offload_params=True))
+        fsdp_model.to(torch.device("cuda"))
+        inp = torch.randn((2, 10))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "An FSDP-managed module with parameter CPU offloading enabled has "
+            "parameters on cuda:0. Make sure to not move the module from CPU "
+            "when offloading parameters.",
+        ):
+            fsdp_model(inp)
+
 
 instantiate_parametrized_tests(TestFSDPMisc)
 

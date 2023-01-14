@@ -794,10 +794,11 @@ class FlatParamHandle:
         if self._offload_params:
             p_assert(
                 flat_param.device == cpu_device,
-                "Expects the `FlatParameter` to be offloaded to CPU since CPU "
-                "offloading is enabled. You may be accidentally moving the "
-                f"model to {flat_param.device} after the FSDP constructor.",
+                f"Expects the `FlatParameter` to be on CPU when parameter CPU "
+                f"offloading is enabled, not {flat_param.device}"
             )
+        else:
+            self._check_on_compute_device(self.flat_param)
         flat_param._local_shard = flat_param.data
         if self._offload_params:
             # Pin the memory for faster H2D transfer

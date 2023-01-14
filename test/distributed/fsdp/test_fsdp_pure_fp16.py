@@ -59,7 +59,7 @@ class TestPureFP16(FSDPTest):
         self._test_fsdp_parity(
             NestedWrappedModule,
             FSDPInitMode.RECURSIVE,
-            cuda_init_mode=CUDAInitMode.CUDA_AFTER,
+            cuda_init_mode=CUDAInitMode.CUDA_BEFORE,
             # Run one iteration to avoid NaN without a gradient scaler
             num_iters=1,
             cpu_offload=cpu_offload,

@@ -1015,7 +1015,9 @@ class FSDPTest(MultiProcessTestCase):
                 self.assertEqual(param.device, cpu_device)
         context = (
             self.assertRaisesRegex(
-                AssertionError, "Expects the `FlatParameter` to be offloaded to CPU"
+                RuntimeError,
+                "An FSDP-managed module with parameter CPU offloading enabled "
+                "has parameters on cuda"
             )
             if expects_device_error
             else suppress()
