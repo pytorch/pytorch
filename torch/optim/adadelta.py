@@ -47,7 +47,11 @@ class Adadelta(Optimizer):
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer is used (default: None)
+        foreach (bool, optional): whether foreach implementation of optimizer is used.
+            Since the foreach implementation is usually significantly faster than
+            the for-loop implementation on CUDA, we try to use it whenever possible
+            (all parameters are on CUDA). Else, we continue with the for-loop
+            implementation. (default: None)
         maximize (bool, optional): maximize the params based on the objective, instead of
             minimizing (default: False)
 
@@ -174,7 +178,7 @@ def adadelta(
     acc_deltas: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: bool = None,
+    foreach: Optional[bool] = None,
     differentiable: bool = False,
     *,
     lr: float,
@@ -188,9 +192,19 @@ def adadelta(
     See :class:`~torch.optim.Adadelta` for details.
     """
 
+    # We try to use the foreach implementation on CUDA whenever possible since
+    # it is faster than the for-loop implementation. However, the foreach
+    # implementation is not differentiable, so we must check differentiable=False.
+    # We still respect when the user inputs False for foreach.
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
+        all_tensors = []
+        all_tensors.extend(params)
+        all_tensors.extend(grads)
+        all_tensors.extend(square_avgs)
+        all_tensors.extend(acc_deltas)
+        foreach = not torch.jit.is_scripting() and not differentiable and all(
+            p.is_cuda for p in all_tensors
+        )
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
