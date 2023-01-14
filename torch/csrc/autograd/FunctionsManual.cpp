@@ -1955,7 +1955,7 @@ Tensor binary_cross_entropy_target_backward(
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction) {
-  auto grad_target = self.neg().log1p_().sub_(self.log());
+  auto grad_target = at::logit(self).neg();
   if (!areAnyTensorSubclassLike({grad})) {
     grad_target.mul_(grad);
   } else {
