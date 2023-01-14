@@ -179,7 +179,7 @@ inline void warn(const char* _reason, const char* _kind = nullptr) {
 TORCH_API void setWarn(warn_fn_type fn);
 
 struct TORCH_API NoWarn {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  // NOLINTNEXTLINE(*-member-init, *.cplusplus.UninitializedObject)
   NoWarn() : state(getTracingState()) {
     if (state) {
       prev = state->warn;
@@ -196,12 +196,10 @@ struct TORCH_API NoWarn {
 };
 
 struct WithNestedTracingFrame {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   WithNestedTracingFrame() {
     getTracingState()->enterFrame();
   }
 
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~WithNestedTracingFrame() {
     getTracingState()->leaveFrame();
   }
