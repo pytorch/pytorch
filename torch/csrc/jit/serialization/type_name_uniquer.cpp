@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
+
 c10::QualifiedName TypeNameUniquer::getUniqueName(c10::ConstNamedTypePtr t) {
   auto it = name_map_.find(t);
   if (it != name_map_.cend()) {
@@ -28,5 +28,5 @@ c10::QualifiedName TypeNameUniquer::getUniqueName(c10::ConstNamedTypePtr t) {
   used_names_.insert(mangled);
   return mangled;
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit
