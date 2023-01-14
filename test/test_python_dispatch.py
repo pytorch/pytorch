@@ -392,7 +392,6 @@ $5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)'''
 
     def test_optional_tensor_list(self) -> None:
         def weird(xs):
-            print("woof")
             return torch.empty(())
 
         my_lib = Library("my_lib", "DEF")
