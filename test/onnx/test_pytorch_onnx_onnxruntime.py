@@ -12529,7 +12529,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_tensor = torch.randn(n, c, d_in, h_in, w_in)
             grid_tensor = torch.randn(n, d_out, h_out, w_out, 3)
             with self.assertRaises(
-                torch.onnx.errors.UnsupportedOperatorError,
+                torch.onnx.errors.OnnxExporterError,
             ):
                 self.run_test(
                     GridSampleModule(mode, padding_mode, align_corners),
