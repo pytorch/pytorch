@@ -10,6 +10,7 @@ from typing import Any, Tuple
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed.fsdp import (
     CPUOffload,
@@ -251,36 +252,41 @@ class TestFSDPMisc(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fsdp_device_id_cpu_offload(self):
         """
-        Ensures that even if device_id is specified but we have
-        CPU offload, module is on CPU after init.
+        Tests FSDP when specifying both ``device_id`` and parameter CPU
+        offloading.
         """
+        self.run_subtests(
+            {"use_orig_params": [False, True]},
+            self._test_fsdp_device_id_cpu_offload,
+        )
 
+    def _test_fsdp_device_id_cpu_offload(self, use_orig_params: bool):
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.a = nn.Linear(10, 10)
-                self.b = nn.Linear(10, 10)
+                self.seq = nn.Sequential(
+                    nn.Linear(10, 10),
+                    nn.Linear(10, 10),
+                )
+                self.lin = nn.Linear(10, 10)
 
             def forward(self, x):
-                return self.b(self.a(x))
+                return self.lin(self.seq(x))
 
         model = MyModel()
-
-        fsdp = FSDP(
+        # Choose a wrapping policy such that there are (1) nested FSDP
+        # instances and (2) the parent FSDP instance has managed parameters
+        auto_wrap_policy = ModuleWrapPolicy({nn.Sequential})
+        fsdp_model = FSDP(
             model,
-            auto_wrap_policy=always_wrap_policy,
+            auto_wrap_policy=auto_wrap_policy,
             cpu_offload=CPUOffload(offload_params=True),
             device_id=torch.cuda.current_device(),
+            use_orig_params=use_orig_params,
         )
-
         cpu_device = torch.device("cpu")
-
-        for fsdp_unit in FSDP.fsdp_modules(fsdp):
-            # This FSDP unit may not directly manage
-            # any parameters.
-            if len(fsdp_unit.params) > 0:
-                fsdp_param = fsdp_unit.params[0]
-                self.assertEqual(fsdp_param.device, cpu_device)
+        for handle in traversal_utils._get_fsdp_handles(fsdp_model):
+            self.assertEqual(handle.flat_param.device, cpu_device)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_index", [True, False])
