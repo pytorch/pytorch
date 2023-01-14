@@ -2,6 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import Optimizer, _use_grad_for_differentiable
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
 __all__ = ["Adadelta", "adadelta"]
@@ -272,24 +273,26 @@ def _multi_tensor_adadelta(
     if len(params) == 0:
         return
 
-    if maximize:
-        grads = torch._foreach_neg(grads)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
+    for device_params, device_grads, device_square_avgs, device_acc_deltas in grouped_tensors.values():
+        if maximize:
+            device_grads = torch._foreach_neg(device_grads)
 
-    if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
+        if weight_decay != 0:
+            torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
 
-    torch._foreach_mul_(square_avgs, rho)
-    torch._foreach_addcmul_(square_avgs, grads, grads, value=1 - rho)
+        torch._foreach_mul_(device_square_avgs, rho)
+        torch._foreach_addcmul_(device_square_avgs, device_grads, device_grads, value=1 - rho)
 
-    std = torch._foreach_add(square_avgs, eps)
-    torch._foreach_sqrt_(std)
+        std = torch._foreach_add(device_square_avgs, eps)
+        torch._foreach_sqrt_(std)
 
-    deltas = torch._foreach_add(acc_deltas, eps)
-    torch._foreach_sqrt_(deltas)
-    torch._foreach_div_(deltas, std)
-    torch._foreach_mul_(deltas, grads)
+        deltas = torch._foreach_add(device_acc_deltas, eps)
+        torch._foreach_sqrt_(deltas)
+        torch._foreach_div_(deltas, std)
+        torch._foreach_mul_(deltas, device_grads)
 
-    torch._foreach_add_(params, deltas, alpha=-lr)
+        torch._foreach_add_(device_params, deltas, alpha=-lr)
 
-    torch._foreach_mul_(acc_deltas, rho)
-    torch._foreach_addcmul_(acc_deltas, deltas, deltas, value=1 - rho)
+        torch._foreach_mul_(device_acc_deltas, rho)
+        torch._foreach_addcmul_(device_acc_deltas, deltas, deltas, value=1 - rho)
