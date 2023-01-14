@@ -11,7 +11,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -182,4 +182,4 @@ static void topk_kernel(
 REGISTER_DISPATCH(sort_stub, &sort_kernel);
 REGISTER_DISPATCH(topk_stub, &topk_kernel);
 
-}} //at::native
+} //at::native

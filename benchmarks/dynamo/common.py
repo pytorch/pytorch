@@ -92,26 +92,18 @@ CI_SKIP_AOT_EAGER_TRAINING = [
 
 CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     *CI_SKIP_AOT_EAGER_TRAINING,
-    "drq",  # assert type(inner_out) == type(user_out)
     "hf_T5_base",  # fp64_OOM
     "mobilenet_v2_quantized_qat",  # setStorage
     "resnet50_quantized_qat",  # setStorage
-    "soft_actor_critic",  # assert type(inner_out) == type(user_out)
     "tacotron2",  # aten._thnn_fused_lstm_cell.default
-    "tts_angular",  # _VF.lstm
-    "AllenaiLongformerBase",  # assert type(inner_out) == type(user_out)
-    "DebertaV2ForQuestionAnswering",  # OOM
-    "botnet26t_256",  # assert type(inner_out) == type(user_out)
+    "DebertaV2ForQuestionAnswering",  # OOMs (but on CI only; graph breaks?)
     "crossvit_9_240",  # torch._C._nn.upsample_bicubic2d
-    "eca_botnext26ts_256",  # assert type(inner_out) == type(user_out)
-    "eca_halonext26ts",  # assert type(inner_out) == type(user_out)
-    "hrnet_w18",  # torch._C._nn.upsample_nearest2d
     "levit_128",  # Cannot call sizes() on tensor with symbolic sizes/strides
-    "sebotnet33ts_256",  # assert type(inner_out) == type(user_out)
+    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "twins_pcpvt_base",  # timeout
 ]
 
-CI_SKIP_INDCUTOR_INFERENCE = [
+CI_SKIP_INDUCTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
     "DALLE2_pytorch",
@@ -136,7 +128,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
 ]
 
 CI_SKIP_INDUCTOR_TRAINING = [
-    *CI_SKIP_INDCUTOR_INFERENCE,
+    *CI_SKIP_INDUCTOR_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
@@ -1525,6 +1517,17 @@ def parse_args(args=None):
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
+        "--dynamic-ci-skips-only",
+        action="store_true",
+        help=(
+            "Run only the models that would have been skipped in CI "
+            "if dynamic-shapes, compared to running without dynamic-shapes.  "
+            "This is useful for checking if more models are now "
+            "successfully passing with dynamic shapes.  "
+            "Implies --dynamic-shapes and --ci"
+        ),
+    )
+    parser.add_argument(
         "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
     )
     parser.add_argument(
@@ -1796,6 +1799,14 @@ def run(runner, args, original_dir=None):
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
+    if args.dynamic_ci_skips_only:
+        args.dynamic_shapes = True
+        args.ci = True
+        # We only have a CI skip list for aot_eager right now.  When inductor
+        # comes online, add that skip list too.
+        assert (
+            args.backend == "aot_eager"
+        ), "--dynamic-ci-skips only works with aot_eager backend at the moment"
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
         torch._functorch.config.use_dynamic_shapes = True
@@ -1804,18 +1815,25 @@ def run(runner, args, original_dir=None):
         args.quiet = True
         args.repeat = 2
         if args.backend == "aot_eager":
-            args.exclude = (
-                CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
-                if args.training and args.dynamic_shapes
-                else CI_SKIP_AOT_EAGER_TRAINING
-                if args.training
-                else CI_SKIP_AOT_EAGER_INFERENCE
-            )
+            if args.dynamic_ci_skips_only:
+                assert args.training and args.dynamic_shapes
+                args.filter = list(
+                    set(CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING)
+                    - set(CI_SKIP_AOT_EAGER_TRAINING)
+                )
+            else:
+                args.exclude = (
+                    CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
+                    if args.training and args.dynamic_shapes
+                    else CI_SKIP_AOT_EAGER_TRAINING
+                    if args.training
+                    else CI_SKIP_AOT_EAGER_INFERENCE
+                )
         elif args.inductor:
             args.exclude = (
                 CI_SKIP_INDUCTOR_TRAINING
                 if args.training
-                else CI_SKIP_INDCUTOR_INFERENCE
+                else CI_SKIP_INDUCTOR_INFERENCE
             )
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
