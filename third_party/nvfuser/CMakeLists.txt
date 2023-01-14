@@ -134,6 +134,7 @@ list(APPEND NVFUSER_SRCS
 add_library(${NVFUSER_CODEGEN} SHARED ${NVFUSER_SRCS})
 # Note: for some reason, torch_compile_options gives us segfaults when we run test_jit
 #torch_compile_options(${NVFUSER_CODEGEN})
+target_compile_options(${NVFUSER_CODEGEN} PRIVATE -Wall)
 
 if(NOT USE_ROCM)
   target_compile_options(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
