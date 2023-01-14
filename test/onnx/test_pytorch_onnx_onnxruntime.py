@@ -12518,6 +12518,28 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             **atol_rtol,
         )
 
+        # ONNX Opset 16 GridSample 5D volumetric input is not supported.
+        d_in = 2
+        d_out = 3
+        for mode, padding_mode, align_corners in itertools.product(
+            ("bilinear", "nearest", "bicubic"),
+            ("zeros", "border", "reflection"),
+            (True, False),
+        ):
+            grid_sample_module = GridSampleModule(mode, padding_mode, align_corners)
+            input_tensor = torch.randn(n, c, d_in, h_in, w_in)
+            grid_tensor = torch.randn(n, d_out, h_out, w_out, 3)
+            f = io.BytesIO()
+            args = (
+                grid_sample_module,
+                (input_tensor, grid_tensor),
+                f,
+                16,
+            )
+            self.assertRaises(
+                torch.onnx.errors.UnsupportedOperatorError, torch.onnx.export, args
+            )
+
     class IfNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:
             y: Optional[Tensor] = None
