@@ -177,9 +177,6 @@ class triton:
     # should we put op names in kernel names
     descriptive_kernel_names = True
 
-    # theses are not enforced, but they are checked by asserts in autotune.grid
-    max_block = {"X": 1024, "Y": 1024, "Z": 1024}
-
 
 # create a directory containing lots of debug information
 class trace:
