@@ -386,7 +386,6 @@ class Sequential : public torch::nn::ModuleHolder<SequentialImpl> {
   /// Constructs the `Sequential` from a braced-init-list of named `AnyModule`s.
   /// It enables the following use case:
   /// `Sequential sequential({{"m1", M(1)}, {"m2", M(2)}})`
-  // NOLINTNEXTLINE(performance-move-const-arg)
   Sequential(std::initializer_list<NamedAnyModule> named_modules)
       : ModuleHolder(
             std::make_shared<SequentialImpl>(std::move(named_modules))) {}
