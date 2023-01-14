@@ -26,7 +26,7 @@ class C10_CUDA_API CUDAError : public c10::Error {
 
 #define C10_CUDA_CHECK(EXPR)                                             \
   do {                                                                   \
-    const cudaError_t __err = EXPR;                           \
+    const cudaError_t __err = EXPR;                                      \
     c10::cuda::c10_cuda_check_implementation(                            \
         static_cast<int>(__err),                                         \
         __FILE__,                                                        \
