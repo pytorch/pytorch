@@ -77,8 +77,13 @@ runs:
             --event-name "${{ github.event_name }}" \
             --schedule "${{ github.event.schedule }}"
         else
+          # Replace new lines in the test matrix JSON with space. The JSON structure remains
+          # the same. This is needed becaue Windows conda is rather dumb and breaks the command
+          # at new lines
+          TEST_MATRIX=$(echo "${{ inputs.test-matrix }}" | tr "\n" " ")
+
           ${CONDA_RUN} ${PYTHON} .github/scripts/filter_test_configs.py \
-            --test-matrix "${{ inputs.test-matrix }}" \
+            --test-matrix "$TEST_MATRIX" \
             --pr-number "${{ github.event.pull_request.number }}" \
             --tag "${{ steps.parse-ref.outputs.tag }}" \
             --event-name "${{ github.event_name }}" \
