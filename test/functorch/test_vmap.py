@@ -19,12 +19,15 @@ import unittest
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma
+    skipCUDAIfNoMagma, OpDTypes
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
-    subtest
+    subtest,
+    TEST_WITH_UBSAN,
+    IS_MACOS,
+    IS_X86
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -41,6 +44,8 @@ from common_utils import (
     generate_vmap_inputs,
     compute_quantities_for_vmap_test,
     is_valid_inplace_sample_input,
+    decorate,
+    expectedFailureIf
 )
 import types
 from collections import namedtuple
@@ -3361,11 +3366,31 @@ class TestVmapOperatorsOpInfo(TestCase):
                             vmap(op, in_dims)(*args, **kwargs)
 
             # Sample inputs check
-            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+            sample_inputs_op = {
+                # Take too long with reference inputs
+                "special.chebyshev_polynomial_t",
+                "special.chebyshev_polynomial_u",
+                "special.chebyshev_polynomial_v",
+                "special.chebyshev_polynomial_w",
+                "special.hermite_polynomial_he",
+                "special.laguerre_polynomial_l",
+                "special.legendre_polynomial_p",
+                "special.shifted_chebyshev_polynomial_t",
+                "special.shifted_chebyshev_polynomial_u",
+                "special.shifted_chebyshev_polynomial_v",
+                "special.shifted_chebyshev_polynomial_w",
+            }
+            if op.name in sample_inputs_op:
+                sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+            else:
+                sample_inputs_itr = op.reference_inputs(device, dtype, requires_grad=False)
             aliases, inplace_aliases = discover_variants(op)
             check_shape_only = op.name in ('empty_like', 'new_empty')
             for sample_input in sample_inputs_itr:
                 args = (sample_input.input,) + sample_input.args
+                if not any(map(lambda arg: isinstance(arg, torch.Tensor), args)):
+                    # Atleast one tensor required for vmap.
+                    continue
                 kwargs = sample_input.kwargs
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
                 for args, in_dims, _ in generate_vmap_inputs(
@@ -3420,16 +3445,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.fractional_max_pool2d'),  # randomness
         xfail('pca_lowrank', ''),  # random operation
         xfail('svd_lowrank', ''),  # random operation
-        xfail('linspace', ''),  # test runner can't handle factory functions
-        xfail('arange', ''),  # test runner can't handle factory functions
-        xfail('logspace', ''),  # test runner can't handle factory functions
-        xfail('scalar_tensor'),  # test runner can't handle factory functions
-        xfail('empty', ''),  # test runner can't handle factory functions
-        xfail('ones', ''),  # test runner can't handle factory functions
-        xfail('zeros', ''),  # test runner can't handle factory functions
-        xfail('full', ''),  # test runner can't handle factory functions
-        xfail('eye', ''),  # non-tensor input
-        xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
         xfail("NumpyCubeNotComposableAutogradFunction"),  # Not composable autograd.Function
         skip('_softmax_backward_data'),
@@ -3449,7 +3464,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),  # data-dependent control flow error
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
-        xfail('column_stack', ''),  # Batching rule not implemented for aten::column_stack
         xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
 
         # required rank 4 tensor to use channels_last format
@@ -3473,11 +3487,34 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('jiterator_unary', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
         xfail('jiterator_2inputs_2outputs', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
         # ---------------------------------------------------------------------
+
+        # TypeError: expected Tensor as element 0 in argument 0, but got NotImplementedType
+        xfail('__rsub__'),
+        # RuntimeError: Batching rule not implemented for aten::moveaxis.int;
+        # the fallback path doesn't work on out= or view ops.
+        xfail('movedim'),
+        # RuntimeError: NYI: querying is_contiguous inside of vmap for
+        # memory_format other than torch.contiguous_format
+        xfail('contiguous'),
+        # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only supported
+        # with memory_format torch.preserve_format or torch.contiguous_format (got ChannelsLast)
+        xfail('clone'),
+        # RuntimeError: When vmap-ing torch.nn.functional.one_hot,
+        # please provide an explicit positive num_classes argument.
+        xfail('nn.functional.one_hot'),
+        # RuntimeError: Expected all tensors to be on the same device,
+        # but found at least two devices, cuda:0 and cpu!
+        xfail('eq', device_type='cuda'),
+        xfail('ge', device_type='cuda'),
+        xfail('gt', device_type='cuda'),
+        xfail('le', device_type='cuda'),
+        xfail('lt', device_type='cuda'),
+        xfail('ne', device_type='cuda'),
     }
 
     @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', (
         tol1('linalg.det',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
@@ -3486,7 +3523,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=1e-04, rtol=1e-02)}, device_type='cuda'),
     ))
-    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04),
+                        torch.complex64: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
         # RuntimeError: Batch norm got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
@@ -3494,9 +3532,24 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('_native_batch_norm_legit'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
-        # The error inputs are vectors, that pass when batched as they are treated as a matrix
-        xfail('trace'),
         xfail('as_strided', 'partial_views'),
+
+        # RuntimeError: output with shape [4, 4] doesn't match the broadcast shape [1, 4, 4]
+        xfail('addcdiv'),
+        xfail('addcmul'),
+        xfail('clamp'),
+        # AssertionError: Tensor-likes are not equal!
+        xfail('bitwise_left_shift', device_type='cpu'),
+        decorate('bitwise_right_shift', device_type='cpu',
+                 decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
+
+        # UBSAN: runtime error: shift exponent -1 is negative
+        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        # UBSAN: runtime error: -1e+20 is outside the range of representable values of type 'long'
+        decorate('special.hermite_polynomial_h', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
+        decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error"))
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3506,12 +3559,12 @@ class TestVmapOperatorsOpInfo(TestCase):
                               skip_inplace=inplace_failure_list)
 
     @_set_autograd_function_extension_enabled()
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
         tol1('linalg.det',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
     ))
-    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04), torch.complex64: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         xfail('as_strided', 'partial_views'),
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
@@ -3549,15 +3602,12 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
-        xfail('all'),
-        xfail('any'),
         xfail('count_nonzero'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
-        xfail('trace'),  # Does not support batched tensors
         xfail('bucketize'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
@@ -3589,7 +3639,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('native_dropout_backward'),
         xfail('nn.functional.kl_div', ''),
         xfail('multinomial', ''),
-        xfail('column_stack', ''),
         xfail('pca_lowrank', ''),
         xfail('normal', ''),
         xfail('nn.functional.dropout2d', ''),
@@ -3618,7 +3667,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.max_unpool3d', ''),
         xfail('linalg.ldl_solve', '', device_type='cpu'),
         xfail('chalf', ''),
-        xfail('arange', ''),
         xfail('clamp_max', ''),
         xfail('jiterator_binary_return_by_ref', device_type='cuda'),
         xfail('special.spherical_bessel_j0'),
@@ -3633,10 +3681,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('special.modified_bessel_k1'),
         xfail('segment_reduce', 'offsets'),
         xfail('special.bessel_j1'),
-        xfail('logspace', ''),
-        xfail('empty', ''),
         xfail('index_reduce', ''),
-        xfail('linspace', ''),
         xfail('special.laguerre_polynomial_l'),
         xfail('special.hermite_polynomial_h'),
         xfail('jiterator_binary', device_type='cuda'),
@@ -3650,7 +3695,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('special.scaled_modified_bessel_k0'),
         xfail('nn.functional.dropout3d', ''),
         xfail('special.scaled_modified_bessel_k1'),
-        xfail('broadcast_shapes', ''),
         xfail('special.modified_bessel_k0'),
         xfail('linalg.vecdot', ''),
         xfail('linalg.ldl_factor', ''),
@@ -3661,6 +3705,24 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
+        # One or more of the overload doesn't have a Batch rule.
+        xfail('where'),
+        xfail('bincount'),
+        xfail('bitwise_and'),
+        xfail('bitwise_or'),
+        xfail('bitwise_xor'),
+        xfail('bitwise_left_shift'),
+        xfail('bitwise_right_shift'),
+        xfail('float_power'),
+        xfail('gt'),
+        xfail('le'),
+        xfail('lt'),
+        xfail('ne'),
+        # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
+        decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        # RuntimeError: Expected all tensors to be on the same device,
+        # but found at least two devices, cuda:0 and cpu!
+        xfail('ge', device_type='cuda'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
@@ -3688,12 +3750,14 @@ class TestVmapOperatorsOpInfo(TestCase):
             'div',
             'floor_divide',
             'fmod',
+            'gcd',
             'heaviside',
             'hypot',
             'igamma',
             'igammac',
             'index_add',
             'index_copy',
+            'lcm',
             'ldexp',
             'lerp',
             'neg',
