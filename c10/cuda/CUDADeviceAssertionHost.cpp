@@ -14,7 +14,7 @@
 #include <thread>
 
 #define CHECK_CUDA_API_CALL_WITHOUT_CHECKING_DEVICE_ASSERTS() \
-  c10_cuda_check_implementation(__FILE__, __FUNCTION__, __LINE__, false)
+  c10_cuda_check_implementation(0, __FILE__, __FUNCTION__, __LINE__, false, true)
 
 namespace c10 {
 namespace cuda {

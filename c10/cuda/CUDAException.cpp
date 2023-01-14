@@ -10,11 +10,14 @@ namespace c10 {
 namespace cuda {
 
 void c10_cuda_check_implementation(
+    int err,
     const char* filename,
     const char* function_name,
     const int line_number,
-    const bool include_device_assertions) {
-  const auto cuda_error = cudaGetLastError();
+    const bool include_device_assertions,
+    const bool get_cuda_error) {
+  cudaError_t cuda_error =
+      get_cuda_error ? cudaGetLastError() : static_cast<cudaError_t>(err);
   const auto cuda_kernel_failure = include_device_assertions
       ? c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().has_failed()
       : false;
