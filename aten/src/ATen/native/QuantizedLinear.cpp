@@ -580,4 +580,4 @@ Tensor fbgemm_linear_fp16_weight(
 
 #endif // USE_FBGEMM
 
-} // namespace at
+} // namespace at::native

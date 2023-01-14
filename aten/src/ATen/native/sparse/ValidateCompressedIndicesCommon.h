@@ -364,4 +364,4 @@ void validate_compressed_sparse_indices_kernel(
 
 } // namespace
 
-} // namespace at
+} // namespace at::native

@@ -225,4 +225,4 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
   return std::make_tuple(dX, dScale, dZeroPoint);
 }
 
-} // namespace at
+} // namespace at::native

@@ -43,4 +43,4 @@ using lerp_fn_tensor = void (*)(
 DECLARE_DISPATCH(lerp_fn_scalar, lerp_kernel_scalar_weight);
 DECLARE_DISPATCH(lerp_fn_tensor, lerp_kernel_tensor_weight);
 
-} // namespace at
+} // namespace at::native

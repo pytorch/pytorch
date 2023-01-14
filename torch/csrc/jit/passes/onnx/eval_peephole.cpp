@@ -12,7 +12,7 @@ namespace jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
-}
+} // namespace onnx
 
 std::vector<at::Tensor> getValues(
     Node* node,

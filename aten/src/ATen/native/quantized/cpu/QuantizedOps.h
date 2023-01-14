@@ -230,4 +230,4 @@ DECLARE_DISPATCH(qmean_inner_dim_fn, qmean_inner_dim_stub);
 DECLARE_DISPATCH(qstd_inner_dim_fn, qstd_inner_dim_stub);
 DECLARE_DISPATCH(qprelu_fn, qprelu_stub);
 
-} // namespace at
+} // namespace at::native

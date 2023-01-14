@@ -46,7 +46,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 
 REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
 
-}
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

@@ -8,7 +8,7 @@ namespace at {
 class Tensor;
 class TensorBase;
 struct TensorIteratorBase;
-}
+} // namespace at
 
 namespace at::native {
 

@@ -89,4 +89,4 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().nbytes() / base.itemsize() == other.storage().nbytes() / other.itemsize();
 }
 
-} // namespace at
+} // namespace at::native

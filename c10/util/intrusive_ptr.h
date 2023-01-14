@@ -12,17 +12,17 @@
 namespace pybind11 {
 template <typename, typename...>
 class class_;
-}
+} // namespace pybind11
 
 namespace c10 {
 class intrusive_ptr_target;
 namespace raw {
 namespace weak_intrusive_ptr {
 inline void incref(intrusive_ptr_target* self);
-}
+} // namespace weak_intrusive_ptr
 namespace intrusive_ptr {
 inline void incref(intrusive_ptr_target* self);
-}
+} // namespace intrusive_ptr
 
 // constructor tag used by intrusive_ptr constructors
 struct DontIncreaseRefcount {};

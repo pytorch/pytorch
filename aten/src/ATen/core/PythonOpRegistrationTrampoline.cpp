@@ -23,4 +23,4 @@ bool PythonOpRegistrationTrampoline::registerInterpreter(c10::impl::PyInterprete
   }
 }
 
-} // namespace at
+} // namespace at::impl

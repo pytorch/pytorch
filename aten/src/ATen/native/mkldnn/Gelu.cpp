@@ -22,7 +22,7 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
   TORCH_CHECK(false, "mkldnn_gelu_backward: ATen not compiled with MKLDNN support");
 }
 
-}
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

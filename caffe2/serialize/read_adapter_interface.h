@@ -5,7 +5,8 @@
 
 #include "c10/macros/Macros.h"
 
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 
 // this is the interface for the (file/stream/memory) reader in
 // PyTorchStreamReader. with this interface, we can extend the support
@@ -18,4 +19,5 @@ class TORCH_API ReadAdapterInterface {
   virtual ~ReadAdapterInterface();
 };
 
+} // namespace serialize
 } // namespace caffe2

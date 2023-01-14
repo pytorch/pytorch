@@ -52,4 +52,4 @@ Tensor empty_strided_meta_symint(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
-} // namespace at
+} // namespace at::native

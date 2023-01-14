@@ -1037,4 +1037,5 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
   }
 }
 
-}}
+} // namespace CPU_CAPABILITY
+} // namespace at::vec

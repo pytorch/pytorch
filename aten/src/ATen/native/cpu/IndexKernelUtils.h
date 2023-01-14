@@ -89,4 +89,4 @@ void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
     iter.for_each(loop, index_parallel_grain_size);
   }
 }
-} // native
+} // namespace at::native

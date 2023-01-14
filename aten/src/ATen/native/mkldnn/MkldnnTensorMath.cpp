@@ -19,7 +19,7 @@ Tensor& mkldnn_zero_(Tensor& self) {
   TORCH_CHECK(false, "mkldnn_zero_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace at
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

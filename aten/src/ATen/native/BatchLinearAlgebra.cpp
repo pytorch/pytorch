@@ -4191,4 +4191,5 @@ Tensor linalg_vander(
   auto ones =  result.new_ones(shape);
   return at::cat({std::move(ones), std::move(result)}, /*dim=*/ -1);
 }
-}}  // namespace at::native
+} // namespace native
+} // namespace at

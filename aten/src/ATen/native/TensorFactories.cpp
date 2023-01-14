@@ -1670,4 +1670,4 @@ Tensor rand(
 
 DEFINE_DISPATCH(kaiser_window_stub);
 
-} // namespace at
+} // namespace at::native

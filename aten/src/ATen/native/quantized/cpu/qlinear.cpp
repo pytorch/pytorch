@@ -1004,4 +1004,4 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 }
 
 } // namespace
-} // namespace at
+} // namespace at::native

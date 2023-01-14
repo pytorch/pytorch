@@ -502,4 +502,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerBackMode, m) {
   SPECIAL_GRAD_CASE(alias);
 }
 
-} // namespace at
+} // namespace at::functorch

@@ -77,4 +77,4 @@ static inline void fractional_max_pool_check_shape(
       "Expect _random_samples.size(2) equals to ", ndim, "; got ", D, ".");
 }
 
-} // at::native
+} // namespace at::native

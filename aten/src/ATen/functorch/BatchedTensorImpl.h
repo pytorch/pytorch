@@ -155,4 +155,4 @@ inline DispatchKeySet getKeysToPropagateToWrapper(const Tensor& tensor, Dispatch
   return key_set & kKeysToPropagateToWrapper;
 }
 
-}
+} // namespace at::functorch

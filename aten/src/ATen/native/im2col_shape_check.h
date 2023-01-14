@@ -229,4 +229,4 @@ static inline void im2col_shape_check(
   }
 }
 
-} // namespace at
+} // namespace at::native

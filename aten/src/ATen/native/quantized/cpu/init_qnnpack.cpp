@@ -18,6 +18,6 @@ void initQNNPACK() {
       "failed to initialize QNNPACK");
 }
 
-} // namespace at
+} // namespace at::native
 
 #endif

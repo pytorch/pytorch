@@ -4,7 +4,7 @@
 
 namespace at {
 class Tensor;
-}
+} // namespace at
 
 namespace at::native {
 
@@ -13,4 +13,4 @@ using reduce_min_max_fn = void (*)(Tensor & max_result, Tensor & min_result, con
 DECLARE_DISPATCH(reduce_all_fn, min_all_stub);
 DECLARE_DISPATCH(reduce_all_fn, max_all_stub);
 
-}
+} // namespace at::native

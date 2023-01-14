@@ -78,4 +78,4 @@ inline void check_and_update_common_device(optional<Device>& common_device, cons
     check_and_update_common_device(common_device, tensor, methodName, argName);
   }
 }
-} // namespace c10
+} // namespace c10::impl

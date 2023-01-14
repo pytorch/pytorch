@@ -38,7 +38,7 @@ void mkl_gemm_batched(
   TORCH_INTERNAL_ASSERT(false, "mkl_gemm_batched: ATen not compiled with MKL support");
 }
 
-}
+} // namespace at::native
 
 #else // AT_MKL_ENABLED
 

@@ -462,4 +462,4 @@ static inline void compute_source_index_and_lambda(
   }
 }
 
-} // namespace at
+} // namespace at::native

@@ -5,7 +5,7 @@
 
 namespace at {
 class TensorBase;
-}
+} // namespace at
 
 namespace at::native {
 
@@ -25,4 +25,4 @@ DECLARE_DISPATCH(topk_fn, topk_stub);
 
 void _fill_indices(const TensorBase &indices, int64_t dim);
 
-} // namespace at
+} // namespace at::native

@@ -542,4 +542,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("convolution_backward", convolution_backward_plumbing);
 }
 
-} // namespace at;:functorch
+} // namespace at::functorch

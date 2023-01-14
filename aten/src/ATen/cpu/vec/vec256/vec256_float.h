@@ -554,4 +554,6 @@ inline void transpose_mxn<float, 8, 8>(
 
 #endif
 
-}}}
+} // namespace CPU_CAPABILITY
+} // namespace vec
+} // namespace at

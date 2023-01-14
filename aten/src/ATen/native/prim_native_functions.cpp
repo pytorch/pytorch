@@ -36,4 +36,4 @@ Tensor foobar(const Tensor& self, bool arg1, bool arg2, bool arg3) {
   return self;
 }
 
-} // namespace at
+} // namespace at::native

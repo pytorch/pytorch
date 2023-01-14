@@ -337,4 +337,4 @@ Tensor& multi_margin_loss_cpu_backward_out(const Tensor& grad_output,
   return grad_input;
 }
 
-} // namespace at
+} // namespace at::native

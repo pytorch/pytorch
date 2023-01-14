@@ -656,4 +656,4 @@ Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, optional<ScalarType>
   return at::_sparse_log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-}
+} // namespace at::native

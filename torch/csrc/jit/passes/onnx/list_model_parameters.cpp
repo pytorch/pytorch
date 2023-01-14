@@ -9,7 +9,7 @@ namespace jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
-}
+} // namespace onnx
 
 // findSubModuleAttr function chases getAttr chains backwards to locate the
 // submodules. For example: module M {

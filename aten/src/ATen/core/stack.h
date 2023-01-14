@@ -195,4 +195,4 @@ inline void pack(Stack& stack, std::tuple<Args...>&& t) {
   TuplePacker<sizeof...(Args), Args...>::execute(stack, std::move(t));
 }
 
-} // namespace torch
+} // namespace torch::jit

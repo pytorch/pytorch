@@ -37,4 +37,4 @@ Scalar _local_scalar_dense_cpu(const Tensor& self) {
   return r;
 }
 
-} // at::native
+} // namespace at::native

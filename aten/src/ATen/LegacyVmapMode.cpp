@@ -23,4 +23,4 @@ int64_t VmapMode::decrement_nesting() {
   }
   return VmapMode_current_vmap_level;
 }
-} // namespace at
+} // namespace at::impl

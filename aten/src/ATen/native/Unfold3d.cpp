@@ -525,4 +525,4 @@ void Unfold3dAccCPU(
       });
 }
 
-} // namespace at
+} // namespace at::native

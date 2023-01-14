@@ -175,4 +175,4 @@ Tensor max_pool3d(
   return std::get<0>(output_and_indices);
 }
 
-} // namespace at
+} // namespace at::native

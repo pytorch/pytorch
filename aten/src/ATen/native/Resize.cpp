@@ -269,4 +269,4 @@ const Tensor& resize__symint(
   return _resize_(self, size, optional_memory_format);
 }
 
-} // namespace at
+} // namespace at::native

@@ -42,4 +42,4 @@ using call_fallback_fn_symint = _call_fallback_fn<fallback_fn, Op, true, typenam
 template<c10::KernelFunction::BoxedKernelFunction* fallback_fn, class Op>
 using call_fallback_fn = _call_fallback_fn<fallback_fn, Op, false, typename Op::schema>;
 
-} // namespace at
+} // namespace at::native

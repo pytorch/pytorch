@@ -384,4 +384,4 @@ struct BoxedKernelWrapper<
   }
 };
 
-} // c10
+} // namespace c10::impl

@@ -121,4 +121,4 @@ TORCH_API bool getInplaceRequiresGradAllowed();
 TORCH_API DynamicLayer popDynamicLayer();
 TORCH_API int64_t pushDynamicLayer(DynamicLayer&& layer);
 
-} // namespace at
+} // namespace at::functorch

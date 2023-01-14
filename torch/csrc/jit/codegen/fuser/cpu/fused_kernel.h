@@ -11,7 +11,7 @@
 // Forward declare DynamicLibrary
 namespace at {
 struct DynamicLibrary;
-}
+} // namespace at
 
 namespace torch::jit::fuser::cpu {
 

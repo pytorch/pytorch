@@ -432,7 +432,7 @@ Tensor qnnpack_avg_pool2d(
     bool ceil_mode,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override);
-} // namespace at
+} // namespace at::native::qnnp_avgpool_helper
 
 namespace {
 C10_UNUSED std::vector<float> generate_requantization_scales(

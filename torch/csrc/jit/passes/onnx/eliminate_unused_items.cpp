@@ -9,7 +9,7 @@ namespace jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
-}
+} // namespace onnx
 
 void EliminateUnusedItemsONNX(Block* b, ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);

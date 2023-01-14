@@ -226,4 +226,4 @@ void slow_conv_dilated_shape_check(
   }
 }
 
-} // namespace at
+} // namespace at::native::internal

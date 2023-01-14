@@ -68,7 +68,7 @@ namespace {
     }
     return unreduced;
   }
-}
+} // namespace
 
 namespace at {
 namespace meta {
@@ -513,4 +513,5 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction((input - target).abs(), reduction);
 }
-}}  // namespace at::native
+} // namespace native
+} // namespace at

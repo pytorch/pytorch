@@ -1107,5 +1107,5 @@ Tensor replication_pad3d_backward_cpu(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
 }
-} // at::native
-} // at
+} // namespace native
+} // namespace at

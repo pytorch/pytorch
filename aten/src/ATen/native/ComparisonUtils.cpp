@@ -28,5 +28,5 @@ void _assert_tensor_metadata(at::Tensor const& tensor, at::OptionalIntArrayRef s
   _assert_match(tensor.dtype(), dtype, "dtype");
 }
 
-}
-}  // namespace at::native
+} // namespace native
+} // namespace at

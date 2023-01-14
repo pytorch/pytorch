@@ -165,4 +165,4 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map() {
 };
 
 #endif // AT_MKLDNN_ENABLED()
-}
+} // namespace at::native

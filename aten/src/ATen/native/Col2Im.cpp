@@ -214,4 +214,4 @@ Tensor col2im_cpu(
   return output;
 }
 
-} // namespace at
+} // namespace at::native

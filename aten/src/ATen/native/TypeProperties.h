@@ -17,4 +17,4 @@ TORCH_API ScalarType result_type(const ResultTypeState& state);
 
 TORCH_API ScalarType result_type(ITensorListRef tensors);
 
-}
+} // namespace at::native

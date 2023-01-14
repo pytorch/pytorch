@@ -104,7 +104,7 @@ void deleteNode(Node* function) {
 
 namespace {
 bool kAutogradFunctionExtensionEnabled = true;
-}
+} // namespace
 
 bool isAutogradFunctionExtensionEnabled() {
   return kAutogradFunctionExtensionEnabled;

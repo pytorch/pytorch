@@ -12,7 +12,7 @@
 
 namespace c10 {
 struct IValue;
-}
+} // namespace c10
 
 namespace torch::jit {
 

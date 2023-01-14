@@ -162,7 +162,7 @@ class MaxPosCalculator;
 
 namespace ir_utils {
 class TVDomainGuard;
-}
+} // namespace ir_utils
 
 //! TensorView is our primitive Tensor Type used in code generation. It can be
 //! thought of as representing physical memory, however, its dimensionality is

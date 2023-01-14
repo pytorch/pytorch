@@ -6,6 +6,6 @@ namespace at::native {
 
 void initQNNPACK();
 
-} // namespace at
+} // namespace at::native
 
 #endif

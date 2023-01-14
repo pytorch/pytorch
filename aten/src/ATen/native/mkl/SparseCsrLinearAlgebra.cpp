@@ -26,7 +26,7 @@ Tensor& _sparse_mm_mkl_(
 #endif
   return self; // for stopping compiler warnings.
 }
-} // namespace at
+} // namespace at::sparse_csr
 
 #else // AT_MKL_ENABLED
 

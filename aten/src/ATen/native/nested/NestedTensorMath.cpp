@@ -1002,4 +1002,4 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
   return self.reshape(sizes);
 }
 
-} // namespace at
+} // namespace at::native

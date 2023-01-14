@@ -143,7 +143,7 @@ jiterator_also_stringify_as(jiterator_code(
     return chbevl(T{32.0} / x - T{2.0}, coefficients, int{25}) / std::sqrt(x);
   }),
   i0e_string); // i0e_string
-}
+} // namespace
 
 #define CENTRAL_RANGE 0.7
 

@@ -501,4 +501,4 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
   return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction, zero_infinity);
 }
 
-} // at::native
+} // namespace at::native

@@ -1856,4 +1856,4 @@ std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
   }
   return outs;
 }
-} // namespace at
+} // namespace at::native

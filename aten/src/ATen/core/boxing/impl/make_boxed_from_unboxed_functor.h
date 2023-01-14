@@ -609,4 +609,4 @@ namespace impl {
 
 namespace torch {
   using OperatorKernel = c10::OperatorKernel;
-}
+} // namespace torch

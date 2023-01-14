@@ -7,7 +7,8 @@
 #include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 
 class TORCH_API FileAdapter final : public ReadAdapterInterface {
  public:
@@ -31,4 +32,5 @@ class TORCH_API FileAdapter final : public ReadAdapterInterface {
   uint64_t size_;
 };
 
+} // namespace serialize
 } // namespace caffe2

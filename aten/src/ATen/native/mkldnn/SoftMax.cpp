@@ -19,7 +19,7 @@ Tensor mkldnn_softmax(
   TORCH_CHECK(false, "mkldnn_softmax: ATen not compiled with MKLDNN support");
 }
 
-} // namespace at
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

@@ -183,4 +183,4 @@ Tensor& cat_out_quantized_cpu(const ITensorListRef& qxs, int64_t dim, Tensor& ou
   return out;
 }
 
-}  // namespace at
+} // namespace at::native

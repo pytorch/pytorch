@@ -18,4 +18,4 @@ Tensor map_nt(const Tensor& nt, Func f) {
   return at::detail::make_tensor<NestedTensorImpl>(f(nt_impl->get_buffer()), sizes);
 }
 
-} // namespace at
+} // namespace at::native

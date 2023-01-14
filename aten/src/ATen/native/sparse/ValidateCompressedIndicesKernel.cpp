@@ -25,7 +25,7 @@ struct CPUVecKernel {
   }
 };
 
-}
+} // namespace
 
 void _validate_compressed_sparse_indices_cpu(
     const bool is_crow,
@@ -42,4 +42,4 @@ void _validate_compressed_sparse_indices_cpu(
       is_crow, cidx, idx, cdim, dim, nnz);
 }
 
-}
+} // namespace at::native

@@ -74,4 +74,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
     m.impl("allclose", torch::CppFunction::makeFromBoxedFunction<&unsupportedAllclose>());
 }
 
-}
+} // namespace at::functorch

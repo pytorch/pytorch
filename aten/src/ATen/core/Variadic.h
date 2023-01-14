@@ -92,4 +92,4 @@ struct IterArgs {
   }
 };
 
-} // namespace torch
+} // namespace at

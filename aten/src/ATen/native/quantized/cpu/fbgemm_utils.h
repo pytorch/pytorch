@@ -344,7 +344,7 @@ Tensor ConvertConvWeightsToChannelLastTensor(
     const at::Tensor& src,
     int groups,
     bool transpose);
-} // namespace at
+} // namespace at::native::fbgemm_utils
 
 #endif // USE_FBGEMM
 

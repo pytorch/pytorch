@@ -154,6 +154,6 @@ void XNNPackTransposeConv2dOpContext::free_orig_weight_and_bias() {
   orig_bias_.reset();
 }
 
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

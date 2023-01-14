@@ -6,7 +6,7 @@ namespace {
 
 thread_local std::unique_ptr<FuncTorchTLSBase> kFuncTorchTLS = nullptr;
 
-}
+} // namespace
 
 std::unique_ptr<FuncTorchTLSBase> getCopyOfFuncTorchTLS() {
   if (kFuncTorchTLS == nullptr) {
@@ -28,4 +28,4 @@ std::unique_ptr<FuncTorchTLSBase>& functorchTLSAccessor() {
 }
 
 
-}
+} // namespace at::functorch

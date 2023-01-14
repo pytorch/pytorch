@@ -110,7 +110,7 @@ void PropertyPropBase::setUnshapedType(Node* node) {
 
 namespace prim {
 using namespace ::c10::prim;
-}
+} // namespace prim
 
 #define SHAPE_ASSERT(cond) \
   if (!(cond))             \

@@ -333,5 +333,5 @@ struct lognormal_distribution {
     T mean;
     T stdv;
 };
-}
+} // namespace
 } // namespace at

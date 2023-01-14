@@ -419,4 +419,4 @@ inline at::Tensor map_nested_tensor(F&& fn, A... a) {
       c10::nullopt);
 }
 
-} // namespace at
+} // namespace at::native

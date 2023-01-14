@@ -44,7 +44,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   TORCH_CHECK(false, "mkldnn_linear_backward: ATen not compiled with MKLDNN support");
 }
 
-} // namespace at
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

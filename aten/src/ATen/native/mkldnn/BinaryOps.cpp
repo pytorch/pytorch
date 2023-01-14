@@ -44,7 +44,7 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
   TORCH_CHECK(false, "mkldnn_mul_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace at
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

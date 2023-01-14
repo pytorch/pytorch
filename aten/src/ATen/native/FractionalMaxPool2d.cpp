@@ -392,5 +392,5 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cpu) (
   );
 }
 
-} // at::native
-} // at
+} // namespace native
+} // namespace at

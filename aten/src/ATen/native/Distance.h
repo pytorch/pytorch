@@ -17,4 +17,5 @@ DECLARE_DISPATCH(pdist_backward_fn, pdist_backward_stub);
 DECLARE_DISPATCH(cdist_fn, cdist_stub);
 DECLARE_DISPATCH(cdist_backward_fn, cdist_backward_stub);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

@@ -6,7 +6,7 @@
 
 namespace ao::sparse {
 int register_linear_params();
-}
+} // namespace ao::sparse
 
 // Register operators
 TORCH_LIBRARY(sparse, m) {

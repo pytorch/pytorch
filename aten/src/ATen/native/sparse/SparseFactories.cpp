@@ -91,4 +91,4 @@ Tensor spdiags(
   return result_coo;
 }
 
-} // namespace at
+} // namespace at::native

@@ -32,7 +32,7 @@ inline void raise_warning_for_complex_half(ScalarType dtype) {
   }
 }
 
-}  // namespace (anonymous)
+} // namespace
 
 size_t computeStorageNbytesContiguous(
     IntArrayRef sizes,

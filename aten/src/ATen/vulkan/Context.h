@@ -22,4 +22,4 @@ class VulkanImplRegistrar {
 
 at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src);
 
-} // namespace at
+} // namespace at::vulkan

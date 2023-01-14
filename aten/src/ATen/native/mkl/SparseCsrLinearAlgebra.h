@@ -10,4 +10,4 @@ Tensor& _sparse_mm_mkl_(
     const Tensor& t,
     const Scalar& alpha,
     const Scalar& beta);
-} // namespace at
+} // namespace at::sparse_csr

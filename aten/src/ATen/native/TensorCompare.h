@@ -4,13 +4,13 @@
 
 namespace c10 {
 class Scalar;
-}
+} // namespace c10
 
 namespace at {
 class Tensor;
 struct TensorIterator;
 struct TensorIteratorBase;
-}
+} // namespace at
 
 namespace at::native {
 
@@ -37,7 +37,7 @@ DECLARE_DISPATCH(clamp_tensor_fn, clamp_stub);
 
 namespace detail {
     enum class ClampLimits {Min, Max, MinMax};
-}
+} // namespace detail
 
 DECLARE_DISPATCH(void (*)(TensorIteratorBase &, const c10::Scalar&, const c10::Scalar&), clamp_scalar_stub);
 DECLARE_DISPATCH(void (*)(TensorIteratorBase &, c10::Scalar), clamp_min_scalar_stub);

@@ -6,13 +6,13 @@
 
 namespace c10 {
 class Scalar;
-}
+} // namespace c10
 
 namespace at {
 struct TensorIterator;
 struct TensorIteratorBase;
 class TensorBase;
-}
+} // namespace at
 
 namespace at::native {
 
@@ -87,4 +87,4 @@ DECLARE_DISPATCH(activation_backward_fn, mish_backward_stub);
 DECLARE_DISPATCH(activation_fn, prelu_stub);
 DECLARE_DISPATCH(activation_backward_fn, prelu_backward_stub);
 
-} // namespace at
+} // namespace at::native

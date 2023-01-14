@@ -149,7 +149,7 @@ namespace detail {
           "without narrowing to the specified dtype (", dtype, ")");
     }
   }
-}
+} // namespace detail
 
 namespace meta {
 
@@ -2512,7 +2512,7 @@ Tensor backward_analytic_function_of_a_matrix(
     .narrow(-2, 0, n).narrow(-1, n, n);
   return grad_input;
 }
-} // end anon namespace
+} // namespace
 
 // Computes the matrix exponential for a given batch of squared matrices.
 // The implementaion is based on:
@@ -3136,7 +3136,7 @@ struct KronImpl final {
     c10::SmallVector<int64_t, 10> a_reshape;
     c10::SmallVector<int64_t, 10> b_reshape;
 };
-}
+} // namespace
 
 /*
 Calculates the Kronecker product between two Tensors.

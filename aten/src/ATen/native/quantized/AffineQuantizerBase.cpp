@@ -296,4 +296,4 @@ requantize_from_int<quint8>(double, int64_t, int64_t);
 template TORCH_API qint32
 requantize_from_int<qint32>(double, int64_t, int64_t);
 
-} // namespace at
+} // namespace at::native

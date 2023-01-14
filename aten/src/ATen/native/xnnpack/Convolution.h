@@ -56,6 +56,6 @@ ContextConv2D create(
 
 Tensor run(ContextConv2D& context, const Tensor& input);
 
-} // namespace at
+} // namespace at::native::xnnpack::internal::convolution2d
 
 #endif /* USE_XNNPACK */

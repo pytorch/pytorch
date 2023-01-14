@@ -53,4 +53,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(3, max_pool2d_with_indices_backward, 2);
 }
 
-}
+} // namespace at::functorch

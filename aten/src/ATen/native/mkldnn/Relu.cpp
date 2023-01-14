@@ -25,7 +25,7 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
   TORCH_CHECK(false, "mkldnn_relu_backward: ATen not compiled with MKLDNN support");
 }
 
-}
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

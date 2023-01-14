@@ -123,4 +123,4 @@ template <typename batch_rule_t> struct ToOperatorType {
 };
 template <typename batch_rule_t> using to_operator_t = typename ToOperatorType<batch_rule_t>::type;
 
-} // namespace at
+} // namespace at::functorch

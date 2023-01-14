@@ -36,7 +36,7 @@ TORCH_META_FUNC(linalg_cross)
   set_output_raw_strided(0, out_size, {}, input.options());
 }
 
-}
+} // namespace meta
 namespace native {
 
 DEFINE_DISPATCH(cross_stub);
@@ -79,4 +79,5 @@ TORCH_IMPL_FUNC(linalg_cross_out)
   cross_stub(input.device().type(), out, input_broadcasted, other_broadcasted, dim);
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

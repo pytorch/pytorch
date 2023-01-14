@@ -114,4 +114,4 @@ bool is_set_to(const Tensor& self, const Tensor& src) {
   return false;
 }
 
-} // namespace at
+} // namespace at::native

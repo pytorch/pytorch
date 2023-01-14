@@ -22,4 +22,4 @@ check_tensor_options_and_extract_memory_format(
   }
 }
 
-} // namespace impl namespace c10
+} // namespace c10::impl

@@ -9,4 +9,4 @@ void common_device_check_failure(optional<Device>& common_device, const at::Tens
     "(when checking argument for argument ", argName, " in method ", methodName, ")");
 }
 
-} // namespace c10
+} // namespace c10::impl

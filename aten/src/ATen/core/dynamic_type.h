@@ -215,7 +215,7 @@ struct DynamicTypeTrait {
 
 namespace detail {
 C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag);
-}
+} // namespace detail
 
 #define DYNAMIC_TYPE_TAG_VALUE(NAME, _, IS_BASE_TYPE)      \
   template <>                                              \

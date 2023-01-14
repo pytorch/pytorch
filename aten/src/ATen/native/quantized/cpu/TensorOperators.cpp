@@ -96,4 +96,4 @@ const Tensor& quantized_resize_cpu_(
   return self;
 }
 
-}  // at::native
+} // namespace at::native

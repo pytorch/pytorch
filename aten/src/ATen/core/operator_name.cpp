@@ -18,4 +18,4 @@ std::ostream& operator<<(std::ostream& os, const OperatorName& opName) {
   return os;
 }
 
-}
+} // namespace c10

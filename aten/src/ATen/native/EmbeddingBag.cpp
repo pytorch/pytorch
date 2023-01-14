@@ -53,7 +53,7 @@ namespace {
   const int MODE_SUM = 0;
   const int MODE_MEAN = 1;
   const int MODE_MAX = 2;
-}
+} // namespace
 
 namespace at::native {
 

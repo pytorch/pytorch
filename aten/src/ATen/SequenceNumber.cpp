@@ -14,4 +14,4 @@ uint64_t get_and_increment() {
   return sequence_nr_++;
 }
 
-} // namespace at
+} // namespace at::sequence_number

@@ -204,4 +204,4 @@ Tensor max_unpooling3d_forward_cpu(
 DEFINE_DISPATCH(max_unpool2d_kernel);
 DEFINE_DISPATCH(max_unpool3d_kernel);
 
-} // namespace at
+} // namespace at::native

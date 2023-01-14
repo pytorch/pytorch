@@ -69,4 +69,4 @@ TORCH_LIBRARY_IMPL(_, AutogradHPU, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
-}
+} // namespace

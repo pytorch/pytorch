@@ -5,7 +5,7 @@ namespace torch {
 namespace jit {
 namespace onnx {
 using namespace ::c10::onnx;
-}
+} // namespace onnx
 
 // For ONNX opset < 9, constant operator supports only three data types:
 // float16, float, and double. Constants of other data types are exported as

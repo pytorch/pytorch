@@ -1060,4 +1060,4 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
       embedding_bag_2bit_rowwise_offsets);
 }
 } // namespace
-} // namespace at
+} // namespace at::native

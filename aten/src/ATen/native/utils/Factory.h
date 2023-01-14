@@ -17,4 +17,4 @@ at::Tensor empty_with_tail_padding(
     c10::MemoryFormat memory_format,
     c10::optional<DimnameList> maybe_names);
 
-} // namespace at
+} // namespace at::native::mobile

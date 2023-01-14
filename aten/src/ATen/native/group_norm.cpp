@@ -251,4 +251,4 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
   return std::make_tuple(out, mean, rstd);
 }
-} // namespace at
+} // namespace at::native

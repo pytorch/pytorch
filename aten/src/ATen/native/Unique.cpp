@@ -35,7 +35,7 @@ namespace std {
             return std::hash<uint16_t>()(v.x);
         }
     };
-}
+} // namespace std
 
 namespace at::native{
 
@@ -353,4 +353,4 @@ unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool
   return unique_dim_consecutive_cpu(self, dim.value(), return_inverse, return_counts);
 }
 
-}  // namespace at
+} // namespace at::native

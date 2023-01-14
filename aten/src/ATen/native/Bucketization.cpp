@@ -137,7 +137,7 @@ void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, boo
   }
 }
 
-}
+} // namespace
 
 Tensor& searchsorted_out_cpu(
     const Tensor& sorted_sequence,

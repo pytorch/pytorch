@@ -2291,4 +2291,5 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
   return self;
 }
 
-}} // at::native
+} // namespace native
+} // namespace at

@@ -358,4 +358,5 @@ struct BernoulliKernel {
   }
 };
 
-}}
+} // namespace
+} // namespace at::native::templates::cpu

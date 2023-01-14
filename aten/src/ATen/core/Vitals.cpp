@@ -94,4 +94,4 @@ APIVitals::APIVitals() : vitals_enabled(false), name_map_() {
   setVital("CUDA", "used", "False", /* force = */ true);
 }
 
-} // namespace at
+} // namespace at::vitals

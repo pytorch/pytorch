@@ -5,11 +5,11 @@
 
 namespace c10 {
 class Scalar;
-}
+} // namespace c10
 
 namespace at {
 struct TensorIterator;
-}
+} // namespace at
 
 namespace at::native {
 

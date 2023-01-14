@@ -97,4 +97,4 @@ using backward_fn = void (*)(
 DECLARE_DISPATCH(forward_fn, LayerNormKernel);
 DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel);
 
-} // namespace at
+} // namespace at::native

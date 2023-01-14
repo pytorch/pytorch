@@ -137,7 +137,7 @@ MaybeSetTLSOnEntryGuard::~MaybeSetTLSOnEntryGuard() {
 }
 
 
-} // namespace at
+} // namespace at::impl
 
 TORCH_LIBRARY_IMPL(_, Python, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonFallback>());

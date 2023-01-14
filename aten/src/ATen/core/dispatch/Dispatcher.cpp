@@ -43,7 +43,7 @@ public:
 private:
   std::list<std::unique_ptr<OpRegistrationListener>> listeners_;
 };
-}
+} // namespace detail
 
 OpRegistrationListener::~OpRegistrationListener()= default;
 
@@ -421,4 +421,4 @@ void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction
   guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
-}
+} // namespace c10

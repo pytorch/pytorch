@@ -354,7 +354,7 @@ Tensor fftn_c2c(
   return fft_c2c_maybe_out(fname, out, x, dim, norm, forward);
 }
 
-}  // namespace (anonymous)
+} // namespace
 
 // torch.fft.fft, analogous to NumPy's numpy.fft.fft
 Tensor fft_fft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
@@ -1276,4 +1276,4 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
 
 DEFINE_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
 
-} // at::native
+} // namespace at::native

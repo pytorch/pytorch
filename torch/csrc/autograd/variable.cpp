@@ -347,7 +347,7 @@ void add_hook(
 
 namespace {
 std::vector<std::shared_ptr<FunctionPreHook>> empty_singleton;
-}
+} // namespace
 
 // TODO: Return an ArrayRef instead (and delete the singleton while you're at
 // it
@@ -618,7 +618,7 @@ const at::TensorBase& VariableHooks::base(const at::TensorBase& self) const {
 
 namespace {
 std::string singleton_string;
-}
+} // namespace
 
 const std::string& VariableHooks::name(const at::TensorBase& self) const {
   TORCH_CHECK(
@@ -632,7 +632,7 @@ const std::string& VariableHooks::name(const at::TensorBase& self) const {
 
 namespace {
 std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
-}
+} // namespace
 
 const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
     const at::TensorBase& self) const {

@@ -8,11 +8,11 @@
 
 namespace c10 {
 struct FunctionSchema;
-};
+} // namespace c10;
 
 namespace at {
 TORCH_API void launch(std::function<void()> func);
-}
+} // namespace at
 
 namespace torch::jit {
 
@@ -21,7 +21,7 @@ struct Code;
 
 namespace mobile {
 struct Code;
-}
+} // namespace mobile
 
 using Stack = std::vector<at::IValue>;
 using Kwargs = std::unordered_map<std::string, at::IValue>;
@@ -102,4 +102,4 @@ struct TORCH_API Function {
 
   virtual ~Function() = default;
 };
-} // namespace torch
+} // namespace torch::jit

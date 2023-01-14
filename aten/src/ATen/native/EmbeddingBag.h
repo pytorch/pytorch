@@ -136,4 +136,4 @@ void _embedding_bag_cpu_out(
     const c10::optional<int64_t>& padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache = nullptr);
 
-} // at
+} // namespace at::native

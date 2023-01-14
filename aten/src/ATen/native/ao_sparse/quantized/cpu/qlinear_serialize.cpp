@@ -244,4 +244,4 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
 
 #endif // USE_PYTORCH_QNNPACK
 
-} // namespace ao
+} // namespace ao::sparse

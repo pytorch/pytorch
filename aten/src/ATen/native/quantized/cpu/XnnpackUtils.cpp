@@ -80,6 +80,6 @@ Tensor convert_conv_weights_to_channel_last_tensor<2>(
                    // 2d conv weight transform
                    : src.contiguous(c10::MemoryFormat::ChannelsLast);
 }
-} // namespace at
+} // namespace at::native::xnnp_utils
 
 #endif // USE_XNNPACK

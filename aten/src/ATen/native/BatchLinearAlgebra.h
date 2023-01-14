@@ -11,9 +11,9 @@ struct TensorIterator;
 
 namespace native {
 enum class TransposeType;
-}
+} // namespace native
 
-}
+} // namespace at
 
 namespace at::native {
 

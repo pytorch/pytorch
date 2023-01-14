@@ -327,4 +327,4 @@ Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& 
     }
 }
 
-} // at
+} // namespace at::functionalization

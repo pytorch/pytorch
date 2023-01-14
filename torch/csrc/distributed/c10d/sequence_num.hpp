@@ -10,7 +10,7 @@ const int kUnsetSeqNum = 0;
 
 namespace {
   constexpr int kByteOffset = 8;
-}
+} // namespace
 
 // Converts from int to char vec to write in store
 template <typename T>

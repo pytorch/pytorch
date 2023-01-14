@@ -183,4 +183,4 @@ struct TORCH_API VmapPhysicalToLogicalMap {
 };
 
 
-} // namespace at
+} // namespace at::functorch

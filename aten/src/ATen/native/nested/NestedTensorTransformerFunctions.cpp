@@ -245,4 +245,4 @@ Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c
   return result;
 }
 
-} // namespace at
+} // namespace at::native

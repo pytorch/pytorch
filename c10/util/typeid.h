@@ -104,7 +104,7 @@ inline std::ostream& operator<<(
 
 namespace at {
 using DataType = caffe2::TypeIdentifier;
-}
+} // namespace at
 
 C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 

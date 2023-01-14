@@ -424,5 +424,5 @@ Tensor fractional_max_pool3d_backward_cpu(
   return gradInput;
 }
 
-}// native
-}// at
+} // namespace native
+} // namespace at

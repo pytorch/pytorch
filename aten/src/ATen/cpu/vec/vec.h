@@ -32,4 +32,5 @@ inline Vectorized<bool> Vectorized<bool>::loadu(const void* ptr, int64_t count) 
   return convert_to_bool(Vectorized<int8_t>::loadu(ptr, count));
 }
 
-}} // namespace at::vec::CPU_CAPABILITY
+} // namespace CPU_CAPABILITY
+} // namespace at::vec

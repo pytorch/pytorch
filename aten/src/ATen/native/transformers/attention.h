@@ -35,4 +35,4 @@ TORCH_API Tensor qkv_projection(
     const int64_t embed_dim,
     const Tensor& qkv_weight);
 
-} // namespace at
+} // namespace at::native

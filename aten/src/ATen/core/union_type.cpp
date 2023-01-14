@@ -133,7 +133,7 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
 
 }
 
-}
+} // namespace
 
 void sortUnion(std::vector<TypePtr>* types) {
   // We want the elements to be sorted so we can easily compare two
@@ -463,4 +463,4 @@ bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const 
   }
 }
 
-} // namespace 10
+} // namespace c10

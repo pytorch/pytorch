@@ -525,5 +525,5 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
   }
 }
 
-} // at::native
-} // at
+} // namespace native
+} // namespace at

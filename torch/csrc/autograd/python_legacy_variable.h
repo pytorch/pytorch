@@ -10,5 +10,5 @@ namespace autograd {
 
 void init_legacy_variable(PyObject* module);
 
-}
+} // namespace autograd
 } // namespace torch

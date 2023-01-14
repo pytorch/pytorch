@@ -113,4 +113,4 @@ Tensor repeat_interleave_symint(
     return at::native::repeat_interleave(self, repeats.guard_int(__FILE__, __LINE__), dim, output_size);
   }
 
-} // namespace at
+} // namespace at::native

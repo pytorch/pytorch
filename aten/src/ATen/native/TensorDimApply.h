@@ -50,4 +50,4 @@ namespace at::native {
         }
       }
     }
-}
+} // namespace at::native

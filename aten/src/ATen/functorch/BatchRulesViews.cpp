@@ -567,4 +567,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(narrow_copy, narrow_copy_batch_rule);
 }
 
-}
+} // namespace at::functorch

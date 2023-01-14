@@ -88,7 +88,7 @@ namespace {
     }
     return t;
   }
-}
+} // namespace
 
 template<typename T>
 struct InvStd {
@@ -867,4 +867,5 @@ TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
   at::mul_outf(self, factor, const_cast<Tensor&>(out));
 }
 
-}} // at::native
+} // namespace native
+} // namespace at

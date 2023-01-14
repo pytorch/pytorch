@@ -171,4 +171,4 @@ Tensor empty_quantized(
   return output;
 }
 
-} // namespace at
+} // namespace at::native

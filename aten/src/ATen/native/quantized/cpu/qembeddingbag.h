@@ -29,4 +29,4 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
 
 Tensor& qembeddingbag_byte_unpack_out(Tensor& output, const Tensor& packed_weight);
 
-} // at
+} // namespace at::native

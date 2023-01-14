@@ -802,4 +802,4 @@ Tensor slow_conv3d(
   return at::slow_conv3d_forward(self, weight, kernel_size, bias, stride, padding);
 }
 
-} // namespace at
+} // namespace at::native

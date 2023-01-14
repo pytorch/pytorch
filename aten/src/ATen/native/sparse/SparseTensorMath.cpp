@@ -88,7 +88,7 @@ namespace {
     }
     return at::empty_like(input);
   }
-}
+} // namespace
 
 // --------------------------------------------------------------------
 // zero_(SparseTensor)

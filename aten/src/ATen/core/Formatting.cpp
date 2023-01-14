@@ -40,7 +40,7 @@ std::string toString(const Scalar& s) {
   out << s;
   return out.str();
 }
-}
+} // namespace c10
 namespace at {
 
 //not all C++ compilers have default float so we define our own here
@@ -341,4 +341,4 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   return stream;
 }
 
-}
+} // namespace at

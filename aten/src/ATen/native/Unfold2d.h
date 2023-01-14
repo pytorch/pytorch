@@ -27,4 +27,5 @@ using unfold2d_fn = void (*)(
 DECLARE_DISPATCH(unfold2d_fn, unfolded2d_copy_stub);
 DECLARE_DISPATCH(unfold2d_fn, unfolded2d_acc_stub);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

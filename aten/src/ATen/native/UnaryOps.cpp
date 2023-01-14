@@ -879,7 +879,7 @@ Tensor& logical_not_out(const Tensor& self, Tensor& result) {
 namespace {
 constexpr double HALF = 0.5;
 constexpr double QUARTER = 0.25;
-}
+} // namespace
 
 static inline void mvlgamma_check(const Tensor& self, int64_t p) {
   TORCH_CHECK(self.scalar_type() != kBool, "The input tensor may not be a boolean tensor.");

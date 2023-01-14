@@ -270,4 +270,4 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
 }
 
 } // namespace
-} // namespace at
+} // namespace at::native

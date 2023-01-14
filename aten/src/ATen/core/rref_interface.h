@@ -37,4 +37,4 @@ class C10_EXPORT RRefInterface : public c10::intrusive_ptr_target {
   virtual const TypePtr type() const = 0;
 };
 
-}
+} // namespace c10

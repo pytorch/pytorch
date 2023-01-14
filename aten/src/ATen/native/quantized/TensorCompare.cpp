@@ -47,4 +47,4 @@ std::tuple<Tensor, Tensor> sort_quantized_cpu_stable(
       sort_indicies);
 }
 
-} // namespace at
+} // namespace at::native

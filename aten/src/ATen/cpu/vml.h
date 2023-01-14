@@ -166,5 +166,5 @@ IMPLEMENT_VML_MKL(log2, Log2)
 
 #endif
 
-} // namespace
-} // namespace at
+} // namespace CPU_CAPABILITY
+} // namespace at::vml

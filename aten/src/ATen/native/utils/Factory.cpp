@@ -59,4 +59,4 @@ Tensor allocate_padded_contiguous_if_needed(
   return padded_input.copy_(input);
 }
 
-} // namespace at
+} // namespace at::native::mobile

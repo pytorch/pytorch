@@ -9,4 +9,4 @@ DECLARE_DISPATCH(masked_fill_kernel_quantized_fn, masked_fill_kernel_quantized_s
 DECLARE_DISPATCH(index_put_kernel_quantized_fn, index_put_kernel_quantized_stub);
 
 
-} // at
+} // namespace at::native

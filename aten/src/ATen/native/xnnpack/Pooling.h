@@ -37,6 +37,6 @@ private:
   }
 };
 
-} // namespace at
+} // namespace at::native::xnnpack::internal::pooling
 
 #endif /* USE_XNNPACK */

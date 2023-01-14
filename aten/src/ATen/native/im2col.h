@@ -146,4 +146,4 @@ static void col2im(
   }
 }
 
-} // at
+} // namespace at::native

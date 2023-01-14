@@ -254,4 +254,4 @@ at::Tensor fused_moving_avg_obs_fake_quant(
       symmetric_quant);
   return std::get<0>(res);
 }
-} // namespace at
+} // namespace at::native

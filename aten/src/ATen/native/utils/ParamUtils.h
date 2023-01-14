@@ -37,4 +37,4 @@ inline std::vector<c10::SymInt> expand_param_if_needed(
   return _expand_param_if_needed(list_param, param_name, expected_dim);
 }
 
-} // namespace at
+} // namespace at::native

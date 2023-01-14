@@ -85,4 +85,4 @@ inline void _allocate_or_resize_output_with_indices(
   }
 }
 
-} // namespace at
+} // namespace at::native

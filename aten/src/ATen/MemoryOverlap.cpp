@@ -96,4 +96,4 @@ void assert_no_overlap(TensorImpl* a, TensorImpl* b) {
     "Please clone() the tensor before performing the operation.");
 }
 
-}
+} // namespace at

@@ -10,7 +10,7 @@
 
 namespace at {
 struct TensorIterator;
-}
+} // namespace at
 
 namespace at::native {
 

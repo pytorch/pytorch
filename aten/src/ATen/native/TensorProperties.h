@@ -3,7 +3,7 @@
 // See NOTE: [Tensor vs. TensorBase]
 namespace at {
 class TensorBase;
-}
+} // namespace at
 
 namespace at::native {
 

@@ -13,7 +13,7 @@ namespace jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
-}
+} // namespace onnx
 
 namespace {
 const int ONNX_OPSET_13 = 13;

@@ -13,7 +13,7 @@ namespace {
   // It's an optimization so that users who never use default hooks don't need to
   // read the thread_local variables pack_hook_ and unpack_hook_.
   static bool is_initialized(false);
-}
+} // namespace
 
 static void assertSavedTensorHooksNotDisabled() {
   TORCH_CHECK(SavedTensorDefaultHooks::is_enabled(), tls.disabled_error_message.value());
@@ -80,4 +80,4 @@ void SavedTensorDefaultHooks::set_stack(std::stack<std::pair<PyObject*, PyObject
   tls.stack = std::move(stack_);
 }
 
-}
+} // namespace at

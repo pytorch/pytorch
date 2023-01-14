@@ -9,7 +9,7 @@ namespace jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
-}
+} // namespace onnx
 
 void DeduplicateInitializers(
     std::shared_ptr<Graph>& g,

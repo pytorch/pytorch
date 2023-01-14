@@ -342,4 +342,4 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach(
       std::move(version_counter), allow_tensor_metadata_change);
 }
 
-} // namespace at
+} // namespace at::native

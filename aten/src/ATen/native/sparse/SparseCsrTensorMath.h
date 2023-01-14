@@ -56,4 +56,4 @@ inline void _check_dim(const Tensor& self, int64_t target_dim, c10::string_view 
       " instead.");
 }
 
-}
+} // namespace at::native::sparse::impl

@@ -157,4 +157,4 @@ struct AdvancedIndex {
 };
 
 
-}
+} // namespace at::native

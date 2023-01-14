@@ -367,7 +367,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
   }
 }
 
-} // namespace at
+} // namespace at::native::fbgemm_utils
 
 
 #endif // USE_FBGEMM
@@ -386,7 +386,7 @@ namespace {
         return "NotAValidDimension";
     }
   }
-}
+} // namespace
 
 template <int kSpatialDim = 2>
 TORCH_API int

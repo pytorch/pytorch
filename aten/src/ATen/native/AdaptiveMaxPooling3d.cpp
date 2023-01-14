@@ -441,5 +441,5 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cpu)
         });
   }
 }
-} // at::native
-} // at
+} // namespace native
+} // namespace at

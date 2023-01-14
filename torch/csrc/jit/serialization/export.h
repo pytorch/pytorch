@@ -14,7 +14,7 @@
 
 namespace ONNX_NAMESPACE {
 class ModelProto;
-}
+} // namespace ONNX_NAMESPACE
 
 namespace torch::jit {
 

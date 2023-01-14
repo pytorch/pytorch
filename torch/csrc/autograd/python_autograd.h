@@ -9,7 +9,7 @@ namespace autograd {
 
 PyMethodDef* python_functions();
 
-}
+} // namespace autograd
 } // namespace torch
 
 #include <torch/csrc/autograd/python_engine.h>

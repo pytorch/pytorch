@@ -10,4 +10,4 @@ Tensor nested_to_padded_tensor(
     return t.to_padded_tensor(padding, output_size);
 }
 
-} // namespace at
+} // namespace at::native

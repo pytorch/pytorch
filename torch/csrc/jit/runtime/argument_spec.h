@@ -167,7 +167,7 @@ struct ArgumentSpec {
 
 namespace {
 static constexpr size_t ARG_SPEC_DEPTH_LIMIT = 128;
-}
+} // namespace
 
 // ArgumentSpecCreator takes an initial graph and comes up with a set
 // of simple instructions to compute the ArgumentSpec given a set of

@@ -11,7 +11,7 @@ inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
   scalar_t* dptr = static_cast<scalar_t*>(self.data_ptr());
   *dptr = value;
 }
-}
+} // namespace
 
 namespace detail {
 Tensor& scalar_fill(Tensor& self, const Scalar& value) {

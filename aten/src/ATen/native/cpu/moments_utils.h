@@ -200,4 +200,4 @@ std::pair<acc_t<T>, acc_t<T>> RowwiseMoments(const T* X, int64_t N, int64_t ddof
 }
 
 } // namespace CPU_CAPABILITY
-} // namespace at
+} // namespace at::native

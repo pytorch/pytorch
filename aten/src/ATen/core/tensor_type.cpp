@@ -37,7 +37,7 @@ bool possible_cross_dimension_overlap(c10::IntArrayRef sizes, c10::IntArrayRef s
   return false;
 }
 
-}
+} // namespace
 
 const TensorTypePtr& TensorType::get() {
   static auto value = TensorType::create(
@@ -466,4 +466,4 @@ bool TensorType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   return Type::isSubtypeOfExt(rhs, why_not);
 }
 
-}
+} // namespace c10

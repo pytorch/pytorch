@@ -18,4 +18,4 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   py::setattr(m, "dim", py::reinterpret_steal<py::object>(dim));
 }
 
-}
+} // namespace at::functorch

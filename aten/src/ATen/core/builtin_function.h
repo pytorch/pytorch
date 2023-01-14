@@ -83,4 +83,4 @@ struct BuiltinOpFunction : public Function {
   std::string doc_string_;
 };
 
-} // namespace torch
+} // namespace torch::jit

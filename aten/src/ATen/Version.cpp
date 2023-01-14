@@ -221,4 +221,4 @@ std::string get_cxx_flags() {
   return caffe2::GetBuildOptions().at("CXX_FLAGS");
 }
 
-}
+} // namespace at

@@ -28,4 +28,4 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
   TORCH_CHECK(false, "Must specify exactly one of output_size and scale_factors");
 }
 
-} // namespace at
+} // namespace at::native::upsample

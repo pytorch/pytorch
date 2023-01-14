@@ -55,4 +55,4 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     return ret;
 }
 
-} // namespace at
+} // namespace at::native

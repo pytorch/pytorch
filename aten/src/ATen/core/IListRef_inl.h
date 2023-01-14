@@ -6,7 +6,7 @@
 namespace at {
 class Tensor;
 class OptionalTensorRef;
-}
+} // namespace at
 
 namespace c10::detail {
 
@@ -183,7 +183,7 @@ class IListRefTagImpl<IListRefTag::Materialized, at::OptionalTensorRef>
           at::OptionalTensorRef,
           MaterializedIListRefElem<at::OptionalTensorRef>> {};
 
-} // namespace c10
+} // namespace c10::detail
 
 namespace at {
 

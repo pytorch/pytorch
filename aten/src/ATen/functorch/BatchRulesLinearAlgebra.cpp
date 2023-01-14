@@ -624,4 +624,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 }
-}
+} // namespace at::functorch

@@ -12,7 +12,7 @@ namespace jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
-}
+} // namespace onnx
 
 // Meyer’s Singleton for C++ 14
 ConstantValueMap& ConstantValueMap::getInstance() {

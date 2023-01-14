@@ -243,6 +243,6 @@ class XNNPackTransposeConv2dOpContext final : public TransposeConv2dOpContext {
       const c10::optional<Scalar>& output_max);
 };
 
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

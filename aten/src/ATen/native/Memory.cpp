@@ -36,4 +36,4 @@ Tensor pin_memory(const Tensor& self, c10::optional<Device> device) {
   return at::_pin_memory(self, device);
 }
 
-}
+} // namespace at::native

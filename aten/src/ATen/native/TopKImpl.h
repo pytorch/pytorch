@@ -90,4 +90,4 @@ void topk_impl_loop(
 }
 
 } // namespace CPU_CAPABILITY
-} // namespace at
+} // namespace at::native

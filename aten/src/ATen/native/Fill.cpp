@@ -156,4 +156,4 @@ Tensor& zero_meta_(Tensor& self) {
   return self;
 }
 
-} // namespace at
+} // namespace at::native

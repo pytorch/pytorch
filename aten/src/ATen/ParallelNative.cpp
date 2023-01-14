@@ -35,13 +35,13 @@ void _set_in_parallel_region(bool in_region) {
   in_parallel_region_ = in_region;
 }
 
-}  // namespace (anonymous)
+} // namespace
 
 namespace internal {
 void set_thread_num(int thread_num) {
   thread_num_ = thread_num;
 }
-}
+} // namespace internal
 
 namespace {
 void _unset_thread_num() {

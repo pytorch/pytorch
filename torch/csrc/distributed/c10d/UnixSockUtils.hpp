@@ -20,4 +20,4 @@ inline struct ::pollfd getPollfd(int socket, short events) {
   return res;
 }
 
-} // namespace c10d
+} // namespace c10d::tcputil

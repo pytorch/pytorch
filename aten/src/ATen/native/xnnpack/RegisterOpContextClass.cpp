@@ -99,6 +99,6 @@ TORCH_LIBRARY_IMPL(prepacked, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("prepacked::conv2d_transpose_clamp_run"), TORCH_FN(internal::convolution2d::conv2d_transpose_clamp_run));
 }
 
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

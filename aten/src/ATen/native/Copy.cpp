@@ -321,4 +321,4 @@ void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src) {
 
 DEFINE_DISPATCH(copy_stub);
 
-} // namespace at
+} // namespace at::native

@@ -4,7 +4,7 @@ namespace at::impl {
 
 namespace {
 VariableHooksInterface* hooks = nullptr;
-}
+} // namespace
 
 void SetVariableHooks(VariableHooksInterface* h) {
   hooks = h;

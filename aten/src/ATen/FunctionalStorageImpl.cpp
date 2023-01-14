@@ -120,4 +120,4 @@ bool FunctionalStorageImpl::apply_updates() {
   return any_updates;
 }
 
-} // namespace at
+} // namespace at::functionalization

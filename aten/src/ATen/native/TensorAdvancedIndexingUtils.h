@@ -90,4 +90,4 @@ static AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   return AdvancedIndex(self, indices);
 }
 
-} // native
+} // namespace at::native

@@ -111,4 +111,4 @@ struct hash<c10::DeviceType> {
 
 namespace torch {
 using c10::DeviceType;
-}
+} // namespace torch

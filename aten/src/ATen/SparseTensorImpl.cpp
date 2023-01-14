@@ -12,7 +12,7 @@ namespace {
       "cannot create sparse tensor with non sparse dispatch key ", k);
     return c10::dispatchKeyToDeviceType(k);
   }
-}
+} // namespace
 
 
 // An empty dense tensor defaults to a 1-dimensional tensor of size [0]

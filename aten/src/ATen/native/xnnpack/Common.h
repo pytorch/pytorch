@@ -121,6 +121,6 @@ struct Layout final {
   };
 };
 } // namespace internal
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

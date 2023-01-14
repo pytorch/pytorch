@@ -77,4 +77,4 @@ DECLARE_DISPATCH(fft_fill_with_conjugate_symmetry_fn, fft_fill_with_conjugate_sy
 // See NOTE [ Fourier Transform Conjugate Symmetry ]
 TORCH_API void _fft_fill_with_conjugate_symmetry_(const Tensor& self, IntArrayRef dims);
 
-} // at::native
+} // namespace at::native

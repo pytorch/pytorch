@@ -13,4 +13,4 @@ public:
   static bool registerInterpreter(c10::impl::PyInterpreter*);
 };
 
-} // namespace at
+} // namespace at::impl

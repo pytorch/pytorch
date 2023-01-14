@@ -117,4 +117,4 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
   return maybe_movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
 }
 
-} // namespace at
+} // namespace at::native

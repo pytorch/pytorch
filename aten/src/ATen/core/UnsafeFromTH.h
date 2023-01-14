@@ -18,4 +18,4 @@ inline Storage unsafeStorageFromTH(void * th_pointer, bool retain) {
   return Storage(c10::intrusive_ptr<StorageImpl>::reclaim(static_cast<StorageImpl*>(th_pointer)));
 }
 
-}
+} // namespace at

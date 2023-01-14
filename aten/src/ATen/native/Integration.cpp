@@ -80,7 +80,7 @@ DimVector add_padding_to_shape(IntArrayRef curr_shape, int64_t target_n_dim) {
     }
     return new_shape;
 }
-}
+} // namespace
 
 Tensor trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
     dim = maybe_wrap_dim(dim, y);

@@ -127,7 +127,7 @@ Tensor& coalesced_unary_ufunc_out(const Tensor &self, Tensor &result, const Ufun
   return result;
 }
 
-}  // namespace (anonymous)
+} // namespace
 
 // Generic formulation for unary operators which map 0 -> 0 so
 // we can just transform self.values() and preserve the sparsity pattern.

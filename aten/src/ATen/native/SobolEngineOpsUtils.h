@@ -52,4 +52,4 @@ constexpr float RECIPD = 1.0 / LARGEST_NUMBER;
 extern const int64_t poly[MAXDIM];
 extern const int64_t initsobolstate[MAXDIM][MAXDEG];
 
-} // namespace at
+} // namespace at::native::sobol_utils

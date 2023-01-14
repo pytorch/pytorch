@@ -125,4 +125,4 @@ TORCH_API Tensor dequantize_tensor(
     double scale,
     int64_t zero_point);
 
-} // namespace at
+} // namespace at::native

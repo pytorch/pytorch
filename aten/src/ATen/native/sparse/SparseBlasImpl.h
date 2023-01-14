@@ -42,4 +42,4 @@ void triangular_solve_out_sparse_csr(
     bool unitriangular);
 
 } // namespace cpu
-} // namespace at
+} // namespace at::native::sparse::impl

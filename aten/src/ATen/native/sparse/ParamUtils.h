@@ -19,4 +19,4 @@ TORCH_API std::tuple<Tensor, Tensor, Tensor> softmax_backward_sparse_input_prepr
     const Tensor& input_,
     CheckedFrom function_name);
 
-} // namespace at
+} // namespace at::native

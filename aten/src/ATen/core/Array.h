@@ -36,4 +36,4 @@ struct Array {
   }
 };
 
-}
+} // namespace at::detail

@@ -32,4 +32,4 @@ void triangular_solve_out_sparse_csr(
     bool transpose,
     bool unitriangular);
 
-} // namespace at
+} // namespace at::native::sparse::impl::mkl

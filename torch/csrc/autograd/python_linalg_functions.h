@@ -5,5 +5,5 @@ namespace autograd {
 
 void initLinalgFunctions(PyObject* module);
 
-}
+} // namespace autograd
 } // namespace torch

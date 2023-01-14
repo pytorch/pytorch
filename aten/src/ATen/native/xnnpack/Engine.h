@@ -92,4 +92,4 @@ bool use_hardswish(const Tensor& input);
 Tensor hardswish(const Tensor& input);
 Tensor& hardswish_(Tensor& input);
 
-} // namespace at
+} // namespace at::native::xnnpack

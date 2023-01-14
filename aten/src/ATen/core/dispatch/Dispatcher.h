@@ -50,7 +50,7 @@ public:
 
 namespace detail {
 class RegistrationListenerList;
-}
+} // namespace detail
 class SchemaRegistrationHandleRAII;
 
 /**

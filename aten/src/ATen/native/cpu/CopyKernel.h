@@ -9,4 +9,6 @@ inline namespace CPU_CAPABILITY {
 void direct_copy_kernel(TensorIteratorBase &iter);
 void copy_kernel(TensorIterator& iter, bool /*non_blocking*/);
 
-}}}  // namespace at::native::CPU_CAPABILITY
+} // namespace CPU_CAPABILITY
+} // namespace native
+} // namespace at

@@ -26,4 +26,4 @@ bool tensorlist_has_dispatch(const c10::List<c10::optional<at::Tensor>>& li) {
   return false;
 }
 
-} // namespace at
+} // namespace at::impl

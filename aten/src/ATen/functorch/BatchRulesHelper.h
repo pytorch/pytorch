@@ -472,4 +472,4 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
     const Tensor& tensor, optional<int64_t> tensor_batch_dim, const Tensor& other, optional<int64_t> other_batch_dim,
     bool do_type_promotion=true);
 
-}
+} // namespace at::functorch

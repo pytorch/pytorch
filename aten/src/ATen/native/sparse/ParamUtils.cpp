@@ -56,4 +56,4 @@ std::tuple<Tensor, Tensor, Tensor> softmax_backward_sparse_input_preprocessing(
   return std::make_tuple(grad_input, grad, output);
 }
 
-} // namespace at
+} // namespace at::native

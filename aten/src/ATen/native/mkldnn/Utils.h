@@ -46,7 +46,7 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map();
 const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
-};
+} // namespace native;
 
 inline bool mkldnn_bf16_device_check() {
   return cpuinfo_initialize() && ((cpuinfo_has_x86_avx512bw()
@@ -63,4 +63,4 @@ constexpr bool mkldnn_bf16_device_check_arm() {
 }
 #endif
 
-}
+} // namespace at

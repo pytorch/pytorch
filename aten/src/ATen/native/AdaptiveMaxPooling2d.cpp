@@ -85,5 +85,5 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cpu)
 DEFINE_DISPATCH(adaptive_max_pool2d_kernel);
 DEFINE_DISPATCH(adaptive_max_pool2d_backward_kernel);
 
-} // at::native
-} // at
+} // namespace native
+} // namespace at

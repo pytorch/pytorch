@@ -16,7 +16,7 @@ static constexpr int CPU_DEVICE = -1;
 
 namespace {
 std::atomic<uint64_t> graph_task_id{0};
-}
+} // namespace
 
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask : std::enable_shared_from_this<GraphTask> {

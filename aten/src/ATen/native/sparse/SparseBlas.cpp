@@ -265,4 +265,4 @@ void sparse_sampled_addmm_check_inputs(
 
 DEFINE_DISPATCH(sampled_addmm_sparse_csr_stub);
 
-} // namespace at
+} // namespace at::native

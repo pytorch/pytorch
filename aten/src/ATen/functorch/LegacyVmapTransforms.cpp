@@ -226,4 +226,4 @@ void VmapPhysicalToLogicalMap::applyInplace(std::vector<Tensor>& physical_tensor
   }
 }
 
-} // namespace at
+} // namespace at::functorch

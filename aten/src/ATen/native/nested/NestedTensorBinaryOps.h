@@ -11,4 +11,4 @@ using nested_dense_elementwise_fn = void (*)(Tensor& result, const Tensor & self
 
 DECLARE_DISPATCH(nested_dense_elementwise_fn, nested_dense_elementwise_stub);
 
-} // namespace at
+} // namespace at::native

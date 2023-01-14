@@ -15,7 +15,7 @@ std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, cons
   TORCH_CHECK(false, "mkldnn_prelu_backward: ATen not compiled with MKLDNN support");
 }
 
-}
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

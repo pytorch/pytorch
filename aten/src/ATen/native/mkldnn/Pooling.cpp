@@ -193,7 +193,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
   TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_backward: ATen not compiled with MKLDNN support");
 }
 
-} // namespace at
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

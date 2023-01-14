@@ -263,4 +263,4 @@ Tensor& std_out_quantized_cpu(
       self, dimnames_to_positions(self, dim), unbiased, keepdim, result);
 }
 
-} // namespace at
+} // namespace at::native

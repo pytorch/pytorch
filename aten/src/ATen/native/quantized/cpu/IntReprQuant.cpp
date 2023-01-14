@@ -51,4 +51,4 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
   return dst;
 }
 
-} // namespace at
+} // namespace at::native

@@ -116,4 +116,4 @@ Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level) {
   return makeBatched(tensor, dim, level);
 }
 
-} // namespace at
+} // namespace at::functorch

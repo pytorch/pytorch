@@ -23,7 +23,7 @@
 
 namespace c10 {
 class Scalar;
-}
+} // namespace c10
 
 namespace torch::autograd {
 
@@ -49,7 +49,7 @@ inline bool variable_excluded_from_dispatch() {
 #endif
 }
 
-}
+} // namespace impl
 
 // NOTE: [Tensor vs. TensorBase]
 //

@@ -12,7 +12,7 @@ namespace torch::jit {
 
 namespace prim {
 using namespace ::c10::prim;
-}
+} // namespace prim
 
 class DeadCodeEliminator {
  public:

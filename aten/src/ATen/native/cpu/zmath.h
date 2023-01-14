@@ -247,5 +247,5 @@ inline TYPE min_impl (TYPE a, TYPE b) {
   }
 }
 
-} // end namespace
-} //end at::native
+} // namespace CPU_CAPABILITY
+} // namespace at::native

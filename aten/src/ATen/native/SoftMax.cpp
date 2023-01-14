@@ -144,7 +144,7 @@ TORCH_META_FUNC(_log_softmax_backward_data)
 
   set_output_raw_strided(0, grad.sizes(), {}, grad_input_options);
 }
-}
+} // namespace meta
 
 namespace native {
 namespace {
@@ -679,5 +679,5 @@ Tensor masked_softmax_backward_cpu(
       });
   return grad_input;
 }
-}
-}
+} // namespace native
+} // namespace at

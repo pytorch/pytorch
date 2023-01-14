@@ -307,6 +307,6 @@ Tensor _nnpack_spatial_convolution(
   return output;
 }
 
-} // namespace at
+} // namespace at::native
 
 #endif // AT_NNPACK_ENABLED

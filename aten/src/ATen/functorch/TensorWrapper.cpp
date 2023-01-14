@@ -210,4 +210,4 @@ TORCH_LIBRARY_IMPL(_, FuncTorchGradWrapper, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dead_tensor_wrapper_fallback>());
 }
 
-} // namespace at
+} // namespace at::functorch

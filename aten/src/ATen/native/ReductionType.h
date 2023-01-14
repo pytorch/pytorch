@@ -37,4 +37,4 @@ static inline ReductionType get_operator_enum(const c10::string_view reduce, boo
   }
 }
 
-} // at::native
+} // namespace at::native

@@ -829,4 +829,5 @@ Tensor& log_sigmoid_backward_cpu_out(const Tensor& grad_output,
 DEFINE_DISPATCH(GeluKernel);
 DEFINE_DISPATCH(GeluBackwardKernel);
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

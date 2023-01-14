@@ -55,6 +55,6 @@ bool available() {
   return internal::initialize();
 }
 
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

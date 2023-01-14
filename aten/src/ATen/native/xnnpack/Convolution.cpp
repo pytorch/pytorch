@@ -443,7 +443,7 @@ Tensor conv2d_transpose_clamp_run(
   return op_context->run(input);
 }
 
-} // namespace internal
+} // namespace internal::convolution2d
 
 bool use_convolution2d(
     const Tensor& input,
@@ -489,6 +489,6 @@ Tensor convolution2d(
       ContextConv2D::kMax);
 }
 
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

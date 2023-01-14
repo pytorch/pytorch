@@ -906,4 +906,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("native_layer_norm_backward", native_layer_norm_backward_plumbing);
 }
 
-}
+} // namespace at::functorch

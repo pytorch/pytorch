@@ -16,7 +16,7 @@ Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
   TORCH_CHECK(false, "copy_mkldnn_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace at
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

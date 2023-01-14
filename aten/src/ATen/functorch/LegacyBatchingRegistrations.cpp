@@ -823,4 +823,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("new_empty_strided", new_empty_strided_batching_rule);
 
 }
-} // namespace at
+} // namespace at::functorch

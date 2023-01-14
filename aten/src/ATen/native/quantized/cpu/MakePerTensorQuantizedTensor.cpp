@@ -35,4 +35,4 @@ Tensor make_per_tensor_quantized_tensor_cpu(
   return dst;
 }
 
-} // namespace at
+} // namespace at::native

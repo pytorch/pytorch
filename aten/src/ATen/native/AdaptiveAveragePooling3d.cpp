@@ -348,4 +348,4 @@ Tensor adaptive_avg_pool3d_backward_cpu(const Tensor& gradOutput_,
   return gradInput;
 }
 
-} // namespace at
+} // namespace at::native

@@ -45,7 +45,7 @@ bool CheckAndSaturate(T max_val, T* element) {
   }
   return false;
 }
-}
+} // namespace
 using namespace std;
 // A structure to hold quantization parameters 'scale' and 'zero_point'.
 // The meaning of these values is as the constants in the quantization equation

@@ -7,5 +7,5 @@ namespace jit {
 
 void initJITBindings(PyObject* module);
 
-}
+} // namespace jit
 } // namespace torch

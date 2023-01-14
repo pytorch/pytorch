@@ -27,4 +27,4 @@ TORCH_API int _mkldnn_set_verbose(int level) {
 #endif
 }
 
-} // namespace torch
+} // namespace torch::verbose

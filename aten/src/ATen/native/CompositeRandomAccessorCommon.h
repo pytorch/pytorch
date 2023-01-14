@@ -43,7 +43,7 @@ private:
   Accessor accessor;
 };
 
-}
+} // namespace
 
 // references_holder is used as a surrogate for the
 // references type from std::iterator_traits in CompositeRandomAccessor.

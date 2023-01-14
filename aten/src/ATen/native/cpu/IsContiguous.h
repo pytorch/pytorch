@@ -59,4 +59,5 @@ static inline bool is_contiguous_scalar(const int64_t* strides) {
   return IsContiguous<traits::arity, traits::arity, traits, s>::eval(strides);
 }
 
-}}
+} // namespace CPU_CAPABILITY
+} // namespace at::native

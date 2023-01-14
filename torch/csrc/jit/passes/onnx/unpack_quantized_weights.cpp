@@ -22,7 +22,7 @@ namespace jit {
 namespace onnx {
 using namespace ::c10::onnx;
 
-}
+} // namespace onnx
 
 // Get the scale of the input to quantized op. There are two cases here
 // 1. For ops with output_scale specified in op signature, we get the output

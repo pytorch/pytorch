@@ -25,4 +25,4 @@ const c10::ClassTypePtr& getCustomClassType() {
   return cache;
 }
 
-}
+} // namespace c10

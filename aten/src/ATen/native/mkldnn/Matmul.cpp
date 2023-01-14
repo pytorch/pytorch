@@ -35,7 +35,7 @@ bool mkldnn_bf16_gemm(
   return false;
 }
 
-} // namespace at
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

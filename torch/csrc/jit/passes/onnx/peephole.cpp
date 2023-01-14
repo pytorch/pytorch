@@ -28,7 +28,7 @@ namespace jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
-}
+} // namespace onnx
 
 bool isRNN(const Node* node) {
   auto k = node->kind();

@@ -87,7 +87,7 @@ thread_local bool cache_enabled = true;
 
 // autocast_gpu_dtype is the lower_precision_fp used by AutocastGPU.
 thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
-}
+} // namespace
 
 void clear_cache() {
   const std::lock_guard<std::mutex> lock(cached_casts_mutex);
@@ -621,4 +621,4 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 
 }
 } // namespace
-} // namespace at
+} // namespace at::autocast

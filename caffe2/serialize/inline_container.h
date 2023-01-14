@@ -90,7 +90,8 @@ typedef struct mz_zip_archive mz_zip_archive;
 // model.json as the last file when writing after we have accumulated all
 // other information.
 
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 
 class TORCH_API PyTorchStreamReader final {
  public:
@@ -193,4 +194,5 @@ size_t getPadding(
     std::string& padding_buf);
 } // namespace detail
 
+} // namespace serialize
 } // namespace caffe2

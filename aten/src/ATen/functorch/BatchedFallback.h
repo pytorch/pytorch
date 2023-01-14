@@ -77,4 +77,4 @@ std::tuple<A, B, C> slow_fallback(const c10::OperatorHandle& op, ArrayRef<IValue
 }
 
 
-} // namespace at
+} // namespace at::functorch

@@ -26,7 +26,7 @@ std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
   }
   return result;
 }
-}
+} // namespace
 // This is intentionally a separate function and in a .cpp file
 // because then the template is smaller and that benefits binary size
 C10_EXPORT FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
@@ -36,7 +36,7 @@ C10_EXPORT FunctionSchema make_function_schema(std::string&& name, std::string&&
 C10_EXPORT FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
   return make_function_schema("", "", arguments, returns);
 }
-}
+} // namespace detail::infer_schema
 
 C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema& lhs, const FunctionSchema& rhs) {
   if (lhs.arguments().size() != rhs.arguments().size()) {
@@ -74,4 +74,4 @@ C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema
   return c10::nullopt;
 }
 
-}
+} // namespace c10

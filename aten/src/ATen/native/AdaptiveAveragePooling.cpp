@@ -162,4 +162,4 @@ namespace {
 DEFINE_DISPATCH(adaptive_avg_pool2d_kernel);
 DEFINE_DISPATCH(adaptive_avg_pool2d_backward_kernel);
 
-} // at
+} // namespace at::native

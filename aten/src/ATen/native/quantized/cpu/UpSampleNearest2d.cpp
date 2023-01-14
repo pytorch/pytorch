@@ -237,4 +237,4 @@ Tensor _upsample_nearest_exact2d_quantized_cpu(
   return _upsample_nearest_exact2d_quantized_cpu(input, osize, scale_h, scale_w);
 }
 
-} // namespace at
+} // namespace at::native

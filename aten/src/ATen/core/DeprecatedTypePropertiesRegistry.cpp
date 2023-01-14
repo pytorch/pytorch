@@ -31,4 +31,4 @@ DeprecatedTypePropertiesRegistry & globalDeprecatedTypePropertiesRegistry() {
   return singleton;
 }
 
-}
+} // namespace at

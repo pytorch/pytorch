@@ -581,4 +581,4 @@ void _sparse_binary_op_intersection_kernel_out(
 
 } // anonymous namespace
 
-} // at::native
+} // namespace at::native

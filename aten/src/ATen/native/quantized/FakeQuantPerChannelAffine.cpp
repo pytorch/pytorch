@@ -259,4 +259,4 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   free(axis_for_reduction);
   return std::make_tuple(dX, dScale, dZeroPoint);
 }
-} // namespace at
+} // namespace at::native

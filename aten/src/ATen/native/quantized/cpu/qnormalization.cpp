@@ -174,4 +174,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   });
 }
 
-} // namespace at
+} // namespace at::native

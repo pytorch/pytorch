@@ -277,4 +277,6 @@ inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
 
 #endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-}}}
+} // namespace CPU_CAPABILITY
+} // namespace vec
+} // namespace at

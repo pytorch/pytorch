@@ -322,7 +322,7 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return out;
 }
 
-}
+} // namespace at::native
 
 #elif AT_MKL_ENABLED()
 #include <ATen/Dispatch.h>

@@ -88,6 +88,6 @@ Tensor& hardswish_(Tensor& input) {
   }
 }
 
-}
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

@@ -6,7 +6,7 @@
 
 namespace c10 {
 struct IValue;
-}
+} // namespace c10
 
 namespace caffe2::serialize {
 class IStreamAdapter;

@@ -865,4 +865,4 @@ Tensor empty_like_sparse_coo(
   }
 }
 
-} // namespace at
+} // namespace at::native

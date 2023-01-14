@@ -109,7 +109,7 @@ CBLAS_TRANSPOSE to_apple_accelerate_transpose(TransposeType trans) {
 }
 #endif
 
-}  // namespace (anonymous)
+} // namespace
 
 DEFINE_DISPATCH(gemm_stub);
 

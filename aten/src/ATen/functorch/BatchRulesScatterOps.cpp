@@ -893,7 +893,7 @@ Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t di
   }
   return index_;
 }
-}
+} // namespace
 
 Tensor index_select_decomp(const Tensor &self, int64_t dim, const Tensor &index)
 {
@@ -1083,4 +1083,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("as_strided_scatter", torch::CppFunction::makeFromBoxedFunction<&vmapErrorFallback>());
 }
 
-}
+} // namespace at::functorch

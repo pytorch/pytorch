@@ -186,4 +186,4 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
   return std::make_tuple(tensor_, other_);
 }
 
-}
+} // namespace at::functorch

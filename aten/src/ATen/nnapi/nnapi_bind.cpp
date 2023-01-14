@@ -206,4 +206,4 @@ void NnapiCompilation::get_operand_type(const at::Tensor& t, ANeuralNetworksOper
   CAFFE_THROW("Bad dtype: " + std::to_string(static_cast<int8_t>(t.scalar_type())));
 }
 
-} // namespace torch
+} // namespace torch::nnapi::bind

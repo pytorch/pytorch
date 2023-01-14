@@ -46,4 +46,4 @@ bool torch_function_mode_enabled() {
          PythonTorchFunctionTLS::stack_len() > 0;
 }
 
-} // namespace at
+} // namespace at::impl

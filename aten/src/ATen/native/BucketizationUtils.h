@@ -163,4 +163,4 @@ inline void searchsorted_pre_check(
   }
 }
 
-}
+} // namespace at::native

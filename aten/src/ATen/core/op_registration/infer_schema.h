@@ -141,7 +141,7 @@ FunctionSchema createFunctionSchemaFromTraitsSingleReturn(std::string&& name, st
  return make_function_schema(std::move(name), std::move(overload_name), arguments, returns);
 }
 
-}
+} // namespace detail::infer_schema
 
 template<class FuncType>
 FunctionSchema inferFunctionSchemaFlattenedReturns() {
@@ -155,4 +155,4 @@ FunctionSchema inferFunctionSchemaSingleReturn(std::string&& name, std::string&&
 
 TORCH_API c10::optional<std::string> findSchemaDifferences(const FunctionSchema& inferred, const FunctionSchema& specified);
 
-}
+} // namespace c10

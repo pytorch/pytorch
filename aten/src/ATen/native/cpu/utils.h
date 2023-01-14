@@ -71,7 +71,7 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr)
   return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size()));
 }
 
-} // namespace
+} // namespace CPU_CAPABILITY
 
 namespace utils {
 
@@ -147,4 +147,4 @@ inline void parallel_sparse_csr(
 
 } // namespace utils
 
-} // namespace at
+} // namespace at::native

@@ -3105,7 +3105,7 @@ struct InferUnsqueezeGeometryResult {
       : sizes(tensor_sizes.begin(), tensor_sizes.end())
       , strides(tensor_strides.begin(), tensor_strides.end()) {}
 };
-}
+} // namespace
 InferUnsqueezeGeometryResult
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
   InferUnsqueezeGeometryResult result(tensor.sizes(), tensor.strides());

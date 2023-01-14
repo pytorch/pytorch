@@ -150,4 +150,4 @@ Tensor corrcoef(const Tensor& self) {
       : c.clip(-1, 1);
 }
 
-} // namespace at
+} // namespace at::native

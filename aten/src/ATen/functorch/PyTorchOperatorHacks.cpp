@@ -288,7 +288,7 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
   return _feature_alpha_dropout<true>(input, p, train);
 }
 
-} // dropout_hack
+} // namespace dropout_hack
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerFrontMode, m) {
   m.impl("index_select_backward", index_select_backward_hack);
@@ -307,4 +307,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerFrontMode, m) {
   m.impl("feature_alpha_dropout_", dropout_hack::feature_alpha_dropout_);
 }
 
-}
+} // namespace at::functorch

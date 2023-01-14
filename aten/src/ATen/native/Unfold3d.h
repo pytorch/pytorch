@@ -46,4 +46,4 @@ void Unfold3dAccCPU(
     int64_t pad_w,
     void *dst);
 
-} // namespace at
+} // namespace at::native

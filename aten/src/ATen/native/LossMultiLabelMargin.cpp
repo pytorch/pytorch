@@ -332,4 +332,4 @@ Tensor multilabel_margin_loss(const Tensor & self, const Tensor & target, int64_
   return std::get<0>(at::multilabel_margin_loss_forward(self, target, reduction));
 }
 
-} // namespace at
+} // namespace at::native

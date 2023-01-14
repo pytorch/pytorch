@@ -144,4 +144,4 @@ struct hash<c10::Symbol> {
     return std::hash<uint32_t>()(static_cast<uint32_t>(s));
   }
 };
-}
+} // namespace std

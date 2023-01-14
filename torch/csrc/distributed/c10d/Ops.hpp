@@ -112,4 +112,4 @@ TORCH_API c10::intrusive_ptr<Work> recv_any_source(
     at::TensorList tensors,
     int64_t tag);
 
-} // namespace c10d
+} // namespace c10d::ops

@@ -7,11 +7,11 @@ class Tensor;
 class TensorBase;
 struct TensorIterator;
 struct TensorIteratorBase;
-}
+} // namespace at
 
 namespace c10 {
 class Scalar;
-}
+} // namespace c10
 
 namespace at::native {
 

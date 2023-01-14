@@ -13,4 +13,4 @@ bool tensorlist_has_dispatch(at::ITensorListRef li);
 bool tensorlist_has_dispatch(const c10::List<c10::optional<at::Tensor>>& li);
 using c10::impl::dispatch_mode_enabled;
 
-}
+} // namespace at::impl

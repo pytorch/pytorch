@@ -480,4 +480,6 @@ inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::ne(
 
 #endif
 
-}}}
+} // namespace CPU_CAPABILITY
+} // namespace vec
+} // namespace at

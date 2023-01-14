@@ -96,7 +96,7 @@ namespace {
       }
     }
   }
-}
+} // namespace
 
 // Vanilla implementation to compute contiguous strides given some sizes.
 // Should probably refactor this into shared code (also used in TensorImpl.h)

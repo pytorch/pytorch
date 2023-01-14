@@ -4,7 +4,7 @@ namespace torch::autograd::impl {
 
 namespace {
 JitDecompInterface* impl = nullptr;
-}
+} // namespace
 
 void setJitDecompImpl(JitDecompInterface* impl_) {
   impl = impl_;

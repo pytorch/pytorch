@@ -237,4 +237,4 @@ Tensor _upsample_nearest_exact3d_quantized_cpu(
       input, osize, scale_d, scale_h, scale_w);
 }
 
-} // namespace at
+} // namespace at::native

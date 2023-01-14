@@ -154,4 +154,4 @@ Tensor max_pool1d(
       self, kernel_size, stride, padding, dilation, ceil_mode);
 }
 
-} // namespace at
+} // namespace at::native

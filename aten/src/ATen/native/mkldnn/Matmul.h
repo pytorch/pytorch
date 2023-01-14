@@ -29,4 +29,4 @@ bool mkldnn_bf16_gemm(
     float beta,
     c10::BFloat16 *c, int64_t ldc);
 
-}
+} // namespace at::native

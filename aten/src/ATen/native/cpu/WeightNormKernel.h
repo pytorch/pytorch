@@ -4,7 +4,7 @@
 
 namespace at {
 class TensorBase;
-}
+} // namespace at
 
 namespace at::native {
 

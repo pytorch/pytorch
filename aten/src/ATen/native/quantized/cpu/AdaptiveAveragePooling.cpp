@@ -352,4 +352,4 @@ Tensor adaptive_avg_pool3d_quantized_cpu(
   return at::native::adaptive_avg_pool3d_out_quantized_cpu(input, output_size, output);
 }
 
-} // namespace at
+} // namespace at::native

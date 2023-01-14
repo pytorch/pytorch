@@ -33,7 +33,7 @@ namespace torch::jit {
 // variable objects for use in the interpreter.
 namespace interpreter {
 struct CodeImpl;
-}
+} // namespace interpreter
 
 struct Node;
 struct GraphExecutor;

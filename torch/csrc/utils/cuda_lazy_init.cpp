@@ -10,7 +10,7 @@ namespace {
 
 bool is_initialized = false;
 
-}
+} // namespace
 
 void cuda_lazy_init() {
   pybind11::gil_scoped_acquire g;

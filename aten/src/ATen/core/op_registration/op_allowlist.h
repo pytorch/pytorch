@@ -193,4 +193,4 @@ constexpr bool dispatch_key_allowlist_check(DispatchKey /*k*/) {
 #endif
 }
 
-} // namespace c10
+} // namespace c10::impl

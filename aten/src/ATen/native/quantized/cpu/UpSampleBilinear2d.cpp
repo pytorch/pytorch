@@ -230,4 +230,4 @@ Tensor upsample_bilinear2d_quantized_cpu(
 }
 
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);
-} // namespace at
+} // namespace at::native

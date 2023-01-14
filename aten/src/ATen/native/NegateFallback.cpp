@@ -47,4 +47,4 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m)
 }
 
-} // namespace at
+} // namespace at::native

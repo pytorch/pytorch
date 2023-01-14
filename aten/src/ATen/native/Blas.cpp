@@ -37,7 +37,7 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
   set_output_raw_strided(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
 }
-}
+} // namespace meta
 
 namespace native {
 
@@ -223,4 +223,5 @@ Tensor vdot(const Tensor &self, const Tensor &other){
 
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

@@ -287,4 +287,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
 }
 
-}
+} // namespace at::functorch

@@ -14,7 +14,7 @@ namespace jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
-}
+} // namespace onnx
 
 namespace onnx_constant_fold {
 

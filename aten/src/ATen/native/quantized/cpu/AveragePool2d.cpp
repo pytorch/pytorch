@@ -356,7 +356,7 @@ Tensor qnnpack_avg_pool2d(
       "failed to run QNNPACK Average Pool operator");
   return output.contiguous(input.suggest_memory_format());
 }
-} // qnnp_avgpool_helper
+} // namespace qnnp_avgpool_helper
 #endif
 
 Tensor avg_pool2d_quantized_cpu(
@@ -394,4 +394,4 @@ Tensor avg_pool2d_quantized_cpu(
   return output;
 }
 
-} // namespace at
+} // namespace at::native

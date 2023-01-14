@@ -69,4 +69,4 @@ Tensor NestedTensor_neg(const Tensor& self) {
   return map_nt(self, at::neg);
 }
 
-} // namespace at
+} // namespace at::native

@@ -10,4 +10,4 @@ TORCH_API sparse::SparseTensor& _mul_dense_sparse_out(const Tensor& d, const Ten
 TORCH_API sparse::SparseTensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& other, Tensor& res);
 TORCH_API sparse::SparseTensor& _mul_sparse_sparse_out(const Tensor& x, const Tensor& y, Tensor& res);
 
-}
+} // namespace at::native

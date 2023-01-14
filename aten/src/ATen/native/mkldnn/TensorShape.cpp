@@ -38,7 +38,7 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "mkldnn_transpose_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace at
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 
@@ -107,4 +107,4 @@ Tensor mkldnn_view_symint(const Tensor& self, c10::SymIntArrayRef size) {
   return mkldnn_view(self, C10_AS_INTARRAYREF_SLOW(size));
 }
 
-} // namespace at
+} // namespace at::native

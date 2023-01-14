@@ -29,7 +29,7 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
   using func_type = typename c10::remove_DispatchKeySet_arg_from_func<KernelFunctor>::func_type;
   return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>());
 }
-}
+} // namespace detail
 
 /**
  * An instance of this class handles the registration for one or more operators.
@@ -593,4 +593,4 @@ private:
 namespace torch {
   // Old-style API
   using RegisterOperators = c10::RegisterOperators;
-}
+} // namespace torch

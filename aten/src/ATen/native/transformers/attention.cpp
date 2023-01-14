@@ -902,4 +902,4 @@ Tensor triton_multi_head_attention(
 #endif
   return proj;
 }
-} // namespace at
+} // namespace at::native

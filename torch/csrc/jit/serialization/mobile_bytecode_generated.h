@@ -2576,7 +2576,7 @@ inline void FinishSizePrefixedModuleBuffer(
   fbb.FinishSizePrefixed(root, ModuleIdentifier());
 }
 
-}  // namespace torch
+} // namespace torch::jit::mobile::serialization
 
 #endif  // FLATBUFFERS_GENERATED_MOBILEBYTECODE_TORCH_JIT_MOBILE_SERIALIZATION_H_
 // @generated

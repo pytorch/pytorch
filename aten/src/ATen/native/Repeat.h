@@ -45,4 +45,4 @@ static inline Tensor repeat_interleave_common(
   return result;
 }
 
-} // namespace at
+} // namespace at::native

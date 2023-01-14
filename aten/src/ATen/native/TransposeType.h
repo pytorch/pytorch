@@ -20,4 +20,4 @@ static inline char to_blas(TransposeType trans) {
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
 
-}  // at::native
+} // namespace at::native

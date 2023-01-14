@@ -38,7 +38,7 @@ namespace {
     }
     return "(unknown)";
   }
-}
+} // namespace
 
 CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppSignature> cpp_signature, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))

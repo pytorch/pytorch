@@ -9,4 +9,4 @@ using sampled_addmm_sparse_csr_fn = void(*)(const Tensor&, const Tensor&, const 
 
 DECLARE_DISPATCH(sampled_addmm_sparse_csr_fn, sampled_addmm_sparse_csr_stub);
 
-} // at::native
+} // namespace at::native

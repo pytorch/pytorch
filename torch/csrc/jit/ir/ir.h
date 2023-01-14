@@ -70,13 +70,13 @@ using ::c10::fmap;
 
 namespace prim {
 using namespace ::c10::prim;
-}
+} // namespace prim
 namespace attr {
 using namespace ::c10::attr;
-}
+} // namespace attr
 namespace aten {
 using namespace ::c10::aten;
-}
+} // namespace aten
 namespace cuda {
 #if !defined(USE_ROCM)
 using namespace ::c10::cuda;

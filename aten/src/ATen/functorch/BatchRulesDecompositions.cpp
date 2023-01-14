@@ -310,4 +310,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(multiply_, Scalar)
 }
 
-}
+} // namespace at::functorch

@@ -329,4 +329,4 @@ avg_pool3d_backward_shape_check(
 
 } // namespace
 
-} // at
+} // namespace at::native

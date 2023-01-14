@@ -29,7 +29,7 @@ Tensor& mkldnn_tanh_(Tensor& self) {
   TORCH_CHECK(false, "mkldnn_tanh_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace at
+} // namespace at::native
 
 #else // AT_MKLDNN_ENABLED
 

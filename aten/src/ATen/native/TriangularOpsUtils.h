@@ -54,4 +54,4 @@ static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor
   return std::make_tuple(true, tensor);
 }
 
-}  // namespace at
+} // namespace at::native

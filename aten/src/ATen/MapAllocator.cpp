@@ -61,7 +61,7 @@ const std::string unknown_filename = "filename not specified";
 #ifdef _WIN32
 const std::string unknown_eventname = "eventname not specified";
 #endif
-}  // namespace (anonymous)
+} // namespace
 
 MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size)
   : filename_(filename.empty() ? unknown_filename : std::move(filename))

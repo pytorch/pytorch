@@ -1244,4 +1244,6 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
 }
 
 #endif // if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-}}}
+} // namespace CPU_CAPABILITY
+} // namespace vec
+} // namespace at

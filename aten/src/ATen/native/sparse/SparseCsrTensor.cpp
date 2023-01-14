@@ -1108,4 +1108,4 @@ Tensor select_copy_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
   return select_sparse_csr_worker<false, true>(self, dim, index);
 }
 
-} // namespace at
+} // namespace at::native

@@ -11,4 +11,4 @@ enum Reduction {
   Sum,              // Sum losses
   END
 };
-} // namespace at
+} // namespace at::Reduction

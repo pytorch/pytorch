@@ -117,4 +117,4 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
   return std::make_tuple(dInput, dWeight, dBias);
 }
 
-}
+} // namespace at::native

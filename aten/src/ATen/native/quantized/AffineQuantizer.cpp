@@ -300,4 +300,4 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
   return rtensor;
 }
 
-} // namespace at
+} // namespace at::native

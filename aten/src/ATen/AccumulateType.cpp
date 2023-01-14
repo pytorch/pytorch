@@ -17,4 +17,4 @@ c10::ScalarType toAccumulateType(c10::ScalarType type, bool is_cuda) {
   }
 }
 
-}
+} // namespace at

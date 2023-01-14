@@ -79,7 +79,7 @@ class TORCH_API APIVitals {
 
 extern TORCH_API APIVitals VitalsAPI;
 
-} // namespace at
+} // namespace at::vitals
 
 #define TORCH_VITAL_DECLARE(name) \
   TORCH_API at::vitals::TorchVital TorchVital_##name;

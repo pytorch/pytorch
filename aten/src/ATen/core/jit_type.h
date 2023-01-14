@@ -19,7 +19,7 @@
 
 namespace torch::jit {
 struct Function;
-} // namespace torch
+} // namespace torch::jit
 
 namespace c10 {
 
@@ -490,7 +490,7 @@ template<typename T>
 inline bool isComplete(const T& /*t*/) {
   return true;
 }
-}
+} // namespace detail
 
 template <typename T>
 struct VaryingShape {

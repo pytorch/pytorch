@@ -157,4 +157,4 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
   }
 }
 
-} // namespace at
+} // namespace at::native

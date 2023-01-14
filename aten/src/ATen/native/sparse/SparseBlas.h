@@ -15,4 +15,4 @@ TORCH_API void sparse_sampled_addmm_check_inputs(
     const Scalar& alpha,
     const Tensor& result);
 
-} // namespace at
+} // namespace at::native::sparse

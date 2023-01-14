@@ -32,4 +32,4 @@ Tensor empty_mkldnn(IntArrayRef sizes, c10::optional<ScalarType> dtype, c10::opt
 
 #endif // AT_MKLDNN_ENABLED()
 
-}
+} // namespace at::native

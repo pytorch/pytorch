@@ -10,7 +10,7 @@ namespace torch::jit {
 
 namespace prim {
 using namespace ::c10::prim;
-}
+} // namespace prim
 
 GraphFunction* tryToGraphFunction(Node* n) {
   if (n->kind() == prim::CallFunction) {

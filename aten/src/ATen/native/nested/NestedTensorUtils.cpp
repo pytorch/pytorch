@@ -107,4 +107,4 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   return splits;
 }
 
-} // namespace at
+} // namespace at::native

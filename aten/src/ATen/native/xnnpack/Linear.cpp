@@ -187,7 +187,7 @@ unpack_prepacked_sizes_linear(const IValue& ivalue) {
       (bias && bias->defined()) ? at::OptionalIntArrayRef(bias->sizes()) : c10::nullopt));
 }
 
-} // namespace internal
+} // namespace internal::linear
 
 bool use_linear(
     const Tensor& input,
@@ -214,6 +214,6 @@ Tensor linear(
       ContextLinear::kMax);
 }
 
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

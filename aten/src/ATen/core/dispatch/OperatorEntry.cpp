@@ -13,7 +13,7 @@ namespace {
       return "(catch all)";
     }
   }
-}
+} // namespace
 
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 : name_(std::move(operator_name))
@@ -614,4 +614,4 @@ std::string OperatorEntry::dumpState() const {
   return oss.str();
 }
 
-}
+} // namespace c10::impl

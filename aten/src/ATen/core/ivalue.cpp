@@ -523,7 +523,7 @@ std::ostream& printDict(
   out << "}";
   return out;
 }
-}
+} // namespace
 
 // Properly disambiguate the type of an empty dict
 std::ostream& printMaybeAnnotatedDict(
@@ -1134,7 +1134,7 @@ std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
   return oss.str();
 }
 
-}
+} // namespace
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     List<intrusive_ptr<ivalue::Future>> srcs) {

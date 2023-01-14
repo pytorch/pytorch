@@ -498,4 +498,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(fill_, Tensor, fill__Tensor_batch_rule);
 }
 
-}
+} // namespace at::functorch

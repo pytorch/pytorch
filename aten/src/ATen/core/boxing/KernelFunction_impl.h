@@ -224,4 +224,4 @@ inline std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value,
     );
 }
 
-}
+} // namespace c10

@@ -188,4 +188,4 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
   return sobolstate;
 }
 
-} // namespace at
+} // namespace at::native

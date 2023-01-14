@@ -68,4 +68,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
 }
 
 
-} // namespace at
+} // namespace at::functorch

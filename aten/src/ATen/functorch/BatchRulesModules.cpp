@@ -438,4 +438,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UPSAMPLE_BACKWARD(upsample_trilinear3d_backward);
   m.impl("one_hot", one_hot_decomposition_hack);
 }
-}
+} // namespace at::functorch

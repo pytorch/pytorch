@@ -63,7 +63,7 @@ DECLARE_DISPATCH(slow_conv_transpose3d_backward_fn, slow_conv_transpose3d_backwa
 
 namespace {
   static bool cudnnv8_heuristic_mode_b = c10::utils::check_env("TORCH_CUDNN_USE_HEURISTIC_MODE_B") == true;
-}
+} // namespace
 
 static inline bool cudnnv8_enabled_check_debug() {
   static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_DISABLED") != true;

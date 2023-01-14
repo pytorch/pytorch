@@ -237,6 +237,6 @@ Tensor max_pool2d(
   return output_padded_contig_nhwc.contiguous(input.suggest_memory_format());
 }
 
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

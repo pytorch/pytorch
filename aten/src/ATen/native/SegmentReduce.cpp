@@ -564,4 +564,4 @@ REGISTER_ZVECTOR_DISPATCH(
     _segment_reduce_offsets_backward_stub,
     &_segment_reduce_cpu_offsets_backward_kernel);
 
-} // namespace at
+} // namespace at::native

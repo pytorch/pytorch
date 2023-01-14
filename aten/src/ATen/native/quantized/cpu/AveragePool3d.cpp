@@ -183,4 +183,4 @@ Tensor avg_pool3d_quantized_cpu(
   return output;
 }
 
-} // namespace at
+} // namespace at::native

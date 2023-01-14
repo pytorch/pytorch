@@ -193,4 +193,4 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   }
 }
 
-} // namespace at
+} // namespace at::native

@@ -44,4 +44,4 @@ inline const Tensor& resize_named_tensor_(
       optional_memory_format.value());
   return self;
 }
-}
+} // namespace at::native

@@ -64,7 +64,7 @@ static OptionalTensorRef make_otr(const TensorBase &tensor) {
   }
 }
 
-}
+} // namespace
 
 namespace internal {
 
@@ -82,7 +82,7 @@ const Tensor& OpaqueOptionalTensorRef::getTensor() const {
   return get()->getTensorRef();
 }
 
-}
+} // namespace internal
 
 void OperandInfo::tensor(c10::MaybeOwned<TensorBase> &&tensor) {
   tensor_base_ = std::move(tensor);

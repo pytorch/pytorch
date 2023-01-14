@@ -55,7 +55,7 @@ static Tensor & masked_fill_impl_quantized_cpu(Tensor & self, const Tensor & mas
   masked_fill_kernel_quantized_stub(iter.device_type(), iter, value, self.q_scale(), self.q_zero_point());
   return self;
 }
-}
+} // namespace
 
 Tensor & masked_fill__quantized_cpu(Tensor& self, const Tensor & mask, const Scalar& value) {
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "masked_fill__quantized_cpu for quantized tensors is currently only supported for per tensor quantized tensors");
@@ -202,4 +202,4 @@ Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::op
   return self;
 }
 
-}
+} // namespace at::native

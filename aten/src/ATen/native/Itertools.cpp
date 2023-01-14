@@ -73,4 +73,4 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   return at::stack(grids, 1);
 }
 
-}  // namespace at
+} // namespace at::native

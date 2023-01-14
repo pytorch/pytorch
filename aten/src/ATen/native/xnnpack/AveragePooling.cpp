@@ -76,6 +76,6 @@ Tensor global_average_pool(
 
   return output.to(input.suggest_memory_format());
 }
-}
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

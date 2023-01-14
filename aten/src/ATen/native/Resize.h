@@ -163,4 +163,4 @@ inline void setStrided(
   self_->set_sizes_and_strides(size, stride, c10::make_optional(storage_offset));
 }
 
-}
+} // namespace at::native

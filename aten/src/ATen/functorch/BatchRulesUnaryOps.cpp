@@ -196,4 +196,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 }
 
 #undef INVOKE
-}
+} // namespace at::functorch

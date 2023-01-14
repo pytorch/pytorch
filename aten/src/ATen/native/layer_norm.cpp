@@ -258,4 +258,4 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   rstd = rstd.view(stat_shape);
   return std::make_tuple(out, mean, rstd);
 }
-} // namespace at
+} // namespace at::native

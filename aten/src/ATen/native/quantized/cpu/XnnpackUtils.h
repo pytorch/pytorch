@@ -270,6 +270,6 @@ enum xnn_status xnnp_setup_fully_connected_nc(
       threadpool);        /* pthreadpool_t threadpool          */
 }
 
-} // namespace at
+} // namespace at::native::xnnp_utils
 
 #endif // USE_XNNPACK

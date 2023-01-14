@@ -39,4 +39,4 @@ using pooling_fn = void (*)(Tensor&, const Tensor&, const PoolingParams1D&);
 
 DECLARE_DISPATCH(pooling_fn, max_pool1d_stub);
 
-} // namespace at
+} // namespace at::native

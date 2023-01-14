@@ -9,7 +9,7 @@
 namespace torch::jit {
 struct CompilationUnit;
 struct Function;
-} // namespace torch
+} // namespace torch::jit
 
 namespace c10 {
 
@@ -437,4 +437,4 @@ struct TORCH_API ClassType : public NamedType {
   std::vector<std::string> unresolved_class_attributes_;
 };
 
-}
+} // namespace c10

@@ -773,7 +773,7 @@ inline bool isnan_(T x) {
   return std::isnan(x);
 }
 #endif
-}
+} // namespace
 
 template<typename T1, typename T2, typename Operation>
 void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
@@ -1231,7 +1231,7 @@ void inline set_result(Tensor& result, accscalar_t sum)
       *result.data_ptr<scalar_t>() = sum;
     }
 }
-}
+} // namespace
 // NOTE: this could be implemented via diag and sum, but this has perf problems,
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {

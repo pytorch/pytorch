@@ -11,7 +11,7 @@
 
 namespace c10 {
 struct Device;
-}
+} // namespace c10
 
 namespace torch::lazy {
 

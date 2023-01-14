@@ -133,7 +133,7 @@ matmul_nested_helper(
   Tensor output = wrap_buffer(buffer, sizemat);
   return std::make_tuple(batch_sizes, output);
 }
-}
+} // namespace
 
 Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
   // Tensor self = self_.contiguous();
@@ -347,4 +347,4 @@ Tensor& matmul_out_nested(const Tensor& tensor1, const Tensor& tensor2, Tensor& 
   return result;
 }
 
-} // namespace at
+} // namespace at::native

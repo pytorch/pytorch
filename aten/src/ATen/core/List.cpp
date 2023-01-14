@@ -11,4 +11,4 @@ bool operator==(const ListImpl& lhs, const ListImpl& rhs) {
           rhs.list.cbegin(),
           _fastEqualsForContainer);
 }
-} // namespace c10
+} // namespace c10::detail

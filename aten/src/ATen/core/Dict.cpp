@@ -24,4 +24,4 @@ bool operator==(const DictImpl& lhs, const DictImpl& rhs) {
 
   return true;
 }
-} // namespace c10
+} // namespace c10::detail

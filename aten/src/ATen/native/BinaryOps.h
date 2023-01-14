@@ -7,7 +7,7 @@
 namespace at {
 struct TensorIterator;
 struct TensorIteratorBase;
-}
+} // namespace at
 
 namespace at::native {
 

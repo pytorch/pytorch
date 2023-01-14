@@ -60,4 +60,4 @@ inline bool ivalueParticipatesInCurrentLevel(const IValue& ivalue) {
   return false;
 }
 
-}
+} // namespace at::functorch

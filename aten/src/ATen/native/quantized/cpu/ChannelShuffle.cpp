@@ -119,4 +119,4 @@ class QChannelShuffle final : public c10::OperatorKernel {
 
 } // namespace
 
-} // namespace at
+} // namespace at::native
