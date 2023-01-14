@@ -87,6 +87,9 @@ int rangePush(
     std::optional<std::string> domain,
     std::optional<std::string> category,
     std::optional<uint32_t> color) {
+#ifdef USE_ROCM
+  return roctxRangePushA(msg.c_str());
+#else
   nvtxEventAttributes_t eventAttrib =
       getAttributes(msg, domain, category, color);
 
@@ -95,13 +98,18 @@ int rangePush(
         registry.getDomain(domain.value()), &eventAttrib);
   else
     return nvtxRangePushEx(&eventAttrib);
+#endif
 }
 
 int rangePop(std::optional<std::string> domain) {
+#ifdef USE_ROCM
+  return roctxRangePop();
+#else
   if (domain)
     return nvtxDomainRangePop(registry.getDomain(domain.value()));
   else
     return nvtxRangePop();
+#endif
 }
 
 void mark(
@@ -109,6 +117,9 @@ void mark(
     std::optional<std::string> domain,
     std::optional<std::string> category,
     std::optional<uint32_t> color) {
+#ifdef USE_ROCM
+  roctxMarkA(msg.c_str());
+#else
   nvtxEventAttributes_t eventAttrib =
       getAttributes(msg, domain, category, color);
 
@@ -116,13 +127,17 @@ void mark(
     nvtxDomainMarkEx(registry.getDomain(domain.value()), &eventAttrib);
   else
     nvtxMarkEx(&eventAttrib);
+#endif
 }
 
-nvtxRangeId_t rangeStart(
+uint64_t rangeStart(
     const std::string& msg,
     std::optional<std::string> domain,
     std::optional<std::string> category,
     std::optional<uint32_t> color) {
+#ifdef USE_ROCM
+  return roctxRangeStartA(msg.c_str());
+#else
   nvtxEventAttributes_t eventAttrib =
       getAttributes(msg, domain, category, color);
 
@@ -131,15 +146,18 @@ nvtxRangeId_t rangeStart(
         registry.getDomain(domain.value()), &eventAttrib);
   else
     return nvtxRangeStartEx(&eventAttrib);
+#endif
 }
 
-void rangeEnd(
-    const nvtxRangeId_t& range_id,
-    std::optional<std::string> domain) {
+void rangeEnd(const uint64_t& range_id, std::optional<std::string> domain) {
+#ifdef USE_ROCM
+  roctxRangeStop(range_id);
+#else
   if (domain)
-    return nvtxDomainRangeEnd(registry.getDomain(domain.value()), range_id);
+    nvtxDomainRangeEnd(registry.getDomain(domain.value()), range_id);
   else
-    return nvtxRangeEnd(range_id);
+    nvtxRangeEnd(range_id);
+#endif
 }
 
 void initNvtxBindings(PyObject* module) {
@@ -147,7 +165,7 @@ void initNvtxBindings(PyObject* module) {
 
   auto nvtx = m.def_submodule("_nvtx", "libNvToolsExt.so bindings");
   nvtx.def(
-      "rangePushA",
+      "rangePush",
       rangePush,
       "NVTX range push",
       py::arg("message"),
@@ -156,7 +174,7 @@ void initNvtxBindings(PyObject* module) {
       py::arg("color"));
   nvtx.def("rangePop", rangePop, "NVTX range pop", py::arg("domain"));
   nvtx.def(
-      "rangeStartA",
+      "rangeStart",
       rangeStart,
       "NVTX range start",
       py::arg("message"),
@@ -166,7 +184,7 @@ void initNvtxBindings(PyObject* module) {
   nvtx.def(
       "rangeEnd", rangeEnd, "NVTX range end", py::arg("id"), py::arg("domain"));
   nvtx.def(
-      "markA",
+      "mark",
       mark,
       "NVTX mark",
       py::arg("message"),

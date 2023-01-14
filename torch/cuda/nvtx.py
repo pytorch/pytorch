@@ -8,9 +8,9 @@ except ImportError:
         def _fail(*args, **kwargs):
             raise RuntimeError("NVTX functions not installed. Are you sure you have a CUDA build?")
 
-        rangePushA = _fail
+        rangePush = _fail
         rangePop = _fail
-        markA = _fail
+        mark = _fail
 
     _nvtx = _NVTXStub()  # type: ignore[assignment]
 
@@ -28,7 +28,7 @@ def range_push(msg, domain=None, category=None, color=None):
         category(str): ASCII category name
         color(int) ARGB color
     """
-    return _nvtx.rangePushA(msg, domain, category, color)
+    return _nvtx.rangePush(msg, domain, category, color)
 
 
 def range_pop(domain=None):
@@ -59,7 +59,7 @@ def range_start(msg, domain=None, category=None, color=None) -> int:
         category(str): ASCII category name
         color(int) ARGB color
     """
-    return _nvtx.rangeStartA(msg, domain, category, color)
+    return _nvtx.rangeStart(msg, domain, category, color)
 
 
 def range_end(range_id, domain=None) -> None:
@@ -83,7 +83,7 @@ def mark(msg, domain=None, category=None, color=None):
         category(str): ASCII category name
         color(int) ARGB color
     """
-    return _nvtx.markA(msg, domain, category, color)
+    return _nvtx.mark(msg, domain, category, color)
 
 
 @contextmanager
