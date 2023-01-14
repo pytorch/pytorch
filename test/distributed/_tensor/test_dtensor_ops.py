@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DEVICE_TYPE,
     DTensorConverter,
-    DTensorTestBase,
+    DTensorOpTestBase,
     TEST_SKIPS,
 )
 from torch.testing._internal.distributed._tensor.dtensor_lagging_op_db import (
@@ -661,7 +661,7 @@ def check_dtensor_func(test_case, test_func, opinfo, dry_run=False):
         test_case.destroy_pg()
 
 
-class TestDTensorOps(DTensorTestBase):
+class TestDTensorOps(DTensorOpTestBase):
     @property
     def world_size(self) -> int:
         return 4
