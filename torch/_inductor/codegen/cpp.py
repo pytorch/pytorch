@@ -3,9 +3,10 @@ import dataclasses
 import functools
 import math
 import sys
-from copy import deepcopy
+from copy import copy, deepcopy
 from pathlib import Path
 from typing import Dict, List
+from unittest.mock import patch
 
 import sympy
 
@@ -14,7 +15,7 @@ from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..utils import sympy_product, sympy_subs, sympy_symbol
+from ..utils import cache_on_self, sympy_product, sympy_subs, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
@@ -232,6 +233,30 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.sqrt()"
 
     @staticmethod
+    def eq(x, y):
+        return f"{x} == {y}"
+
+    @staticmethod
+    def ne(x, y):
+        return f"{x} != {y}"
+
+    @staticmethod
+    def lt(x, y):
+        return f"{x} < {y}"
+
+    @staticmethod
+    def gt(x, y):
+        return f"{x} > {y}"
+
+    @staticmethod
+    def le(x, y):
+        return f"{x} <= {y}"
+
+    @staticmethod
+    def ge(x, y):
+        return f"{x} >= {y}"
+
+    @staticmethod
     def rsqrt(x):
         return f"{x}.rsqrt()"
 
@@ -277,7 +302,10 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def tanh(a):
-        return f"{a}.tanh()"
+        vec_one = f"decltype({a})(1)"
+        vec_two = f"decltype({a})(2)"
+        vec_minus_two = f"decltype({a})(-2)"
+        return f"{vec_two} / ({vec_one} + ({vec_minus_two} * {a}).exp()) - {vec_one}"
 
     @staticmethod
     def reciprocal(a):
@@ -520,6 +548,11 @@ class CppOverrides(OpOverrides):
             code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
         elif other == float("inf"):
             code.writeline(f"float {var} = std::numeric_limits<float>::infinity();")
+        elif isinstance(other, bool):
+            if other:
+                code.writeline(f"auto {var} = true;")
+            else:
+                code.writeline(f"auto {var} = false;")
         elif isinstance(other, float):
             code.writeline(f"float {var} = {other};")
         else:
@@ -580,8 +613,19 @@ class CppKernel(Kernel):
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = DeferredIndentedBuffer()
-        self.reduction_vars = {}
+        self.reduction_var_map = {}
+        self.preloads = IndentedBuffer()
+        self.poststores = DeferredIndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
+
+    def scale_index_with_offset(
+        self, index: sympy.Expr, scale, itervar_idx=-1, offset=0
+    ):
+        expanded_index = sympy.expand(index)
+        var = self.itervars[itervar_idx]
+        replacement = {var: var * scale + offset}
+        new_index = sympy_subs(expanded_index, replacement)
+        return new_index
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -612,7 +656,7 @@ class CppKernel(Kernel):
             self.loads, f"reduction {name} {cexpr(index)}", write=False
         )
         index = self.rename_indexing(index)
-        self.reduction_vars[tmpvar] = reduction_type
+        self.reduction_var_map[tmpvar] = reduction_type
         if argmax_or_argmin:
             self.reduction_prefix.writelines(
                 argmax_argmin_prefix(reduction_type, src_dtype, tmpvar)
@@ -665,65 +709,85 @@ class CppKernel(Kernel):
     def size_hint(self):
         return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
 
-    def codegen_loops(self, code, worksharing):
+    def codegen_loops_impl(self, loop_nest, code, worksharing):
         threads = parallel_num_threads()
-
-        loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
-        loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
-            loops[self.reduction_depth :]
+        par_depth = self.decide_parallel_depth(
+            self.call_ranges[: loop_nest.max_parallel_depth()], threads
         )
-        reductions.mark_reduction(self.reduction_vars)
-
-        if codecache.pick_vec_isa():
-            # TODO(jansel): detect stride-1 dimension and vectorize that
-            if reductions:
-                reductions.loops[-1].simd = True
-            elif loops:
-                loops.loops[-1].simd = True
-
-        par_depth = 0
-        reduction_par_depth = 0
-        if loops:
-            par_depth = self.decide_parallel_depth(
-                self.call_ranges[: self.reduction_depth], threads
-            )
-        else:
-            reduction_par_depth = self.decide_parallel_depth(
-                self.call_ranges[self.reduction_depth :], threads
-            )
-
         with contextlib.ExitStack() as stack:
             if par_depth:
-                worksharing.parallel(threads)
-                loops.mark_parallel(par_depth)
-            elif reduction_par_depth:
-                # need to close the worksharing scope to define reduction vars outside it
-                worksharing.close()
-                reductions.mark_parallel(reduction_par_depth)
+                if loop_nest.is_reduction_only():
+                    # need to close the worksharing scope to define reduction vars outside it
+                    worksharing.close()
+                else:
+                    worksharing.parallel(threads)
+                loop_nest.mark_parallel(par_depth)
             elif threads > 1:
                 if worksharing.single():
                     stack.enter_context(code.indent())
 
-            loops.codegen(code, stack)
-
-            with contextlib.ExitStack() as stack_outer:
-                if self.reduction_prefix:
-                    stack_outer.enter_context(code.indent())
-                code.splice(self.reduction_prefix)
-
-                if reduction_par_depth:
-                    worksharing.parallel(threads)
-
+            def gen_kernel(kernel):
                 with contextlib.ExitStack() as stack:
-                    reductions.codegen(code, stack)
-                    code.splice(self.loads)
-                    code.splice(self.compute)
-                    code.splice(self.stores)
+                    assert kernel
+                    if hasattr(kernel, "codegen_inner_loops"):
+                        code.splice(kernel.preloads)
+                        kernel.codegen_inner_loops(code)
+                        stack.enter_context(code.indent())
+                    code.splice(kernel.loads)
+                    code.splice(kernel.compute)
+                    code.splice(kernel.stores)
+                if hasattr(kernel, "codegen_inner_loops"):
+                    code.splice(kernel.poststores)
 
-                if reduction_par_depth:
-                    worksharing.close()
+            def gen_loops(loops: List[LoopLevel], in_reduction=False):
+                with contextlib.ExitStack() as stack_outer:
+                    if loops:
+                        loop = loops[0]
+                        if loop.is_reduction() and not in_reduction:
+                            kernels = loop.get_kernels()
+                            assert kernels
+                            # TODO(jgong5): should gen prefix for all kernels.
+                            # currently, Vec kernel generates prefix for both
+                            # vector and scalar kernels.
+                            if kernels[0].reduction_prefix:
+                                stack_outer.enter_context(code.indent())
+                            code.splice(kernels[0].reduction_prefix)
+                        if loop_nest.is_reduction_only() and loop.parallel:
+                            worksharing.parallel(threads)
 
-                code.splice(self.reduction_suffix)
+                    for loop in loops:
+                        gen_loop(loop, in_reduction)
+
+                    if loops:
+                        if loop_nest.is_reduction_only() and loop.parallel:
+                            worksharing.close()
+                        for loop in loops:
+                            if loop.is_reduction() and not in_reduction:
+                                kernels = loop.get_kernels()
+                                for kernel in kernels:
+                                    code.splice(kernel.reduction_suffix)
+
+            def gen_loop(loop: LoopLevel, in_reduction=False):
+                with contextlib.ExitStack() as stack:
+                    code.writelines(loop.lines())
+                    stack.enter_context(code.indent())
+                    # generate inner loops or loop body
+                    if loop.inner:
+                        gen_loops(loop.inner, loop.is_reduction())
+                    else:
+                        kernels = loop.get_kernels()
+                        assert len(kernels) == 1
+                        gen_kernel(kernels[0])
+
+            stack.enter_context(code.indent())
+            if loop_nest.root:
+                gen_loops(loop_nest.root)
+            else:
+                gen_kernel(loop_nest.kernel)
+
+    def codegen_loops(self, code, worksharing):
+        loop_nest = LoopNestWithSplit.build(self)
+        self.codegen_loops_impl(loop_nest, code, worksharing)
 
     def decide_parallel_depth(self, ranges, threads):
         seq = self.size_hint()
@@ -763,39 +827,34 @@ class CppKernel(Kernel):
 class CppVecKernel(CppKernel):
     overrides = CppVecOverrides
 
-    def __init__(self, args, num_threads):
+    def __init__(self, args, num_threads, tiling_factor=0):
         super(CppVecKernel, self).__init__(args, num_threads)
         assert codecache.pick_vec_isa()
-        self.simd_nelements = codecache.pick_vec_isa().nelements()
+        if tiling_factor == 0:
+            tiling_factor = codecache.pick_vec_isa().nelements()
+        self.tiling_factor = tiling_factor
         self.reduction_omp_dec: Dict[str, str] = {}
         self.var_vec_buf_map: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
-    def is_single_step_var(self, var: sympy.Symbol, index: sympy.Expr):
+    def stride_at(self, var: sympy.Symbol, index: sympy.Expr):
         replacement = {var: var + 1}
         new_index = sympy_subs(index, replacement)
-        delta = sympy.simplify(new_index - index)
-        return delta == 1
+        return sympy.simplify(new_index - index)
 
-    def is_var_irrevelant(self, var: sympy.Symbol, index: sympy.Expr):
+    def is_stride1_at(self, var: sympy.Symbol, index: sympy.Expr):
+        return self.stride_at(var, index) == 1
+
+    def is_invariant_under(self, var: sympy.Symbol, index: sympy.Expr):
         expanded_index = sympy.expand(index)
         return not expanded_index.has(var)
-
-    def transform_index(self, index: sympy.Expr):
-        expanded_index = sympy.expand(index)
-        assert self.simd_nelements
-        assert self.simd_nelements >= 1
-        most_inner_var = self.itervars[-1]
-        replacement = {most_inner_var: most_inner_var * self.simd_nelements}
-        new_index = sympy_subs(expanded_index, replacement)
-        return new_index
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
         expanded_index = sympy.expand(index)
-        new_index = self.transform_index(index)
+        new_index = self.scale_index_with_offset(index, self.tiling_factor)
 
         if expanded_index == new_index:
             line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
@@ -823,7 +882,7 @@ class CppVecKernel(CppKernel):
         assert mode is None
 
         expanded_index = sympy.expand(index)
-        new_index = self.transform_index(index)
+        new_index = self.scale_index_with_offset(index, self.tiling_factor)
         assert new_index != expanded_index
         line = f"{value}.store({var} + {cexpr(new_index)});"
         self.stores.writeline(name, line)
@@ -860,7 +919,7 @@ class CppVecKernel(CppKernel):
         tmpvar_vec = f"{tmpvar}_vec"
 
         index = self.rename_indexing(index)
-        self.reduction_vars[tmpvar] = reduction_type
+        self.reduction_var_map[tmpvar_vec] = reduction_type
         self.reduction_prefix.writeline(
             f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
@@ -878,16 +937,198 @@ class CppVecKernel(CppKernel):
             reduce_all_body += f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
         reduce_all_body += "}"
         vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+        next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
         self.reduction_suffix.writeline(
             name,
-            f"{tmpvar} = {vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec});",
+            f"{reduction_combine(reduction_type, tmpvar, next_value)};",
         )
+        # NOTE(jgong5): we do not generate the real stores here with the assumption that
+        # the scalar kernel that handles the loop tail would be generated and generates
+        # the stores there.
         self.cse.store_cache[name] = tmpvar
 
 
+class CppTile2DKernel(CppVecKernel):
+    """
+    A vector kernel that handles the 2d tiles with the tile size defined in `tiling_factor` on
+    the inner-most loop level and one of the outer loop level (`outer_tiling_idx`). When the data
+    tile is accessed in a contiguous way from the outer loop axis, a transposition is applied on the
+    tile to make the access contiguous from the inner-most loop axis. Then, the same vectorization
+    logic from its parent `CppVecKernel` is leveraged for load/store/compute. The transposed tile load
+    and store are generated into kernel.preloads and kernel.poststores buffers.
+
+    The loop structure looks like below:
+    for ...
+      for i_outer ...
+        for ...
+          for inner_most ...
+            // generated by CppTile2DKernel
+            float tmp0[16*16]; at::vec::transpose_mxn<...>(tmp0, in_ptr0 + ..., ...); // into kernel.preloads
+            float tmp1[16*16]; // into kernel.preloads
+            for i_inner ... { // the kernel inner loop
+              vectorized loads/compute/stores (e.g., load tmp0, store tmp1) // into kernel.loads/compute/stores
+            }
+            at::vec::transpose_mxn(out_ptr0 + ..., tmp1, ...) // into kernel.poststores
+          for inner_most ... (tail)
+            // generated by CppTile2DTailKernel
+            ...
+      for i_outer ... (tail)
+        for ...
+          for ...
+            // generated by CppKernel
+            ...
+    """
+
+    def __init__(self, args, num_threads, tiling_factor, outer_tiling_idx):
+        super().__init__(args, num_threads, tiling_factor)
+        self.outer_tiling_idx = outer_tiling_idx
+
+    def inner_itervar(self):
+        return sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
+
+    def need_vec_transpose(self, index):
+        return self.is_stride1_at(
+            self.itervars[self.outer_tiling_idx], index
+        ) and not self.is_invariant_under(self.itervars[-1], index)
+
+    def gen_transposed_tile_load_store(self, name, var, index, is_store):
+        # transposed tile load/store outside the kernel inner loop
+        factor = self.tiling_factor
+        new_index = self.scale_index_with_offset(index, factor, itervar_idx=-1)
+        new_index = self.scale_index_with_offset(
+            new_index, factor, itervar_idx=self.outer_tiling_idx
+        )
+
+        src = f"{var} + {cexpr(new_index)}"
+        dst = "__place_holder__"
+        ld_src = f"{cexpr(self.stride_at(self.itervars[-1], index))}"
+        ld_dst = f"{factor}"
+        if is_store:
+            src, dst = dst, src
+            ld_src, ld_dst = ld_dst, ld_src
+
+        need_define = True
+        load_or_store = f"at::vec::transpose_mxn<float,{factor},{factor}>({src}, {ld_src}, {dst}, {ld_dst});"
+        if is_store:
+            tile_var = self.cse.newvar()
+        elif load_or_store not in self.cse.cache:
+            tile_var = self.cse.generate(self.preloads, load_or_store, write=False)
+        else:
+            need_define = False
+            tile_var = self.cse.cache[load_or_store]
+
+        if need_define:
+            define_line = f"float {tile_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
+            self.preloads.writeline(define_line)
+
+        load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
+        if is_store:
+            self.poststores.writeline(name, load_or_store)
+        else:
+            self.preloads.writeline(load_or_store)
+
+        return tile_var
+
+    def load(self, name: str, index: sympy.Expr):
+        var = self.args.input(name)
+        index = self.rename_indexing(index)
+
+        inner = self.inner_itervar()
+        expanded_index = sympy.expand(index)
+        if self.need_vec_transpose(expanded_index):
+            tile_var = self.gen_transposed_tile_load_store(
+                name, var, expanded_index, is_store=False
+            )
+            # vector load inside the kernel inner loop
+            line = f"at::vec::Vectorized<float>::loadu({tile_var} + {cexpr(inner * self.tiling_factor)})"
+            return self.cse.generate(self.loads, line)
+        else:
+            new_index = self.scale_index_with_offset(
+                expanded_index,
+                self.tiling_factor,
+                itervar_idx=self.outer_tiling_idx,
+                offset=inner,
+            )
+            return super().load(name, new_index)
+
+    def store(self, name, index, value, mode=None):
+        assert "buf" in name
+        var = self.args.output(name)
+
+        inner = self.inner_itervar()
+        index = self.rename_indexing(index)
+        assert mode is None
+        # TODO(jgong5): assert the index is an affine expression on the itervars in concern
+        expanded_index = sympy.expand(index)
+        if self.need_vec_transpose(expanded_index):
+            tile_var = self.gen_transposed_tile_load_store(
+                name, var, expanded_index, is_store=True
+            )
+            # vector store inside the kernel inner loop
+            line = f"{value}.store({tile_var} + {cexpr(inner * self.tiling_factor)});"
+            self.stores.writeline(name, line)
+        else:
+            new_index = self.scale_index_with_offset(
+                expanded_index,
+                self.tiling_factor,
+                itervar_idx=self.outer_tiling_idx,
+                offset=inner,
+            )
+            super().store(name, new_index, value, mode)
+
+    def codegen_inner_loops(self, code):
+        inner = self.inner_itervar()
+        code.writeline(
+            f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++)"
+        )
+
+
+class CppTile2DTailKernel(CppKernel):
+    """
+    A scalar kernel that handles the tail of inner-most loop split from a 2d tiling. The tile of the outer
+    loop axis is handled with a kernel inner loop (see method `codegen_inner_loops`).
+    """
+
+    def __init__(self, args, num_threads, tiling_factor, outer_tiling_idx):
+        super().__init__(args, num_threads)
+        self.outer_tiling_idx = outer_tiling_idx
+        self.tiling_factor = tiling_factor
+
+    def inner_itervar(self):
+        return sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
+
+    def transform_index(self, index):
+        index = self.rename_indexing(index)
+        expanded_index = sympy.expand(index)
+        new_index = self.scale_index_with_offset(
+            expanded_index,
+            self.tiling_factor,
+            itervar_idx=self.outer_tiling_idx,
+            offset=self.inner_itervar(),
+        )
+        return new_index
+
+    def load(self, name: str, index: sympy.Expr):
+        new_index = self.transform_index(index)
+        return super().load(name, new_index)
+
+    def store(self, name, index, value, mode=None):
+        assert "buf" in name
+        var = self.args.output(name)
+        assert mode is None
+        new_index = self.transform_index(index)
+        super().store(name, new_index, value, mode)
+
+    def codegen_inner_loops(self, code):
+        inner = self.inner_itervar()
+        code.writeline(
+            f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++)"
+        )
+
+
 class CppVecKernelChecker(CppVecKernel):
-    def __init__(self, args, num_threads):
-        super(CppVecKernelChecker, self).__init__(args, num_threads)
+    def __init__(self, args, num_threads, tiling_factor):
+        super(CppVecKernelChecker, self).__init__(args, num_threads, tiling_factor)
 
         # Since this kernel is only for checker but does not genreate any
         # code, so we need to decrease the kernel count.
@@ -905,9 +1146,6 @@ class CppVecKernelChecker(CppVecKernel):
                 self.fast_vec_list.append(k)
         self.exit_stack = contextlib.ExitStack()
 
-    def is_legal_data_access(self, var: sympy.Symbol, index: sympy.Expr):
-        return self.is_var_irrevelant(var, index) or self.is_single_step_var(var, index)
-
     def could_vec(self, name: str, index: sympy.Expr):
         assert self.itervars is not None
         # Not a loop
@@ -915,7 +1153,9 @@ class CppVecKernelChecker(CppVecKernel):
             return False
 
         most_inner_var = self.itervars[-1]
-        return self.is_legal_data_access(most_inner_var, index)
+        return self.is_invariant_under(most_inner_var, index) or self.is_stride1_at(
+            most_inner_var, index
+        )
 
     def load(self, name: str, index: sympy.Expr):
         if not V.graph.get_dtype(name) in [
@@ -1032,220 +1272,178 @@ class CppVecKernelChecker(CppVecKernel):
         return self
 
 
+class CppTile2DKernelChecker(CppVecKernelChecker):
+    """
+    Currently, we only address the situations with following constraints.
+    1. There exists one and only one fp32 load/store with outer loop var having contiguous buffer accesses.
+    2. When a load/store doesn't have contiguous access in an outer loop var, the access should be
+       vectorizable from the inner-most dim.
+    3. No reduction.
+    """
+
+    def __init__(self, args, num_threads, tiling_factor):
+        super().__init__(args, num_threads, tiling_factor)
+        self.can_tile2d = True
+        self.outer_tiling_idx = -1
+
+    def check_can_tile2d(self, name: str, index: sympy.Expr):
+        if not self.can_tile2d:
+            return
+        # check contiguity from any of the outer loops
+        has_stride1 = False
+        for loop_idx, itervar in enumerate(self.itervars[:-1]):
+            if self.is_stride1_at(itervar, index):
+                # only support 2d tile now
+                if V.graph.get_dtype(name) not in [torch.float, torch.float32] or (
+                    self.outer_tiling_idx >= 0 and self.outer_tiling_idx != loop_idx
+                ):
+                    self.can_tile2d = False
+                    return
+                else:
+                    self.outer_tiling_idx = loop_idx
+                has_stride1 = True
+        if not has_stride1 and not self.could_vec(name, index):
+            self.can_tile2d = False
+        return self.can_tile2d
+
+    def load(self, name: str, index: sympy.Expr):
+        if not V.graph.get_dtype(name) in [
+            torch.float,
+            torch.float32,
+            torch.bool,
+            torch.uint8,
+        ]:
+            self.can_tile2d = False
+            return self.can_tile2d
+        index = self.rename_indexing(index)
+        return self.check_can_tile2d(name, index)
+
+    def store(self, name, index, value, mode=None):
+        if not V.graph.get_dtype(name) in [
+            torch.float,
+            torch.float32,
+        ]:
+            self.can_tile2d = False
+            return self.can_tile2d
+        index = self.rename_indexing(index)
+        return self.check_can_tile2d(name, index)
+
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+        self.can_tile2d = False
+        return self.can_tile2d
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        super().__exit__(exc_type, exc_val, exc_tb)
+        if not self.simd_vec or self.outer_tiling_idx < 0:
+            self.can_tile2d = False
+
+
 class CppKernelProxy(CppKernel):
-    def __init__(self, args=None, num_threads=None):
-        super(CppKernelProxy, self).__init__(args, num_threads)
-        self.simd_vec_kernel: CppVecKernel = None
-        self.simd_omp_kernel: CppKernel = None
+    def __init__(self, kernel_group):
+        super(CppKernelProxy, self).__init__(
+            kernel_group.args, kernel_group.ws.num_threads
+        )
+        self.kernel_group = kernel_group
+        self.loop_nest = None
+        self.call_ranges = None
         self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
 
-    def vectorize_most_inner_loop(self, loop_nest, dtype=torch.float):
-        assert self.picked_vec_isa
-        nelements = self.picked_vec_isa.nelements(dtype)
-        loop_nest.split_most_inner_loop(nelements)
-        loop_with_tail = loop_nest.loops[-1]
-        assert isinstance(loop_with_tail, LoopLevelWithTail)
+    def codegen_nodes(self, nodes):
+        kernel_group = self.kernel_group
+        _, (group, reduction_group) = max(
+            nodes, key=lambda x: int(x.is_reduction())
+        ).group
 
-        loop_with_tail.main_loop.simd_vec = True
+        def codegen_kernel(cls, *args):
+            with kernel_group.new_kernel(cls, *args) as kernel:
+                run(kernel)
 
-        loop_with_tail.tail_loop.simd_omp = True
-        # We chope the loop into two cubes by the nelements - main loop and tail loop.
-        # Regarding the main loop, it is straightforward that it could be vectorized with
-        # nelements. But for the tail loop, it still could be vectorized. For example,
-        # if the nelements is 8(256bits), then the tail loop still could be vectorized
-        # as 4(128bits).
-        loop_with_tail.tail_loop.simd_nelements = int(nelements / 2)
-        loop_with_tail.tail_loop.simd_vec = False
+                # Ugly hack to maitain the metrics kernel count since
+                # we only count in CppKernelProxy, not those contained in it
+                metrics.generated_kernel_count -= 1
 
-        loop_with_tail.main_loop_body = self.simd_vec_kernel
-        loop_with_tail.tail_loop_body = self.simd_omp_kernel
-        return loop_nest
+                return kernel
+
+        def run(kernel):
+            vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+            in_suffix = False
+            for node in nodes:
+                if node.group[1] in [
+                    (group, reduction_group),
+                    (group + reduction_group, ()),
+                ]:
+                    assert not in_suffix
+                    node.run(vars, reduction_vars)
+                else:
+                    in_suffix = True
+                    assert node.group[1] == (
+                        group,
+                        (),
+                    ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
+                    # we can fuse in some extra pointwise into the suffix
+                    with kernel.write_to_suffix():
+                        node.run(vars, ())
+
+        scalar_kernel = codegen_kernel(CppKernel)
+        inner_most_idx = len(scalar_kernel.itervars) - 1
+        self.call_ranges = scalar_kernel.call_ranges
+        self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
+
+        if not self.picked_vec_isa:
+            return
+
+        # TODO(jgong5): support alternative tiling factors and data types
+        tiling_factor = self.picked_vec_isa.nelements(dtype=torch.float)
+
+        # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
+        # But the generated scalar kernel has updated these global contexts. Hence, the other kernels
+        # should not do this again to avoid context conflict. By now, we only control the
+        # config.inplace_buffers. In the future, we could maintain more contexts.
+        with patch.object(torch._inductor.config, "inplace_buffers", False):
+
+            with CppVecKernelChecker(
+                deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
+            ) as vec_checker:
+                run(vec_checker)
+
+            with CppTile2DKernelChecker(
+                deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
+            ) as tile2d_checker:
+                run(tile2d_checker)
+
+            if vec_checker.simd_vec:
+                main_loop, tail_loop = self.loop_nest.split_with_tiling(
+                    inner_most_idx, factor=tiling_factor
+                )
+                main_loop.set_kernel(codegen_kernel(CppVecKernel, tiling_factor))
+                tail_loop.set_kernel(scalar_kernel)
+                main_loop.simd_vec = True
+                tail_loop.simd_omp = True
+                # We chop the loop into two cubes by the nelements - main loop and tail loop.
+                # Regarding the main loop, it is straightforward that it could be vectorized with
+                # nelements. But for the tail loop, it still could be vectorized. For example,
+                # if the nelements is 8(256bits), then the tail loop still could be vectorized
+                # as 4(128bits).
+                tail_loop.simd_nelements = tiling_factor // 2
+            elif tile2d_checker.can_tile2d:
+                outer_tiling_idx = tile2d_checker.outer_tiling_idx
+                assert outer_tiling_idx < inner_most_idx
+                outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
+                    outer_tiling_idx, factor=tiling_factor
+                )
+                outer_tail_loop.set_kernel(scalar_kernel)
+                inner_main_loop, inner_tail_loop = outer_main_loop.split_with_tiling(
+                    inner_most_idx - outer_tiling_idx, factor=tiling_factor
+                )
+                inner_main_loop.set_kernel(
+                    codegen_kernel(CppTile2DKernel, tiling_factor, outer_tiling_idx)
+                )
+                inner_tail_loop.set_kernel(
+                    codegen_kernel(CppTile2DTailKernel, tiling_factor, outer_tiling_idx)
+                )
 
     def codegen_loops(self, code, worksharing):
-        threads = parallel_num_threads()
-
-        if self.simd_vec_kernel is None or not self.picked_vec_isa:
-            assert self.simd_omp_kernel
-            return self.simd_omp_kernel.codegen_loops(code, worksharing)
-
-        assert self.simd_vec_kernel.itervars == self.simd_omp_kernel.itervars
-        assert self.simd_vec_kernel.ranges == self.simd_omp_kernel.ranges
-        assert (
-            self.simd_vec_kernel.reduction_vars == self.simd_omp_kernel.reduction_vars
-        )
-
-        itervars = self.simd_vec_kernel.itervars
-        rangs = self.simd_vec_kernel.ranges
-        loops = [LoopLevel(var, size) for var, size in zip(itervars, rangs)]
-        assert (
-            self.simd_vec_kernel.reduction_depth == self.simd_omp_kernel.reduction_depth
-        )
-        reduction_depth = self.simd_vec_kernel.reduction_depth
-        loops_nest_non_reduce, loops_nest_reduce = LoopNest(
-            loops[:reduction_depth]
-        ), LoopNest(loops[reduction_depth:])
-        loops_nest_reduce.mark_reduction(self.simd_vec_kernel.reduction_vars)
-
-        assert self.picked_vec_isa
-        # Do not apply vectorization since the range of most inner is too small. Meanwhile,
-        # If the range of the most inner is less then the codecache.pick_vec_isa().nelements(),
-        # the generated code for some reduction will be as follows that leads to incrrect result.
-        #
-        #    LINE01:  float tmp1 = 0;
-        #    LINE02:  auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
-        #    LINE03:  for(long i1=0; i1<2; i1+=1)
-        #    LINE04:  {
-        #    LINE05:      for(long i2=0; i2<0; i2+=1)
-        #    LINE06:      {
-        #    LINE07:          auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i0) + (16*i2) + (32*i1));
-        #    LINE08:          tmp1_vec += tmp0;
-        #    LINE09:      }
-        #    LINE10:      tmp1 = vec_reduce_all<float>([](Vectorized<float>& x, Vectorized<float>&y) {return x + y;}, tmp1_vec);
-        #    LINE11:      #pragma omp simd simdlen(8)  reduction(+:tmp1)
-        #    LINE12:      for(long i2=0; i2<8; i2+=1)
-        #    LINE13:      {
-        #    LINE14:          auto tmp0 = in_ptr0[i2 + (8*i0) + (32*i1)];
-        #    LINE15:          tmp1 += tmp0;
-        #    LINE16:      }
-        #    LINE17:  }
-        #    LINE18:  out_ptr3[i0] = tmp1;
-        #
-        # tmp1_vec(LINE02) will always be zero as it is initialized with tmp1 value and the range(LINE05)
-        # is 0. Hence, the LINE10 will always reset tmp1 to 0. But tmp1(LINE01) is global value. So the result
-        # will be incorrect. We skip thie case.
-        most_inner_loop = (
-            loops_nest_reduce.loops[-1]
-            if loops_nest_reduce
-            else loops_nest_non_reduce.loops[-1]
-        )
-        main_loop_range = ir.IndexingDiv(
-            most_inner_loop.size, self.picked_vec_isa.nelements()
-        )
-        loop_interval = sympy.simplify(main_loop_range)
-        # TODO(Eikan): To support dynamic shape.
-        if not loop_interval.is_integer or loop_interval <= 0:
-            metrics.generated_cpp_vec_kernel_count -= 1
-            return self.simd_omp_kernel.codegen_loops(code, worksharing)
-
-        # TODO(jansel): detect stride-1 dimension and vectorize that
-        if loops_nest_reduce:
-            loops_nest_reduce.loops[-1].simd = True
-        elif loops_nest_non_reduce:
-            loops_nest_non_reduce.loops[-1].simd = True
-
-        par_depth = 0
-        reduction_par_depth = 0
-        if loops_nest_non_reduce:
-            par_depth = self.simd_vec_kernel.decide_parallel_depth(
-                self.simd_vec_kernel.call_ranges[:reduction_depth], threads
-            )
-        else:
-            reduction_par_depth = self.simd_vec_kernel.decide_parallel_depth(
-                self.simd_vec_kernel.call_ranges[reduction_depth:], threads
-            )
-
-        # If the most inner loop of the reduction will be vectorized, the vectorization
-        # will add a vec variable for reduction. Take the code snippet as an example:
-        #     float tmp1 = 0;
-        #     for(long i1=0; i1<8; i1+=1) {
-        #        auto tmp0 = in_ptr0[i1];
-        #        tmp1 += tmp0;
-        #     }
-        # The vectorization will add tmp1_vec for reduction and then the loop will be transformed
-        # as follows.
-        #     float tmp1 = 0;
-        #     auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
-        #     for(long i1=0; i1<1; i1+=1) {
-        #        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i1));
-        #        tmp1_vec += tmp0;
-        #     }
-        #     tmp1 = at::vec::vec_reduce_all<float>([]
-        #       (at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;},
-        #       tmp1_vec);
-        #     for(long i1=8; i1<8; i1+=1) {
-        #        auto tmp0 = in_ptr0[i1];
-        #        tmp1 += tmp0;
-        #     }
-        # It means that the vectorization introduce another reduction variable(tmp1_vec).
-        # If the most inner loop of the reduction is not a parallelized but its parent reduction
-        # loop is parallized, the new added reduction variable(tmp1_vec) could not be added
-        # to the parallelized loop reduction. So we skip this case and does not vectorize it.
-        if reduction_par_depth > 0 and reduction_par_depth != len(
-            loops_nest_reduce.loops
-        ):
-            metrics.generated_cpp_vec_kernel_count -= 1
-            return self.simd_omp_kernel.codegen_loops(code, worksharing)
-
-        with contextlib.ExitStack() as stack:
-            if par_depth:
-                worksharing.parallel(threads)
-                loops_nest_non_reduce.mark_parallel(par_depth)
-            elif reduction_par_depth:
-                # need to close the worksharing scope to define reduction vars outside it
-                worksharing.close()
-                loops_nest_reduce.mark_parallel(reduction_par_depth)
-            elif threads > 1:
-                if worksharing.single():
-                    stack.enter_context(code.indent())
-
-            non_reduce_loops = loops_nest_non_reduce.loops
-            reduce_loops = loops_nest_reduce.loops
-            loop_with_tail: LoopLevelWithTail = None
-
-            if loops_nest_reduce:
-                self.vectorize_most_inner_loop(loops_nest_reduce)
-                loop_with_tail = loops_nest_reduce.loops[-1]
-                # The most inner loop will be vectorized
-                reduce_loops = reduce_loops[0:-1]
-            else:
-                self.vectorize_most_inner_loop(loops_nest_non_reduce)
-                loop_with_tail = loops_nest_non_reduce.loops[-1]
-                # The most inner loop will be vectorized
-                non_reduce_loops = non_reduce_loops[0:-1]
-
-            # The reductions loops are always the loop body of non-reduction loops
-            for loop in non_reduce_loops:
-                code.writelines(loop.lines())
-                stack.enter_context(code.indent())
-
-            with contextlib.ExitStack() as stack_outer:
-                if self.simd_vec_kernel.reduction_prefix:
-                    stack_outer.enter_context(code.indent())
-                code.splice(self.simd_vec_kernel.reduction_prefix)
-
-                if reduction_par_depth:
-                    worksharing.parallel(threads)
-
-                with contextlib.ExitStack() as stack:
-                    for loop in reduce_loops:
-                        code.writelines(loop.lines())
-                        stack.enter_context(code.indent())
-
-                    def gen_vectorized_loop(loop, kernel, write_reduction_suffix=False):
-                        code.writelines(loop.lines())
-                        with contextlib.ExitStack() as stack:
-                            stack.enter_context(code.indent())
-                            code.splice(kernel.loads)
-                            code.splice(kernel.compute)
-                            code.splice(kernel.stores)
-                        if write_reduction_suffix:
-                            code.splice(kernel.reduction_suffix)
-
-                    # Regarding the vectorized reduction loop, we need to call reduce_all to to reduce
-                    # the vectorize as a single scalar. Hence, we set write_reduction_suffix to True to
-                    # gen the code.
-                    gen_vectorized_loop(
-                        loop_with_tail.main_loop, loop_with_tail.main_loop_body, True
-                    )
-
-                    gen_vectorized_loop(
-                        loop_with_tail.tail_loop, loop_with_tail.tail_loop_body, False
-                    )
-
-                if reduction_par_depth:
-                    worksharing.close()
-
-                code.splice(loop_with_tail.tail_loop_body.reduction_suffix)
+        self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
 
 class CppScheduling:
@@ -1279,110 +1477,14 @@ class CppScheduling:
     def can_fuse_vertical(cls, node1, node2):
         return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
 
-    def can_vec(self, nodes):
-        if not codecache.pick_vec_isa():
-            return False
-
-        _, (group, reduction_group) = max(
-            nodes, key=lambda x: int(x.is_reduction())
-        ).group
-
-        with CppVecKernelChecker(
-            deepcopy(self.kernel_group.args), parallel_num_threads()
-        ) as kernel_checker:
-            vars, reduction_vars = kernel_checker.set_ranges(group, reduction_group)
-            for node in nodes:
-                if node.group[1] in [
-                    (group, reduction_group),
-                    (group + reduction_group, ()),
-                ]:
-                    node.run(vars, reduction_vars)
-                else:
-                    assert node.group[1] == (
-                        group,
-                        (),
-                    ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
-                    node.run(vars, ())
-
-            return kernel_checker.simd_vec
-
-    def _codegen_nodes_impl(self, nodes, is_simd_vec=False):
-        """
-        Turn an set of pre-fused nodes into a C++ kernel.
-        """
-        kernel_group = self.kernel_group
-        _, (group, reduction_group) = max(
-            nodes, key=lambda x: int(x.is_reduction())
-        ).group
-
-        def create_kernel(_is_simd_vec):
-            in_suffix = False
-
-            with kernel_group.new_kernel(_is_simd_vec) as kernel:
-                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-
-                for node in nodes:
-                    if node.group[1] in [
-                        (group, reduction_group),
-                        (group + reduction_group, ()),
-                    ]:
-                        assert not in_suffix
-                        node.run(vars, reduction_vars)
-                    else:
-                        in_suffix = True
-                        assert node.group[1] == (
-                            group,
-                            (),
-                        ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
-                        # we can fuse in some extra pointwise into the suffix
-                        with kernel.write_to_suffix():
-                            node.run(vars, ())
-                return kernel
-
-        org_inplace_buffers_flag = config.inplace_buffers
-        if is_simd_vec:
-            # Create vectorization kernel
-            cpp_vec_kernel = create_kernel(True)
-
-            # Since a kernel is divided into two parts - vectorization and non-vectorization.
-            # And the two parts share the same global contexts like V.graph.wrapper_code,
-            # V.kernel.args. But the vectorization kernel generation has updated these global
-            # contexts. Hence, the non-vectorization kernel should not do this again to avoid
-            # conext conflict. By now, we only control the config.inplace_buffers. In the future,
-            # we could maintain more contexts.
-            config.inplace_buffers = False
-
-            # Create non-vectorization kernel
-            cpp_kernel = create_kernel(False)
-
-            # Restore the inplace_buffers flag
-            config.inplace_buffers = org_inplace_buffers_flag
-            return (cpp_vec_kernel, cpp_kernel)
-        else:
-            return (None, create_kernel(False))
-
     def codegen_nodes(self, nodes):
         """
         Turn an set of pre-fused nodes into a C++ kernel.
         """
         kernel_group = self.kernel_group
 
-        can_be_simd_vec = self.can_vec(nodes)
-        simd_vec_kernel, simd_omp_kernel = self._codegen_nodes_impl(
-            nodes, can_be_simd_vec
-        )
-
-        assert simd_omp_kernel
-        metrics.generated_kernel_count -= 1
-        # Maitain the metrics kernel count
-        if simd_vec_kernel:
-            metrics.generated_kernel_count -= 1
-
-        cpp_kernel_proxy = CppKernelProxy(
-            kernel_group.args, kernel_group.ws.num_threads
-        )
-        cpp_kernel_proxy.simd_vec_kernel = simd_vec_kernel
-        cpp_kernel_proxy.simd_omp_kernel = simd_omp_kernel
+        cpp_kernel_proxy = CppKernelProxy(kernel_group)
+        cpp_kernel_proxy.codegen_nodes(nodes)
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, None)
 
@@ -1404,11 +1506,8 @@ class KernelGroup:
         self.stack.enter_context(self.ws)
         self.count = 0
 
-    def new_kernel(self, simd_vec=False):
-        if simd_vec:
-            return CppVecKernel(self.args, parallel_num_threads())
-        else:
-            return CppKernel(self.args, parallel_num_threads())
+    def new_kernel(self, cls, *args):
+        return cls(self.args, parallel_num_threads(), *args)
 
     def finalize_kernel(self, new_kernel, scheduler):
         self.count += 1
@@ -1516,14 +1615,113 @@ class LoopLevel:
     simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
     simd_vec: bool = False
     collapsed: bool = False
-    reduction_vars: Dict[str, str] = None
+    reduction_var_map: Dict[str, str] = None
+    parent: "LoopLevel" = None
+    # the next inner level of the loop, empty if it is inner-most
+    # contains >1 LoopLevel if the inner level of loop is split
+    inner: List["LoopLevel"] = dataclasses.field(default_factory=list)
+    # kernel assigned to this loop level, only valid when it is a leaf
+    kernel: CppKernel = None
+
+    def get_kernels(self) -> List[CppKernel]:
+        """Get all kernel objects under this loop level"""
+        if self.kernel:
+            return [self.kernel]
+        kernels = []
+        for loop in self.inner:
+            kernels += loop.get_kernels()
+        return kernels
+
+    def set_kernel(self, kernel: CppKernel):
+        """
+        Set the kernel under this loop level. No split is allowed under
+        this loop level.
+        """
+        if not self.inner:
+            self.kernel = kernel
+            loop = self
+            if loop.is_reduction():
+                loop.reduction_var_map = kernel.reduction_var_map.copy()
+                loop = loop.parent
+                while loop is not None and loop.is_reduction():
+                    loop.reduction_var_map.update(kernel.reduction_var_map)
+                    loop = loop.parent
+            return
+        assert len(self.inner) == 1
+        self.inner[0].set_kernel(kernel)
+
+    def get_loops_at(self, depth) -> List["LoopLevel"]:
+        if depth == 0:
+            return [self]
+        else:
+            loops = []
+            for loop in self.inner:
+                loops += loop.get_loops_at(depth - 1)
+            return loops
+
+    def is_reduction(self):
+        return bool(self.reduction_var_map)
+
+    def split_with_tiling(self, depth, factor):
+        def clone_inner():
+            inner = []
+            if self.inner:
+                for loop in self.inner:
+                    inner.append(loop.clone())
+            return inner
+
+        def do_split_with_tiling():
+            sympy_factor = sympy.Integer(factor)
+
+            main_loop_range = ir.IndexingDiv(self.size, sympy_factor)
+            main_loop = LoopLevel(self.var, main_loop_range)
+            main_loop.parallel = self.parallel
+            main_loop.collapsed = False
+            main_loop.reduction_var_map = self.reduction_var_map
+            main_loop.inner = clone_inner()
+            if main_loop.inner:
+                for loop in main_loop.inner:
+                    loop.parent = main_loop
+
+            offset = main_loop_range * sympy_factor
+            tail_loop = LoopLevel(self.var, self.size)
+            tail_loop.offset = offset
+            tail_loop.parallel = self.parallel
+            tail_loop.collapsed = False
+            tail_loop.reduction_var_map = self.reduction_var_map
+            tail_loop.inner = clone_inner()
+            if tail_loop.inner:
+                for loop in tail_loop.inner:
+                    loop.parent = tail_loop
+
+            return main_loop, tail_loop
+
+        if depth == 0:
+            main_loop, tail_loop = do_split_with_tiling()
+            parent = self.parent
+            if parent:
+                parent.inner = [main_loop, tail_loop]
+                main_loop.parent = parent
+                tail_loop.parent = parent
+            return main_loop, tail_loop
+        else:
+            assert len(self.inner) == 1
+            return self.inner[0].split_with_tiling(depth - 1, factor)
+
+    def clone(self):
+        loop = copy(self)
+        if self.inner:
+            for idx, inner_loop in enumerate(self.inner):
+                loop.inner[idx] = inner_loop.clone()
+                loop.inner[idx].parent = loop
+        loop.kernel = deepcopy(self.kernel)
+        return loop
 
     def lines(self):
-        if self.reduction_vars:
-            suffix = "_vec" if self.simd_vec else ""
+        if self.reduction_var_map:
             reduction = " " + " ".join(
-                f"reduction({RTYPE_TO_CPP[rtype]}:{var}{suffix})"
-                for var, rtype in self.reduction_vars.items()
+                f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
+                for var, rtype in self.reduction_var_map.items()
             )
         else:
             reduction = ""
@@ -1543,7 +1741,7 @@ class LoopLevel:
             line1 = ""
         elif self.simd_omp:
             line1 = f"#pragma omp {simd}{reduction}"
-        elif not self.reduction_vars and codecache.is_gcc():
+        elif not self.reduction_var_map and codecache.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
@@ -1553,70 +1751,101 @@ class LoopLevel:
         return [line1, line2]
 
 
-class LoopLevelWithTail(LoopLevel):
-    def __init__(self, main_loop: LoopLevel, tail_loop: LoopLevel):
-        super().__init__()
-        self.main_loop = main_loop
-        self.tail_loop = tail_loop
-        self.main_loop_body = None
-        self.tail_loop_body = None
-
-    def lines(self):
-        raise AssertionError("Not Implemented")
-
-
 @dataclasses.dataclass
-class LoopNest:
-    loops: List[LoopLevel]
+class LoopNestWithSplit:
+    """
+    A loop-nest like structure but with some loop level split along
+    the loop range into the main tiling loop and the tail. It is built
+    with the `build` method as a loop nest and then split with
+    `split_with_tiling` at some depth.
+
+    A typical case is for vectorization where we typically split at the inner-most
+    loop level. A more complicated case is 2D tiling where we split at
+    both inner-most and outer levels.
+    """
+
+    root: List[LoopLevel] = None
+    kernel: CppKernel = None
+
+    @staticmethod
+    def build(kernel: CppKernel):
+        """Build a LoopNest with the given `kernel` as the leaf"""
+        itervars = kernel.itervars
+        ranges = kernel.ranges
+        reduction_depth = kernel.reduction_depth
+
+        root: List[LoopLevel] = []
+        levels: List[LoopLevel] = root
+        loop: LoopLevel = None
+        for loop_idx, (var, size) in enumerate(zip(itervars, ranges)):
+            loop = LoopLevel(var, size, parent=loop)
+            if loop_idx >= reduction_depth:
+                loop.reduction_var_map = kernel.reduction_var_map.copy()
+            levels.append(loop)
+            levels = loop.inner
+        loop_nest = LoopNestWithSplit(root, len(itervars))
+        if loop:
+            loop.kernel = kernel
+        else:
+            loop_nest.kernel = kernel
+        return loop_nest
 
     def __bool__(self):
-        return bool(self.loops)
+        return bool(self.root)
 
-    def mark_reduction(self, reduction_vars):
-        for loop in self.loops:
-            loop.reduction_vars = reduction_vars
+    def get_loops_at(self, depth) -> List[LoopLevel]:
+        """Get all the loop levels at the given `depth` (most outer loop has depth 0)"""
+        loops = []
+        for loop in self.root:
+            loops += loop.get_loops_at(depth)
+        return loops
+
+    @cache_on_self
+    def max_parallel_depth(self):
+        """
+        Maximal allowed depth for parallelism:
+        1) Levels without splitting and
+        2) All reduction or non-reduction levels
+        When the loop is split at the top level, the max depth is 1.
+        """
+        max_depth = 0
+        loops = self.root
+        if len(loops) > 1:
+            return 1
+        is_reduction = loops[0].is_reduction() if loops else False
+        while len(loops) == 1 and loops[0].is_reduction() == is_reduction:
+            max_depth += 1
+            loops = loops[0].inner
+        return max_depth
+
+    def is_reduction_only(self):
+        """
+        Whether all the loops are for reduction. Reduction loops
+        are always the inner most ones.
+        """
+        return self.root and self.root[0].is_reduction()
 
     def mark_parallel(self, par_depth):
-        loops = self.loops
-        loops[0].parallel = par_depth
+        assert (
+            par_depth <= self.max_parallel_depth()
+        ), "Parallel depth cannot exceed the maximal allowed parallel depth"
+        loops = self.root
+        for loop in loops:
+            loop.parallel = par_depth
         for i in range(1, par_depth):
-            loops[i].collapsed = True
+            loops = loops[0].inner
+            loops[0].collapsed = True
 
-    def split_most_inner_loop(self, factor):
-        sympy_factor = sympy.Integer(factor)
-
-        most_inner_loop = self.loops[-1]
-
-        # If the most inner loop needs to be collapsed, we need to
-        # exclude it since we need to split it into two loops. Meanwhile,
-        # we still mark it as parallized.
-        if most_inner_loop.collapsed:
-            assert self.loops[0].parallel == len(self.loops)
-            self.loops[0].parallel -= 1
-
-        main_loop_range = ir.IndexingDiv(most_inner_loop.size, sympy_factor)
-
-        main_loop = LoopLevel(most_inner_loop.var, main_loop_range)
-        main_loop.parallel = most_inner_loop.parallel
-        main_loop.collapsed = False
-        main_loop.reduction_vars = most_inner_loop.reduction_vars
-
-        offset = main_loop_range * sympy_factor
-        tail_loop = LoopLevel(most_inner_loop.var, most_inner_loop.size)
-        tail_loop.offset = offset
-        tail_loop.parallel = most_inner_loop.parallel
-        tail_loop.collapsed = False
-        tail_loop.reduction_vars = most_inner_loop.reduction_vars
-
-        loop_with_tail = LoopLevelWithTail(main_loop, tail_loop)
-        loop_with_tail.parallel = 0
-        loop_with_tail.collapsed = False
-
-        self.loops[-1] = loop_with_tail
-
-    def codegen(self, code, stack):
-        for loop in self.loops:
-            code.writelines(loop.lines())
-            stack.enter_context(code.indent())
-        else:
-            stack.enter_context(code.indent())
+    def split_with_tiling(self, depth, factor):
+        """
+        Split the loop into main and tail loops at given `depth` so that the range
+        of the main loop has range `floor_div(range, factor) * factor` and
+        the tail loop handles the remainder. The main loop is tiled
+        according to the `factor`.
+        """
+        loops = self.get_loops_at(depth)
+        assert len(loops) == 1
+        split_loops = loops[0].split_with_tiling(0, factor)
+        if depth == 0:
+            self.root = split_loops
+        return split_loops

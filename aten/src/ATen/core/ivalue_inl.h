@@ -186,10 +186,18 @@ inline c10::Storage IValue::toStorage() const& {
   return c10::Storage(toIntrusivePtr<at::StorageImpl>());
 }
 inline c10::Stream IValue::toStream() && {
-  return c10::Stream::unpack(payload.u.as_int);
+  AT_ASSERT(isStream(), "Expected Stream but got ", tagKind());
+  auto ptr = toIntrusivePtr<ivalue::StreamData3Holder>();
+  return c10::Stream::unpack3((*ptr).val.stream_id,
+                              (*ptr).val.device_index,
+                              (*ptr).val.device_type);
 }
 inline c10::Stream IValue::toStream() const& {
-  return c10::Stream::unpack(payload.u.as_int);
+  AT_ASSERT(isStream(), "Expected Stream but got ", tagKind());
+  auto ptr = toIntrusivePtr<ivalue::StreamData3Holder>();
+  return c10::Stream::unpack3((*ptr).val.stream_id,
+                              (*ptr).val.device_index,
+                              (*ptr).val.device_type);
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
@@ -2152,7 +2160,7 @@ inline IValue IValue::make_capsule(
 template <
     typename T,
     std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
-IValue::IValue(c10::intrusive_ptr<T> custom_class) {
+IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
   auto classType = []() {
     try {
       return c10::getCustomClassType<c10::intrusive_ptr<T>>();
@@ -2166,7 +2174,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(ivalue_obj.release());
-  tag = Tag::Object;
+
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
