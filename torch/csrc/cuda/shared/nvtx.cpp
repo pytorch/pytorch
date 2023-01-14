@@ -12,6 +12,8 @@ namespace torch {
 namespace cuda {
 namespace shared {
 
+#ifndef USE_ROCM
+
 // registry idea from NVIDIA/nvtx-plugins  @jdekhtiar
 class DomainCategoryRegistry {
  public:
@@ -82,6 +84,9 @@ nvtxEventAttributes_t getAttributes(
   return eventAttrib;
 }
 
+#endif
+
+
 int rangePush(
     const std::string& msg,
     std::optional<std::string> domain,
@@ -145,7 +150,7 @@ uint64_t rangeStart(
   return roctxRangeStartA(msg.c_str());
 #else
   if (!domain && !category && !color)
-    return rangeStartA(msg.c_str());
+    return nvtxRangeStartA(msg.c_str());
 
   nvtxEventAttributes_t eventAttrib =
       getAttributes(msg, domain, category, color);
