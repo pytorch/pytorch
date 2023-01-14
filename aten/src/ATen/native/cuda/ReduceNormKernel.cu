@@ -8,7 +8,7 @@
 #include <ATen/native/LinearAlgebra.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // This reduction accumulates results as the type `acc_t`. By default, when
 // `scalar_t` is complex, `acc_t` is the downgraded real number type.
@@ -48,4 +48,4 @@ void norm_launch_kernel(TensorIterator& iter, double ord) {
   });
 }
 
-}} // namespace at::native
+} // namespace at::native
