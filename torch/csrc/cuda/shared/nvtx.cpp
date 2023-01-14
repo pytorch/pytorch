@@ -90,14 +90,17 @@ int rangePush(
 #ifdef USE_ROCM
   return roctxRangePushA(msg.c_str());
 #else
+  if (!domain && !category && !color)
+    return nvtxRangePushA(msg.c_str());
+
   nvtxEventAttributes_t eventAttrib =
       getAttributes(msg, domain, category, color);
 
   if (domain)
     return nvtxDomainRangePushEx(
         registry.getDomain(domain.value()), &eventAttrib);
-  else
-    return nvtxRangePushEx(&eventAttrib);
+
+  return nvtxRangePushEx(&eventAttrib);
 #endif
 }
 
@@ -107,8 +110,8 @@ int rangePop(std::optional<std::string> domain) {
 #else
   if (domain)
     return nvtxDomainRangePop(registry.getDomain(domain.value()));
-  else
-    return nvtxRangePop();
+
+  return nvtxRangePop();
 #endif
 }
 
@@ -118,15 +121,18 @@ void mark(
     std::optional<std::string> category,
     std::optional<uint32_t> color) {
 #ifdef USE_ROCM
-  roctxMarkA(msg.c_str());
+  return roctxMarkA(msg.c_str());
 #else
+  if (!domain && !category && !color)
+    return nvtxMarkA(msg.c_str());
+
   nvtxEventAttributes_t eventAttrib =
       getAttributes(msg, domain, category, color);
 
   if (domain)
-    nvtxDomainMarkEx(registry.getDomain(domain.value()), &eventAttrib);
-  else
-    nvtxMarkEx(&eventAttrib);
+    return nvtxDomainMarkEx(registry.getDomain(domain.value()), &eventAttrib);
+
+  return nvtxMarkEx(&eventAttrib);
 #endif
 }
 
@@ -138,25 +144,28 @@ uint64_t rangeStart(
 #ifdef USE_ROCM
   return roctxRangeStartA(msg.c_str());
 #else
+  if (!domain && !category && !color)
+    return rangeStartA(msg.c_str());
+
   nvtxEventAttributes_t eventAttrib =
       getAttributes(msg, domain, category, color);
 
   if (domain)
     return nvtxDomainRangeStartEx(
         registry.getDomain(domain.value()), &eventAttrib);
-  else
-    return nvtxRangeStartEx(&eventAttrib);
+
+  return nvtxRangeStartEx(&eventAttrib);
 #endif
 }
 
 void rangeEnd(const uint64_t& range_id, std::optional<std::string> domain) {
 #ifdef USE_ROCM
-  roctxRangeStop(range_id);
+  return roctxRangeStop(range_id);
 #else
   if (domain)
-    nvtxDomainRangeEnd(registry.getDomain(domain.value()), range_id);
-  else
-    nvtxRangeEnd(range_id);
+    return nvtxDomainRangeEnd(registry.getDomain(domain.value()), range_id);
+
+  return nvtxRangeEnd(range_id);
 #endif
 }
 
