@@ -46,7 +46,7 @@ class TestCollectivesWithWrapper(TestCase):
         with self.assertRaises(RuntimeError):
             _test_method(self)
 
-    def test_collective_error_on_rank_non_zero_1(self):
+    def test_collective_error_on_rank_non_zero(self):
         @spawn_threads_and_init_comms(world_size=4)
         def _test_method(self):
             input_tensor = torch.ones(3, 3) * dist.get_rank()  # perform 1st all gather
