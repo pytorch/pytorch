@@ -183,7 +183,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
     _ready = False
 
     _coll_lock = threading.Lock()
-    _cur_coll = None
+    _cur_coll_on_pgs = {}
 
     _terminate = threading.Event()
 
@@ -194,32 +194,32 @@ class ProcessLocalGroup(dist.ProcessGroup):
                 cls._pg_list.append(None)
             cls._pg_list[pg._rank] = pg
             cls._count += 1
-            if cls._count == pg._world:
+            if cls._count == pg._world_size:
                 cls._ready = True
 
     @classmethod
-    def _start_coll(cls, world_size, collective):
+    def _start_coll(cls, collective, pg):
         with cls._coll_lock:
             if not cls._ready:
                 raise Exception(
-                    f"world not ready, only {cls._count} PG's registered but world has {world_size} ranks"
+                    f"world not ready, only {cls._count} PG's registered but world has {pg.size()} ranks"
                 )
-            if cls._cur_coll is None:
-                cls._cur_coll = Collective(world_size, collective, cls)
-            return cls._cur_coll
+            # pg_name is unique, we use that to record the mapping between pg and collective
+            if pg.pg_name not in cls._cur_coll_on_pgs:
+                cls._cur_coll_on_pgs[pg.pg_name] = Collective(pg.size(), collective, cls)
+            return cls._cur_coll_on_pgs[pg.pg_name]
 
     @classmethod
-    def _end_coll(cls, collective):
+    def _end_coll(cls, collective, pg):
         # This is racily called by all ranks, so only one will work
         with cls._coll_lock:
-            if cls._cur_coll == collective:
-                cls._cur_coll = None
+            if pg.pg_name in cls._cur_coll_on_pgs and cls._cur_coll_on_pgs[pg.pg_name] == collective:
+                cls._cur_coll_on_pgs.pop(pg.pg_name)
 
     @classmethod
     def exception_handle(cls, exc):
         cls._terminate.set()
-        coll = cls._cur_coll
-        if coll:
+        for coll in cls._cur_coll_on_pgs.values():
             with coll._start_cond:
                 coll._start_cond.notify()
             with coll._done_cond:
@@ -227,53 +227,61 @@ class ProcessLocalGroup(dist.ProcessGroup):
 
     @classmethod
     def reset(cls):
-        cls._cur_coll = None
-        cls._terminate.clear()
+        with cls._coll_lock:
+            cls._cur_coll_on_pgs = {}
+            cls._terminate.clear()
 
     def allreduce(self, tensor_list, opts=AllreduceOptions()):
-        coll = ProcessLocalGroup._start_coll(self._world, AllReduce(opts.reduceOp))
+        coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
         res = coll.join(self._rank, tensor_list)
-        ProcessLocalGroup._end_coll(coll)
+        ProcessLocalGroup._end_coll(coll, self)
         return res
 
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
-        coll = ProcessLocalGroup._start_coll(self._world, AllGather())
+        coll = ProcessLocalGroup._start_coll(AllGather(), self)
         res = coll.join(self._rank, (output_tensors, input_tensor))
-        ProcessLocalGroup._end_coll(coll)
+        ProcessLocalGroup._end_coll(coll, self)
         return res
 
     def broadcast(self, tensor_list, opts=BroadcastOptions()):
-        coll = ProcessLocalGroup._start_coll(self._world, Broadcast(opts.rootRank))
+        coll = ProcessLocalGroup._start_coll(Broadcast(opts.rootRank), self)
         res = coll.join(self._rank, tensor_list)
-        ProcessLocalGroup._end_coll(coll)
+        ProcessLocalGroup._end_coll(coll, self)
         return res
 
     def scatter(self, output_tensors, input_tensors, opts=ScatterOptions()):
-        coll = ProcessLocalGroup._start_coll(self._world, Scatter(opts.rootRank))
+        coll = ProcessLocalGroup._start_coll(Scatter(opts.rootRank), self)
         res = coll.join(self._rank, (output_tensors, input_tensors))
-        ProcessLocalGroup._end_coll(coll)
+        ProcessLocalGroup._end_coll(coll, self)
         return res
 
     def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
-        coll = ProcessLocalGroup._start_coll(self._world, ReduceScatter(opts.reduceOp))
+        coll = ProcessLocalGroup._start_coll(ReduceScatter(opts.reduceOp), self)
         res = coll.join(self._rank, (output_tensor, scatter_list))
-        ProcessLocalGroup._end_coll(coll)
+        ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def __init__(self, rank, world):
-        super(ProcessLocalGroup, self).__init__(rank, world)
+    def __init__(self, rank, world_size):
+        super(ProcessLocalGroup, self).__init__(rank, world_size)
         self._rank = rank
-        self._world = world
+        self._world_size = world_size
         ProcessLocalGroup._register(self)
 
     def size(self):
-        return self._world
+        return self._world_size
+
+    @property
+    def pg_name(self):
+        """
+        return the global registered name of the current pg in the world
+        """
+        return dist.distributed_c10d._world.pg_names[self]
 
     def getBackendName(self):
-        return "local"
+        return "threaded"
 
     def __repr__(self):
-        return f"PLG w:{self._world} r:{self._rank}"
+        return f"ThreadedPG world_size:{self._world_size} rank:{self._rank}"
 
 
 def _create_threaded_pg(prefix_store, rank, world_size, timeout):
