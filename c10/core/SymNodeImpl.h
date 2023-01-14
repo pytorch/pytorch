@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <c10/util/Exception.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <memory>
 #include <mutex>
@@ -96,7 +96,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(false, "NYI");
   };
   // NB: self is ignored here, only the arguments are used
-  virtual SymNode is_non_overlapping_and_dense(ArrayRef<SymNode> sizes, ArrayRef<SymNode> strides) {
+  virtual SymNode is_non_overlapping_and_dense(
+      ArrayRef<SymNode> sizes,
+      ArrayRef<SymNode> strides) {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymNode clone() {

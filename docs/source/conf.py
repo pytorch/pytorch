@@ -338,6 +338,7 @@ coverage_ignore_classes = [
     "Warning",
     "SymInt",
     "SymFloat",
+    "SymBool",
 ]
 
 # The suffix(es) of source filenames.

@@ -14,7 +14,6 @@ import random
 import contextlib
 import math
 import atexit
-import io
 import os
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
@@ -388,6 +387,13 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
+
+    @skipIfNoSympy
+    def test_non_overlapping_and_dense(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = torch.empty_strided((a0, 7), (1, a0), device='meta')
+        self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(r))
 
     @skipIfNoSympy
     def test_symint_as_scalar(self):

@@ -200,6 +200,12 @@ class SymNode:
     def sym_float(self) -> "SymNode":  # noqa: F811
         raise AssertionError("should have been overridden")
 
+    def or_(self, other) -> "SymNode":  # noqa: F811
+        raise AssertionError("should have been overridden")
+
+    def and_(self, other) -> "SymNode":  # noqa: F811
+        raise AssertionError("should have been overridden")
+
     # Make C++ happy
     def sym_or(self, other):
         return self.or_(other)
@@ -266,7 +272,21 @@ if HAS_SYMPY:
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
 
-    IsNonOverlappingAndDenseIndicator = sympy.Function('IsNonOverlappingAndDenseIndicator')
+    class IsNonOverlappingAndDenseIndicator(sympy.Function):
+        is_integer = True
+
+        @classmethod
+        def eval(cls, *args):
+            assert len(args) % 2 == 0
+            if all(isinstance(a, sympy.Integer) for a in args):
+                dim = len(args) // 2
+                sizes = args[0:dim]
+                strides = args[dim:]
+                return int(eval_is_non_overlapping_and_dense(
+                    [int(s) for s in sizes],
+                    [int(s) for s in strides]
+                ))
+            return None
 
 def safe_expand(r):
     if hasattr(r, 'expand'):
@@ -308,8 +328,7 @@ sizes_strides_methods = {
     'is_non_overlapping_and_dense': IsNonOverlappingAndDenseIndicator,
 }
 
-"""
-def is_non_overlapping_and_dense(sizes, strides):
+def eval_is_non_overlapping_and_dense(sizes, strides):
     dim = len(sizes)
 
     # Short-circuits for tensors of rank one, which are
@@ -335,7 +354,6 @@ def is_non_overlapping_and_dense(sizes, strides):
         expected_stride *= length
 
     return True
-"""
 
 def is_non_overlapping_and_dense(sizes, strides):
     base = None

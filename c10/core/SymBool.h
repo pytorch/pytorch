@@ -13,8 +13,7 @@ namespace c10 {
 class C10_API SymBool {
  public:
   /*implicit*/ SymBool(bool b) : data_(b){};
-  SymBool(SymNode ptr)
-      : data_(false), ptr_(std::move(ptr)) {
+  SymBool(SymNode ptr) : data_(false), ptr_(std::move(ptr)) {
     TORCH_CHECK(ptr_->is_bool());
   };
   SymBool() : data_(false) {}
@@ -38,9 +37,15 @@ class C10_API SymBool {
   SymBool sym_or(const SymBool&) const;
   SymBool sym_not() const;
 
-  SymBool operator&(const SymBool& other) const { return sym_and(other); }
-  SymBool operator|(const SymBool& other) const { return sym_or(other); }
-  SymBool operator~() const { return sym_not(); }
+  SymBool operator&(const SymBool& other) const {
+    return sym_and(other);
+  }
+  SymBool operator|(const SymBool& other) const {
+    return sym_or(other);
+  }
+  SymBool operator~() const {
+    return sym_not();
+  }
 
   // Insert a guard for the bool to be its concrete value, and then return
   // that value.  Note that C++ comparison operations default to returning

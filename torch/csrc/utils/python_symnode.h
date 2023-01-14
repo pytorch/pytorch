@@ -50,7 +50,9 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return c10::make_intrusive<PythonSymNodeImpl>(r);
   }
 
-  c10::SymNode is_non_overlapping_and_dense(c10::ArrayRef<c10::SymNode> sizes, c10::ArrayRef<c10::SymNode> strides) override {
+  c10::SymNode is_non_overlapping_and_dense(
+      c10::ArrayRef<c10::SymNode> sizes,
+      c10::ArrayRef<c10::SymNode> strides) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("is_non_overlapping_and_dense")(sizes, strides);
     return c10::make_intrusive<PythonSymNodeImpl>(r);

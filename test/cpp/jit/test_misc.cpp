@@ -1469,6 +1469,10 @@ class TestSymNodeImpl : public c10::SymNodeImpl {
     return false;
   };
 
+  bool is_bool() override {
+    return false;
+  };
+
   bool bool_() override {
     return static_cast<bool>(i_);
   };

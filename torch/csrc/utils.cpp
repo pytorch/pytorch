@@ -401,8 +401,7 @@ handle type_caster<at::ArrayRef<c10::SymNode>>::cast(
   for (const auto i : c10::irange(src.size())) {
     // TODO: this is terrible but I don't know how to override when
     // the SymNode is also explicitly cast by py::cast
-    auto* py_node =
-        dynamic_cast<torch::impl::PythonSymNodeImpl*>(src[i].get());
+    auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(src[i].get());
     if (py_node) {
       // Return the Python directly (unwrap)
       t[i] = py_node->getPyObj();

@@ -363,7 +363,8 @@ bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
   }
 }
 
-SymBool TensorImpl::compute_channels_last_contiguous_3d(identity<SymBool>) const {
+SymBool TensorImpl::compute_channels_last_contiguous_3d(
+    identity<SymBool>) const {
   SymIntArrayRef sizes = extra_meta_->sizes_;
   SymIntArrayRef strides = extra_meta_->strides_;
   switch (sizes.size()) {
@@ -390,11 +391,14 @@ bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_2d(sizes_and_strides_.sizes_arrayref(), sizes_and_strides_.strides_arrayref());
+  return is_channels_last_strides_2d(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
 // Keep this in sync with MemoryFormat.h
-SymBool TensorImpl::compute_strides_like_channels_last_2d(identity<SymBool>) const {
+SymBool TensorImpl::compute_strides_like_channels_last_2d(
+    identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
@@ -425,7 +429,8 @@ SymBool TensorImpl::compute_strides_like_channels_last_2d(identity<SymBool>) con
         //     [H, H, 1, 1] contiguous stride
         // 2. permutation of 1C1W:
         //     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
-        //     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as channels_last
+        //     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as
+        //     channels_last
         min = strides[d] * sizes[d].max(1);
       }
       return r;
@@ -441,11 +446,14 @@ bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_3d(sizes_and_strides_.sizes_arrayref(), sizes_and_strides_.strides_arrayref());
+  return is_channels_last_strides_3d(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
 // Keep this in sync with MemoryFormat.h
-SymBool TensorImpl::compute_strides_like_channels_last_3d(identity<SymBool>) const {
+SymBool TensorImpl::compute_strides_like_channels_last_3d(
+    identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
@@ -543,10 +551,14 @@ SymBool TensorImpl::compute_non_overlapping_and_dense(identity<SymBool>) const {
   size_nodes.reserve(sizes.size());
   stride_nodes.reserve(strides.size());
   for (const auto& s : sizes) {
-    size_nodes.emplace_back(s.is_symbolic() ? s.toSymNodeImpl() : base->wrap_int(s.as_int_unchecked()));
+    size_nodes.emplace_back(
+        s.is_symbolic() ? s.toSymNodeImpl()
+                        : base->wrap_int(s.as_int_unchecked()));
   }
   for (const auto& s : strides) {
-    stride_nodes.emplace_back(s.is_symbolic() ? s.toSymNodeImpl() : base->wrap_int(s.as_int_unchecked()));
+    stride_nodes.emplace_back(
+        s.is_symbolic() ? s.toSymNodeImpl()
+                        : base->wrap_int(s.as_int_unchecked()));
   }
   // Do the call
   return SymBool(base->is_non_overlapping_and_dense(size_nodes, stride_nodes));
