@@ -51,6 +51,20 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
         self.run_test_with_fx_to_onnx_exporter(MNISTModel(), (tensor_x,))
 
+    # test single op with no kwargs
+    def test_sigmoid(self):
+        x = torch.randn(1, 4, 2, 3)
+
+        class SigmoidModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                return self.sigmoid(x)
+
+        self.run_test_with_fx_to_onnx_exporter(SigmoidModel(), (x,))
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

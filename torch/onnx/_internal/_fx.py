@@ -5,6 +5,8 @@ import operator
 from typing import Callable, Dict, Tuple, Union
 
 import onnx
+from onnxscript.evaluator import TorchScriptEvaluator
+from onnxscript.function_libs.torch_aten import ops
 
 import torch
 import torch._C
@@ -15,6 +17,7 @@ from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.fx.passes import fake_tensor_prop
 from torch.nn.utils import stateless
+from torch.onnx import _type_utils, symbolic_helper
 from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
 from torch.onnx._internal import jit_utils, registration
 from torch.utils import _pytree
@@ -121,7 +124,6 @@ def _retrieve_or_wrap_scalar_as_constant(
     elif isinstance(ts_value, list) and all(isinstance(val, float) for val in ts_value):
         ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.float))
     elif isinstance(ts_value, torch.dtype):
-        from torch.onnx import _type_utils
 
         ts_value = _type_utils.JitScalarType.from_dtype(ts_value)
     else:
@@ -168,6 +170,21 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
     # "g" should just be onnx.GraphProto or an equivalent
     # data structure in ONNXScript.
     g = torch._C.Graph()
+    # assume onnx downstream graph
+    graph_context = jit_utils.GraphContext(
+        graph=g,
+        block=g.block(),  # Pointless. Just make linter happy.
+        opset=ONNX_GLOBALS.export_onnx_opset_version,
+        original_node=g.insertPoint(),  # Pointless. Just make linter happy.
+        params_dict={},  # Pointless. Just make linter happy.
+        env={},  # Pointless. Just make linter happy.
+    )
+    # Initialize the ONNX graph
+    torchscript_evaluator = TorchScriptEvaluator(graph_context)
+
+    # assume atenlib API
+    atenlib = {"aten::sigmoid": ops.core.aten_sigmoid}
+
     # In the following loop, a TorchScript graph is created to
     # represent the input FX graph with ONNX symbols (e.g., onnx::add).
     # To connect the values to nodes in the TorchScript graph, we maintian
@@ -209,29 +226,22 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                 and node.target in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
             ):
                 exporter_key = _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[node.target]
-                symbolic_function_group = registration.registry.get_function_group(
-                    exporter_key
-                )
-                assert symbolic_function_group is not None
-                symbolic_fn = symbolic_function_group.get(opset_version)
+
+                # latest version is only supported in atenlib for now
+                symbolic_fn = atenlib.get(exporter_key, None)
                 assert symbolic_fn is not None
-                # TODO(wechi): current type checking throws when feeding torch._C.Graph
-                # to symbolic_opset*.py functions, so we need the following wrapper.
-                # After we get rid of TorchScript, we can remove this wrapper.
-                graph_context = jit_utils.GraphContext(
-                    graph=g,
-                    block=g.block(),  # Pointless. Just make linter happy.
-                    opset=opset_version,
-                    original_node=g.insertPoint(),  # Pointless. Just make linter happy.
-                    params_dict={},  # Pointless. Just make linter happy.
-                    env={},  # Pointless. Just make linter happy.
-                )
                 # Map FX inputs to ONNX inputs and fill optional inputs with default values.
                 ts_args = _wrap_fx_args_as_ts_args(
                     graph_context, fx_module_with_metadata, node, fx_name_to_ts_value
                 )
-                # The returned value could be a value of a tuple of values.
-                v = symbolic_fn(graph_context, *ts_args)
+                # TODO(titaiwang): ts_args to onnxscript args
+                onnx_inputs, onnx_attrs = torchscript_evaluator.decode_attributes(symbolic_fn, ts_args, {})
+                # TODO(titaiwang): ONNXFunction triggers adding custom Ops and record it
+                # into dict for function_proto insertion. It also needs to define type of
+                # the return torch._C.Value.
+                with evaluator.set_default(torchscript_evaluator):
+                    # v is tuple[torch._C.Value, ...] or torch._C.Value
+                    v = symbolic_fn(*onnx_inputs, **onnx_attrs)
                 assert (
                     v is not None
                 ), f"Node creates None with target={node.target}, name={node.name}, args={ts_args}"
@@ -373,6 +383,7 @@ def _ts_graph_to_onnx_model_in_protobuf(
         onnx_file_path="",
         node_attr_to_name={},
     )
+    # TODO(titaiwang): use dict to record custom ONNXFunction
 
     return proto
 
