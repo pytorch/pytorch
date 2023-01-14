@@ -182,18 +182,14 @@ class DTensorOpTestBase(MultiThreadedTestCase):
 
     @property
     def device_type(self) -> str:
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        return DEVICE_TYPE
 
     def build_device_mesh(self):
         return DeviceMesh(self.device_type, list(range(self.world_size)))
 
     def setUp(self) -> None:
         super().setUp()
-        # Precision/rel_tol is a thread-local setting since it may be overridden per test, need to share them
-        # across multiple threads for each test case.
-        # This would be relevant when we use op db tests, i.e. using instantiate_device_type_tests()
-        shared_tls_dict = {"precision": MultiThreadedTestCase.precision, "rel_tol": MultiThreadedTestCase.rel_tol}
-        self._spawn_threads(shared_tls_dict=shared_tls_dict)
+        self._spawn_threads()
 
 
 # This is a class for converting args/kwargs of an op into distributed args/kwargs

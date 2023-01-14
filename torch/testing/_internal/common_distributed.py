@@ -898,6 +898,7 @@ def spawn_threads_and_init_comms(
     def _run_test_method_with_multi_threads(world_size, callback):
         world = _install_threaded_pg()
         global_store = c10d.HashStore()
+
         def world_is_valid():
             return world == c10d.distributed_c10d._world
 
@@ -910,7 +911,7 @@ def spawn_threads_and_init_comms(
             except BaseException as ex:
                 # Exceptions are handled in MultiThreadedTestCase
                 MultiThreadedTestCase.exception_queue.put((rank, sys.exc_info()))
-                ProcessLocalGroup.exception_handle(ex) # trigger _terminate event and awaken worker threads
+                ProcessLocalGroup.exception_handle(ex)  # trigger _terminate event and awaken worker threads
             finally:
                 if world_is_valid():
                     c10d.destroy_process_group()
@@ -947,7 +948,6 @@ class MultiThreadedTestCase(TestCase):
         How bad of a limitation is this?
     """
     exception_queue = queue.Queue()
-    _tls = threading.local()
 
     MAIN_THREAD_RANK = -1
 
@@ -992,7 +992,7 @@ class MultiThreadedTestCase(TestCase):
         super().tearDown()
         self.threads = []
 
-    def _spawn_threads(self, shared_tls_dict = None):
+    def _spawn_threads(self):
         """
         class method to spawn threads and run test, this is shared by both wrapper and base class approach
         """
@@ -1000,6 +1000,7 @@ class MultiThreadedTestCase(TestCase):
         # for each test case, we need to create thread local world, and a global store
         world = _install_threaded_pg()
         self.__class__.global_store = c10d.HashStore()
+
         def world_is_valid():
             return world == c10d.distributed_c10d._world
 
@@ -1007,20 +1008,22 @@ class MultiThreadedTestCase(TestCase):
             raise RuntimeError("Invalid world")
 
         for rank in range(self.world_size):
-            t = threading.Thread(target=self.__class__._run, args=(test_name, rank, self.world_size, shared_tls_dict))
+            t = threading.Thread(target=self.__class__._run, args=(test_name, rank, self.world_size))
             t.start()
             logger.info(f"Started thread {rank} with thread id {t.native_id}")
             self.threads.append(t)
 
     @classmethod
-    def _run(cls, test_name, rank, world_size, shared_tls_dict = None):
+    def _run(cls, test_name, rank, world_size):
         self = cls(test_name)
         self.rank = rank
 
-        # set up shared tls if there's any
-        if shared_tls_dict is not None and isinstance(shared_tls_dict, dict):
-            for k, v in shared_tls_dict.items():
-                setattr(self._tls, k, v)
+        # precision/rel_tol is a thread-local setting since it may be overridden per test, need to make
+        # every thread have the same value. This would be relevant when we use op db tests, where it
+        # needs those states to be set i.e. using instantiate_device_type_tests()
+        # TODO: figure out a better way to do this
+        self._tls.precision = TestCase._precision
+        self._tls.rel_tol = TestCase._rel_tol
 
         self.run_test_with_threaded_pg(test_name, rank, world_size)
 
@@ -1038,7 +1041,7 @@ class MultiThreadedTestCase(TestCase):
             getattr(self, test_name)()
         except BaseException as ex:
             self.exception_queue.put((rank, sys.exc_info()))
-            ProcessLocalGroup.exception_handle(ex) # trigger _terminate event and awaken worker threads
+            ProcessLocalGroup.exception_handle(ex)  # trigger _terminate event and awaken worker threads
         finally:
             c10d.destroy_process_group()
             self.perThreadTearDown()
@@ -1051,7 +1054,7 @@ class MultiThreadedTestCase(TestCase):
             for idx, thread in enumerate(threads):
                 thread.join(max(0, timeout))
                 if thread.is_alive():
-                   MultiThreadedTestCase.exception_queue.put(
+                    MultiThreadedTestCase.exception_queue.put(
                         (
                             idx,
                             (
@@ -1134,16 +1137,16 @@ class MultiThreadedTestCase(TestCase):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
 
-    def assertEqualOnRank(self, x, y, rank=0):
+    def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
         """
         The reason why we have this util function instead of
         self.assertEqual is all threads are sharing one CPU RNG
         so the assertion result is only reliable on rank 0
         """
         if self.rank == rank:
-            self.assertEqual(x, y)
+            self.assertEqual(x, y, msg)
 
-    def assertNotEqualOnRank(self, x, y, rank):
+    def assertNotEqualOnRank(self, x, y, msg=None, *, rank=0):
         if self.rank == rank:
             self.assertNotEqual(x, y)
 
