@@ -13,8 +13,7 @@
 #include <string>
 #include <utility>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 
 InputArchive::InputArchive()
     : module_("Module", std::make_shared<jit::CompilationUnit>()) {}
@@ -173,5 +172,4 @@ std::vector<std::string> InputArchive::keys() {
   return all_keys;
 }
 
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize

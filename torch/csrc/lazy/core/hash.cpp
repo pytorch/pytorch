@@ -7,8 +7,7 @@
 
 #include <torch/csrc/lazy/core/hash.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 hash_t LoadHash(const uint8_t** data, const uint8_t* top) {
@@ -108,5 +107,4 @@ hash_t Hash(const std::vector<bool>& values) {
   return h;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

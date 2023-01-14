@@ -21,8 +21,7 @@
 #include <folly/container/F14Set.h>
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 #ifdef FBCODE_CAFFE2
 template <typename Key, typename Value>
@@ -1145,5 +1144,4 @@ class TORCH_API StaticRuntime {
   IValueArray values_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -14,8 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // The current evaluating node. This is useful to assign the current node as a
 // parent of new nodes created during the evaluation of this node in anomaly
@@ -115,5 +114,4 @@ void setAutogradFunctionExtensionEnabled(bool enabled) {
   kAutogradFunctionExtensionEnabled = enabled;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

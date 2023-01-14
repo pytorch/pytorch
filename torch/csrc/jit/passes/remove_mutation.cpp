@@ -1,8 +1,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 bool MutationRemover::removeListMutation() {
   return RemoveListMutation(graph_->block());
@@ -380,5 +379,4 @@ bool InplaceToFunctionalActivation(const std::shared_ptr<Graph>& graph) {
   });
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

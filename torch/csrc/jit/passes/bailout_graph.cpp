@@ -11,8 +11,7 @@
 #include <memory>
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static bool shouldBeCapturedInByBailOut(Node* n) {
   return n->kind() != prim::Constant;
@@ -393,5 +392,4 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
   return bailout_graph;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

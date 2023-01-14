@@ -13,8 +13,7 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct InputBuffer {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -47,5 +46,4 @@ struct InputBuffer {
   std::vector<Variable> buffer;
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

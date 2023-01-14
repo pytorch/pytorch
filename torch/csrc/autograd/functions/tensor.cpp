@@ -14,8 +14,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   check_input_variables("CopyBackwards", grads, 1, -1, true);
@@ -159,5 +158,4 @@ void CopySlices::release_variables() {
   fn = nullptr;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

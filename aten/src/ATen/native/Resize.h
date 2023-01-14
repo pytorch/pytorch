@@ -8,7 +8,7 @@
 #include <c10/core/CPUAllocator.h>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 // TODO: make all operations that resize given outputs use this function
 //   for consistency and maintainability.
@@ -163,4 +163,4 @@ inline void setStrided(
   self_->set_sizes_and_strides(size, stride, c10::make_optional(storage_offset));
 }
 
-}}
+}

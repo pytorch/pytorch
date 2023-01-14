@@ -51,9 +51,7 @@
     return true;                                       \
   }()
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 TORCH_API bool softAssertRaises();
 TORCH_API void setSoftAssertRaises(c10::optional<bool> value);
 
@@ -223,15 +221,9 @@ struct HashCombine {
   }
 };
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
 
-namespace torch {
-namespace autograd {
-namespace profiler {
+namespace torch::autograd::profiler {
 using torch::profiler::impl::computeFlops;
 using torch::profiler::impl::getTime;
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::profiler

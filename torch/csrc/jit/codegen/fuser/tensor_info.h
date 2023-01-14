@@ -3,9 +3,7 @@
 
 #include <cstdint>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Host-side view of TensorInfo
 // Note dims[0] - we need to dynamically allocate the dims.
@@ -24,6 +22,4 @@ struct TORCH_API TensorInfo {
 #pragma GCC diagnostic pop
 };
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

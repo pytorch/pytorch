@@ -1,9 +1,6 @@
 #include <torch/csrc/profiler/orchestration/python_tracer.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
-namespace python_tracer {
+namespace torch::profiler::impl::python_tracer {
 namespace {
 MakeFn make_fn;
 
@@ -31,7 +28,4 @@ std::unique_ptr<PythonTracerBase> PythonTracerBase::make(RecordQueue* queue) {
   }
   return make_fn(queue);
 }
-} // namespace python_tracer
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl::python_tracer

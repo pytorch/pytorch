@@ -1,8 +1,7 @@
 #include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 Normal::Normal(
     const torch::lazy::Value& self,
@@ -43,5 +42,4 @@ torch::lazy::TSOpVector Normal::Lower(
   return normal__out;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -17,8 +17,7 @@
 #include <queue>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -1283,5 +1282,4 @@ void CustomFuseGraph(
   Lint(&db);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -21,8 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace python {
+namespace torch::python {
 namespace detail {
 inline Device py_object_to_device(py::object object) {
   PyObject* obj = object.ptr();
@@ -258,5 +257,4 @@ detail::PyModuleClass<ModuleType> bind_module(
       .def("forward", &ModuleType::forward)
       .def("__call__", &ModuleType::forward);
 }
-} // namespace python
-} // namespace torch
+} // namespace torch::python

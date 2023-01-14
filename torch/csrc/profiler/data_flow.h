@@ -8,9 +8,7 @@
 #include <c10/util/strong_type.h>
 #include <c10/util/variant.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 // Identity is a complex concept in PyTorch. A Tensor might not have a
 // an associated storage, multiple Tensors might share the same underlying
@@ -90,6 +88,4 @@ struct Result;
 void calculateUniqueTensorIDs(
     std::vector<std::shared_ptr<Result>>& sorted_results);
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

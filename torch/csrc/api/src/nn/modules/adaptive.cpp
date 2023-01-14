@@ -7,8 +7,7 @@ namespace F = torch::nn::functional;
 
 using namespace torch::indexing;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 ASMoutput::ASMoutput(Tensor output_, double loss_)
     : output(std::move(output_)), loss(loss_) {}
@@ -216,5 +215,4 @@ void AdaptiveLogSoftmaxWithLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::AdaptiveLogSoftmaxWithLoss";
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

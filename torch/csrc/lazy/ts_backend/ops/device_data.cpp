@@ -5,8 +5,7 @@
 
 #include <sstream>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 DeviceData::DeviceData(std::shared_ptr<BackendData> data)
     : TsNode(
@@ -38,5 +37,4 @@ NodePtr DeviceData::Create(std::shared_ptr<BackendData> data) {
   return node;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

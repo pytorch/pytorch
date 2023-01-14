@@ -31,9 +31,7 @@ class Context;
 
 } // namespace tensorpipe
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // These priorities instruct TensorPipe on which transport/channel to pick
 // during handshake. Higher priorities will take precedence over lower ones.
@@ -489,8 +487,6 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
       std::string errorMsg);
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif // USE_TENSORPIPE

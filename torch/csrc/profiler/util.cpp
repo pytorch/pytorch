@@ -10,9 +10,7 @@
 #include <libkineto.h>
 #endif
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 ApproximateClockToUnixTimeConverter::ApproximateClockToUnixTimeConverter()
     : start_times_(measurePairs()) {}
@@ -666,6 +664,4 @@ uint64_t computeFlops(
   return 0;
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

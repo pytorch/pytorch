@@ -1,8 +1,7 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <mutex>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static CudaFuserComparisonCallback comparison_callback = {false, nullptr};
 static std::mutex comparison_callback_lock;
@@ -17,5 +16,4 @@ void setCudaFuserComparisonCallback(CudaFuserComparisonCallback callback) {
   comparison_callback = callback;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -15,8 +15,7 @@
 
 #include <stack>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -1045,5 +1044,4 @@ void freeze_module_inplace(
   attrPropagator.run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

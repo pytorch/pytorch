@@ -3,8 +3,7 @@
 #include <c10/util/ArrayRef.h>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename T>
 inline std::vector<T> _expand_param_if_needed(
@@ -38,5 +37,4 @@ inline std::vector<c10::SymInt> expand_param_if_needed(
   return _expand_param_if_needed(list_param, param_name, expected_dim);
 }
 
-} // namespace native
 } // namespace at

@@ -11,8 +11,7 @@
 #include <torch/csrc/utils/memory.h>
 #include <limits>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   if (index < 0) {
@@ -325,5 +324,4 @@ bool PeepholeOptimizeListIdioms(
   return opt.run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

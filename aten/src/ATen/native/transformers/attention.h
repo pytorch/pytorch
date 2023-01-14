@@ -4,8 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/attention.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using fused_sdp_choice_fn = int64_t (*)(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal);
@@ -36,5 +35,4 @@ TORCH_API Tensor qkv_projection(
     const int64_t embed_dim,
     const Tensor& qkv_weight);
 
-} // namespace native
 } // namespace at

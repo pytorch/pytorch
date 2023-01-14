@@ -7,8 +7,7 @@
 #include <functional>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct BuiltinOpFunction : public Function {
   BuiltinOpFunction(
@@ -84,5 +83,4 @@ struct BuiltinOpFunction : public Function {
   std::string doc_string_;
 };
 
-} // namespace jit
 } // namespace torch

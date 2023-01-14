@@ -22,9 +22,7 @@
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-namespace at {
-
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
 REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_stub);
@@ -904,5 +902,4 @@ Tensor triton_multi_head_attention(
 #endif
   return proj;
 }
-} // namespace native
 } // namespace at

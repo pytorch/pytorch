@@ -16,9 +16,7 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace {
 
@@ -1474,8 +1472,6 @@ size_t TensorPipeAgent::messageIdToTimeoutMapSize() {
   return messageIdToTimeout_.size();
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif // USE_TENSORPIPE

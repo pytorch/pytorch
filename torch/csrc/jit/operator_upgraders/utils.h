@@ -7,8 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct UpgraderRange {
   int min_version;
@@ -50,5 +49,4 @@ TORCH_API uint64_t getMaxOperatorVersion();
 TORCH_API std::vector<UpgraderRange> getUpgradersRangeForOp(
     const std::string& name);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

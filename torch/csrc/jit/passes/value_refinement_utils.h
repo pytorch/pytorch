@@ -10,8 +10,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Refine from Value of type List -> len of list
 // If a refinement mapping of List Value * -> len is present in a block
@@ -78,5 +77,4 @@ TORCH_API bool handleCommonRefinentOperators(
     std::unordered_set<Block*>& throwing_blocks,
     std::unordered_map<Value*, BooleanRefinementMapping>& info);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

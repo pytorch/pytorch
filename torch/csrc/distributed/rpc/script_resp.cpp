@@ -5,9 +5,7 @@
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace {
 
@@ -40,6 +38,4 @@ std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
   return std::make_unique<ScriptResp>(std::move(value));
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

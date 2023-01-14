@@ -6,8 +6,7 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace prim {
 using namespace ::c10::prim;
@@ -95,5 +94,4 @@ void Inline(Graph& graph) {
   GRAPH_DUMP("After Inlining: ", &graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

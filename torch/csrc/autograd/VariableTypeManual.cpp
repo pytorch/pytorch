@@ -17,8 +17,7 @@ using torch::autograd::as_view;
 using torch::autograd::CreationMeta;
 
 namespace torch {
-namespace autograd {
-namespace VariableType {
+namespace autograd::VariableType {
 
 std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(
     at::ArrayRef<at::Backend> backends) {
@@ -358,8 +357,7 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
 }
 
 } // namespace
-} // namespace VariableType
-} // namespace autograd
+} // namespace autograd::VariableType
 
 namespace ADInplaceOrView {
 #define CREATION_META_DEFINITION                            \

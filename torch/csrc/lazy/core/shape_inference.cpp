@@ -69,8 +69,7 @@
 #include <ostream>
 #include <vector>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // Copied from ATen/native/utils/ParamUtils.h, which aparently I can't include
 // from here?
@@ -1388,5 +1387,4 @@ std::vector<Shape> compute_shape_as_strided_scatter_symint(
 // Restore unused-parameters warnings
 #pragma GCC diagnostic pop
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

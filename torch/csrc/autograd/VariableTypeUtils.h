@@ -34,8 +34,7 @@
 #endif
 #endif
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // The requires_grad argument is used to know if the inplace operation needs
 // gradient to be setup for it.
@@ -524,5 +523,4 @@ Return run_jit_decomposition_with_args_for_jvp(
 
 } // namespace impl
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

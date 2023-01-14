@@ -5,8 +5,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 void update_source_range_and_cs_ptr(
@@ -218,5 +217,4 @@ Module PatternBasedRewrite(const Module& module) {
   return subgraph_rewriter.runOnModule(module);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

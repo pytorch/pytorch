@@ -15,9 +15,7 @@
 
 #include <initializer_list>
 
-namespace torch {
-
-namespace detail {
+namespace torch::detail {
 
 enum class TensorDataContainerType { Scalar, InitList, Tensor };
 
@@ -366,6 +364,4 @@ inline std::ostream& operator<<(
   return stream;
 }
 
-} // namespace detail
-
-} // namespace torch
+} // namespace torch::detail

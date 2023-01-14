@@ -13,8 +13,7 @@
 #include <torch/csrc/lazy/core/tensor.h>
 #include <vector>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 // Turn clang-format off, as we rely on the whole signature being on one line
 // for codegen.
 // clang-format off
@@ -118,5 +117,4 @@ TORCH_API std::vector<torch::lazy::Shape> compute_shape_diagonal_scatter(const a
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_slice_scatter_symint(const at::Tensor & self, const at::Tensor & src, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_as_strided_scatter_symint(const at::Tensor & self, const at::Tensor & src, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset);
 // clang-format on
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

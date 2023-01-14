@@ -6,8 +6,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace monitor {
+namespace torch::monitor {
 
 namespace {
 class EventHandlers {
@@ -57,5 +56,4 @@ void unregisterEventHandler(const std::shared_ptr<EventHandler>& p) {
   EventHandlers::get().unregisterEventHandler(p);
 }
 
-} // namespace monitor
-} // namespace torch
+} // namespace torch::monitor

@@ -4,8 +4,7 @@
 #include <string>
 #include <utility>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 
 /// An exception thrown when a DataLoader's worker thread throws an exception,
 /// which is caught. A `WorkerException` stores an `exception_ptr` to the
@@ -35,5 +34,4 @@ struct WorkerException : public std::exception {
   std::string message;
 };
 
-} // namespace data
-} // namespace torch
+} // namespace torch::data

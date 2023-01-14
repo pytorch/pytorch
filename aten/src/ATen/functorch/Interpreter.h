@@ -7,7 +7,7 @@
 #include <c10/util/variant.h>
 #include <bitset>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // NOTE: [functorch interpreter stack]
 //
@@ -205,4 +205,4 @@ void setup_dispatch_key_tls(DispatchKeySet exclude, DispatchKeySet include);
 
 void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
-}} // namespace at::functorch
+} // namespace at::functorch

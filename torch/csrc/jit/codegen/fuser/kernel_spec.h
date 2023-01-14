@@ -16,9 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Helper struct containing partition information: the number of tensors
 // created and the dimension the partitioning is performed on.
@@ -146,6 +144,4 @@ struct TORCH_API KernelSpec {
           kernels_;
 };
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

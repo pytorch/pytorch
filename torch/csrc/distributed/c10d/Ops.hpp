@@ -3,8 +3,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
-namespace c10d {
-namespace ops {
+namespace c10d::ops {
 
 // Below are essentially ProcessGroup's corresponding ops but routed to the
 // dispatcher. To be noted, it's a convention to use at::TensorList to represent
@@ -113,5 +112,4 @@ TORCH_API c10::intrusive_ptr<Work> recv_any_source(
     at::TensorList tensors,
     int64_t tag);
 
-} // namespace ops
 } // namespace c10d

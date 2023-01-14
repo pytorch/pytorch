@@ -9,8 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct TORCH_API Error : public Node {
   Error(std::string msg, edge_list&& next_edges)
@@ -91,5 +90,4 @@ struct TORCH_API Identity : public Node {
   variable_list apply(variable_list&& inputs) override;
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

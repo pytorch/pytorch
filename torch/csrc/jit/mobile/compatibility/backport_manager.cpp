@@ -12,8 +12,7 @@
 #include <cstddef>
 #include <sstream>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
@@ -698,5 +697,4 @@ bool BackportManager::backport(
   return backport_success;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

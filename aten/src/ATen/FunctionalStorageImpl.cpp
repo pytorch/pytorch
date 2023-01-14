@@ -7,8 +7,7 @@
 #include <c10/util/Exception.h>
 #include <vector>
 
-namespace at {
-namespace functionalization {
+namespace at::functionalization {
 
 ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
   if (out_idx == this->out_index) return *this;
@@ -121,5 +120,4 @@ bool FunctionalStorageImpl::apply_updates() {
   return any_updates;
 }
 
-} // namespace functionalization
 } // namespace at

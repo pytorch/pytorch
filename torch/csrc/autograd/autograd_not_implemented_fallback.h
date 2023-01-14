@@ -2,12 +2,10 @@
 
 #include <torch/library.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 TORCH_API torch::CppFunction autogradNotImplementedFallback();
 
 TORCH_API torch::CppFunction autogradNotImplementedInplaceOrViewFallback();
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

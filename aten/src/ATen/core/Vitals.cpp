@@ -2,8 +2,7 @@
 #include <cstdlib>
 #include <iostream>
 
-namespace at {
-namespace vitals {
+namespace at::vitals {
 
 APIVitals VitalsAPI;
 
@@ -95,5 +94,4 @@ APIVitals::APIVitals() : vitals_enabled(false), name_map_() {
   setVital("CUDA", "used", "False", /* force = */ true);
 }
 
-} // namespace vitals
 } // namespace at

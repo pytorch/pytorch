@@ -7,15 +7,12 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 struct TORCH_API AdamOptions : public OptimizerCloneableOptions<AdamOptions> {
   AdamOptions(double lr = 1e-3);
@@ -90,5 +87,4 @@ class TORCH_API Adam : public Optimizer {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(Adam);
   }
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

@@ -7,8 +7,7 @@
 #include <c10/macros/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /**
  * SourceRef does two things:
@@ -43,5 +42,4 @@ class TORCH_API SourceRef : public CustomClassHolder {
   std::shared_ptr<Source> source_view_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

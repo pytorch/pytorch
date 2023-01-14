@@ -8,8 +8,7 @@
 
 // TODO move this to c10 namespace
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using c10::IValue;
 using Stack = std::vector<IValue>;
@@ -196,5 +195,4 @@ inline void pack(Stack& stack, std::tuple<Args...>&& t) {
   TuplePacker<sizeof...(Args), Args...>::execute(stack, std::move(t));
 }
 
-} // namespace jit
 } // namespace torch

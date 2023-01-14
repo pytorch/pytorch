@@ -4,9 +4,7 @@
 
 #include <sstream>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 thread_local std::vector<std::shared_ptr<RRefContext::PendingUserState>>
     RRefContext::userTable_;
@@ -803,6 +801,4 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
   return deletedRRef;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

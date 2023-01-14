@@ -8,8 +8,7 @@
 #include <arm_neon.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_stub);
 DEFINE_DISPATCH(quantize_tensor_per_channel_affine_stub);
@@ -301,5 +300,4 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
   return rtensor;
 }
 
-} // namespace native
 } // namespace at

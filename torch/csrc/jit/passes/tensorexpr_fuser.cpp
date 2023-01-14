@@ -36,8 +36,7 @@ C10_DEFINE_bool(
     false,
     "enable TE fusion using dynamic shapes");
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static bool texpr_reductions_enabled = false;
 
@@ -1455,5 +1454,4 @@ RegisterOperators TensorExprOps({
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

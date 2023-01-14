@@ -7,9 +7,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 class HasRand : public IRVisitor {
  public:
   HasRand(StmtPtr stmt) : stmt_(std::move(stmt)) {
@@ -401,6 +399,4 @@ class CreateBufferMap : public IRVisitor {
   std::unordered_map<std::string, BufPtr> map_input_to_tensor_bufs_;
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

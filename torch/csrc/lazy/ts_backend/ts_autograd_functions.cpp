@@ -3,8 +3,7 @@
 #include <torch/csrc/lazy/ts_backend/ts_autograd_functions.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 at::Tensor MaxPool3dAutogradFunctionTS::forward(
     torch::autograd::AutogradContext* ctx,
@@ -57,5 +56,4 @@ torch::autograd::variable_list MaxPool3dAutogradFunctionTS::backward(
   return grad_inputs;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

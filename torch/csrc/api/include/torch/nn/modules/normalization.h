@@ -10,8 +10,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LayerNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -198,5 +197,4 @@ class TORCH_API GroupNormImpl : public torch::nn::Cloneable<GroupNormImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(GroupNorm);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

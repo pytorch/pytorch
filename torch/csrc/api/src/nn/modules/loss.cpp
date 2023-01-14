@@ -2,8 +2,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 L1LossImpl::L1LossImpl(const L1LossOptions& options_) : options(options_) {}
 
@@ -440,5 +439,4 @@ Tensor BCEWithLogitsLossImpl::forward(
       options.pos_weight());
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

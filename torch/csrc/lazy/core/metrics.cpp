@@ -12,8 +12,7 @@
 #include <cmath>
 #include <sstream>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 const std::vector<double>* ReadEnvPercentiles() {
@@ -434,5 +433,4 @@ int64_t NowNs() {
       .count();
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -14,8 +14,7 @@
 #include <typeinfo>
 #include <utility>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyValue ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -119,5 +118,4 @@ class AnyValue {
   std::unique_ptr<Placeholder> content_;
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

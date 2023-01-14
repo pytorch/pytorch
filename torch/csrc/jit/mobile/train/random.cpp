@@ -5,9 +5,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 RandomSampler::RandomSampler(int64_t size, Dtype index_dtype)
     : indices_(torch::randperm(size, index_dtype)) {}
@@ -54,6 +52,4 @@ size_t RandomSampler::index() const noexcept {
   return index_;
 }
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

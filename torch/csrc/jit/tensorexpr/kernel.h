@@ -10,9 +10,7 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 struct SmallSizeTPairHash {
  public:
@@ -378,6 +376,4 @@ bool isContiguous(
     const torch::jit::Value* v,
     at::MemoryFormat memory_format = at::MemoryFormat::Contiguous);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

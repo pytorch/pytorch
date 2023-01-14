@@ -426,8 +426,7 @@ inline std::string to_string(c10::guts::detail::DummyClassForToString) {
 }
 
 } // namespace std
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 namespace detail {
 
 template <class T, class Enable = void>
@@ -462,7 +461,6 @@ constexpr const T& max(const T& a, const T& b) {
   return (a < b) ? b : a;
 }
 
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts
 
 #endif // C10_UTIL_CPP17_H_

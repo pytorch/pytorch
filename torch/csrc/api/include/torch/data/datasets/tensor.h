@@ -7,9 +7,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace data {
-namespace datasets {
+namespace torch::data::datasets {
 
 /// A dataset of tensors.
 /// Stores a single tensor internally, which is then indexed inside `get()`.
@@ -33,6 +31,4 @@ struct TensorDataset : public Dataset<TensorDataset, TensorExample> {
   Tensor tensor;
 };
 
-} // namespace datasets
-} // namespace data
-} // namespace torch
+} // namespace torch::data::datasets

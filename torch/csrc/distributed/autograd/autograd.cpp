@@ -1,9 +1,7 @@
 #include <ATen/record_function.h>
 #include <torch/csrc/distributed/autograd/autograd.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 constexpr auto kDistAutogradBackwardProfilingKey =
     "torch::distributed::autograd::backward";
@@ -23,6 +21,4 @@ void backward(
   }
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

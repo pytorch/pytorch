@@ -9,8 +9,7 @@
 
 #include <algorithm>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -549,5 +548,4 @@ void FixupTraceScopeBlocks(std::shared_ptr<Graph>& graph, Module* self) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

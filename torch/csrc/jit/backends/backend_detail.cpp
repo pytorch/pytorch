@@ -11,9 +11,7 @@
 #include <stack>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace detail {
+namespace torch::jit::detail {
 namespace {
 
 /*
@@ -408,6 +406,4 @@ Module codegen_backend_module(
 
   return wrapper;
 }
-} // namespace detail
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::detail

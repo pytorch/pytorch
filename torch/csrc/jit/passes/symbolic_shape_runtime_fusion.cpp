@@ -14,8 +14,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <sstream>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Inserts the Compute for Each Symbolic Shape in the TensorExpr Graph
 // and returns back a map from Symbolic Shape Value to its runtime Value *
@@ -741,5 +740,4 @@ RegisterOperators TensorExprDynamicOp({
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

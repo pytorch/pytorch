@@ -45,8 +45,7 @@
 #include <typeinfo>
 #include <unordered_set>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 static bool in_bad_autograd_fork =
@@ -1579,5 +1578,4 @@ void GraphTask::init_to_execute(
   }
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

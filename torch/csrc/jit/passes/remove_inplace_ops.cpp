@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 static const std::unordered_map<NodeKind, NodeKind> inPlaceToOutOfPlace = {
     {aten::add_, aten::add},
@@ -143,5 +142,4 @@ void RemoveInplaceOps(const std::shared_ptr<Graph>& graph) {
   ImplicitCastForBinaryInplaceOps(graph->block());
   RemoveInplaceOps(graph->block());
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

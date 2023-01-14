@@ -37,8 +37,7 @@ namespace std {
     };
 }
 
-namespace at {
-namespace native{
+namespace at::native{
 
 namespace {
 
@@ -354,5 +353,4 @@ unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool
   return unique_dim_consecutive_cpu(self, dim.value(), return_inverse, return_counts);
 }
 
-}  // namespace native
 }  // namespace at

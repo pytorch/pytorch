@@ -5,7 +5,7 @@
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace sparse {
+namespace at::sparse {
 
 // NOTE [ Flatten Sparse Indices ]
 // This helper function flattens a sparse indices tensor (a Tensor) into a 1D
@@ -114,4 +114,4 @@ Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
   return csr;
 }
 
-}} // namespace at::sparse
+} // namespace at::sparse

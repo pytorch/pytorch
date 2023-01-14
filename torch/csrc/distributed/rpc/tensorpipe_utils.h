@@ -10,9 +10,7 @@ class Allocation;
 class Descriptor;
 } // namespace tensorpipe
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 TORCH_API const c10::Stream& getStreamForDevice(
     const std::vector<c10::Stream>& streams,
@@ -116,8 +114,6 @@ TORCH_API c10::intrusive_ptr<Message> tensorpipeDeserialize(
     tensorpipe::Descriptor&& tpDescriptor,
     TensorpipeReadBuffers&& holder);
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif // USE_TENSORPIPE

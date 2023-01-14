@@ -30,9 +30,7 @@ std::string getTypeStr(const c10::TypePtr& type) {
 
 } // namespace
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 std::atomic<local_id_t> RRefContext::nextLocalId_{0};
 
@@ -295,6 +293,4 @@ std::ostream& operator<<(std::ostream& os, const RRef& rref) {
   }
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

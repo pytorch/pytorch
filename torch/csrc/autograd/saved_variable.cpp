@@ -14,8 +14,7 @@
 #include <memory>
 #include <sstream>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 SavedVariable::SavedVariable(
     const Variable& variable,
@@ -294,5 +293,4 @@ const char* ERR_BACKWARD_TWICE =
     "retain_graph=True if you need to backward through the graph a second time or "
     "if you need to access saved tensors after calling backward.";
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

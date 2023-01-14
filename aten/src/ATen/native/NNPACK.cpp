@@ -46,8 +46,7 @@ bool _nnpack_available() {
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static bool init_nnpack() {
   static c10::once_flag once_;
@@ -308,7 +307,6 @@ Tensor _nnpack_spatial_convolution(
   return output;
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_NNPACK_ENABLED

@@ -44,10 +44,7 @@
 // type: virtual Statement* mutate(Statement*) this is useful for when we want
 // to have an IR node result from our overloaded functions.
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 class IrContainer;
 class Fusion;
 
@@ -372,7 +369,4 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   void removeExpr(IrContainer*, Expr*);
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

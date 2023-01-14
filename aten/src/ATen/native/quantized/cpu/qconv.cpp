@@ -1369,8 +1369,7 @@ template at::Tensor PackedConvWeightsOnednn<3>::apply_relu(
 
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 /*
@@ -1499,5 +1498,4 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }
 
 } // namespace
-} // namespace native
 } // namespace at

@@ -1,7 +1,6 @@
 #include <ATen/core/TorchDispatchUtils.h>
 
-namespace at {
-namespace impl {
+namespace at::impl {
 
 bool tensor_has_dispatch(const at::Tensor& t) {
   DispatchKeySet key_set({DispatchKey::Python, DispatchKey::PythonTLSSnapshot});
@@ -27,5 +26,4 @@ bool tensorlist_has_dispatch(const c10::List<c10::optional<at::Tensor>>& li) {
   return false;
 }
 
-} // namespace impl
 } // namespace at

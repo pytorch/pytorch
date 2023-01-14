@@ -21,10 +21,8 @@ C10_DEFINE_bool(
     true,
     "enable horizontal fusion for nvfuser");
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit {
+namespace fuser::cuda {
 
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 
@@ -381,8 +379,7 @@ bool complyWith(
   return true;
 }
 
-} // namespace cuda
-} // namespace fuser
+} // namespace fuser::cuda
 
 namespace {
 
@@ -928,5 +925,4 @@ RegisterOperators reg_expand_as_copy({
 
 } // namespace
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

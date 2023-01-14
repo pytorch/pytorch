@@ -4,8 +4,7 @@
 
 namespace c10 {
 
-namespace detail {
-namespace infer_schema {
+namespace detail::infer_schema {
 namespace {
 
 std::string fastToString(size_t x) {
@@ -36,7 +35,6 @@ C10_EXPORT FunctionSchema make_function_schema(std::string&& name, std::string&&
 
 C10_EXPORT FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
   return make_function_schema("", "", arguments, returns);
-}
 }
 }
 

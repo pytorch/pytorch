@@ -46,8 +46,7 @@
 #include <string>
 #include <utility>
 
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 
 namespace detail {
 template <typename _Tp, std::size_t _Nm>
@@ -387,5 +386,4 @@ constexpr array<T, N> to_array(const T (&arr)[N]) {
   return detail::to_array_(arr, std::make_index_sequence<N>());
 }
 
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts

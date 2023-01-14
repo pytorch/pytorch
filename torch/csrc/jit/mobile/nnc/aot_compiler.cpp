@@ -25,10 +25,7 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
-namespace torch {
-namespace jit {
-namespace mobile {
-namespace nnc {
+namespace torch::jit::mobile::nnc {
 
 std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
@@ -443,7 +440,4 @@ c10::IValue preprocess(
 // TODO(mvz): temporarily disable NNC backend in mobile builds.
 // static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
 
-} // namespace nnc
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile::nnc

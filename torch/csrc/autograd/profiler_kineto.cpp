@@ -48,8 +48,7 @@ __attribute__((weak)) int acc_get_device_type() {
 #endif // USE_KINETO
 
 namespace torch {
-namespace autograd {
-namespace profiler {
+namespace autograd::profiler {
 
 namespace {
 inline int64_t getTimeUs() {
@@ -900,11 +899,9 @@ void ProfilerResult::save(const std::string& path) {
   trace_->save(path);
 }
 
-} // namespace profiler
-} // namespace autograd
+} // namespace autograd::profiler
 
-namespace profiler {
-namespace impl {
+namespace profiler::impl {
 void _reportVulkanEventToProfiler(vulkan_id_t id) {
   auto state_ptr = ::torch::autograd::profiler::KinetoThreadLocalState::get(
       /*global=*/false);
@@ -912,7 +909,6 @@ void _reportVulkanEventToProfiler(vulkan_id_t id) {
     state_ptr->reportVulkanEventToProfiler(id);
   }
 }
-} // namespace impl
-} // namespace profiler
+} // namespace profiler::impl
 
 } // namespace torch

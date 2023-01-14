@@ -13,9 +13,7 @@
 #include <cstddef>
 #include <tuple>
 
-namespace torch {
-namespace nn {
-namespace init {
+namespace torch::nn::init {
 namespace {
 struct Fan {
   explicit Fan(Tensor& tensor) {
@@ -251,6 +249,4 @@ std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(
   return std::tie(fan_in, fan_out);
 }
 
-} // namespace init
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::init

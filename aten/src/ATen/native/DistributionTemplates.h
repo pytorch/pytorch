@@ -22,9 +22,7 @@
 #include <ATen/ops/view_as_real.h>
 #endif
 
-namespace at {
-namespace native {
-namespace templates {
+namespace at::native::templates {
 
 // ==================================================== Random ========================================================
 
@@ -359,4 +357,4 @@ Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, c10::optional<Gen
 #undef CHECK_OUT_OF_BOUNDS
 #undef WARN_OUT_OF_BOUNDS
 
-}}}
+}

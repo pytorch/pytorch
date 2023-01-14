@@ -9,8 +9,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Trees are used to represent all forms of TC IR, pre- and post-typechecking.
 // Rather than have a full class hierarchy for all TC statements, trees are a
@@ -216,5 +215,4 @@ static inline std::ostream& operator<<(std::ostream& out, const TreeRef& t) {
   return out << pretty_tree(t);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -15,8 +15,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/utils/memory.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
@@ -432,5 +431,4 @@ bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
   return made_change;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

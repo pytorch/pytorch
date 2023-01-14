@@ -3,8 +3,7 @@
 #include <caffe2/serialize/read_adapter_interface.h>
 
 
-namespace caffe2 {
-namespace serialize {
+namespace caffe2::serialize {
 
 class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
  public:
@@ -28,5 +27,4 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
 };
 
 
-} // namespace serialize
 } // namespace caffe2

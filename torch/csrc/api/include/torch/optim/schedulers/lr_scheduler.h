@@ -4,8 +4,7 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 class TORCH_API LRScheduler {
  public:
@@ -36,5 +35,4 @@ class TORCH_API LRScheduler {
 
   torch::optim::Optimizer& optimizer_;
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

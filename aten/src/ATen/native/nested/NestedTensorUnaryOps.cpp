@@ -15,8 +15,7 @@
 
 #include <tuple>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& NestedTensor_relu_(Tensor& self) {
   auto self_ptr = get_nested_tensor_impl(self);
@@ -70,5 +69,4 @@ Tensor NestedTensor_neg(const Tensor& self) {
   return map_nt(self, at::neg);
 }
 
-} // namespace native
 } // namespace at

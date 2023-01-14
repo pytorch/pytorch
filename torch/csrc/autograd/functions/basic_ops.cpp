@@ -9,8 +9,7 @@
 #include <memory>
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 auto Error::apply(variable_list&& inputs) -> variable_list {
   throw std::runtime_error(msg);
@@ -55,5 +54,4 @@ auto Identity::apply(variable_list&& grads) -> variable_list {
   return std::move(grads);
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

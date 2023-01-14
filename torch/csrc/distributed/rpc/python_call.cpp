@@ -2,9 +2,7 @@
 
 #include <c10/util/C++17.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 PythonCall::PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncExecution)
     : serializedPyObj_(std::move(serializedPyObj)),
@@ -46,6 +44,4 @@ const SerializedPyObj& PythonCall::serializedPyObj() const {
   return serializedPyObj_;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

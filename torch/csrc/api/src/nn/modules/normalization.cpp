@@ -9,8 +9,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 LayerNormImpl::LayerNormImpl(const LayerNormOptions& options_)
     : options(options_) { // NOLINT(modernize-pass-by-value)
@@ -121,5 +120,4 @@ void GroupNormImpl::pretty_print(std::ostream& stream) const {
          << ", affine=" << options.affine() << ")";
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

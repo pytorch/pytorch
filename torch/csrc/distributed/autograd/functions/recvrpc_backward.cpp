@@ -4,9 +4,7 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using torch::autograd::Variable;
 using torch::autograd::variable_list;
@@ -65,6 +63,4 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
   return variable_list();
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

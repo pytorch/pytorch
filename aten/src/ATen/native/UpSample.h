@@ -44,8 +44,7 @@
  *     src_idx + 0.5 = scale * (dst_index + 0.5)
  */
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace upsample {
 
@@ -463,5 +462,4 @@ static inline void compute_source_index_and_lambda(
   }
 }
 
-} // namespace native
 } // namespace at

@@ -8,8 +8,7 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Base class for all (dimension-specialized) avgpool modules.
 template <size_t D, typename Derived>
@@ -772,5 +771,4 @@ class TORCH_API LPPool2dImpl : public LPPoolImpl<2, LPPool2dImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(LPPool2d);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

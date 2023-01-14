@@ -8,8 +8,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 char const* toString(OpCode op);
 namespace mobile {
@@ -270,5 +269,4 @@ Function& Function::registerFunc(
 }
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

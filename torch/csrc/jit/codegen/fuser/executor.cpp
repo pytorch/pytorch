@@ -20,9 +20,7 @@
 #include <tuple>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Returns the "map size" for this run, which is the common size for all
 // intermediate tensors.
@@ -409,6 +407,4 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   return true;
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

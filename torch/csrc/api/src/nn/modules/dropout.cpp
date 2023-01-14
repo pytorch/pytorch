@@ -11,8 +11,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 Tensor DropoutImpl::forward(Tensor input) {
   return F::detail::dropout(
@@ -72,5 +71,4 @@ void FeatureAlphaDropoutImpl::pretty_print(std::ostream& stream) const {
          << ", inplace=" << options.inplace() << ")";
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

@@ -14,8 +14,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Conservatively compare two optionals. If both are undefined, assume
 // they aren't equal
@@ -447,5 +446,4 @@ bool PeepholeOptimize(
   return changed;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

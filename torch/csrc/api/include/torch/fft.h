@@ -2,8 +2,7 @@
 
 #include <ATen/ATen.h>
 
-namespace torch {
-namespace fft {
+namespace torch::fft {
 
 /// Computes the 1 dimensional fast Fourier transform over a given dimension.
 /// See https://pytorch.org/docs/master/fft.html#torch.fft.fft.
@@ -385,5 +384,4 @@ inline Tensor ifftshift(
   return torch::fft_ifftshift(x, dim);
 }
 
-} // namespace fft
-} // namespace torch
+} // namespace torch::fft

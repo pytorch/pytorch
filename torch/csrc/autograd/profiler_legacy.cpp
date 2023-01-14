@@ -23,9 +23,7 @@
 
 #include <iostream>
 
-namespace torch {
-namespace autograd {
-namespace profiler {
+namespace torch::autograd::profiler {
 
 // We decompose the profiler logic into the following components:
 //
@@ -679,6 +677,4 @@ void RecordProfile::processEvents(const std::vector<LegacyEvent*>& events) {
   writeProfilerEventsToStream(out_, events);
 }
 
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::profiler

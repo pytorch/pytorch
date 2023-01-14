@@ -12,8 +12,7 @@
 
 #include <functional>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 SGDOptions::SGDOptions(double lr) : lr_(lr) {}
 
@@ -135,5 +134,4 @@ void SGD::load(serialize::InputArchive& archive) {
     }
   }
 }
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

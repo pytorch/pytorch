@@ -12,10 +12,7 @@
 //! Nodes in here are intended to be "user facing" users in this sense being
 //! those that want to be able to generate CUDA code.
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 
 class WelfordResult;
 class ViewTransform;
@@ -594,7 +591,4 @@ class TORCH_CUDA_CU_API TensorViewBuilder {
   std::vector<Val*> shape_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

@@ -21,8 +21,7 @@
 
 using namespace torch::nn::utils::rnn;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// These must line up with the CUDNN mode codes:
 /// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
@@ -1006,5 +1005,4 @@ Tensor GRUCellImpl::forward(const Tensor& input, Tensor hx) {
   return torch::gru_cell(input, hx, weight_ih, weight_hh, bias_ih, bias_hh);
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

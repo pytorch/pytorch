@@ -25,11 +25,11 @@ namespace c10 {
 class Scalar;
 }
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 struct Node;
 
-}} // namespace torch::autograd
+} // namespace torch::autograd
 
 namespace at {
 

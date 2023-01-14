@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/api/module.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static ModuleHook emit_module_callback;
 void didFinishEmitModule(Module module) {
@@ -28,5 +27,4 @@ std::pair<ModuleHook, FunctionHook> getEmitHooks() {
   return std::make_pair(emit_module_callback, emit_function_callback);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

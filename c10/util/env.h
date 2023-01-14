@@ -4,8 +4,7 @@
 #include <c10/util/Optional.h>
 #include <cstring>
 
-namespace c10 {
-namespace utils {
+namespace c10::utils {
 // Reads an environment variable and returns
 // - optional<true>,              if set equal to "1"
 // - optional<false>,             if set equal to "0"
@@ -38,5 +37,4 @@ inline optional<bool> check_env(const char* name) {
   }
   return c10::nullopt;
 }
-} // namespace utils
-} // namespace c10
+} // namespace c10::utils

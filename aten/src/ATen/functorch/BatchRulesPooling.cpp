@@ -9,7 +9,7 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
 max_pool2d_with_indices_batch_rule(
@@ -53,4 +53,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(3, max_pool2d_with_indices_backward, 2);
 }
 
-}}
+}

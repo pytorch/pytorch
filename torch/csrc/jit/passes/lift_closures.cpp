@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Closures are initially emitted as prim::Closure nodes with a single block.
 // Here, we convert the block to a subgraph, adding all closed over variables
@@ -75,5 +74,4 @@ void liftClosures(const std::shared_ptr<Graph>& to_clean) {
   liftClosures(to_clean->block());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

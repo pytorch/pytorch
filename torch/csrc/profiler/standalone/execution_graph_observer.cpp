@@ -32,9 +32,7 @@
 
 using namespace at;
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 //******************************************************************************
 // JSON output utility functions. To be merged with PyTorch profiler.
@@ -694,6 +692,4 @@ void disableExecutionGraphObserver() {
         << "Trying to disable Execution Graph Observer when it's already disabled.";
   }
 }
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

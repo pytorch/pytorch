@@ -7,9 +7,7 @@
 
 #include <functional>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 bool SGDParamGroup::has_options() const {
   return options_ != nullptr;
@@ -128,6 +126,4 @@ Tensor SGD::step(const LossClosure& closure) {
   }
   return loss;
 }
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

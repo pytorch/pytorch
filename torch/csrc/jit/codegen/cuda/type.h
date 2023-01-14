@@ -12,10 +12,7 @@
 #include <string>
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 
 // https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
 struct TypeHash {
@@ -432,7 +429,4 @@ const char* const kMagicZeroName = "nvfuser_zero";
 //! limit can be increased by extending struct Tuple define in tuple.cu.
 static constexpr int kMaxNumGroupedReductions = 8;
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

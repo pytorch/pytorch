@@ -6,14 +6,11 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 class Module;
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn
 
-namespace torch {
-namespace detail {
+namespace torch::detail {
 /// Detects if a type T has a forward() method.
 template <typename T>
 struct has_forward {
@@ -61,5 +58,4 @@ using is_module =
 template <typename M, typename T = void>
 using enable_if_module_t =
     typename std::enable_if<is_module<M>::value, T>::type;
-} // namespace detail
-} // namespace torch
+} // namespace torch::detail

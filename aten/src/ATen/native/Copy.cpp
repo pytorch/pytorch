@@ -113,8 +113,7 @@ bool is_supported_device(Device device) {
 
 } // namespace
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
@@ -322,5 +321,4 @@ void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src) {
 
 DEFINE_DISPATCH(copy_stub);
 
-} // namespace native
 } // namespace at

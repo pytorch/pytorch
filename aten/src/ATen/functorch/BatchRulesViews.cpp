@@ -16,7 +16,7 @@
 #include <c10/util/SmallBuffer.h>
 #include <ATen/InferSize.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // Note [Adding vmap support for an operator]
 // Hey there! So you have an operator and you want to get it to work with vmap.
@@ -567,4 +567,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(narrow_copy, narrow_copy_batch_rule);
 }
 
-}}
+}

@@ -11,15 +11,12 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 struct TORCH_API RMSpropOptions
     : public OptimizerCloneableOptions<RMSpropOptions> {
@@ -93,5 +90,4 @@ class TORCH_API RMSprop : public Optimizer {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(RMSprop);
   }
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

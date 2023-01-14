@@ -30,10 +30,7 @@
  * transformations, and lowering the IR.
  */
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 
 using ValueId = int32_t;
 
@@ -518,7 +515,4 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   kir::Predicate* write_predicate_ = nullptr;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

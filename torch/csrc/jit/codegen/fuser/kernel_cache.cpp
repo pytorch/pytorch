@@ -6,9 +6,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 struct KernelCacheImpl {
   // Note: std::unordered_map does not invalidate references even if rehashing
@@ -87,6 +85,4 @@ at::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph) {
   return nolock_retrieve(cache, it->second);
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

@@ -19,8 +19,7 @@
 
 #include <ATen/ScalarOps.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 struct TlsData {
@@ -1068,5 +1067,4 @@ hash_t LazyGraphExecutor::GetGraphHash(
   return coll.hash;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

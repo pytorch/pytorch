@@ -9,8 +9,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 inline void check_nested_tensor_matrix_constraints(
@@ -246,5 +245,4 @@ Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c
   return result;
 }
 
-} // namespace native
 } // namespace at

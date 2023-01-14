@@ -17,7 +17,7 @@
 #include <ATen/ops/empty_strided.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 /*
@@ -1209,4 +1209,4 @@ REGISTER_AVX512_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
 REGISTER_AVX2_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
 REGISTER_VSX_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
 REGISTER_ZVECTOR_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
-}} // namespace at::native
+} // namespace at::native

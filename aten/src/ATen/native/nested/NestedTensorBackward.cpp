@@ -10,8 +10,7 @@
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // See Note [nested tensor matmul] in NestedTensorMath.cpp
 std::tuple<Tensor, Tensor> matmul_backward_nested(
@@ -170,5 +169,4 @@ Tensor _nested_select_backward_symint(
   return nt_grad;
 }
 
-} // namespace native
 } // namespace at

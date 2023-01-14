@@ -26,8 +26,7 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_max_pool2d(
     const Tensor& self,
@@ -194,7 +193,6 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
   TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_backward: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
 } // namespace at
 
 #else // AT_MKLDNN_ENABLED

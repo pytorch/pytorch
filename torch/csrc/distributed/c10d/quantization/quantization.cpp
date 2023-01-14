@@ -2,10 +2,7 @@
 #include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
 #include <torch/library.h>
 
-namespace torch {
-namespace distributed {
-namespace c10d {
-namespace quantization {
+namespace torch::distributed::c10d::quantization {
 
 // TODO: The kernels are copied from fbgemm_gpu, we should dedup them later
 
@@ -99,7 +96,4 @@ TORCH_LIBRARY_IMPL(quantization, CPU, m) {
   m.impl("_FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
 }
 
-} // namespace quantization
-} // namespace c10d
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::c10d::quantization

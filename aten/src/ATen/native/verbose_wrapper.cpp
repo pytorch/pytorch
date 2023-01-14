@@ -9,8 +9,7 @@
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #endif
 
-namespace torch {
-namespace verbose {
+namespace torch::verbose {
 
 TORCH_API int _mkl_set_verbose(int enable) {
 #if AT_MKL_ENABLED()
@@ -28,5 +27,4 @@ TORCH_API int _mkldnn_set_verbose(int level) {
 #endif
 }
 
-} // namespace verbose
 } // namespace torch

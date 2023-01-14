@@ -19,8 +19,7 @@
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -515,5 +514,4 @@ script::Module optimizeForMobile(
 }
 
 #endif
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

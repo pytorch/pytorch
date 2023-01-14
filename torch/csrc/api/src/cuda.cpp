@@ -6,8 +6,7 @@
 
 #include <cstddef>
 
-namespace torch {
-namespace cuda {
+namespace torch::cuda {
 
 size_t device_count() {
   return at::detail::getCUDAHooks().getNumGPUs();
@@ -61,5 +60,4 @@ void synchronize(int64_t device_index) {
   at::detail::getCUDAHooks().deviceSynchronize(device_index);
 }
 
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda

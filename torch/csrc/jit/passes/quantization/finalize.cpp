@@ -14,8 +14,7 @@
 #include <torch/csrc/jit/passes/quantization/register_packed_params.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -273,5 +272,4 @@ Module FinalizeOnDevicePTQ(
   return module;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

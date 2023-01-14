@@ -15,11 +15,7 @@
 #include <ATen/mkl/Utils.h>
 #endif
 
-namespace at {
-namespace native {
-namespace sparse {
-namespace impl {
-namespace mkl {
+namespace at::native::sparse::impl::mkl {
 
 namespace {
 
@@ -663,8 +659,4 @@ void triangular_solve_out_sparse_csr(
 #endif
 }
 
-} // namespace mkl
-} // namespace impl
-} // namespace sparse
-} // namespace native
 } // namespace at

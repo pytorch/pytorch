@@ -24,8 +24,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qadd_relu_stub);
 DEFINE_DISPATCH(qadd_stub);
@@ -487,4 +486,4 @@ Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
   return qadd<false>(std::move(qa), std::move(qb), scale, zero_point);
 }
 
-}}  // namespace at::native
+}  // namespace at::native

@@ -4,8 +4,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 struct C10_API PythonDispatcherTLS {
   static void set_state(PyInterpreter* state);
@@ -23,5 +22,4 @@ struct C10_API DisablePythonDispatcher {
   PyInterpreter* old_;
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

@@ -14,10 +14,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
-namespace sparse {
-namespace impl {
+namespace at::native::sparse::impl {
 
 Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& strided, Tensor& result) {
   const auto compressed_layout = compressed.layout();
@@ -283,7 +280,4 @@ void triangular_solve_out_sparse_csr(
 }
 
 } // namespace cpu
-} // namespace impl
-} // namespace sparse
-} // namespace native
 } // namespace at

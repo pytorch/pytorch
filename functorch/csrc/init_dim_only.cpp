@@ -7,8 +7,7 @@
 #include <torch/extension.h>
 #include <functorch/csrc/dim/dim.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   // initialize first-class dims and install it as a submodule on _C
@@ -19,4 +18,4 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   py::setattr(m, "dim", py::reinterpret_steal<py::object>(dim));
 }
 
-}}
+}

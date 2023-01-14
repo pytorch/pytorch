@@ -10,8 +10,7 @@
 
 #include <c10/util/irange.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
@@ -117,5 +116,4 @@ Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level) {
   return makeBatched(tensor, dim, level);
 }
 
-}
 } // namespace at

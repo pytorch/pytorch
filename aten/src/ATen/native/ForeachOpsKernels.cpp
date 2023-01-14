@@ -55,7 +55,7 @@
 #include <ATen/ops/zeros_like_ops.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 #define FOREACH_BINARY_OP_SCALAR(OP)                                                                      \
 void foreach_tensor_##OP##_scalar_kernel_slow_(TensorList tensors, const Scalar& scalar) {                       \
@@ -321,4 +321,4 @@ std::vector<Tensor> foreach_tensor_norm_slow(TensorList tensors, const Scalar& o
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

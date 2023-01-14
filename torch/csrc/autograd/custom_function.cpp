@@ -3,8 +3,7 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
     : layout(var.layout()),
@@ -558,5 +557,4 @@ const std::unordered_set<at::TensorImpl*>& AutogradContext::
     get_non_differentiable() const {
   return non_differentiable_;
 }
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -5,8 +5,7 @@
 
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // We explicitly pass in scale and zero_point because we don't have the infra
@@ -172,5 +171,4 @@ Tensor empty_quantized(
   return output;
 }
 
-} // namespace native
 } // namespace at

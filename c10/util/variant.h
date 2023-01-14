@@ -395,8 +395,7 @@ constexpr in_place_type_t<T> in_place_type{};
     return __VA_ARGS__;                                    \
   }
 
-namespace c10 {
-namespace lib {
+namespace c10::lib {
 template <typename T>
 struct identity {
   using type = T;
@@ -569,8 +568,7 @@ struct voider : identity<void> {};
 template <typename... Ts>
 using void_t = typename voider<Ts...>::type;
 
-namespace detail_ {
-namespace swappable {
+namespace detail_::swappable {
 
 using std::swap;
 
@@ -598,8 +596,7 @@ struct is_nothrow_swappable {
 template <typename T>
 struct is_nothrow_swappable<false, T> : std::false_type {};
 
-} // namespace swappable
-} // namespace detail_
+} // namespace detail_::swappable
 
 using detail_::swappable::is_swappable;
 
@@ -907,8 +904,7 @@ struct push_back<index_sequence<Is...>, J> {
   using type = index_sequence<Is..., J>;
 };
 
-} // namespace lib
-} // namespace c10
+} // namespace c10::lib
 
 #undef C10_MPARK_RETURN
 

@@ -9,9 +9,7 @@
 
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using int32 = std::int32_t;
 
@@ -146,9 +144,7 @@ inline Dtype BinaryOpDtype(
   return resultType;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 
 namespace std {
 

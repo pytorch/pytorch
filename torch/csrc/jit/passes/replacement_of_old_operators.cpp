@@ -12,8 +12,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct OldOpsReplacerWithUpgraders {
   OldOpsReplacerWithUpgraders(std::shared_ptr<Graph> graph)
@@ -96,5 +95,4 @@ TORCH_API void ReplaceOldOperatorsWithUpgraders(std::shared_ptr<Graph> graph) {
   OldOpsReplacerWithUpgraders(graph).run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

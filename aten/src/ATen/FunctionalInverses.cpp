@@ -5,8 +5,7 @@
 #include <ATen/ExpandUtils.h>
 
 #include <utility>
-namespace at {
-namespace functionalization {
+namespace at::functionalization {
 
 // This logic is similar to autograd code for view backwards calls.
 // We can't easily share it though, because (eventually) these functions
@@ -328,5 +327,4 @@ Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& 
     }
 }
 
-} // functionalization
 } // at

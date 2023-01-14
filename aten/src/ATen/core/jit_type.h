@@ -17,10 +17,8 @@
 #include <sstream>
 #include <type_traits>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 struct Function;
-} // namespace jit
 } // namespace torch
 
 namespace c10 {

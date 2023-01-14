@@ -10,9 +10,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using VarMapping = std::vector<std::pair<VarPtr, ExprPtr>>;
 
@@ -62,6 +60,4 @@ class VarSubMutator : public IRMutator {
   std::unordered_map<VarPtr, ExprPtr> var_mapping_;
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

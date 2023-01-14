@@ -3,8 +3,7 @@
 #include <torch/csrc/lazy/core/cache.h>
 
 // SHAPE CACHINHG CODE
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 using CanonicalArg = c10::variant<CanonicalizedSymbolicShape, IValue>;
 using CanonicalArgVec = std::vector<CanonicalArg>;
@@ -204,5 +203,4 @@ bool operator==(
     const CanonicalizedSymbolicShape& b) {
   return a.values_ == b.values_;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

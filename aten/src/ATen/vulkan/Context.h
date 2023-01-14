@@ -4,8 +4,7 @@
 
 #include <ATen/Tensor.h>
 
-namespace at {
-namespace vulkan {
+namespace at::vulkan {
 
 struct VulkanImplInterface {
   virtual ~VulkanImplInterface() = default;
@@ -23,5 +22,4 @@ class VulkanImplRegistrar {
 
 at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src);
 
-} // namespace vulkan
 } // namespace at

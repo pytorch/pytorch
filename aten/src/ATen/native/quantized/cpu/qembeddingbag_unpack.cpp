@@ -99,8 +99,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
   return weight_origin;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& qembeddingbag_byte_unpack_out(Tensor& output, const Tensor& packed_weight) {
   // The "last" dimension of an N-Dimensioned batch of embedding bags is
@@ -271,5 +270,4 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
 }
 
 } // namespace
-} // namespace native
 } // namespace at

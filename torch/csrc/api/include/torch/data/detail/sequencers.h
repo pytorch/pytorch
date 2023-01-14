@@ -6,10 +6,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace data {
-namespace detail {
-namespace sequencers {
+namespace torch::data::detail::sequencers {
 namespace detail {
 template <typename Result>
 bool buffer_contains_result(const std::vector<optional<Result>>& buffer) {
@@ -107,7 +104,4 @@ struct OrderedSequencer : public Sequencer<Result> {
   /// A fixed-size buffer (after construction).
   std::vector<optional<Result>> buffer_;
 };
-} // namespace sequencers
-} // namespace detail
-} // namespace data
-} // namespace torch
+} // namespace torch::data::detail::sequencers

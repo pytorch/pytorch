@@ -14,8 +14,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // We expect this code to only be reached in inference mode and when all inputs are inference tensors
 Tensor _make_dual(const Tensor& primal, const Tensor& tangent, int64_t level) {
@@ -89,7 +88,5 @@ Tensor _new_zeros_with_same_feature_meta(
 bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().nbytes() / base.itemsize() == other.storage().nbytes() / other.itemsize();
 }
-
-} // namespace native
 
 } // namespace at

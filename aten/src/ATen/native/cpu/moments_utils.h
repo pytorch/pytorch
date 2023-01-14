@@ -13,8 +13,7 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 inline namespace CPU_CAPABILITY {
 
 template<typename T> using acc_t = at::opmath_type<T>;
@@ -201,5 +200,4 @@ std::pair<acc_t<T>, acc_t<T>> RowwiseMoments(const T* X, int64_t N, int64_t ddof
 }
 
 } // namespace CPU_CAPABILITY
-} // namespace native
 } // namespace at

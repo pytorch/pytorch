@@ -4,8 +4,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 template <size_t D, typename Derived>
 ReflectionPadImpl<D, Derived>::ReflectionPadImpl(
@@ -98,5 +97,4 @@ template class ConstantPadImpl<1, ConstantPad1dImpl>;
 template class ConstantPadImpl<2, ConstantPad2dImpl>;
 template class ConstantPadImpl<3, ConstantPad3dImpl>;
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

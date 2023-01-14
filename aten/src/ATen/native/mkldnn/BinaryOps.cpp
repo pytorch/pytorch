@@ -13,8 +13,7 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& mkldnn_add_out(
     const Tensor& self,
@@ -45,7 +44,6 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
   TORCH_CHECK(false, "mkldnn_mul_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
 } // namespace at
 
 #else // AT_MKLDNN_ENABLED

@@ -1,7 +1,6 @@
 #include <ATen/ScalarOps.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void tupleIndex(Stack& stack) {
   int64_t index = pop(stack).toInt();
@@ -249,5 +248,4 @@ static const C10_UNUSED std::array<mobile::prim_op_fn_register, 16> op_reg = {
     // mobile::prim_op_fn_register("aten::size", size)
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -2,9 +2,7 @@
 
 #include <c10/util/TypeTraits.h>
 
-namespace c10 {
-
-namespace impl {
+namespace c10::impl {
   namespace detail {
     template<class FuncType, class ReturnType, class ParameterList> class WrapFunctionIntoRuntimeFunctor_ {};
     template<class FuncType, class ReturnType, class... Parameters>
@@ -34,6 +32,4 @@ namespace impl {
       typename guts::infer_function_traits_t<FuncType>::return_type,
       typename guts::infer_function_traits_t<FuncType>::parameter_types
   >;
-}
-
 }

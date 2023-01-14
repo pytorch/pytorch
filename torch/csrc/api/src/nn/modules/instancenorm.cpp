@@ -3,8 +3,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 template <size_t D, typename Derived>
 void InstanceNormImpl<D, Derived>::pretty_print(std::ostream& stream) const {
@@ -43,5 +42,4 @@ template class InstanceNormImpl<1, InstanceNorm1dImpl>;
 template class InstanceNormImpl<2, InstanceNorm2dImpl>;
 template class InstanceNormImpl<3, InstanceNorm3dImpl>;
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

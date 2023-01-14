@@ -11,8 +11,7 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 class TORCH_API Computation {
  public:
@@ -110,5 +109,4 @@ class TORCH_API LoweringContext {
   Util::EmissionMap emit_status_;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -6,8 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
@@ -145,5 +144,4 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
 
 TORCH_MODULE(ParameterDict);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

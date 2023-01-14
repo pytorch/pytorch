@@ -55,8 +55,7 @@ namespace flatbuffers = flatbuffers_fbsource;
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Our own alignment requirement does not need to be exactly the same as what
 // flatbuffers supports, but what flatbuffers supports needs to satisfy our
@@ -914,5 +913,4 @@ bool register_flatbuffer_loader() {
   return true;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

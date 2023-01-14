@@ -15,8 +15,7 @@
 
 #include <tuple>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 int64_t num_bytes(IntArrayRef sizes) {
@@ -1003,5 +1002,4 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
   return self.reshape(sizes);
 }
 
-} // namespace native
 } // namespace at

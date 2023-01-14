@@ -9,8 +9,7 @@
 #include <torch/csrc/utils/memory.h>
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // This pass only does optimizations which requires Alias Analysis
 // It is seprated out from Peephole Pass so that Peephole does not have
@@ -171,5 +170,4 @@ bool PeepholeOptimizeAliasSensitive(
   return opt.run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

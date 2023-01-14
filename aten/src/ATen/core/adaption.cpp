@@ -1,7 +1,6 @@
 #include <ATen/core/op_registration/adaption.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 void common_device_check_failure(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName) {
   TORCH_CHECK(false,
@@ -10,5 +9,4 @@ void common_device_check_failure(optional<Device>& common_device, const at::Tens
     "(when checking argument for argument ", argName, " in method ", methodName, ")");
 }
 
-} // namespace impl
 } // namespace c10

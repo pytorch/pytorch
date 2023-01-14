@@ -17,8 +17,7 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -578,5 +577,4 @@ Tensor max_pool3d_with_indices_backward_cpu(
   return gradInput;
 }
 
-} // at::native
 } // at

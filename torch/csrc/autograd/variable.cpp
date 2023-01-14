@@ -26,8 +26,7 @@
 #include <typeinfo>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 DifferentiableViewMeta::DifferentiableViewMeta(
     at::TensorImpl* self_impl,
@@ -838,5 +837,4 @@ void handle_view_on_rebase(
   }
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

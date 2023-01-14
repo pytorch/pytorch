@@ -15,8 +15,7 @@
 
 #include <tuple>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   if (self.is_nested() && !mat2.is_nested()) {
@@ -348,5 +347,4 @@ Tensor& matmul_out_nested(const Tensor& tensor1, const Tensor& tensor2, Tensor& 
   return result;
 }
 
-} // namespace native
 } // namespace at

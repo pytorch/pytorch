@@ -11,8 +11,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 EmbeddingImpl::EmbeddingImpl(const EmbeddingOptions& options_)
     : options(options_) { // NOLINT(modernize-pass-by-value)
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
@@ -179,5 +178,4 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
   }
   stream << ")";
 }
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

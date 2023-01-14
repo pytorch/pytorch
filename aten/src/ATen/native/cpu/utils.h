@@ -8,8 +8,7 @@
 #include <fbgemm/Fbgemm.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 inline namespace CPU_CAPABILITY {
 
@@ -148,5 +147,4 @@ inline void parallel_sparse_csr(
 
 } // namespace utils
 
-} // namespace native
 } // namespace at

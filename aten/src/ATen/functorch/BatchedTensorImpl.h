@@ -12,8 +12,7 @@
 #include <ATen/SmallVector.h>
 #include <ATen/Tensor.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 using Tensor = at::Tensor;
 
@@ -156,5 +155,4 @@ inline DispatchKeySet getKeysToPropagateToWrapper(const Tensor& tensor, Dispatch
   return key_set & kKeysToPropagateToWrapper;
 }
 
-}
 }

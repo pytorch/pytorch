@@ -14,8 +14,7 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
@@ -58,7 +57,6 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
   TORCH_CHECK(false, "_mkldnn_batch_norm_legit_no_stats: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
 } // namespace at
 
 #else // AT_MKLDNN_ENABLED

@@ -6,9 +6,7 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // This function sends an rpc call to run torchscript function, currently the
 // torchscript function could only be a user defined python function with
@@ -36,6 +34,4 @@ c10::intrusive_ptr<RRef> TORCH_API remoteTorchscript(
     const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
     const bool isAsyncExecution = false);
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

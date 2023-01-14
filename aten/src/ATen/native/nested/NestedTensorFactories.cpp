@@ -2,8 +2,7 @@
 #include <ATen/native/nested/NestedTensorFactories.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 TensorOptions verify_empty_parameters(
     const at::Tensor& self,
@@ -121,5 +120,4 @@ Tensor& copy_nested_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-} // namespace native
 } // namespace at

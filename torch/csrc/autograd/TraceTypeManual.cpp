@@ -10,8 +10,7 @@
 
 using namespace at;
 
-namespace torch {
-namespace TraceType {
+namespace torch::TraceType {
 
 namespace {
 
@@ -155,11 +154,9 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
 
 } // namespace
 
-} // namespace TraceType
-} // namespace torch
+} // namespace torch::TraceType
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 void general_trace_function(const c10::OperatorHandle& op, Stack* stack) {
   const auto input_size = op.schema().arguments().size();
   const auto output_size = op.schema().returns().size();
@@ -297,5 +294,4 @@ TORCH_LIBRARY_IMPL(_, Tracer, m) {
   m.fallback(CppFunction::makeFromBoxedFunction<&general_trace_function>());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

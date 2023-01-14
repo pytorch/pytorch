@@ -2,8 +2,7 @@
 
 #include <cstring>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename T>
 static void vol2col(
@@ -108,5 +107,4 @@ static void col2vol(
   }
 }
 
-} // namespace native
 } // namespace at

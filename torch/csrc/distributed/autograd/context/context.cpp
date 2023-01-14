@@ -6,9 +6,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using torch::autograd::AccumulateGrad;
 
@@ -291,6 +289,4 @@ ContextPtr ThreadLocalDistAutogradContext::getContextPtr() {
   return tl_context_ptr;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

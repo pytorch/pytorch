@@ -11,8 +11,7 @@
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
@@ -351,5 +350,4 @@ inline void setTensorMetadata(
   setTensorMetadata(t, std::move(metadata));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

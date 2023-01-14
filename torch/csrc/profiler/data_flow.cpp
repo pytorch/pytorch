@@ -4,9 +4,7 @@
 #include <c10/util/variant.h>
 #include <torch/csrc/profiler/collection.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 namespace {
 static constexpr TensorImplAddress NoTensorImpl{nullptr};
@@ -192,6 +190,4 @@ void calculateUniqueTensorIDs(
   }
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

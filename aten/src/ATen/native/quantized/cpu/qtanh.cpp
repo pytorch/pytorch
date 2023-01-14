@@ -15,8 +15,7 @@
 #include <ATen/ops/tanh_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qtanh_stub);
 
@@ -100,4 +99,4 @@ Tensor tanh_quantized_cpu(const Tensor& qx) {
   qtanh_stub(qx.device().type(), qx, qy);
   return qy;
 }
-}}  // namespace at::native
+}  // namespace at::native

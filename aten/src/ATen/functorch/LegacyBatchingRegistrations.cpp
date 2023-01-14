@@ -16,8 +16,7 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 
 // NOTE: [What is a batching rule?]
@@ -824,5 +823,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("new_empty_strided", new_empty_strided_batching_rule);
 
 }
-} // namespace functorch
 } // namespace at

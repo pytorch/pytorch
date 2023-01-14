@@ -3,8 +3,7 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 TSLoweringContext::TSLoweringContext(
     const std::string& name,
@@ -81,5 +80,4 @@ torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
   return it->second.param;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

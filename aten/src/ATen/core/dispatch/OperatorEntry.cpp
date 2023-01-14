@@ -3,8 +3,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 namespace {
   std::string toString(c10::optional<DispatchKey> k) {
@@ -615,5 +614,4 @@ std::string OperatorEntry::dumpState() const {
   return oss.str();
 }
 
-}
 }

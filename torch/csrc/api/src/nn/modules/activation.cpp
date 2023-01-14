@@ -4,8 +4,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 ELUImpl::ELUImpl(const ELUOptions& options_) : options(options_) {}
 
@@ -562,5 +561,4 @@ void MultiheadAttentionImpl::_reset_parameters() {
   }
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

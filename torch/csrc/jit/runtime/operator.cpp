@@ -10,8 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 using OperatorMap =
@@ -444,5 +443,4 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
   return out;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

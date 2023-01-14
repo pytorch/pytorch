@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <memory>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // LivenessAnalyzer computes "bailout" liveness which is equivalent to
 // "{LIVE_IN} or {GEN}" or "{LIVE_OUT} - {KILL}"
@@ -159,5 +158,4 @@ std::unordered_map<Node*, std::vector<Value*>> BuildLivenessSets(
   return la.run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -7,9 +7,7 @@
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 namespace {
 Tensor linear_for_ffn(
@@ -214,5 +212,4 @@ std::tuple<Tensor, Tensor, Tensor>  transformer_decoder_only_layer_forward(
   return std::make_tuple(std::move(x), std::move(incr_key_out), std::move(incr_value_out));
 }
 
-} // namespace native
 } // namespace at

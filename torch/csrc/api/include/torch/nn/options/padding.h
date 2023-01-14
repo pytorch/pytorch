@@ -7,8 +7,7 @@
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for a `D`-dimensional ReflectionPad module.
 template <size_t D>
@@ -192,5 +191,4 @@ struct TORCH_API PadFuncOptions {
 
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

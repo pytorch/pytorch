@@ -3,8 +3,7 @@
 #include <c10/util/C++17.h>
 #include <functional>
 
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 
 /**
  * is_equality_comparable<T> is true_type iff the equality operator is defined
@@ -149,5 +148,4 @@ struct is_type_condition<
  */
 template <class T>
 struct is_fundamental : std::is_fundamental<T> {};
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts

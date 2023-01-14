@@ -6,8 +6,7 @@
 
 #include <torch/csrc/lazy/core/ir_builder.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // These operators were once widely used in nativefunction impls to perform
 // convenient decompositions (partial lowerings) of aten operators into more
@@ -42,5 +41,4 @@ NodePtr operator/(const Value& node1, const Value& node2) {
       GetPromotedBinaryOpShape(node1.shape(), node2.shape()));
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

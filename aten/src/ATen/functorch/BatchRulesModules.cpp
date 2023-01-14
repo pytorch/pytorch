@@ -8,7 +8,7 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static Tensor getStepTensor(const Tensor& indices, c10::SymInt bdim_size, c10::SymInt num_embeddings) {
   // [batch_size, 1, 1, 1, ..., 1]
@@ -438,4 +438,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UPSAMPLE_BACKWARD(upsample_trilinear3d_backward);
   m.impl("one_hot", one_hot_decomposition_hack);
 }
-}}
+}

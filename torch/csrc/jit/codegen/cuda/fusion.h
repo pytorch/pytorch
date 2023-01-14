@@ -12,10 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 
 //! Usage: FusionGuard and Fusion are required user interfaces for any operation
 //! underlying the code generator. In order to create values, expressions, and
@@ -282,7 +279,4 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   bool is_during_update_uses_ = false;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

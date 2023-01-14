@@ -17,8 +17,7 @@
 #include <numeric>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static inline void check_pixel_shuffle_shapes(const Tensor& self, int64_t upscale_factor) {
   TORCH_CHECK(self.dim() >= 3,
@@ -188,4 +187,4 @@ Tensor math_pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
 DEFINE_DISPATCH(pixel_shuffle_kernel);
 DEFINE_DISPATCH(pixel_unshuffle_kernel);
 
-}} // namespace at::native
+} // namespace at::native

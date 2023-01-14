@@ -16,9 +16,7 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 using namespace torch::distributed::autograd;
 using namespace torch::autograd::profiler;
@@ -623,6 +621,4 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
   return future;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

@@ -4,7 +4,7 @@
 
 #if !AT_MKL_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 void mkl_gemm_batched(
     const TransposeType trans_A, const TransposeType trans_B,
@@ -38,7 +38,7 @@ void mkl_gemm_batched(
   TORCH_INTERNAL_ASSERT(false, "mkl_gemm_batched: ATen not compiled with MKL support");
 }
 
-}}
+}
 
 #else // AT_MKL_ENABLED
 

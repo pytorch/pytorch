@@ -16,8 +16,7 @@
 
 #include <tuple>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(nested_dense_elementwise_stub);
 REGISTER_NO_CPU_DISPATCH(nested_dense_elementwise_stub);
@@ -243,5 +242,4 @@ Tensor& fill_nested_(Tensor& self, const Tensor& value) {
   return self;
 }
 
-} // namespace native
 } // namespace at

@@ -6,8 +6,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 FoldImpl::FoldImpl(const FoldOptions& options_) : options(options_) {}
 
@@ -53,5 +52,4 @@ Tensor UnfoldImpl::forward(const Tensor& input) {
       options.stride());
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

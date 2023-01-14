@@ -14,7 +14,7 @@ struct TensorIteratorBase;
 class TensorBase;
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 // These constants control the approximation behavior of gelu function.
 enum GeluType {
@@ -86,7 +86,5 @@ DECLARE_DISPATCH(structured_activation_fn, mish_stub);
 DECLARE_DISPATCH(activation_backward_fn, mish_backward_stub);
 DECLARE_DISPATCH(activation_fn, prelu_stub);
 DECLARE_DISPATCH(activation_backward_fn, prelu_backward_stub);
-
-} // namespace native
 
 } // namespace at

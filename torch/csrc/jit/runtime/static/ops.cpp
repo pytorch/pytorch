@@ -48,8 +48,7 @@ C10_DEFINE_bool(
     "If on, static runtime may use use optimizations that cause accuracy loss "
     "vs the jit interpreter");
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
   TORCH_CHECK(
@@ -372,11 +371,9 @@ at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
   }
   return get_qtensorimpl(self)->quantizer()->dequantize_out(out, self);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
@@ -2859,5 +2856,4 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

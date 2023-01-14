@@ -1,7 +1,6 @@
 #include <torch/nn/options/rnn.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 namespace detail {
 
@@ -45,5 +44,4 @@ LSTMCellOptions::LSTMCellOptions(int64_t input_size, int64_t hidden_size)
 GRUCellOptions::GRUCellOptions(int64_t input_size, int64_t hidden_size)
     : input_size_(input_size), hidden_size_(hidden_size) {}
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

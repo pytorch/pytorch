@@ -73,7 +73,7 @@
 
 #include <algorithm>
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 // --------------------------------------------------------------------
@@ -2046,4 +2046,4 @@ Tensor& conj_physical_out_sparse(const Tensor& input, Tensor& result) {
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

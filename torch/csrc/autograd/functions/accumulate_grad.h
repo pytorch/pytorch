@@ -15,8 +15,7 @@
 
 #include <mutex>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 #define CHECK_RESULT(RESULT, VAR)                                          \
   if (!(RESULT.is_sparse() || VAR.is_sparse() || RESULT.is_sparse_csr() || \
@@ -251,5 +250,4 @@ struct TORCH_API AccumulateGrad : public Node {
 
 #undef CHECK_RESULT
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

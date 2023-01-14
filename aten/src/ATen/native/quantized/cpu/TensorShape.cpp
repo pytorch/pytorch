@@ -25,8 +25,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qcat_nhwc_stub);
 DEFINE_DISPATCH(qcat_relu_nhwc_stub);
@@ -184,5 +183,4 @@ Tensor& cat_out_quantized_cpu(const ITensorListRef& qxs, int64_t dim, Tensor& ou
   return out;
 }
 
-}  // namespace native
 }  // namespace at

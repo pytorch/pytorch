@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -336,5 +335,4 @@ void LowerSimpleTuples(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After LowerSimpleTuples: ", graph);
   EliminateDeadCode(graph);
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

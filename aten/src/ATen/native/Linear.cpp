@@ -36,7 +36,7 @@
 #include <utility>
 #include <vector>
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -778,4 +778,4 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   return result;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

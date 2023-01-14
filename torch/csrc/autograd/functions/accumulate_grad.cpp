@@ -12,8 +12,7 @@
 
 using at::Tensor;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // AccumulateGrad sets sequence_nr to the max value so it's always called
 // ASAP during backwards.
@@ -60,5 +59,4 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
   return variable_list();
 }
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

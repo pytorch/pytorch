@@ -23,10 +23,7 @@
 #include <sstream>
 #include <string>
 
-namespace torch {
-namespace jit {
-
-namespace testing {
+namespace torch::jit::testing {
 
 enum CheckType {
   CHECK,
@@ -578,6 +575,4 @@ FileCheck* FileCheck::check_source_highlighted(const std::string& str) {
   return this;
 }
 
-} // namespace testing
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::testing

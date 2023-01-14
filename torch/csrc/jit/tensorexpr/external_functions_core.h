@@ -5,9 +5,7 @@
 #include <torch/csrc/Export.h>
 #include <cstdint>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 #ifdef C10_MOBILE
 extern "C" {
@@ -24,6 +22,4 @@ TORCH_API void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept;
 } // extern "C"
 #endif
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

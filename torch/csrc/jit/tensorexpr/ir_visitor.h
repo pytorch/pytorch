@@ -3,9 +3,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 class TORCH_API IRVisitor {
  public:
@@ -59,6 +57,4 @@ class TORCH_API IRVisitor {
   virtual void visit(ExternalCallWithAllocPtr v);
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

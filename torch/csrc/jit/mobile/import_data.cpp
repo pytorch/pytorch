@@ -23,8 +23,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::MemoryReadAdapter;
@@ -284,5 +283,4 @@ std::map<std::string, at::Tensor> _load_parameters(
   return _load_parameters_bytes(std::move(data), size, device);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

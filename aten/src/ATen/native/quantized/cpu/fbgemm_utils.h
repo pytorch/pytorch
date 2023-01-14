@@ -291,9 +291,7 @@ inline void convert_int8_uint8(
   }
 }
 
-namespace at {
-namespace native {
-namespace fbgemm_utils {
+namespace at::native::fbgemm_utils {
 
 template <int kSpatialDim = 2>
 fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
@@ -346,8 +344,6 @@ Tensor ConvertConvWeightsToChannelLastTensor(
     const at::Tensor& src,
     int groups,
     bool transpose);
-} // namespace fbgemm_utils
-} // namespace native
 } // namespace at
 
 #endif // USE_FBGEMM

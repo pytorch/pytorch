@@ -1,7 +1,6 @@
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 
-namespace at {
-namespace impl {
+namespace at::impl {
 
 // The strategy is that all python interpreters attempt to register themselves
 // as the main interpreter, but only one wins.  Only that interpreter is
@@ -24,5 +23,4 @@ bool PythonOpRegistrationTrampoline::registerInterpreter(c10::impl::PyInterprete
   }
 }
 
-} // namespace impl
 } // namespace at

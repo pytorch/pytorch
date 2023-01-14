@@ -8,7 +8,7 @@
 #include <ATen/ops/empty_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 #if AT_MKLDNN_ENABLED()
 
@@ -32,4 +32,4 @@ Tensor empty_mkldnn(IntArrayRef sizes, c10::optional<ScalarType> dtype, c10::opt
 
 #endif // AT_MKLDNN_ENABLED()
 
-}}
+}

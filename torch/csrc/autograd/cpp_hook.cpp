@@ -17,8 +17,7 @@ void check_single_result(
 }
 } // namespace
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // NOLINTNEXTLINE(modernize-pass-by-value)
 CppFunctionPreHook::CppFunctionPreHook(
@@ -47,5 +46,4 @@ variable_list CppFunctionPreHook::operator()(const variable_list& values) {
   return results;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

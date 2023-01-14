@@ -144,8 +144,7 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   return packed_ptr;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Note - This is a temporary pack function for embedding bag which quantizes
 // and packs the float weight tensor. In the next step it will be replaced by a
@@ -520,5 +519,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 }
 
 } // namespace
-} // namespace native
 } // namespace at

@@ -6,9 +6,7 @@
 
 #include <tensorpipe/tensorpipe.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 namespace {
 
 // The TensorPipe agent splits the RPC message's information across multiple
@@ -334,8 +332,6 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
       *buffers.type,
       *buffers.id);
 }
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif // USE_TENSORPIPE

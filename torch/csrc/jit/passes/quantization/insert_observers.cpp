@@ -17,8 +17,7 @@
 #include <stack>
 #include <string>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ModuleQConfigMap = std::unordered_map<ModulePtr, c10::optional<QConfig>>;
 
@@ -1717,5 +1716,4 @@ Module InsertObserversForOnDevicePTQ(
       cloned_module, observer_method_name, /* is_entry_point */ true);
   return cloned_module;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

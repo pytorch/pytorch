@@ -25,8 +25,7 @@
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 struct NestedTensorImpl;
 
 // The following functions are used to construct nested tensors from buffers and
@@ -420,5 +419,4 @@ inline at::Tensor map_nested_tensor(F&& fn, A... a) {
       c10::nullopt);
 }
 
-} // namespace native
 } // namespace at

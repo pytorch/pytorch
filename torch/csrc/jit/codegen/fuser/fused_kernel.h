@@ -9,9 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 struct FusedKernel {
   AT_DISALLOW_COPY_AND_ASSIGN(FusedKernel);
@@ -98,6 +96,4 @@ struct FusedKernel {
   const bool has_random_;
 };
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

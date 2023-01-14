@@ -2,10 +2,7 @@
 #include <c10/macros/Export.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 
 //! Utility data structure for recording gemm tiles
 struct GemmTile {
@@ -187,7 +184,4 @@ std::string toString(MmaOptions::MacroType macro);
 std::string toString(MmaOptions::MmaInputLayout input_layout);
 std::string toString(MmaOptions::MacroType mt);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

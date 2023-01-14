@@ -13,8 +13,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 template <size_t D, typename Derived>
 void BatchNormImplBase<D, Derived>::pretty_print(std::ostream& stream) const {
@@ -57,5 +56,4 @@ template class BatchNormImplBase<1, BatchNorm1dImpl>;
 template class BatchNormImplBase<2, BatchNorm2dImpl>;
 template class BatchNormImplBase<3, BatchNorm3dImpl>;
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

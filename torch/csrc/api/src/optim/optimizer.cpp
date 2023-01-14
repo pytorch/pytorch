@@ -8,8 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 bool OptimizerParamGroup::has_options() const {
   return options_ != nullptr;
@@ -197,5 +196,4 @@ serialize::InputArchive& operator>>(
   return archive;
 }
 
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

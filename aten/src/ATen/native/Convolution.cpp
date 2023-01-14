@@ -85,7 +85,7 @@
 
 constexpr int MIOPEN_DIM_MAX = 5;
 
-namespace at { namespace native {
+namespace at::native {
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
@@ -2219,4 +2219,4 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   return std::make_tuple(backend_grad_input, backend_grad_weight, backend_grad_bias);
 }
 
-}} // at::native
+} // at::native

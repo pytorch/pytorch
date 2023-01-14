@@ -3,9 +3,7 @@
 
 using namespace torch::autograd;
 
-namespace torch {
-namespace nn {
-namespace functions {
+namespace torch::nn::functions {
 
 Variable CrossMapLRN2d::forward(
     AutogradContext* ctx,
@@ -136,6 +134,4 @@ variable_list CrossMapLRN2d::backward(
       grad_input, Variable(), Variable(), Variable(), Variable()};
 }
 
-} // namespace functions
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functions

@@ -10,8 +10,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at {
-namespace sparse {
+namespace at::sparse {
 
 // Just for documentary purposes
 using SparseTensor = Tensor;
@@ -119,5 +118,4 @@ TORCH_API Tensor flatten_indices_by_dims(
 // Find the CSR representation for a row `indices` from the COO format
 TORCH_API Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz);
 
-} // namespace sparse
-} // namespace at
+} // namespace at::sparse

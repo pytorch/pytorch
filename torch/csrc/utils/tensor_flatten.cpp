@@ -3,8 +3,7 @@
 #include <map>
 #include <unordered_map>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 using namespace at;
 
@@ -123,5 +122,4 @@ std::vector<at::Tensor> unflatten_sparse_tensors(
   return outputs;
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

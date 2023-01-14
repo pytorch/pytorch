@@ -280,8 +280,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
 }
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 
 at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
   Tensor weight_contig = weight.contiguous();
@@ -404,5 +403,4 @@ TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
 }
 
 } // namespace
-} // namespace native
 } // namespace at

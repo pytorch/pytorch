@@ -14,8 +14,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 class JitLoggingConfig {
  public:
@@ -184,5 +183,4 @@ std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {
   return out;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

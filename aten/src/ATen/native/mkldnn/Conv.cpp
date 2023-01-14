@@ -18,7 +18,7 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor mkldnn_convolution(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
@@ -46,7 +46,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 
 REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
 
-}}
+}
 
 #else // AT_MKLDNN_ENABLED
 

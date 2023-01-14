@@ -2,9 +2,7 @@
 
 #include <torch/csrc/autograd/function_hook.h>
 
-namespace torch {
-namespace autograd {
-namespace utils {
+namespace torch::autograd::utils {
 
 // Turns lambda into a torch::autograd::FunctionPostHook.
 class LambdaPostHook : public torch::autograd::FunctionPostHook {
@@ -29,6 +27,4 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
   std::function<variable_list(const variable_list&, const variable_list&)> fn_;
 };
 
-} // namespace utils
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::utils

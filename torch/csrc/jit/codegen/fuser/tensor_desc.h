@@ -10,9 +10,7 @@
 #include <iostream>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // type information needed by the compiler for input/outputs
 // contiguity[i] is true if the dim i is contiguous with dim i + 1.
@@ -103,6 +101,4 @@ inline std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
   return out;
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

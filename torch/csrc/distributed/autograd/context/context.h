@@ -9,9 +9,7 @@
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 class RecvRpcBackward;
 
@@ -169,6 +167,4 @@ class TORCH_API ThreadLocalDistAutogradContext {
   ContextPtr prev_context_ptr_;
 };
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

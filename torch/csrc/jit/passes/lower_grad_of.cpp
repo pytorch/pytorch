@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void LowerGradOf(Graph& g) {
   for (auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
@@ -41,5 +40,4 @@ void LowerGradOf(Graph& g) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

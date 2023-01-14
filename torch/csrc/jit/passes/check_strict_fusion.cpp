@@ -9,8 +9,7 @@
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -128,5 +127,4 @@ void CheckStrictFusion(std::shared_ptr<Graph>& graph) {
   // TODO: improve control flow not taken, right now always errors
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

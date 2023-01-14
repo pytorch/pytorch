@@ -129,8 +129,7 @@
       AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(      \
           kComplexHalf, kHalf, kBool, kBFloat16, __VA_ARGS__))
 
-namespace at {
-namespace sparse_csr {
+namespace at::sparse_csr {
 
 using SparseCsrTensor = Tensor;
 
@@ -308,5 +307,4 @@ inline at::OptionalArray<at::SymInt> getSymIntBlockSize(Tensor const& self) {
   }
 }
 
-} // namespace sparse_csr
-} // namespace at
+} // namespace at::sparse_csr

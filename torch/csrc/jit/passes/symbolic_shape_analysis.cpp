@@ -42,8 +42,7 @@ but not limited to:
 
 static bool symbolic_shape_analysis_test_mode = false;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // This is similar to c10::SymbolicShape, but instead of either having
 // a concrete dimension or a symbolic dimension, an argument may be:
@@ -1183,5 +1182,4 @@ calculateSymbolicShapesOnOp(
   return res;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

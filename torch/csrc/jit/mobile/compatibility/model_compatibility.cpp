@@ -20,8 +20,7 @@ namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
 } // namespace c10
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
@@ -447,5 +446,4 @@ ModelCompatCheckResult is_compatible(
   return result;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -12,8 +12,7 @@
 #include <sstream>
 #include <unordered_map>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 std::vector<at::Tensor> _to_eager(
@@ -368,5 +367,4 @@ void ts_eager_fallback(
   }
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -12,8 +12,7 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 LazyTensorPtr GetOrCreateLtcTensor(
     const at::Tensor& tensor,
@@ -420,5 +419,4 @@ at::Tensor to_lazy_tensor(
   }
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

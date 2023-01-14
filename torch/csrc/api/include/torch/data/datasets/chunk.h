@@ -10,9 +10,7 @@
 
 #include <torch/serialize.h>
 
-namespace torch {
-namespace data {
-namespace datasets {
+namespace torch::data::datasets {
 
 /// Interface for chunk reader, which performs data chunking and reading of
 /// entire chunks.
@@ -526,6 +524,4 @@ class ChunkDataset final
   // chunk_sampler_.
   bool load_checkpoint_;
 };
-} // namespace datasets
-} // namespace data
-} // namespace torch
+} // namespace torch::data::datasets

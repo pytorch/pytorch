@@ -6,10 +6,7 @@
 
 #include "flatbuffers/flatbuffers.h"
 
-namespace torch {
-namespace jit {
-namespace mobile {
-namespace serialization {
+namespace torch::jit::mobile::serialization {
 
 struct Int;
 
@@ -2579,9 +2576,6 @@ inline void FinishSizePrefixedModuleBuffer(
   fbb.FinishSizePrefixed(root, ModuleIdentifier());
 }
 
-}  // namespace serialization
-}  // namespace mobile
-}  // namespace jit
 }  // namespace torch
 
 #endif  // FLATBUFFERS_GENERATED_MOBILEBYTECODE_TORCH_JIT_MOBILE_SERIALIZATION_H_

@@ -33,8 +33,7 @@ class THPPointer;
 using THPObjectPtr = THPPointer<PyObject>;
 using pyobj_list = std::vector<THPObjectPtr>;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace utils {
 TORCH_API std::string getNodesModuleHierarchy(const Node& n);
 } // namespace utils
@@ -1835,5 +1834,4 @@ struct FunctionSchemaMap {
   MapType map;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

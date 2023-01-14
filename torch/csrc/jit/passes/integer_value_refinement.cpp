@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
 #include <torch/csrc/utils/memory.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using IntegerRefinement = std::unordered_map<Value*, int64_t>;
 
@@ -226,5 +225,4 @@ bool RefineIntegerValues(const std::shared_ptr<Graph>& graph) {
   return IntegerValueRefiner(graph).run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

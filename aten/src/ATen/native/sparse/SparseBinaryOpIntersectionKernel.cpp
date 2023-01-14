@@ -4,8 +4,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/TensorIterator.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -104,4 +103,4 @@ REGISTER_AVX2_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cpu_ke
 REGISTER_VSX_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cpu_kernel);
 REGISTER_ZVECTOR_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cpu_kernel);
 
-}}
+}

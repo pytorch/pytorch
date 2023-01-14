@@ -10,8 +10,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Identity ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -215,5 +214,4 @@ class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Bilinear);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

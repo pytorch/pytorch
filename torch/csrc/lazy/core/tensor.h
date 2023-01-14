@@ -7,8 +7,7 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/util.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 class TORCH_API SymNodeImpl : public c10::SymNodeImpl {
  public:
@@ -253,5 +252,4 @@ auto TupleAtenFromLtcTensors(const std::vector<LazyTensorPtr>& tensors) {
   return TupleAtenFromLtcTensorsImpl(tensors, std::make_index_sequence<N>{});
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

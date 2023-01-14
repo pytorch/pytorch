@@ -12,8 +12,7 @@
 
 #include <c10/macros/Export.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // Support waiting for a number of tasks to complete.
 class TORCH_API MultiWait {
@@ -57,5 +56,4 @@ class TORCH_API MultiWait {
   std::exception_ptr exptr_;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

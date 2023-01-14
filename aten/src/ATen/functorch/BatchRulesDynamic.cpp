@@ -15,7 +15,7 @@
 // errors for them.
 
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 void unsupportedDynamicOp(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     TORCH_CHECK(false, "vmap: We do not support batching operators that can output dynamic shape. ",
@@ -74,4 +74,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
     m.impl("allclose", torch::CppFunction::makeFromBoxedFunction<&unsupportedAllclose>());
 }
 
-}}
+}

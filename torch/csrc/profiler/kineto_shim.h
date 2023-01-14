@@ -35,8 +35,7 @@ constexpr bool kKinetoAvailable{true};
 constexpr bool kKinetoAvailable{false};
 #endif
 
-namespace impl {
-namespace kineto {
+namespace impl::kineto {
 
 // ----------------------------------------------------------------------------
 // -- Interface (Does not require Kineto) -------------------------------------
@@ -126,12 +125,10 @@ void popCorrelationId();
 void popUserCorrelationId();
 void recordThreadInfo();
 
-} // namespace kineto
-} // namespace impl
+} // namespace impl::kineto
 } // namespace profiler
 
-namespace autograd {
-namespace profiler {
+namespace autograd::profiler {
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type);
 
 TORCH_API void addMetadataJson(
@@ -140,6 +137,5 @@ TORCH_API void addMetadataJson(
 
 TORCH_API void profilerStep();
 
-} // namespace profiler
-} // namespace autograd
+} // namespace autograd::profiler
 } // namespace torch

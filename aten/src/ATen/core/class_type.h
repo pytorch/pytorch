@@ -6,11 +6,9 @@
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 struct CompilationUnit;
 struct Function;
-} // namespace jit
 } // namespace torch
 
 namespace c10 {

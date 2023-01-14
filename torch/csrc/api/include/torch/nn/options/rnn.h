@@ -5,8 +5,7 @@
 #include <torch/enum.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 namespace detail {
 
@@ -234,5 +233,4 @@ struct TORCH_API GRUCellOptions {
   TORCH_ARG(bool, bias) = true;
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

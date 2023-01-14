@@ -36,8 +36,7 @@
 
 #include <c10/util/CallOnce.h>
 
-namespace c10d {
-namespace detail {
+namespace c10d::detail {
 namespace {
 #ifdef _WIN32
 
@@ -179,8 +178,7 @@ class SocketImpl {
 
   Handle hnd_;
 };
-} // namespace detail
-} // namespace c10d
+} // namespace c10d::detail
 
 //
 // libfmt formatters for `addrinfo` and `Socket`

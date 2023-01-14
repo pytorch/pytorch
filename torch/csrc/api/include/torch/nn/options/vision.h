@@ -5,9 +5,7 @@
 #include <torch/enum.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 /// Options for `torch::nn::functional::grid_sample`.
 ///
@@ -31,6 +29,4 @@ struct TORCH_API GridSampleFuncOptions {
   TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
 };
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

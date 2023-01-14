@@ -4,8 +4,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 template <size_t D, typename Derived>
 AvgPoolImpl<D, Derived>::AvgPoolImpl(const AvgPoolOptions<D>& options_)
@@ -431,5 +430,4 @@ Tensor LPPool2dImpl::forward(const Tensor& input) {
 
 template class LPPoolImpl<2, LPPool2dImpl>;
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

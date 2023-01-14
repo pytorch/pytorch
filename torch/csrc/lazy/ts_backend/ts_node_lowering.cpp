@@ -13,8 +13,7 @@
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 TSOpVector LowerBuiltin(
     const torch::lazy::Node* node,
@@ -157,5 +156,4 @@ torch::lazy::TSOpVector Scalar::Lower(
   return {loctx->graph()->insertConstant(at::scalar_tensor(value, options))};
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

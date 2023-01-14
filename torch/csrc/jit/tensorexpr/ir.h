@@ -12,9 +12,7 @@
 
 #include <ATen/core/ivalue.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 enum CompareSelectOperation {
   kEQ = 0,
@@ -929,6 +927,4 @@ TORCH_API ExprPtr flatten_index(
     const std::vector<ExprPtr>& indices,
     const std::vector<ExprPtr>& strides);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

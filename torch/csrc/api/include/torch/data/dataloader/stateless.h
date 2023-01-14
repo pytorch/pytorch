@@ -12,8 +12,7 @@
 #include <thread>
 #include <utility>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 
 /// A dataloader for stateless datasets.
 ///
@@ -81,5 +80,4 @@ class StatelessDataLoader : public DataLoaderBase<
   /// The `Sampler` used to produce batch requests.
   Sampler sampler_;
 };
-} // namespace data
-} // namespace torch
+} // namespace torch::data

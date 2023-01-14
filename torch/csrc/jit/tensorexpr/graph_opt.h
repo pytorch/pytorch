@@ -2,9 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // Optimize aten::cat ops in the given subgraph.
 //
@@ -110,6 +108,4 @@ TORCH_API bool isGraphCompilable(const std::shared_ptr<Graph>& graph);
 // this, not always correct, workaround pass.
 TORCH_API void fixupMissingShapeInfo(const std::shared_ptr<Graph>& graph);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

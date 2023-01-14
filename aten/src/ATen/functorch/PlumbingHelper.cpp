@@ -8,7 +8,7 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what) {
   TORCH_CHECK(
@@ -91,4 +91,4 @@ bool areAnyBatchedAtLevel(ArrayRef<optional<Tensor>> maybe_tensors, int64_t leve
 }
 
 
-}}
+}

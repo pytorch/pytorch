@@ -18,9 +18,7 @@
 #include <tuple>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Template for computing the offset into the tensor to access a value
 static auto dim_calc = at::jit::CodeTemplate(R"(
@@ -704,6 +702,4 @@ std::string generateKernel(
   return code_string;
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

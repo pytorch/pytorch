@@ -4,9 +4,7 @@
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/xnnpack/Pooling.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 bool use_global_average_pool(
   const Tensor& input) {
@@ -77,8 +75,6 @@ Tensor global_average_pool(
     "xnn_setup_global_average_pooling_nwc_f32 failed!");
 
   return output.to(input.suggest_memory_format());
-}
-}
 }
 }
 

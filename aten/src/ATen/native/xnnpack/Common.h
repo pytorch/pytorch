@@ -8,9 +8,7 @@
 #include <limits>
 #include <memory>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 struct Deleter final {
   void operator()(const xnn_operator_t op) const {
@@ -123,8 +121,6 @@ struct Layout final {
   };
 };
 } // namespace internal
-} // namespace xnnpack
-} // namespace native
 } // namespace at
 
 #endif /* USE_XNNPACK */

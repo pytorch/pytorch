@@ -8,9 +8,7 @@
 #include <memory>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Descriptor for chunk-ing an input tensor into subtensors
 // OR concat-ing an output tensor from subtensors
@@ -59,6 +57,4 @@ struct TORCH_API PartitionDesc {
       subTensorDesc_; // descriptor for the subtensor, if it exists
 };
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

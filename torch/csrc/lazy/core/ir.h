@@ -20,8 +20,7 @@
 
 C10_DECLARE_bool(ltc_enable_dynamic_shapes);
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 static const hash_t kHashSeed(static_cast<uint32_t>(0x5a2d296e9));
 
@@ -289,8 +288,7 @@ struct TORCH_API Value {
   size_t index = 0;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy
 
 namespace c10 {
 // Explicit template instantiation to make ArrayRef<Value> work

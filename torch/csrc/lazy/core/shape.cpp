@@ -7,8 +7,7 @@ C10_DEFINE_bool(
     false,
     "Enables calculation of if dims are symbolic");
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 Shape::Shape(
     at::ScalarType scalar_type,
@@ -129,5 +128,4 @@ void applySymbolicShapesOnLT(
   }
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -3,9 +3,7 @@
 #include <torch/data/samplers/base.h>
 #include <torch/serialize/archive.h>
 
-namespace torch {
-namespace data {
-namespace samplers {
+namespace torch::data::samplers {
 /// Serializes a `Sampler` into an `OutputArchive`.
 template <typename BatchRequest>
 serialize::OutputArchive& operator<<(
@@ -23,6 +21,4 @@ serialize::InputArchive& operator>>(
   sampler.load(archive);
   return archive;
 }
-} // namespace samplers
-} // namespace data
-} // namespace torch
+} // namespace torch::data::samplers

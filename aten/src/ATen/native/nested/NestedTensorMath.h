@@ -4,8 +4,7 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/macros/Macros.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 TORCH_API Tensor NestedTensor_to_padded_tensor_generic(
     const Tensor& t,
@@ -19,5 +18,4 @@ Tensor map_nt(const Tensor& nt, Func f) {
   return at::detail::make_tensor<NestedTensorImpl>(f(nt_impl->get_buffer()), sizes);
 }
 
-} // namespace native
 } // namespace at

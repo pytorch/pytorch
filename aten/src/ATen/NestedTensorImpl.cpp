@@ -68,8 +68,7 @@ c10::DispatchKeySet get_view_key_set(const at::Tensor& base) {
 }
 
 } // namespace
-namespace at {
-namespace native {
+namespace at::native {
 
 inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   // torch.tensor([]) is considered to have `dim() = 1` and `size(0) = 0`
@@ -343,5 +342,4 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach(
       std::move(version_counter), allow_tensor_metadata_change);
 }
 
-} // namespace native
 } // namespace at

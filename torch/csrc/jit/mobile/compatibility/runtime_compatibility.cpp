@@ -11,8 +11,7 @@ namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
 } // namespace c10
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 uint64_t _get_runtime_bytecode_version() {
   return caffe2::serialize::kMaxSupportedBytecodeVersion;
@@ -94,5 +93,4 @@ TORCH_API std::unordered_set<std::string> _get_loaded_custom_classes() {
   return torch::getAllCustomClassesNames();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

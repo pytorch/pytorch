@@ -1,8 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // [value refinement algorithm]
 
@@ -238,5 +237,4 @@ bool handleCommonRefinentOperators(
   return false;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

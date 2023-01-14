@@ -6,8 +6,7 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void mkldnn_matmul(
     const Tensor &mat1,
@@ -36,7 +35,6 @@ bool mkldnn_bf16_gemm(
   return false;
 }
 
-} // namespace native
 } // namespace at
 
 #else // AT_MKLDNN_ENABLED

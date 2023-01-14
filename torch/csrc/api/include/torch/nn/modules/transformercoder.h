@@ -12,8 +12,7 @@
 
 #include <ostream>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ TransformerEncoder
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -152,5 +151,4 @@ class TORCH_API TransformerDecoderImpl
 /// module storage semantics.
 TORCH_MODULE(TransformerDecoder);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

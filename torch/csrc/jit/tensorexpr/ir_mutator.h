@@ -4,9 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 class TORCH_API IRMutator {
  public:
@@ -61,6 +59,4 @@ class TORCH_API IRMutator {
   virtual StmtPtr mutate(CondPtr v);
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

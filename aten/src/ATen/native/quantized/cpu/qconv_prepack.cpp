@@ -482,8 +482,7 @@ template struct PackedConvWeightsOnednn<2>;
 template struct PackedConvWeightsOnednn<3>;
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 template <int kSpatialDim = 2>
@@ -695,5 +694,4 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }
 
 } // namespace
-} // namespace native
 } // namespace at

@@ -2,8 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 TORCH_API void check_out_type_matches(
     const at::Tensor& result,
@@ -13,5 +12,4 @@ TORCH_API void check_out_type_matches(
     c10::optional<at::Device> device,
     bool device_is_none);
 
-}
-} // namespace torch
+} // namespace torch::utils

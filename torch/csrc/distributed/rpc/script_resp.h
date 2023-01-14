@@ -4,9 +4,7 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // Return value of a builtin operator or a TorchScript function.
 class TORCH_API ScriptResp final : public RpcCommandBase {
@@ -21,6 +19,4 @@ class TORCH_API ScriptResp final : public RpcCommandBase {
   const at::IValue value_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

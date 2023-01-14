@@ -11,9 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 namespace registerizer {
 
 /* The Registerizer performs scalar replacement by looking for common Stores and
@@ -428,6 +426,4 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
 // atomics.
 TORCH_API StmtPtr registerize(StmtPtr s);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

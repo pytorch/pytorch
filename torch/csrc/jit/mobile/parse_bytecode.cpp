@@ -8,8 +8,7 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/custom_class_detail.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 OpCode parseOpCode(const char* str);
 using c10::IValue;
 
@@ -195,5 +194,4 @@ void parseRegisterSize(size_t rsize, mobile::Function* function) {
 }
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

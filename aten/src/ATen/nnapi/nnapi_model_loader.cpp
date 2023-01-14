@@ -21,8 +21,7 @@
 #define NNAPI_CHECK(res) CAFFE_ENFORCE(res == ANEURALNETWORKS_NO_ERROR, "NNAPI returned error: ", res)
 
 
-namespace caffe2 {
-namespace nnapi {
+namespace caffe2::nnapi {
 
 namespace {
 
@@ -268,4 +267,4 @@ int load_nnapi_model(
   return 0;
 }
 
-}} // namespace caffe2::nnapi
+} // namespace caffe2::nnapi

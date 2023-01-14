@@ -10,12 +10,10 @@
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API void runCleanupPasses(std::shared_ptr<Graph>& to_clean);
 
 TORCH_API bool meaningfulName(const std::string& name);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

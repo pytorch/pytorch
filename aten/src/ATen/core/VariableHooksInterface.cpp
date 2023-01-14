@@ -1,6 +1,6 @@
 #include <ATen/core/VariableHooksInterface.h>
 
-namespace at { namespace impl {
+namespace at::impl {
 
 namespace {
 VariableHooksInterface* hooks = nullptr;
@@ -14,4 +14,4 @@ VariableHooksInterface* GetVariableHooks() {
   return hooks;
 }
 
-}} // namespace at::impl
+} // namespace at::impl

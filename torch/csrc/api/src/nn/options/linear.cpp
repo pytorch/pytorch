@@ -1,7 +1,6 @@
 #include <torch/nn/options/linear.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 LinearOptions::LinearOptions(int64_t in_features, int64_t out_features)
     : in_features_(in_features), out_features_(out_features) {}
@@ -27,5 +26,4 @@ UnflattenOptions::UnflattenOptions(std::string dimname, namedshape_t namedshape)
       dimname_(std::move(dimname)),
       namedshape_(std::move(namedshape)) {}
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

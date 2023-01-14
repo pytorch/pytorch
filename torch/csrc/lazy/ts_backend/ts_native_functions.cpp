@@ -23,8 +23,7 @@
 
 using at::Tensor;
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 at::Tensor CreateLtcTensor(
@@ -569,5 +568,4 @@ std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
 
 void InitializeAtenBindings() {}
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

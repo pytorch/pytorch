@@ -14,8 +14,7 @@ namespace at {
 TORCH_API void launch(std::function<void()> func);
 }
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Graph;
 struct Code;
@@ -103,5 +102,4 @@ struct TORCH_API Function {
 
   virtual ~Function() = default;
 };
-} // namespace jit
 } // namespace torch

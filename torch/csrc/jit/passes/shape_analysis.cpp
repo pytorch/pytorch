@@ -29,8 +29,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 bool mergeTypes(
     ArrayRef<Value*> lhs,
@@ -2214,5 +2213,4 @@ void EraseShapeInformation(const std::shared_ptr<Graph>& graph) {
   TypeCache unshaped_type_cache;
   EraseShapeInformation(graph->block(), unshaped_type_cache);
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

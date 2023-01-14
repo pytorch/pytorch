@@ -10,8 +10,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -474,5 +473,4 @@ std::vector<Node*> CreateAutodiffSubgraphs(
   GRAPH_DEBUG("diff_nodes.size() ", diff_nodes.size());
   return diff_nodes;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

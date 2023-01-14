@@ -7,8 +7,7 @@
 
 #include <caffe2/serialize/file_adapter.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::ReadAdapterInterface;
@@ -107,5 +106,4 @@ TORCH_API std::set<std::string> _export_operator_list(
 
 } // namespace mobile
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

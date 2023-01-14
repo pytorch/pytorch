@@ -1,8 +1,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/utils/schema_info.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 void SchemaInfo::addArgumentValue(
     const std::string& name,
     const at::IValue& value) {
@@ -432,5 +431,4 @@ void SchemaInfo::generateAliasMaps() {
   }
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

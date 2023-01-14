@@ -6,7 +6,7 @@
 #include <ATen/functorch/ADInterpreters.h>
 #include <ATen/functorch/DynamicLayer.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static DispatchKeySet get_all_dynlayer_keyset() {
   // NB: FULL_AFTER does not include the dispatch key
@@ -120,4 +120,4 @@ void Interpreter::sendToNextInterpreter(const c10::OperatorHandle& op, torch::ji
   INTERPRETER_DISPATCH(key_, SINGLE_ARG(sendToNextInterpreterImpl(op, stack, grad_special_case)));
 }
 
-}}
+}

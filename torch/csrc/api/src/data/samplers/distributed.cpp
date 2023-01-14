@@ -8,9 +8,7 @@
 #include <random>
 #include <vector>
 
-namespace torch {
-namespace data {
-namespace samplers {
+namespace torch::data::samplers {
 
 DistributedRandomSampler::DistributedRandomSampler(
     size_t size,
@@ -163,6 +161,4 @@ size_t DistributedSequentialSampler::index() const noexcept {
   return sample_index_;
 }
 
-} // namespace samplers
-} // namespace data
-} // namespace torch
+} // namespace torch::data::samplers

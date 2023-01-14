@@ -7,8 +7,7 @@
 #include <ATen/ops/is_nonzero_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 bool is_nonzero(const Tensor& self) {
   auto n = self.numel();
@@ -37,5 +36,4 @@ Tensor foobar(const Tensor& self, bool arg1, bool arg2, bool arg3) {
   return self;
 }
 
-} // namespace meta
 } // namespace at

@@ -22,10 +22,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cpu {
+namespace torch::jit::fuser::cpu {
 
 #ifdef _MSC_VER
 int wmkstemps(wchar_t* tmpl, int suffix_len) {
@@ -135,7 +132,4 @@ struct TempFile {
   std::string name_;
 };
 
-} // namespace cpu
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cpu

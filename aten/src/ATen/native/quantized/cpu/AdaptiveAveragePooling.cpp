@@ -25,8 +25,7 @@
 
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qadaptive_avg_pool2d_nhwc_stub);
 DEFINE_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub);
@@ -353,5 +352,4 @@ Tensor adaptive_avg_pool3d_quantized_cpu(
   return at::native::adaptive_avg_pool3d_out_quantized_cpu(input, output_size, output);
 }
 
-} // namespace native
 } // namespace at

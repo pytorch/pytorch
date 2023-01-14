@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /// Pickle an IValue by calling a function to handle writing the data.
 ///
@@ -87,5 +86,4 @@ TORCH_API IValue unpickle(
     c10::TypePtr (*type_parser)(const std::string&) =
         Unpickler::defaultTypeParser);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

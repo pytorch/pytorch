@@ -3,9 +3,7 @@
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <vector>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 constexpr auto kProfilingResponseElementExpectedSize = 3;
 
@@ -145,6 +143,4 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
       std::move(cfg),
       profilerId);
 }
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

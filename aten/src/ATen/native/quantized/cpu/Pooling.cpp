@@ -26,8 +26,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qmaxpool_2d_nhwc_stub);
 
@@ -468,5 +467,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 }
 
 } // namespace
-} // namespace native
 } // namespace at

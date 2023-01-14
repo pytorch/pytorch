@@ -19,7 +19,7 @@
 #endif
 
 
-namespace at { namespace native {
+namespace at::native {
 
 #if AT_MKLDNN_ENABLED()
 
@@ -243,4 +243,4 @@ TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
 }
 
 #endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
-}}
+}

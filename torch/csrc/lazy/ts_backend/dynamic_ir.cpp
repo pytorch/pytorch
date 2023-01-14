@@ -4,8 +4,7 @@ static const torch::lazy::DimensionNode* DimCast(torch::lazy::Output output) {
   return dynamic_cast<const torch::lazy::DimensionNode*>(output.node);
 }
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 TSOpVector SizeNode::Lower(
     std::shared_ptr<torch::jit::GraphFunction> function,
@@ -110,5 +109,4 @@ std::string SizeDiv::ToString() const {
   return "SizeDiv";
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -4,8 +4,7 @@
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 class TORCH_API DeviceData : public TsNode {
  public:
@@ -46,5 +45,4 @@ class TORCH_API DeviceData : public TsNode {
   std::shared_ptr<BackendData> data_;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -6,8 +6,7 @@
 #include <functional>
 #include <type_traits>
 
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 
 /**
  * Access information about result type or arguments from a function type.
@@ -481,5 +480,4 @@ struct concat_iseq<
 template <class... ISeqs>
 using concat_iseq_t = typename concat_iseq<ISeqs...>::type;
 
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts

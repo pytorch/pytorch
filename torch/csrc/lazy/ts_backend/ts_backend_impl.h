@@ -2,8 +2,7 @@
 
 #include <torch/csrc/lazy/backend/backend_interface.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 class TORCH_API TSData : public torch::lazy::BackendData {
  public:
@@ -48,5 +47,4 @@ TORCH_API torch::lazy::BackendImplInterface* GetTSBackendImpl();
 
 TORCH_API void InitTorchScriptBackend();
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

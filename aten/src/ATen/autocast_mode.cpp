@@ -11,8 +11,7 @@
 #include <exception>
 #include <mutex>
 
-namespace at {
-namespace autocast {
+namespace at::autocast {
 
 bool is_enabled() {
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
@@ -622,5 +621,4 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 
 }
 } // namespace
-} // namespace autocast
 } // namespace at

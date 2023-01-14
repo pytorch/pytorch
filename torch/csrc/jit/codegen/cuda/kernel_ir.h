@@ -14,10 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 
 class IrBuilderPasskey;
 
@@ -994,7 +991,4 @@ class TORCH_CUDA_CU_API Swizzle2DInt : public Expr {
 };
 
 } // namespace kir
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

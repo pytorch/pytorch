@@ -9,11 +9,8 @@
 #include <ATen/native/xnnpack/Convolution.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
-namespace internal {
-namespace convolution2d {
+namespace at::native::xnnpack {
+namespace internal::convolution2d {
 
 namespace {
 
@@ -446,7 +443,6 @@ Tensor conv2d_transpose_clamp_run(
   return op_context->run(input);
 }
 
-} // namespace convolution2d
 } // namespace internal
 
 bool use_convolution2d(
@@ -493,9 +489,6 @@ Tensor convolution2d(
       ContextConv2D::kMax);
 }
 
-} // namespace xnnpack
-
-} // namespace native
 } // namespace at
 
 #endif /* USE_XNNPACK */

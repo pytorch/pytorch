@@ -2,9 +2,7 @@
 
 #include <c10/util/Exception.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 ProfilerStubs::~ProfilerStubs() = default;
 
@@ -76,6 +74,4 @@ REGISTER_DEFAULT(cuda, CUDA)
 REGISTER_DEFAULT(itt, ITT)
 #undef REGISTER_DEFAULT
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

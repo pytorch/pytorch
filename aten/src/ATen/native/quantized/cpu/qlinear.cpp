@@ -902,8 +902,7 @@ at::Tensor PackedLinearWeightsOnednn:: apply_tanh(
 
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 template <bool ReluFused>
@@ -1005,5 +1004,4 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 }
 
 } // namespace
-} // namespace native
 } // namespace at

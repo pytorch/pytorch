@@ -18,8 +18,7 @@
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 /**
  * The goal of "dynamic" Nodes is to patch a hole in our tracing.
@@ -55,5 +54,4 @@ class TORCH_API DimensionNode {
   virtual ~DimensionNode() = default;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -11,9 +11,9 @@
 #include <memory>
 
 // Forward-declares at::cuda::NVRTC
-namespace at { namespace cuda {
+namespace at::cuda {
 struct NVRTC;
-}} // at::cuda
+} // at::cuda
 
 namespace at {
 class Context;

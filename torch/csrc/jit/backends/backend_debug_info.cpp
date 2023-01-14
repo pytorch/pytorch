@@ -1,9 +1,7 @@
 #include <c10/macros/Macros.h>
 #include <torch/csrc/jit/backends/backend_debug_info.h>
 
-namespace torch {
-namespace jit {
-namespace backend {
+namespace torch::jit::backend {
 namespace {
 #ifdef BUILD_LITE_INTERPRETER
 static auto cls = torch::class_<PyTorchBackendDebugInfoDummy>(
@@ -18,6 +16,4 @@ static auto cls = torch::class_<PyTorchBackendDebugInfo>(
 #endif
 
 } // namespace
-} // namespace backend
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::backend

@@ -10,8 +10,7 @@
 #include <memory>
 #include <vector>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
   LBFGSOptions(double lr = 1);
@@ -102,5 +101,4 @@ class TORCH_API LBFGS : public Optimizer {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBFGS);
   }
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

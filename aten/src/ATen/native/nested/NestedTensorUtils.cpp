@@ -11,8 +11,7 @@
 #include <ATen/ops/chunk_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 /**
  * Thin wrapper around get_nested_size_tensor that is registered as a native function
@@ -108,5 +107,4 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   return splits;
 }
 
-} // namespace native
 } // namespace at
