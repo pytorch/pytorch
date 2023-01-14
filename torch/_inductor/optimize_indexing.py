@@ -84,6 +84,7 @@ class ValueRanges(object):
 
 class ValueRangeAnalysis(object):
     def __init__(self):
+        self.name = "ValueRangeAnalysis"
         boolean_operators = (
             "eq",
             "ne",
