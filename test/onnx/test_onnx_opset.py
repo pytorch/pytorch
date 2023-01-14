@@ -2,7 +2,6 @@
 
 import io
 import itertools
-import unittest
 
 import onnx
 import pytorch_test_common
