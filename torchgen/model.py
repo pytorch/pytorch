@@ -508,6 +508,8 @@ class NativeFunction:
     # That aren't easily inferrable directly from the operator's schema.
     tags: Set[str]
 
+    type_constraints: Dict[str, Sequence[str]]
+
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
@@ -815,10 +817,11 @@ class NativeFunction:
         # add more dispatch entries after the fact).  Reindex the individual
         # metadata by OperatorName!
         backend_metadata = {k: {func.name: v} for k, v in dispatch.items()}
-
         # don't care if it exists or not; make it easier to use this function
         # with other yaml parsers that aren't setting __line__ in the dict
         e.pop("__line__", None)
+        types = e.pop("type_constraints", {})
+        types.pop("__line__", None)
         assert not e, f"leftover entries: {e}"
 
         # Asserts that we can't do in post_init, because they rely on backend-specific info
@@ -855,6 +858,7 @@ class NativeFunction:
                 has_composite_explicit_autograd_non_functional_kernel=has_composite_explicit_autograd_non_functional_kernel,
                 tags=tags,
                 namespace=namespace,
+                type_constraints=types,
             ),
             backend_metadata,
         )

@@ -508,10 +508,10 @@
   type_constraints:
     self:
       - fp32
-      - fp16
+      - i64
     other:
       - fp32
-      - fp16
+      - i64
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator

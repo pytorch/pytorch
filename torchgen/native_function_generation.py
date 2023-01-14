@@ -349,6 +349,7 @@ def generate_function(
             # which NativeFunction objects did not come directly from native_functions.yaml.
             tags=set(["generated"]) | (f.tags & {"nondeterministic_seeded"}),
             namespace=f.namespace,
+            type_constraints={},
         ),
         backend_metadata,
     )

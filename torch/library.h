@@ -432,6 +432,10 @@ inline c10::FunctionSchema&& schema(c10::FunctionSchema&& s, std::map<std::strin
   return std::move(s);
 }
 
+inline c10::FunctionSchema schema(c10::FunctionSchema s, std::map<std::string, c10::ArrayRef<c10::ScalarType>> types) {
+  (void)types;
+  return s;
+}
 namespace detail {
 
 inline c10::either<c10::OperatorName, c10::FunctionSchema> constructSchemaOrName(
@@ -604,9 +608,14 @@ class TORCH_API Library final {
   /// ```
 
   template <typename Schema>
-  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags = {}, _RegisterOrVerify rv = _RegisterOrVerify::REGISTER, std::map<std::string, c10::ArrayRef<c10::ScalarType>> types = {}) & {
+  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags, std::map<std::string, c10::ArrayRef<c10::ScalarType>> types, _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
     c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema), types);
     return _def(std::move(s), nullptr, tags, rv);
+  }
+
+  template <typename Schema>
+  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags = {}, _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
+    return def(raw_schema, tags, {},  rv);
   }
   /// Define an operator for a schema and then register an implementation for
   /// it.  This is typically what you would use if you aren't planning

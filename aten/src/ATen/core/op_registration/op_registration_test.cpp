@@ -15,7 +15,7 @@
 #include <torch/library.h>
 #include <ATen/core/Tensor.h>
 #include <functional>
-
+#include <c10/core/ScalarType.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 #include <algorithm>
@@ -26,6 +26,7 @@ using c10::OperatorHandle;
 using c10::Dispatcher;
 using c10::IValue;
 using c10::DispatchKey;
+using c10::ScalarType;
 
 using torch::Library;
 using torch::CppFunction;
@@ -740,6 +741,15 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCpp
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();
   }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int a) -> ()");
+}
+
+TEST(OperatorRegistrationTest, givenTorchLibrary_whenRegisteringWithTypeConstraints_thenReturnTypeConstraints) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("dummy(Tensor a) -> ()", {}, {{"a", {ScalarType::Long, ScalarType::Int}}});
+  m.impl("dummy", DispatchKey::CPU, [] (at::Tensor) {});
+  auto handle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "");
+  c10::ArrayRef<ScalarType> expected = {ScalarType::Long, ScalarType::Int};
+  EXPECT_EQ(handle.schema().arguments()[0].allowed_types(), expected);
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingCatchAllWithMismatchingCppSignatures_thenFails) {
