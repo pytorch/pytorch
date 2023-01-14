@@ -936,12 +936,15 @@ def _rekey_sharded_optim_state_dict(
     """
     param_to_fqns = _get_param_to_fqns(model)
     flat_param_to_fqn = _get_flat_param_to_fqn(model)
-    param_to_param_key: Dict[nn.Parameter, Union[int, str]] = (
-        _get_param_to_param_id_from_optim_input(model, optim_input)
-        if using_optim_input
-        else _get_param_to_param_key(
-            optim, is_named_optimizer, param_to_fqns, flat_param_to_fqn
-        )
+    param_to_param_key: Dict[nn.Parameter, Union[int, str]] = cast(
+        Dict[nn.Parameter, Union[int, str]],
+        (
+            _get_param_to_param_id_from_optim_input(model, optim_input)
+            if using_optim_input
+            else _get_param_to_param_key(
+                optim, is_named_optimizer, param_to_fqns, flat_param_to_fqn
+            )
+        ),
     )
     # All parameter keys in `param_to_param_key` should be in
     # `param_to_fqns` -- strict inequality follows when not all parameters are
@@ -964,7 +967,7 @@ def _rekey_sharded_optim_state_dict(
             unflat_param_name_to_flat_param_key[unflat_param_name] = flat_param_key
 
     sharded_osd_state = sharded_osd["state"]
-    rekeyed_osd_state = {}
+    rekeyed_osd_state: Dict[Union[str, int], Any] = {}
     for key, param_state in sharded_osd_state.items():
         if isinstance(key, str):
             rekeyed_osd_state[key] = param_state
