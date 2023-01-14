@@ -5,6 +5,7 @@ import operator
 from typing import Callable, Dict, Tuple, Union
 
 import onnx
+from onnxscript import evaluator
 from onnxscript.evaluator import TorchScriptEvaluator
 from onnxscript.function_libs.torch_aten import ops
 
@@ -183,7 +184,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
     torchscript_evaluator = TorchScriptEvaluator(graph_context)
 
     # assume atenlib API
-    atenlib = {"aten::sigmoid": ops.core.aten_sigmoid}
+    atenlib = {"aten::sigmoid": ops.core.aten_sigmoid, "aten::amax": ops.core.aten_amax}
 
     # In the following loop, a TorchScript graph is created to
     # represent the input FX graph with ONNX symbols (e.g., onnx::add).
@@ -239,7 +240,7 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
                 # TODO(titaiwang): ONNXFunction triggers adding custom Ops and record it
                 # into dict for function_proto insertion. It also needs to define type of
                 # the return torch._C.Value.
-                with evaluator.set_default(torchscript_evaluator):
+                with evaluator.default_as(torchscript_evaluator):
                     # v is tuple[torch._C.Value, ...] or torch._C.Value
                     v = symbolic_fn(*onnx_inputs, **onnx_attrs)
                 assert (
@@ -364,11 +365,11 @@ def _export_fx_to_ts(fx_module_with_metadata, opset_version):
             g, params_dict={}, opset_version=opset_version
         )
 
-    return g, ts_name_to_real_tensor
+    return g, ts_name_to_real_tensor, torchscript_evaluator.get_functions()
 
 
 def _ts_graph_to_onnx_model_in_protobuf(
-    ts_graph, ts_name_to_real_tensor, opset_version
+    ts_graph, ts_name_to_real_tensor, opset_version, function_dict
 ):
     proto, _, _, _ = ts_graph._export_onnx(
         initializers=ts_name_to_real_tensor,
@@ -383,9 +384,18 @@ def _ts_graph_to_onnx_model_in_protobuf(
         onnx_file_path="",
         node_attr_to_name={},
     )
-    # TODO(titaiwang): use dict to record custom ONNXFunction
 
-    return proto
+    # TODO(titaiwang): use dict to record custom ONNXFunction
+    onnx_model = onnx.load_from_string(proto)
+    function_proto_list = []
+    for _, onnx_function in function_dict.items():
+        function_proto_list.append(onnx_function.to_function_proto())
+    onnx_model.functions.extend(function_proto_list)
+    print("ONNX model: \n", onnx_model)
+    onnx.checker.check_model(onnx_model, full_check=True)
+    print("[Success] ONNX model")
+    model_bytes = onnx_model.SerializeToString()
+    return model_bytes
 
 
 def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *args):
@@ -439,10 +449,10 @@ def _export(
 
     decomposed_module = shape_inference_with_fake_tensor(decomposed_module, *args)
 
-    ts_graph, ts_initializers = _export_fx_to_ts(decomposed_module, opset_version)
+    ts_graph, ts_initializers, function_dict = _export_fx_to_ts(decomposed_module, opset_version)
     # Export TorchScript graph to ONNX ModelProto.
     onnx_model = _ts_graph_to_onnx_model_in_protobuf(
-        ts_graph, ts_initializers, opset_version
+        ts_graph, ts_initializers, opset_version, function_dict
     )
     if use_binary_format:
         # Return ModelProto in binary format.

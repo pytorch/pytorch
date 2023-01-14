@@ -65,6 +65,19 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test_with_fx_to_onnx_exporter(SigmoidModel(), (x,))
 
+    # test single op with no kwargs
+    def test_sigmoid_amax(self):
+        x = torch.randn(1, 4, 2, 3)
+
+        class SigmoidAMAXModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                return torch.amax(self.sigmoid(x), dim=1, keepdim=True)
+
+        self.run_test_with_fx_to_onnx_exporter(SigmoidAMAXModel(), (x,))
 
 if __name__ == "__main__":
     common_utils.run_tests()
