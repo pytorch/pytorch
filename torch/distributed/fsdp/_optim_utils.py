@@ -936,7 +936,7 @@ def _rekey_sharded_optim_state_dict(
     """
     param_to_fqns = _get_param_to_fqns(model)
     flat_param_to_fqn = _get_flat_param_to_fqn(model)
-    param_to_param_key = (
+    param_to_param_key: Dict[nn.Parameter, Union[int, str]] = (
         _get_param_to_param_id_from_optim_input(model, optim_input)
         if using_optim_input
         else _get_param_to_param_key(
@@ -1105,10 +1105,12 @@ def _get_param_key_to_param(
     for param_group in optim.param_groups:
         if is_named_optimizer:
             for param in param_group["params"]:
+                assert flat_param_to_fqn is not None
                 if param in flat_param_to_fqn:
                     # FlatParameter case
                     key = flat_param_to_fqn[param]
                 else:
+                    assert param_to_fqns is not None
                     # use_orig_params case
                     assert len(param_to_fqns[param]) == 1
                     key = param_to_fqns[param][0]
@@ -1135,10 +1137,7 @@ def _get_param_to_param_key(
     param_id_to_param = _get_param_key_to_param(
         optim, is_named_optimizer, param_to_fqns, flat_param_to_fqn
     )
-    return {
-        param: cast(Union[int, str], param_id)
-        for param_id, param in param_id_to_param.items()
-    }
+    return {param: param_id for param_id, param in param_id_to_param.items()}
 
 
 def _get_param_to_param_id_from_optim_input(
