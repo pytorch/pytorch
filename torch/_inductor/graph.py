@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
+from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
@@ -31,7 +32,7 @@ from .lowering import (
     needs_realized_inputs,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
-from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
+from .utils import gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -166,7 +167,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def run(self, *args):
         return super().run(*args)
 
@@ -516,7 +517,7 @@ class GraphLowering(torch.fx.Interpreter):
             total_bytes += num_bytes
         return total_bytes, node_counts
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
