@@ -29,6 +29,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
+#include <torch/csrc/utils/torch_dispatch_mode.h>
 
 #include <set>
 #include <unordered_set>
@@ -344,7 +345,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_RestorePythonTLSSnapshot")
       .def(py::init<>());
 
-  // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
   py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")

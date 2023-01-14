@@ -1463,7 +1463,7 @@ struct DropoutState {
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
   // cudaStreamGetCaptureInfo will never give back a capture id of 0, so 0 can serve
   // as a sentinel value that capture was not underway.
   cuda::CaptureId_t capture_id_last_lock = 0;
@@ -1481,7 +1481,7 @@ struct DropoutState {
     // could then define it before we get to unlock().
     mutex.lock();
     if (event) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
       // See Note [DropoutState and CUDA graph capture]
       cudaStreamCaptureStatus status;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
@@ -1502,7 +1502,7 @@ struct DropoutState {
   void unlock() {
     if (event) {
       event->record();
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM)
       // See Note [DropoutState and CUDA graph capture]
       cudaStreamCaptureStatus status;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(cuda::getCurrentCUDAStream(),
