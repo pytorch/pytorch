@@ -836,7 +836,7 @@ class TestTransformers(NNTestCase):
                 attn = torch.nn.functional.dropout(attn, p=dropout_p)
             # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
             output = torch.bmm(attn, v)
-            return output, attn
+            return output
         # TODO: Support cross-device / dtype testing properly when instantiate_device_type_tests() is used.
         dtypes = [torch.double, torch.float]
         for dtype in dtypes:
@@ -876,23 +876,22 @@ class TestTransformers(NNTestCase):
                     a = a.view(-1, L, S)
                 expected = sdp_ref(q, k, v, attn_mask=a, dropout_p=dropout_p)
                 if input_dim > 3:
-                    expected = (expected[0].view(-1, N_prime, L, E), expected[1].view(-1, N_prime, L, S))
+                    expected = expected.view(-1, N_prime, L, E)
 
-            need_attn_weights: bool = True
             with freeze_rng_state():
                 if is_causal:
                     # NB: Don't pass attn_mask here
                     actual = torch.ops.aten._scaled_dot_product_attention(
-                        query, key, value, None, dropout_p, need_attn_weights, is_causal)
+                        query, key, value, None, dropout_p, is_causal)
 
                     # Error case: both explicit attn_mask and is_causal are set
                     with self.assertRaisesRegex(RuntimeError,
                                                 "Explicit attn_mask should not be set when is_causal=True"):
                         torch.ops.aten._scaled_dot_product_attention(
-                            query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
+                            query, key, value, attn_mask, dropout_p, is_causal)
                 else:
                     actual = torch.ops.aten._scaled_dot_product_attention(
-                        query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
+                        query, key, value, attn_mask, dropout_p, is_causal)
 
                 self.assertEqual(actual, expected)
 
@@ -1130,14 +1129,14 @@ class TestSDPA(NNTestCase):
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool):
-        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float16)
+        rand_tensor = partial(self.rand_tensor, type=type, device="cuda", dtype=torch.float16)
 
         batch, seq_len, num_heads, head_dim = 32, 64, 16, 64
         shape = (batch, seq_len, num_heads, head_dim)
 
-        query = rand_tensor(shape, type=type)
-        key = rand_tensor(shape, type=type)
-        value = rand_tensor(shape, type=type)
+        query = rand_tensor(shape)
+        key = rand_tensor(shape)
+        value = rand_tensor(shape)
 
         # Lets switch seq_len and num_heads
         # B x S X H X D -> B x H x S x D
@@ -1164,13 +1163,13 @@ class TestSDPA(NNTestCase):
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels_packed(self, type: str, is_contiguous: bool):
-        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float16, packed=True)
+        rand_tensor = partial(self.rand_tensor, type=type, device="cuda", dtype=torch.float16, packed=True)
 
         batch_size, seq_len, num_heads, head_dim = 32, 64, 16, 64
         shape = (batch_size, seq_len, num_heads, head_dim)
 
         # Test Packed
-        qkv = rand_tensor(shape, type=type)
+        qkv = rand_tensor(shape)
         query, key, value = qkv.chunk(3, dim=-1)
 
         query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
@@ -1275,7 +1274,7 @@ class TestSDPA(NNTestCase):
     def test_sdp_math_gradcheck(self, contiguous_inputs: bool):
 
         batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
-        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
+        rand_tensor = partial(self.rand_tensor, type="dense", device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
 
         qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
         query, key, value = qkv.chunk(3, dim=-1)
@@ -1299,7 +1298,7 @@ class TestSDPA(NNTestCase):
     @parametrize("contiguous_inputs", [True, False])
     def test_sdp_fused_grad_against_math(self, contiguous_inputs: bool):
         batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
-        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
+        rand_tensor = partial(self.rand_tensor, type="dense", device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
 
         qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
         qkv_lp = qkv.detach().clone().to(torch.float32).requires_grad_()
@@ -1345,7 +1344,7 @@ class TestSDPA(NNTestCase):
         device = "cpu"
         # Test that cpu and nestedtensor cpu return MATH backend
         for dtype in floating_types_and_half():
-            make_tensor = partial(self.rand_tensor, device=device, dtype=dtype)
+            make_tensor = partial(self.rand_tensor, type=type, device=device, dtype=dtype)
             size = (2, 2, 3, 4)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
@@ -1386,7 +1385,7 @@ class TestSDPA(NNTestCase):
         # If we are only warning we still expect that efficient_attention will still be called.
         batch_size, seq_len, num_heads, head_dim = 1, 64, 8, 64
         shape = (batch_size, seq_len, num_heads, head_dim)
-        make_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float32, packed=False)
+        make_tensor = partial(self.rand_tensor, type="dense", device="cuda", dtype=torch.float32, packed=False)
         query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
 
         with use_deterministic_algorithims(True, warn_only=warn_only):
@@ -1401,7 +1400,7 @@ class TestSDPA(NNTestCase):
         # will fail on CI/CD becuase it is not compiled with the right flags
         device = 'cuda'
         dtype = torch.float16
-        make_tensor = partial(self.rand_tensor, device=device, dtype=dtype)
+        make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
 
         with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=False):
             size = (2, 3, 4)
@@ -1431,13 +1430,13 @@ class TestSDPA(NNTestCase):
 
                 # Invalid dtype for both Flash Attention and Mem Efficient Attention
                 size = (2, 2, 3, 16)
-                make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float64)
+                make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=torch.float64)
                 q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
                 # Invalid dtype for Flash Attention
-                make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float32)
+                make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=torch.float32)
                 q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
@@ -1449,16 +1448,14 @@ class TestSDPA(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                     q, k, v, torch.ones_like(q), 0.0, False))
 
-
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
     def test_unaligned_tensors(self):
         # The alignment is depdent on arch so we specifiy SM80OrLater
         device = 'cuda'
         dtype = torch.float16
-        size = (2, 2, 8, 5)
-        q = torch.randn(size, device=device, dtype=dtype)
-        k = torch.randn(size, device=device, dtype=dtype)
-        v = torch.randn(size, device=device, dtype=dtype)
+        shape = (2, 2, 8, 5)
+        make_tensor = partial(self.rand_tensor, shape=shape, type=type, device=device, dtype=dtype)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
         with sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=False):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
@@ -1467,10 +1464,9 @@ class TestSDPA(NNTestCase):
     def test_flash_fail_fp32(self):
         device = 'cuda'
         dtype = torch.float
-        size = (16, 16, 32, 32)
-        q = torch.randn(size, device=device, dtype=dtype)
-        k = torch.randn(size, device=device, dtype=dtype)
-        v = torch.randn(size, device=device, dtype=dtype)
+        shape = (16, 16, 32, 32)
+        make_tensor = partial(self.rand_tensor, shape=shape, type=type, device=device, dtype=dtype)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
         with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
@@ -1479,10 +1475,9 @@ class TestSDPA(NNTestCase):
     def test_flash_autocast_fp32_float16(self):
         device = 'cuda'
         dtype = torch.float
-        size = (16, 16, 32, 32)
-        q = torch.randn(size, device=device, dtype=dtype)
-        k = torch.randn(size, device=device, dtype=dtype)
-        v = torch.randn(size, device=device, dtype=dtype)
+        shape = (16, 16, 32, 32)
+        make_tensor = partial(self.rand_tensor, shape=shape, type=type, device=device, dtype=dtype)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
         with torch.autocast(device_type='cuda', dtype=torch.float16):
             with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
                 _ = torch.nn.functional._scaled_dot_product_attention(
@@ -1492,10 +1487,9 @@ class TestSDPA(NNTestCase):
     def test_flash_autocast_fp32_bfloat16(self):
         device = 'cuda'
         dtype = torch.float
-        size = (16, 16, 32, 32)
-        q = torch.randn(size, device=device, dtype=dtype)
-        k = torch.randn(size, device=device, dtype=dtype)
-        v = torch.randn(size, device=device, dtype=dtype)
+        shape = (16, 16, 32, 32)
+        make_tensor = partial(self.rand_tensor, shape=shape, type=type, device=device, dtype=dtype)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
             with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
                 _ = torch.nn.functional._scaled_dot_product_attention(
@@ -1504,7 +1498,7 @@ class TestSDPA(NNTestCase):
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
 instantiate_parametrized_tests(TestTransformers)
-instantiate_device_type_tests(TestSDPA, globals())
+instantiate_parametrized_tests(TestSDPA)
 
 if __name__ == '__main__':
     run_tests()

@@ -392,7 +392,7 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       at::kHalf, at::kFloat, at::kBFloat16};
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 10> constraints{{
+  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints{{
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,

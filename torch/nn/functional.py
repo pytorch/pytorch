@@ -5225,8 +5225,7 @@ def multi_head_attention_forward(
         k = k.view(bsz, num_heads, src_len, head_dim)
         v = v.view(bsz, num_heads, src_len, head_dim)
 
-        attn_output = _scaled_dot_product_attention(
-            q, k, v, attn_mask, dropout_p, need_weights, is_causal)
+        attn_output = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, is_causal)
         attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
 
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
