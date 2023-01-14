@@ -2085,7 +2085,7 @@ compute_bucket_assignment_by_size(
               std::min_element(indices_a.begin(), indices_a.end());
           const auto bmin =
               std::min_element(indices_b.begin(), indices_b.end());
-          return amin < bmin;
+          return *amin < *bmin;
         });
   }
 
