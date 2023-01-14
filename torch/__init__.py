@@ -323,6 +323,56 @@ class SymFloat:
     def get_pyobj(self):
         return self.node
 
+class SymBool:
+    """
+    Like an bool (including magic methods), but redirects all operations on the
+    wrapped node. This is used in particular to symbolically record operations
+    in the symbolic shape workflow.
+
+    Unlike regular bools, regular boolean operators will force extra guards instead
+    of symbolically evaluate.  Use the bitwise operators instead to handle this.
+    """
+
+    def __init__(self, node):
+        from torch.fx.experimental.symbolic_shapes import SymNode
+        assert isinstance(node, SymNode)
+        # This field MUST be named node; C++ binding code assumes that this
+        # class has a field named node that stores SymNode
+        self.node = node
+
+    def __bool__(self):
+        return self.node.bool_()
+
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    def __and__(self, other) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    def __or__(self, other) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    # This is not a real magic method but we define it anyway, because
+    # calling ~a on things that are potentially booleans will lead to
+    # very strange results.  You can trigger this with sym_not instead.
+    def __sym_not__(self) -> "SymBool":
+        raise AssertionError("type stub not overridden")
+
+    def __repr__(self):
+        return self.node.str()
+
+    # For BC; direct access of node is OK too
+    def get_pyobj(self):
+        return self.node
+
+def sym_not(a):
+    r""" SymInt-aware utility for logical negation.
+
+    Args:
+        a (SymBool or bool): Object to negate
+    """
+    if hasattr(a, '__sym_not__'):
+        return a.__sym_not__()
+    return not a
+
 def sym_float(a):
     r""" SymInt-aware utility for float casting.
 
