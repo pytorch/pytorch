@@ -5116,12 +5116,15 @@ def bucketize(
 
 @register_decomposition(aten.geometric)
 @out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 def geometric(self, p, generator=None):
     assert generator is None
-    tiny = torch.finfo(self.dtype).tiny
     return self.copy_(
         torch.floor(
-            torch.log(torch.clamp(torch.rand_like(self), min=tiny)) / math.log1p(-p)
+            torch.log1p(-torch.rand_like(self)) / math.log1p(-p)
         )
         + 1
     )
