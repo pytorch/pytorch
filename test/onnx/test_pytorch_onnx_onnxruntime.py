@@ -12526,19 +12526,16 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             ("zeros", "border", "reflection"),
             (True, False),
         ):
-            grid_sample_module = GridSampleModule(mode, padding_mode, align_corners)
             input_tensor = torch.randn(n, c, d_in, h_in, w_in)
             grid_tensor = torch.randn(n, d_out, h_out, w_out, 3)
-            f = io.BytesIO()
-            args = (
-                grid_sample_module,
-                (input_tensor, grid_tensor),
-                f,
-                16,
-            )
-            self.assertRaises(
-                torch.onnx.errors.UnsupportedOperatorError, torch.onnx.export, args
-            )
+            with self.assertRaises(
+                torch.onnx.errors.UnsupportedOperatorError,
+            ):
+                self.run_test(
+                    GridSampleModule(mode, padding_mode, align_corners),
+                    (input_tensor, grid_tensor),
+                    **atol_rtol,
+                )
 
     class IfNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:
