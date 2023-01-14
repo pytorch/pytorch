@@ -9,9 +9,8 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
-#include <c10/core/impl/PyInterpreter.h>
+#include <c10/core/impl/PyObjectSlot.h>
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
@@ -192,26 +191,6 @@ struct C10_API AutogradMetaFactoryRegisterer {
   explicit AutogradMetaFactoryRegisterer(AutogradMetaFactory* factory) {
     SetAutogradMetaFactory(factory);
   }
-};
-
-// PyInterpreterStatus describes what the state of its interpreter tag
-// is, relative to the thread currently holding the GIL.
-enum class PyInterpreterStatus {
-  // We just allocated the Tensor, it hasn't escaped to other threads,
-  // we know that it definitely hasn't been tagged to be associated
-  // with an interpreter.
-  DEFINITELY_UNINITIALIZED,
-  // We queried the interpreter field and it looked uninitialized.  But
-  // another thread may have raced with us to tag it with some other
-  // interpreter id.  So we will have to do a CEX to make sure we can
-  // actually nab it.
-  MAYBE_UNINITIALIZED,
-  // We queried the interpreter field and it was tagged to belong to us.
-  // This means we have sole write access (as we hold the GIL for this
-  // interpreter)
-  TAGGED_BY_US,
-  // Someone else tagged this.  We can't use this TensorImpl from Python.
-  TAGGED_BY_OTHER,
 };
 
 } // namespace impl
@@ -609,9 +588,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * tensors.
    */
   void release_resources() override;
-
- private:
-  void destroy_pyobj_if_needed();
 
  public:
   /**
@@ -2006,113 +1982,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     version_counter_.bump();
   }
 
-  // Associate the TensorImpl with the specified PyObject, and, if necessary,
-  // also tag the interpreter.
-  //
-  // NB: This lives in a header so that we can inline away the switch on status
-  //
-  // NB: THIS FUNCTION CAN RAISE AN EXCEPTION.  Make sure to clean up after
-  // PyObject if necessary!
-  void init_pyobj(
-      impl::PyInterpreter* self_interpreter,
-      PyObject* pyobj,
-      c10::impl::PyInterpreterStatus status) {
-    impl::PyInterpreter* expected = nullptr;
-    switch (status) {
-      case impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED:
-        // caller guarantees there is no multithreaded access; if there is
-        // no data race OK to do a relaxed store
-        pyobj_interpreter_.store(self_interpreter, std::memory_order_relaxed);
-        break;
-      case impl::PyInterpreterStatus::TAGGED_BY_US:
-        // no tagging is necessary, the tag is already correct
-        break;
-      case impl::PyInterpreterStatus::MAYBE_UNINITIALIZED:
-        // attempt to claim this TensorImpl with the specified interpreter
-        // tag
-        if (pyobj_interpreter_.compare_exchange_strong(
-                expected, self_interpreter, std::memory_order_acq_rel)) {
-          break;
-        }
-        // test if, actually, it was already tagged by us!  this situation can't
-        // be caused by a race, but it could be caused by a situation
-        // where someone conservatively tagged the tensor as MAYBE_UNINITIALIZED
-        // (because they didn't pre-check the tag) when actually it was
-        // owned by the interpreter
-        if (expected == self_interpreter) {
-          break;
-        }
-        // fallthrough, we lost the race.  We are guaranteed not to lose the
-        // race with ourself, as calls to init_pyobj with the same interpreter
-        // ID must be sequentialized by the GIL
-        C10_FALLTHROUGH;
-      case impl::PyInterpreterStatus::TAGGED_BY_OTHER:
-        TORCH_CHECK(
-            false,
-            "cannot allocate PyObject for Tensor on interpreter ",
-            self_interpreter,
-            " that has already been used by another torch deploy interpreter ",
-            pyobj_interpreter_.load());
-    }
-
-    // we are the ONLY thread that can have gotten to this point.  It is not
-    // possible to conflict with another zero interpreter as access is protected
-    // by GIL
-    // NB: owns_pyobj tag is initially false
-    pyobj_ = pyobj;
+  impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
   }
 
-  // Query the PyObject interpreter.  This may return null if there is no
-  // interpreter.  This is racy!
-  impl::PyInterpreter* pyobj_interpreter() {
-    return pyobj_interpreter_.load(std::memory_order_acquire);
-  }
-
-  PyObject* _unchecked_untagged_pyobj() const {
-    return reinterpret_cast<PyObject*>(
-        reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
-  }
-
-  // Test the interpreter tag.  If tagged for the current interpreter, return
-  // a non-nullopt (but possibly null) PyObject.  If (possibly) untagged,
-  // returns a nullopt.  If it is definitely invalid, raises an error.
-  //
-  // NB: this lives in header so that we can avoid actually creating the
-  // c10::optional
-  c10::optional<PyObject*> check_pyobj(
-      impl::PyInterpreter* self_interpreter) const {
-    // Note [Memory ordering on Python interpreter tag]
-    impl::PyInterpreter* interpreter =
-        pyobj_interpreter_.load(std::memory_order_acquire);
-    if (interpreter == nullptr) {
-      // NB: This never returns DEFINITELY_UNINITIALIZED because there is
-      // always the possibility that another thread races to initialize
-      // after we query here.  The only time when we can conclude a tensor
-      // is definitely uninitialized is when we have just allocated it and
-      // it cannot have escaped to other threads yet
-      return c10::nullopt;
-    } else if (interpreter == self_interpreter) {
-      // NB: pyobj_ could still be null!
-      if (c10::impl::HermeticPyObjectTLS::get_state()) {
-        return c10::nullopt;
-      } else {
-        return c10::make_optional(_unchecked_untagged_pyobj());
-      }
-    } else {
-      TORCH_CHECK(
-          false,
-          "cannot access PyObject for Tensor on interpreter ",
-          (*self_interpreter)->name(),
-          " that has already been used by another torch deploy interpreter ",
-          (*pyobj_interpreter_.load())->name());
-    }
-  }
-
-  // Clear the PyObject field for an interpreter, in situations where we
-  // statically know the tensor is tagged with our interpreter.
-  void unchecked_clear_pyobj(impl::PyInterpreter* interpreter) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(interpreter == pyobj_interpreter_.load());
-    pyobj_ = nullptr;
+  const impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
   }
 
  private:
@@ -2122,8 +1997,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   c10::optional<c10::Device> device_opt() const {
     return device_opt_;
   }
-
-  impl::PyInterpreter& load_pyobj_interpreter() const;
 
  public:
   /**
@@ -2742,15 +2615,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_access_should_throw_ = true;
   }
 
-  bool owns_pyobj() {
-    return reinterpret_cast<uintptr_t>(pyobj_) & 1;
-  }
-
-  void set_owns_pyobj(bool b) {
-    pyobj_ = reinterpret_cast<PyObject*>(
-        reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
-  }
-
  public:
   void set_custom_sizes_strides(SizesStridesPolicy policy) {
     custom_sizes_strides_ = static_cast<uint8_t>(policy);
@@ -2835,49 +2699,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::VariableVersion version_counter_;
 
-  // This field contains the interpreter tag for this object.  See
-  // Note [Python interpreter tag] for general context
-  //
-  // Note [Memory ordering on Python interpreter tag]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // What memory_order do we need when accessing this atomic?  We don't
-  // need a single total modification order (as provided by
-  // memory_order_seq_cst) as pyobj_interpreter_ is monotonic: it can only
-  // transition from -1 to some positive integer and never changes afterwards.
-  // Because there is only one modification, it trivially already has a total
-  // modification order (e.g., we don't need fences or locked instructions on
-  // x86)
-  //
-  // In fact, one could make a reasonable argument that relaxed reads are OK,
-  // due to the presence of external locking (GIL) to ensure that interactions
-  // with other data structures are still correctly synchronized, so that
-  // we fall in the "Single-Location Data Structures" case as described in
-  // http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2020/p2055r0.pdf
-  // However, on x86, it doesn't matter if I use acquire or relaxed on the load
-  // as I get the same assembly in both cases.  So I just use the more
-  // conservative acquire (which will impede compiler optimizations but I don't
-  // care)
-  std::atomic<impl::PyInterpreter*> pyobj_interpreter_;
-
-  // This field contains a reference to a PyObject representing this Tensor.
-  // If pyobj is nullptr, when we transfer Tensor to Python, we allocate a new
-  // PyObject for it and set this field.  This field does not have to be
-  // protected by an atomic as it is only allowed to be accessed when you hold
-  // the GIL, or during destruction of the tensor.
-  //
-  // When a PyObject dies, you are obligated to clear this field
-  // (otherwise, you will try to use-after-free the pyobj); this currently
-  // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
-  //
-  // NB: Ordinarily, this should not be a strong reference, as if the
-  // PyObject owns the Tensor, this would create a reference cycle.
-  // However, sometimes this ownership flips.  To track who owns
-  // who, this has a single pointer tag indicating whether or not the
-  // C++ object owns the PyObject (the common case, zero, means PyObject
-  // owns the C++ object); see _unchecked_untagged_pyobj for raw access
-  // or check_pyobj for checked access.  See references to PyObject
-  // resurrection in torch/csrc/autograd/python_variable.cpp
-  PyObject* pyobj_;
+  impl::PyObjectSlot pyobj_slot_;
 
   c10::impl::SizesAndStrides sizes_and_strides_;
 
@@ -3076,8 +2898,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 //    autograd metadata pointer
 //    named tensor metadata pointer
 //    version counter pointer
-//    Python interpreter pointer
-//    PyObject pointer
+//    PyObjectSlot
 //    SizesAndStrides size/pointer
 //    SizesAndStrides sizes (pre-allocated 0)
 //    SizesAndStrides sizes (pre-allocated 1)
@@ -3156,8 +2977,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     autograd_meta_,
     extra_meta_,
     version_counter_,
-    pyobj_interpreter_,
-    pyobj_,
+    pyobj_slot_,
     sizes_and_strides_,
     storage_offset_,
     numel_,
@@ -3213,8 +3033,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     are_equal<sizeof(autograd_meta_),      4,  FieldNameEnum::autograd_meta_>();
     are_equal<sizeof(extra_meta_),         4,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    4,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_interpreter_),  4,  FieldNameEnum::pyobj_interpreter_>();
-    are_equal<sizeof(pyobj_),              4,  FieldNameEnum::pyobj_>();
+    are_equal<sizeof(pyobj_slot_),    8,  FieldNameEnum::pyobj_slot_>();
     is_le<sizeof(sizes_and_strides_),     88, FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
@@ -3239,8 +3058,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
     is_le<sizeof(extra_meta_),            16,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_interpreter_),  8,  FieldNameEnum::pyobj_interpreter_>();
-    are_equal<sizeof(pyobj_),              8,  FieldNameEnum::pyobj_>();
+    are_equal<sizeof(pyobj_slot_),   16,  FieldNameEnum::pyobj_slot_>();
     are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();

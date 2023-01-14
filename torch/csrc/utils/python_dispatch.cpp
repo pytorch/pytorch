@@ -132,7 +132,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
     // means it's a nontrivial tensor subclass)
     for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
       if (ivalue.isTensor()) {
-        auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
+        auto* interpreter =
+            ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
         if (interpreter &&
             ivalue.unsafeToTensorImpl()->key_set().has(
                 at::DispatchKey::Python)) {
@@ -147,7 +148,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
           if (nv.isNone()) {
             continue;
           }
-          auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
+          auto* interpreter =
+              nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
           if (interpreter &&
               nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
             (*interpreter)
