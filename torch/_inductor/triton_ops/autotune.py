@@ -12,7 +12,6 @@ import torch
 
 from .. import config
 from ..ir import ReductionHint, TileHint
-from ..triton_ops.mm_perf_model import estimate_matmul_time
 from ..utils import conditional_product, dynamo_utils, has_triton
 from .conv_perf_model import (
     early_config_prune as conv_early_config_prune,
@@ -106,8 +105,10 @@ class CachingAutotuner(KernelInterface):
         exec(
             f"""
             def launcher({', '.join(def_args)}, grid, stream):
-                # set_device(current_device())  # TODO(jansel): is this needed?
-                grid_0, grid_1, grid_2 = grid(grid_meta)
+                if callable(grid):
+                    grid_0, grid_1, grid_2 = grid(grid_meta)
+                else:
+                    grid_0, grid_1, grid_2 = grid
                 bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
                             stream, bin.cu_function, None, None, None,
                             {', '.join(call_args)})
@@ -398,7 +399,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     if len(size_hints) == 1:
         return cached_autotune([triton_config(size_hints, 1024)], meta=meta)
     if len(size_hints) == 2:
-        if not config.triton.autotune or tile_hint == TileHint.SQUARE:
+        if not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE:
             return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
         return cached_autotune(
             [
@@ -412,7 +413,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             filename=filename,
         )
     if len(size_hints) == 3:
-        if not config.triton.autotune:
+        if not config.triton.autotune_pointwise:
             return cached_autotune([triton_config(size_hints, 16, 16, 16)], meta=meta)
         return cached_autotune(
             [
@@ -448,7 +449,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             return cached_autotune([outer_config], meta=meta)
         elif reduction_hint == ReductionHint.OUTER_TINY:
             return cached_autotune([tiny_config], meta=meta)
-        if not config.triton.autotune:
+        if not config.triton.autotune_pointwise:
             return cached_autotune(
                 [triton_config_reduction(size_hints, 32, 128)], meta=meta
             )
@@ -467,6 +468,15 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             filename=filename,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
+
+
+def template(num_stages, num_warps, meta, filename=None):
+    """
+    Compile a triton template
+    """
+    return cached_autotune(
+        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta
+    )
 
 
 def conv_heuristics():
@@ -547,126 +557,6 @@ def conv_heuristics():
     prune_configs_by = {
         "early_config_prune": conv_early_config_prune,
         "perf_model": estimate_conv_time,
-        "top_k": 10,
-    }
-    return triton.autotune(configs, key, prune_configs_by=prune_configs_by)
-
-
-def mm_heuristics():
-    from triton import heuristics
-
-    mm_heuristic = heuristics(
-        {
-            "EVEN_K": lambda args: args["K"] % (args["BLOCK_K"] * args["SPLIT_K"]) == 0,
-        }
-    )
-    return mm_heuristic
-
-
-def mm_autotune(get_io_bound_configs=False):
-    from triton.ops.matmul import get_configs_io_bound
-    from triton.ops.matmul_perf_model import early_config_prune as mm_early_config_prune
-
-    configs = [
-        # basic configs for compute-bound matmuls
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=3,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=3,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 256, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32, "SPLIT_K": 1},
-            num_stages=5,
-            num_warps=2,
-        ),
-        # good for int8
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=3,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=3,
-            num_warps=8,
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 256, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 64, "SPLIT_K": 1},
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 64, "SPLIT_K": 1},
-            num_stages=5,
-            num_warps=2,
-        ),
-    ]
-    if get_io_bound_configs:
-        configs += get_configs_io_bound()
-    key = ["M", "N", "K"]
-    prune_configs_by = {
-        "early_config_prune": mm_early_config_prune,
-        "perf_model": estimate_matmul_time,
         "top_k": 10,
     }
     return triton.autotune(configs, key, prune_configs_by=prune_configs_by)
