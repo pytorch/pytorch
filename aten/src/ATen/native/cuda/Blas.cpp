@@ -188,7 +188,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       auto self_alignment = getAlignment(self);
       auto mat1_alignment = getAlignment(mat1);
       auto mat2_alignment = getAlignment(mat2);
-      // cuBlasLt requires all alignments > 2 or the same ( == 2)
+      // due to a heuristic bug, cuBlasLt requires all alignments > 2 or the same ( == 2)
       // should we err on the side of caution and remove the second dispatch path?
       bool alignment_ok = (self_alignment > 2 &&
                            mat1_alignment > 2 &&
