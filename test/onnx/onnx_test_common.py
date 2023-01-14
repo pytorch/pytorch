@@ -65,7 +65,7 @@ def run_model_test_with_fx_to_onnx_exporter(
     if hasattr(test_suite, "check_dtype"):
         options.check_dtype = test_suite.check_dtype
 
-    names = set([f.name for f in dataclasses.fields(options)])
+    names = set(f.name for f in dataclasses.fields(options))
     keywords_to_pop = []
     for k, v in kwargs.items():
         if k in names:
