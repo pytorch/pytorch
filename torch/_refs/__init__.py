@@ -5089,16 +5089,13 @@ def bucketize(
 
 @register_decomposition(aten.exponential)
 @out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 def exponential(self, rate=1, generator=None):
     assert generator is None
-    computation_dtype, result_dtype = utils.elementwise_dtypes(
-        self, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    return (
-        -1
-        / rate
-        * torch.log1p(-torch.rand_like(self.to(computation_dtype))).to(result_dtype)
-    )
+    return -1 / rate * torch.log1p(-torch.rand_like(self))
 
 
 # inplace
