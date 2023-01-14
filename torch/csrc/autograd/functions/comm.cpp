@@ -49,12 +49,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
     return device.index();
   });
   auto tensors = torch::cuda::scatter(
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(input),
-      device_indices,
-      chunk_sizes_,
-      dim_,
-      streams_);
+      std::move(input), device_indices, chunk_sizes_, dim_, streams_);
 
   std::vector<Variable> variables;
   variables.reserve(tensors.size());
