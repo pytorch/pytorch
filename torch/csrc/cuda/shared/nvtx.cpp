@@ -86,7 +86,6 @@ nvtxEventAttributes_t getAttributes(
 
 #endif
 
-
 int rangePush(
     const std::string& msg,
     std::optional<std::string> domain,
