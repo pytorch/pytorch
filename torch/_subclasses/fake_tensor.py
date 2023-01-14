@@ -988,7 +988,11 @@ class FakeTensorMode(TorchDispatchMode):
         def wrap(e, device=None):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
-            if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
+            if (
+                isinstance(e, torch.Tensor)
+                and not isinstance(e, FakeTensor)
+                and converter is not None
+            ):
                 if common_device is None:
                     (
                         common_device,
