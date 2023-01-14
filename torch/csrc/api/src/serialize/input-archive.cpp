@@ -94,14 +94,12 @@ void InputArchive::read(const std::string& key, InputArchive& archive) {
 void InputArchive::load_from(
     const std::string& filename,
     c10::optional<torch::Device> device /*= c10::nullopt*/) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
   module_ = torch::jit::load(filename, std::move(device));
 }
 
 void InputArchive::load_from(
     std::istream& stream,
     c10::optional<torch::Device> device /*= c10::nullopt*/) {
-  // NOLINTNEXTLINE(performance-move-const-arg)
   module_ = torch::jit::load(stream, std::move(device));
 }
 
@@ -131,9 +129,8 @@ void InputArchive::load_from(
     const char* data_;
     size_t size_;
   };
-  std::unique_ptr<OurAdapter> adapter(new OurAdapter(data, size));
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  module_ = torch::jit::load(std::move(adapter), std::move(device));
+  module_ = torch::jit::load(
+      std::make_unique<OurAdapter>(data, size), std::move(device));
 }
 
 void InputArchive::load_from(
@@ -160,9 +157,8 @@ void InputArchive::load_from(
     const std::function<size_t(uint64_t, void*, size_t)>& read_func_;
     const std::function<size_t(void)>& size_func_;
   };
-  std::unique_ptr<OurAdapter> adapter(new OurAdapter(read_func, size_func));
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  module_ = torch::jit::load(std::move(adapter), std::move(device));
+  module_ = torch::jit::load(
+      std::make_unique<OurAdapter>(read_func, size_func), std::move(device));
 }
 
 std::vector<std::string> InputArchive::keys() {
