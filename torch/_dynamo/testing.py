@@ -46,7 +46,7 @@ def remove_optimized_module_prefix(name):
     prefix = "_orig_mod."
     assert name.startswith(prefix)
     name = name[len(prefix) :]
-    return torch.distributed.fsdp._common_utils.clean_tensor_name(name)
+    return name
 
 
 def collect_results(model, prediction, loss, example_inputs):
