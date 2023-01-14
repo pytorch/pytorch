@@ -205,16 +205,16 @@ class ProcessLocalGroup(dist.ProcessGroup):
                     f"world not ready, only {cls._count} PG's registered but world has {pg.size()} ranks"
                 )
             # pg_name is unique, we use that to record the mapping between pg and collective
-            if pg.name not in cls._cur_coll_on_pgs:
-                cls._cur_coll_on_pgs[pg.name] = Collective(pg.size(), collective, cls)
-            return cls._cur_coll_on_pgs[pg.name]
+            if pg.pg_name not in cls._cur_coll_on_pgs:
+                cls._cur_coll_on_pgs[pg.pg_name] = Collective(pg.size(), collective, cls)
+            return cls._cur_coll_on_pgs[pg.pg_name]
 
     @classmethod
     def _end_coll(cls, collective, pg):
         # This is racily called by all ranks, so only one will work
         with cls._coll_lock:
-            if pg.name in cls._cur_coll_on_pgs and cls._cur_coll_on_pgs[pg.name] == collective:
-                cls._cur_coll_on_pgs.pop(pg.name)
+            if pg.pg_name in cls._cur_coll_on_pgs and cls._cur_coll_on_pgs[pg.pg_name] == collective:
+                cls._cur_coll_on_pgs.pop(pg.pg_name)
 
     @classmethod
     def exception_handle(cls, exc):
@@ -227,8 +227,9 @@ class ProcessLocalGroup(dist.ProcessGroup):
 
     @classmethod
     def reset(cls):
-        cls._cur_coll = {}
-        cls._terminate.clear()
+        with cls._coll_lock:
+            cls._cur_coll_on_pgs = {}
+            cls._terminate.clear()
 
     def allreduce(self, tensor_list, opts=AllreduceOptions()):
         coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
@@ -270,7 +271,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         return self._world_size
 
     @property
-    def name(self):
+    def pg_name(self):
         """
         return the global registered name of the current pg in the world
         """
