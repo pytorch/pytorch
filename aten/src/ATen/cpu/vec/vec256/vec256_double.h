@@ -10,7 +10,8 @@
 #include <sleef.h>
 #endif
 
-namespace at::vec {
+namespace at {
+namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -420,4 +421,4 @@ Vectorized<double> inline fmsub(const Vectorized<double>& a, const Vectorized<do
 
 #endif
 
-}}
+}}}

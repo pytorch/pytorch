@@ -16,7 +16,8 @@
 // However for now opting for STL, since we are not building
 // with Sleef for mobile yet.
 
-namespace at::vec {
+namespace at {
+namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -835,4 +836,4 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 
 #endif /* defined(aarch64) */
 
-}}
+}}}
