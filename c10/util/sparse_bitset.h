@@ -442,7 +442,7 @@ class SparseBitVector {
 
   SparseBitVector(const SparseBitVector& RHS)
       : Elements(RHS.Elements), CurrElementIter(Elements.begin()) {}
-  SparseBitVector(SparseBitVector&& RHS)
+  SparseBitVector(SparseBitVector&& RHS) noexcept
       : Elements(std::move(RHS.Elements)), CurrElementIter(Elements.begin()) {}
 
   // Clear.
@@ -459,7 +459,7 @@ class SparseBitVector {
     CurrElementIter = Elements.begin();
     return *this;
   }
-  SparseBitVector& operator=(SparseBitVector&& RHS) {
+  SparseBitVector& operator=(SparseBitVector&& RHS) noexcept {
     Elements = std::move(RHS.Elements);
     CurrElementIter = Elements.begin();
     return *this;
