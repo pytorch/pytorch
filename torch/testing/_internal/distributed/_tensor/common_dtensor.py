@@ -25,6 +25,7 @@ import torch.distributed as dist
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    MultiThreadedTestCase,
     TEST_SKIPS,
     skip_if_lt_x_gpu,
 )
@@ -172,6 +173,16 @@ def with_comms(
         self.destroy_pg()
 
     return wrapper
+
+
+class DTensorOpTestBase(MultiThreadedTestCase):
+    @property
+    def world_size(self) -> int:
+        return NUM_DEVICES
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_threads()
 
 
 # This is a class for converting args/kwargs of an op into distributed args/kwargs
