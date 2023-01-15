@@ -180,6 +180,13 @@ class DTensorOpTestBase(MultiThreadedTestCase):
     def world_size(self) -> int:
         return NUM_DEVICES
 
+    @property
+    def device_type(self) -> str:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    def build_device_mesh(self):
+        return DeviceMesh(self.device_type, list(range(self.world_size)))
+
     def setUp(self) -> None:
         super().setUp()
         self._spawn_threads()
