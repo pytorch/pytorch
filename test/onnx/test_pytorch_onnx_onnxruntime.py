@@ -12518,22 +12518,32 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             **atol_rtol,
         )
 
-        # ONNX Opset 16 GridSample 5D volumetric input is not supported.
+        # ONNX Opset 16 GridSample with 5D volumetric input is not supported.
         d_in = 2
         d_out = 3
+        volumetric_input_tensor = torch.randn(n, c, d_in, h_in, w_in)
+        volumetric_grid_tensor = torch.randn(n, d_out, h_out, w_out, 3)
         for mode, padding_mode, align_corners in itertools.product(
-            ("bilinear", "nearest", "bicubic"),
-            ("zeros", "border", "reflection"),
-            (True, False),
+            (
+                "bilinear",
+                "nearest",
+            ),  # PyTorch grid_sample "bicubic" mode does not support 5D volumetric input.
+            (
+                "zeros",
+                "border",
+                "reflection",
+            ),
+            (
+                True,
+                False,
+            ),
         ):
-            input_tensor = torch.randn(n, c, d_in, h_in, w_in)
-            grid_tensor = torch.randn(n, d_out, h_out, w_out, 3)
             with self.assertRaises(
                 torch.onnx.errors.OnnxExporterError,
             ):
                 self.run_test(
                     GridSampleModule(mode, padding_mode, align_corners),
-                    (input_tensor, grid_tensor),
+                    (volumetric_input_tensor, volumetric_grid_tensor),
                     **atol_rtol,
                 )
 
