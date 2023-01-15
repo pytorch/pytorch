@@ -1010,7 +1010,6 @@ class MultiThreadedTestCase(TestCase):
         for rank in range(self.world_size):
             t = threading.Thread(target=self.__class__._run, args=(test_name, rank, self.world_size))
             t.start()
-            logger.info(f"Started thread {rank} with thread id {t.native_id}")
             self.threads.append(t)
 
     @classmethod
