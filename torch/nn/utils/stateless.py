@@ -11,7 +11,7 @@ __all__ = ["functional_call"]
 # and using other types causes mypy errors
 def _change_class(module, params_and_buffers) -> None:
     cls = module.__class__
-    attr_to_path : Dict[str, str] = module._attr_to_path
+    attr_to_path: Dict[str, str] = module._attr_to_path
 
     def _getattribute(self, name: str) -> Any:
         if name in attr_to_path:
@@ -37,7 +37,9 @@ def _change_class(module, params_and_buffers) -> None:
     module._orig_class = cls
 
 
-def _create_tied_weights_map(module: 'torch.nn.Module', params_and_buffers: Dict[str, Tensor]) -> Dict[str, str]:
+def _create_tied_weights_map(
+    module: 'torch.nn.Module', params_and_buffers: Dict[str, Tensor]
+) -> Dict[str, str]:
     """
     _create_tied_weights_map(module: Module, params_and_buffers: Dict[str, Tensor]) -> Dict[str, str]
 
@@ -91,8 +93,10 @@ def _create_tied_weights_map(module: 'torch.nn.Module', params_and_buffers: Dict
             weight_to_name_and_tied_names[t] = (n, weight_to_name_and_tied_names[t][1])
             return
 
-        raise ValueError(f"functional_call got values for both {n} and {first_seen_name}, which are tied. " +
-                         "Consider using tie_weights=False")
+        raise ValueError(
+            f"functional_call got values for both {n} and {first_seen_name}, which are tied. "
+            f"Consider using tie_weights=False"
+        )
 
     tensor: Tensor
     for name, tensor in module.named_parameters(remove_duplicate=False):
@@ -112,7 +116,9 @@ def _create_tied_weights_map(module: 'torch.nn.Module', params_and_buffers: Dict
 
 
 def _create_swap_params(params_and_buffers):
-    def _swap_parameters(module, tensor_name: str, full_path: str, tensor: Optional[Tensor]) -> None:
+    def _swap_parameters(
+        module, tensor_name: str, full_path: str, tensor: Optional[Tensor]
+    ) -> None:
         # Changes the module class to get a new __getattr__ dunder method
         # that looks for the reparametrized tensor
         if hasattr(module, "_attr_to_path"):
@@ -121,6 +127,7 @@ def _create_swap_params(params_and_buffers):
             module._attr_to_path = {}
             module._attr_to_path[tensor_name] = full_path
             _change_class(module, params_and_buffers)
+
     return _swap_parameters
 
 
@@ -137,22 +144,47 @@ def _reparametrize_module(
     parameters_and_buffers: Dict[str, Tensor],
     tie_weights: bool = False,
 ) -> Iterator[None]:
-    tied_weights_map = _create_tied_weights_map(module, parameters_and_buffers) if tie_weights else {}
+    submodules = {"": module}
+
+    def get_submodule(path: str) -> 'torch.nn.Module':
+        try:
+            return submodules[path]
+        except KeyError:
+            prefix, dot, attr = path.rpartition(".")
+            if dot:
+                submodule = submodules[path] = getattr(get_submodule(prefix), attr)
+            else:
+                submodule = submodules[path] = getattr(module, attr)
+            return submodule
+
+    def apply_func_submodules(
+        func: Callable[..., None], full_path: str, given_path: str, args: Tuple
+    ) -> None:
+        prefix_path, _, last_atom = full_path.rpartition(".")
+        func(get_submodule(prefix_path), last_atom, given_path, *args)
+
+    tied_weights_map = (
+        _create_tied_weights_map(module, parameters_and_buffers) if tie_weights else {}
+    )
     for name, tensor in parameters_and_buffers.items():
-        _apply_func_submodules(
+        apply_func_submodules(
             _create_swap_params(parameters_and_buffers),
-            module, name.split("."), name, (tensor,))
+            name,
+            name,
+            (tensor,),
+        )
     for tied_name, user_given_name in tied_weights_map.items():
-        _apply_func_submodules(
+        apply_func_submodules(
             _create_swap_params(parameters_and_buffers),
-            module, tied_name.split("."), user_given_name, (None,))
+            tied_name,
+            user_given_name,
+            (None,),
+        )
     try:
         yield
     finally:
         for name in parameters_and_buffers:
-            _apply_func_submodules(
-                _remove_swap,
-                module, name.split("."), name, ())
+            apply_func_submodules(_remove_swap, name, name, ())
 
 
 def _apply_func_submodules(
@@ -251,13 +283,16 @@ def _functional_call(
 ):
     # TODO allow kwargs such as unsafe and others for parametrization
     if (
-            torch.jit.is_tracing()
-            or torch.jit.is_scripting()
-            or isinstance(module, (
+        torch.jit.is_tracing()
+        or torch.jit.is_scripting()
+        or isinstance(
+            module,
+            (
                 torch.jit.RecursiveScriptModule,
                 torch.jit.ScriptModule,
-                torch.jit.ScriptFunction)
-            )
+                torch.jit.ScriptFunction,
+            ),
+        )
     ):
         raise RuntimeError("The stateless API can't be used with Jitted modules")
     if kwargs is None:

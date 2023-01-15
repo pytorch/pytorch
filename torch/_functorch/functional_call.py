@@ -113,17 +113,23 @@ def functional_call(
     Returns:
         Any: the result of calling ``module``.
     """
-    parameters_and_buffers = parameter_and_buffer_dicts if isinstance(parameter_and_buffer_dicts, dict) else {}
+    parameters_and_buffers = (
+        parameter_and_buffer_dicts if isinstance(parameter_and_buffer_dicts, dict) else {}
+    )
     if isinstance(parameter_and_buffer_dicts, tuple):
         key_list = [i for dct in parameter_and_buffer_dicts for i in dct.keys()]
         key_set = set(key_list)
         if len(key_set) != len(key_list):
             repeated_key = list(filter(lambda key: key_list.count(key) > 1, key_set))[0]
-            raise ValueError(f"{repeated_key} appeared in multiple dictionaries; behavior of functional call is ambiguous")
+            raise ValueError(
+                f"{repeated_key} appeared in multiple dictionaries; behavior of functional call is ambiguous"
+            )
 
         parameters_and_buffers = {k: v for d in parameter_and_buffer_dicts for k, v in d.items()}
 
-    return nn.utils.stateless._functional_call(module, parameters_and_buffers, args, kwargs, tie_weights=tie_weights)
+    return nn.utils.stateless._functional_call(
+        module, parameters_and_buffers, args, kwargs, tie_weights=tie_weights
+    )
 
 
 @exposed_in("torch.func")
@@ -185,27 +191,31 @@ def stack_module_state(models: List[nn.Module]) -> Tuple[Dict[str, Any], Dict[st
     if len(models) == 0:
         raise RuntimeError('stack_module_state: Expected at least one model, got 0.')
     if not (all(m.training for m in models) or all(not m.training for m in models)):
-        raise RuntimeError('stack_module_state: Expected all models to '
-                           'have the same training/eval mode.')
+        raise RuntimeError(
+            'stack_module_state: Expected all models to have the same training/eval mode.'
+        )
     model0_typ = type(models[0])
     if not all(type(m) == model0_typ for m in models):
-        raise RuntimeError('stack_module_state: Expected all models to '
-                           'be of the same class.')
-    all_params = [{k: v for k, v in model.named_parameters()} for model in models]
-    params = {k: construct_stacked_leaf(tuple(params[k] for params in all_params), k)
-              for k in all_params[0]}
-    all_buffers = [{k: v for k, v in model.named_buffers()} for model in models]
-    buffers = {k: construct_stacked_leaf(tuple(buffers[k] for buffers in all_buffers), k)
-               for k in all_buffers[0]}
+        raise RuntimeError('stack_module_state: Expected all models to be of the same class.')
+    all_params = [dict(model.named_parameters()) for model in models]
+    params = {
+        k: construct_stacked_leaf(tuple(params[k] for params in all_params), k)
+        for k in all_params[0]
+    }
+    all_buffers = [dict(model.named_buffers()) for model in models]
+    buffers = {
+        k: construct_stacked_leaf(tuple(buffers[k] for buffers in all_buffers), k)
+        for k in all_buffers[0]
+    }
 
     return params, buffers
+
 
 def construct_stacked_leaf(tensors, name):
     all_requires_grad = all([t.requires_grad for t in tensors])
     none_requires_grad = all([not t.requires_grad for t in tensors])
     if not all_requires_grad and not none_requires_grad:
-        raise RuntimeError(
-            f'Expected {name} from each model to have the same .requires_grad')
+        raise RuntimeError(f'Expected {name} from each model to have the same .requires_grad')
     result = torch.stack(tensors)
     if all_requires_grad:
         result = result.detach().requires_grad_()
