@@ -233,17 +233,18 @@ static void norm_kernel_tensor_iterator_impl(
   // the type `acc_t`. When `scalar_t` is complex, `acc_t` is the downgraded
   // real number type. Otherwise, `acc_t` and `scalar_t` are the same type.
   if (val == 0) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
-      using acc_t = typename scalar_value_type<scalar_t>::type;
-      using real_acc_t = at::opmath_type<acc_t>;
-      binary_kernel_reduce(
-          iter, NormZeroOps<scalar_t, real_acc_t>(), real_acc_t(0));
-    });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+          using real_type = typename scalar_value_type<scalar_t>::type;
+          using real_acc_t = at::opmath_type<real_type>;
+          binary_kernel_reduce(
+              iter, NormZeroOps<scalar_t, real_acc_t>(), real_acc_t(0));
+        });
   } else if (val == 1) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
-          using acc_t = typename scalar_value_type<scalar_t>::type;
-          using real_acc_t = at::opmath_type<acc_t>;
+          using real_type = typename scalar_value_type<scalar_t>::type;
+          using real_acc_t = at::opmath_type<real_type>;
           binary_kernel_reduce(
               iter, NormOneOps<scalar_t, real_acc_t>(), real_acc_t(0));
         });
@@ -285,35 +286,41 @@ static void norm_kernel_tensor_iterator_impl(
       });
       return;
     }
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
-      using acc_t = typename scalar_value_type<scalar_t>::type;
-      using real_acc_t = at::opmath_type<acc_t>;
-      binary_kernel_reduce(
-          iter, NormTwoOps<scalar_t, real_acc_t>(), real_acc_t(0));
-    });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+          using real_type = typename scalar_value_type<scalar_t>::type;
+          using real_acc_t = at::opmath_type<real_type>;
+          binary_kernel_reduce(
+              iter, NormTwoOps<scalar_t, real_acc_t>(), real_acc_t(0));
+        });
   } else if (val == INFINITY) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
-      using acc_t = typename scalar_value_type<scalar_t>::type;
-      using real_acc_t = at::opmath_type<acc_t>;
-      binary_kernel_reduce(
-          iter, AbsMaxOps<scalar_t, real_acc_t>(), real_acc_t(0));
-    });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+          using real_type = typename scalar_value_type<scalar_t>::type;
+          using real_acc_t = at::opmath_type<real_type>;
+          binary_kernel_reduce(
+              iter, AbsMaxOps<scalar_t, real_acc_t>(), real_acc_t(0));
+        });
   } else if (val == -INFINITY) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
-      using acc_t = typename scalar_value_type<scalar_t>::type;
-      using real_acc_t = at::opmath_type<acc_t>;
-      binary_kernel_reduce(
-          iter,
-          AbsMinOps<scalar_t, real_acc_t>(),
-          std::numeric_limits<real_acc_t>::infinity());
-    });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+          using real_type = typename scalar_value_type<scalar_t>::type;
+          using real_acc_t = at::opmath_type<real_type>;
+          binary_kernel_reduce(
+              iter,
+              AbsMinOps<scalar_t, real_acc_t>(),
+              std::numeric_limits<real_acc_t>::infinity());
+        });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
-      using acc_t = typename scalar_value_type<scalar_t>::type;
-      using real_acc_t = at::opmath_type<acc_t>;
-      binary_kernel_reduce(
-          iter, NormOps<scalar_t, real_acc_t>{real_acc_t(val)}, real_acc_t(0));
-    });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+          using real_type = typename scalar_value_type<scalar_t>::type;
+          using real_acc_t = at::opmath_type<real_type>;
+          binary_kernel_reduce(
+              iter,
+              NormOps<scalar_t, real_acc_t>{real_acc_t(val)},
+              real_acc_t(0));
+        });
   }
 
   // For complex outputs, the above kernels do not touch the imaginary values,
