@@ -6,7 +6,7 @@
 #include <c10/util/Exception.h>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 // note(crcrpar): To observe the CI rules, i.e. 20 minutes per file to compile, defensively split instantiations into _impl files.
 // this is only for CUDA 11.3 for which it took about 20 minutes and 28 minutes in my workstation and CI, respectively.
@@ -42,4 +42,4 @@ void _fused_adam_kernel_cuda_(
   }
 }
 
-}} // namespace at::native
+} // namespace at::native
