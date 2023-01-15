@@ -608,8 +608,7 @@ def export(
 
         return result_capturing_wrapper
 
-    # TODO(voz): Handle kwargs properly?
-    flat_args, in_spec = pytree.tree_flatten(args)
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None):
@@ -617,6 +616,7 @@ def export(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
+            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
@@ -682,9 +682,10 @@ def export(
     ).transform()
 
     # Make dynamo graph to have same input/output spec as user code
+    input_strs = [f"orig_arg_{i}" for i in range(len(args))] + list(kwargs.keys())
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
-            [f"orig_arg_{i}" for i in range(len(args))],
+            input_strs,
             in_spec,
             out_spec_traced,
         )
