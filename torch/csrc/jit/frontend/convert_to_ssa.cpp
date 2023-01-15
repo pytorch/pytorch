@@ -6,8 +6,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // At the beginning of the pass the Graph has already undergone type checking,
 // and writes or reads to a variable are emitted as Loads and Stores in the
@@ -345,5 +344,4 @@ void ConvertToSSA(std::shared_ptr<Graph>& graph) {
   TransformExits(graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
