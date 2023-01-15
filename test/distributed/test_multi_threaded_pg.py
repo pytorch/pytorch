@@ -91,6 +91,10 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
     def world_size(self):
         return 4
 
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
     def test_allgather(self):
         input_tensor = torch.ones(3, 3) * dist.get_rank()
         output_tensors = [torch.empty_like(input_tensor) for _ in range(self.world_size)]

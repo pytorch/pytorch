@@ -1,7 +1,5 @@
-import queue
 import sys
 import threading
-import time
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
@@ -349,64 +347,3 @@ def _install_threaded_pg():
 
 def _uninstall_threaded_pg():
     dist.distributed_c10d._world = _old_pg_world
-
-
-def run_with_threaded_pg(world_size, timeout, callback):
-    """
-    Run ``callback`` with ``world_size`` threads using the in-proc process group
-    """
-    world = _install_threaded_pg()
-
-    def world_is_valid():
-        return world == dist.distributed_c10d._world
-
-    global_store = dist.HashStore()
-    exception_queue = queue.Queue()
-
-    def worker(rank):
-        if not world_is_valid():
-            raise TimeoutError("Invalid world")  # TODO: raise TimeoutError or RuntimeError?
-        dist.init_process_group(
-            backend="threaded", rank=rank, world_size=world_size, store=global_store
-        )
-        try:
-            callback()
-        # Exceptions are handled in MultiThreadedTestCase
-        except BaseException as ex:
-            exception_queue.put((rank, sys.exc_info()))
-            world.default_pg.exception_handle(ex)  # trigger _terminate event and awaken worker threads
-        finally:
-            if world_is_valid():
-                dist.destroy_process_group()
-
-    try:
-        threads = [
-            threading.Thread(target=worker, args=(rank,)) for rank in range(world_size)
-        ]
-        for thread in threads:
-            thread.start()
-
-        deadline = time.time() + timeout
-        for idx, thread in enumerate(threads):
-            thread.join(max(0, deadline - time.time()))
-            if thread.is_alive():
-                exception_queue.put(
-                    (
-                        idx,
-                        (
-                            TimeoutError,
-                            TimeoutError(
-                                f"Rank failed to join in under {timeout} seconds"
-                            ),
-                            None,
-                        ),
-                    )
-                )
-        ProcessLocalGroup.reset()
-        failed_ranks = []
-        while not exception_queue.empty():
-            failure = exception_queue.get()
-            failed_ranks.append(failure)
-        return failed_ranks
-    finally:
-        _uninstall_threaded_pg()
