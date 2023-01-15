@@ -31,7 +31,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -392,4 +392,4 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 }
 
 
-}}  // namespace at::native
+}  // namespace at::native

@@ -154,10 +154,41 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "dim", [], {})
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
-        elif name == "T":
-            args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
-            result = self.call_method(tx, "permute", args, {})
-
+        # TODO: reimplement the T/H/mT/mH by generating a function call
+        # to torch.Tensor.{T/H/mT/mH}.__get__
+        elif name in ("T", "H"):
+            out = (
+                tx.output.create_proxy(
+                    "call_method",
+                    "conj",
+                    *proxy_args_kwargs([self], {}),
+                )
+                if name == "H"
+                else self
+            )
+            args_list = [
+                variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)
+            ]
+            args = [variables.TupleVariable(args_list)]
+            result = out.call_method(tx, "permute", args, {})
+        elif name in ("mT", "mH"):
+            out = (
+                tx.output.create_proxy(
+                    "call_method",
+                    "conj",
+                    *proxy_args_kwargs([self], {}),
+                )
+                if name == "mH"
+                else self
+            )
+            if self.ndim > 0:
+                args = [
+                    variables.ConstantVariable(-2),
+                    variables.ConstantVariable(-1),
+                ]
+                result = out.call_method(tx, "transpose", args, {})
+            else:
+                result = out.call_method(tx, "t", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
 
@@ -285,20 +316,7 @@ class TensorVariable(VariableTracker):
             else:
                 unimplemented(f"Tensor.{name}")
         elif name == "__len__":
-            if self.size:
-                assert not config.dynamic_shapes
-                return ConstantVariable(self.size[0], **options)
-            else:
-                return wrap_fx_proxy(
-                    tx,
-                    tx.output.create_proxy(
-                        "call_function",
-                        len,
-                        (self.as_proxy(),),
-                        {},
-                    ),
-                    **options,
-                )
+            return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
         elif name == "__setitem__":
             tx.output.guards.update(options["guards"])
             tx.output.create_proxy(
