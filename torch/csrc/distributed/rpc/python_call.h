@@ -3,7 +3,9 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 // RPC call representing calling a Python function over RPC.
 class TORCH_API PythonCall final : public RpcCommandBase {
@@ -25,4 +27,6 @@ class TORCH_API PythonCall final : public RpcCommandBase {
   const bool isAsyncExecution_;
 };
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

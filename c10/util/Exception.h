@@ -418,7 +418,8 @@ C10_API std::string GetExceptionString(const std::exception& e);
     C10_THROW_ERROR(Error, TORCH_CHECK_MSG(cond, type, __VA_ARGS__)); \
   }
 #else
-namespace c10::detail {
+namespace c10 {
+namespace detail {
 template <typename... Args>
 decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   return ::c10::str(args...);
@@ -432,7 +433,8 @@ inline C10_API const char* torchCheckMsgImpl(
     const char* args) {
   return args;
 }
-} // namespace c10::detail
+} // namespace detail
+} // namespace c10
 
 #define TORCH_CHECK_MSG(cond, type, ...)                   \
   (::c10::detail::torchCheckMsgImpl(                       \
@@ -447,7 +449,8 @@ inline C10_API const char* torchCheckMsgImpl(
   }
 #endif
 
-namespace c10::detail {
+namespace c10 {
+namespace detail {
 
 [[noreturn]] C10_API void torchCheckFail(
     const char* func,
@@ -486,7 +489,8 @@ namespace c10::detail {
     const char* condMsg,
     const std::string& userMsg);
 
-} // namespace c10::detail
+} // namespace detail
+} // namespace c10
 
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                   \
@@ -610,7 +614,8 @@ namespace c10::detail {
 // Deprecated macros
 // ----------------------------------------------------------------------------
 
-namespace c10::detail {
+namespace c10 {
+namespace detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
@@ -639,7 +644,8 @@ https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERTM() {}
 
-} // namespace c10::detail
+} // namespace detail
+} // namespace c10
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
 // using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK

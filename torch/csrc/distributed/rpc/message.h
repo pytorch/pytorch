@@ -3,7 +3,9 @@
 #include <torch/types.h>
 #include <vector>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 // An enum denoting common RPC errors to allow specific error handling for them.
 enum RPCErrorType {
@@ -186,4 +188,6 @@ withStorages(c10::intrusive_ptr<Message> message) {
 
 using JitFuture = c10::ivalue::Future;
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

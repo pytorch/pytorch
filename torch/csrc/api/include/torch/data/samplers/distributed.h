@@ -6,12 +6,16 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch::serialize {
+namespace torch {
+namespace serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace torch::serialize
+} // namespace serialize
+} // namespace torch
 
-namespace torch::data::samplers {
+namespace torch {
+namespace data {
+namespace samplers {
 
 /// A `Sampler` that selects a subset of indices to sample from and defines a
 /// sampling behavior. In a distributed setting, this selects a subset of the
@@ -130,4 +134,6 @@ class TORCH_API DistributedSequentialSampler : public DistributedSampler<> {
   std::vector<size_t> all_indices_;
 };
 
-} // namespace torch::data::samplers
+} // namespace samplers
+} // namespace data
+} // namespace torch

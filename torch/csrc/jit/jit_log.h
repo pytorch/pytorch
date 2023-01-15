@@ -38,7 +38,8 @@
 // `>>>` is also valid and **currently** is equivalent to `GRAPH_DEBUG` as there
 // is no logging level that is higher than `GRAPH_DEBUG`.
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Node;
 struct Graph;
@@ -123,4 +124,5 @@ TORCH_API std::ostream& operator<<(
   (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_UPDATE))
 #define GRAPH_DEBUG_ENABLED \
   (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_DEBUG))
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

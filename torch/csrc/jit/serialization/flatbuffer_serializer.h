@@ -16,7 +16,8 @@
  * types, to avoid leaking those details to PyTorch clients.
  */
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 /// Maps file names to file contents.
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
@@ -89,4 +90,5 @@ TORCH_API void save_mobile_module_to_func(
 // TODO(qihan): delete
 TORCH_API bool register_flatbuffer_serializer();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

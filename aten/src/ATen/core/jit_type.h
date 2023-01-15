@@ -17,9 +17,11 @@
 #include <sstream>
 #include <type_traits>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 struct Function;
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
 
 namespace c10 {
 
@@ -490,7 +492,7 @@ template<typename T>
 inline bool isComplete(const T& /*t*/) {
   return true;
 }
-} // namespace detail
+}
 
 template <typename T>
 struct VaryingShape {

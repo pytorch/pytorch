@@ -3,7 +3,8 @@
 #include <c10/util/irange.h>
 #include <ATen/core/IListRef.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 TORCH_API at::Tensor clone_preserve_strides(const at::Tensor& self);
 
@@ -55,4 +56,4 @@ inline int64_t get_num_splits(const Tensor& self, int64_t split_size, int64_t di
   return num_splits;
 }
 
-} // namespace at::native
+}} // namespace at::native

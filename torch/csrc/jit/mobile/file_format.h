@@ -29,7 +29,8 @@
  * only be called from one or two locations per binary.
  */
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 /**
  * The format of a file or data stream.
@@ -191,4 +192,5 @@ static inline std::tuple<std::shared_ptr<char>, size_t> get_rai_content(
   return std::make_tuple(data, buffer_size);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

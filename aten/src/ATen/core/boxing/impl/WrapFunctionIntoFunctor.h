@@ -2,7 +2,8 @@
 
 #include <c10/core/CompileTimeFunctionPointer.h>
 
-namespace c10::impl {
+namespace c10 {
+namespace impl {
   namespace detail {
     template<class FuncPtr, class ReturnType, class ParameterList> class WrapFunctionIntoFunctor_ {};
     template<class FuncPtr, class ReturnType, class... Parameters>
@@ -12,7 +13,7 @@ namespace c10::impl {
         return (*FuncPtr::func_ptr())(std::forward<Parameters>(args)...);
       }
     };
-  } // namespace detail
+  }
 
   // WrapFunctionIntoFunctor: Wraps a compile time function pointer into a kernel functor.
   // Since it is a compile time function pointer, many compilers can inline it
@@ -26,4 +27,6 @@ namespace c10::impl {
         typename guts::function_traits<typename FuncPtr::FuncType>::parameter_types
     >;
   };
-} // namespace c10::impl
+}
+
+}

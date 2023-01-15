@@ -64,7 +64,7 @@ namespace at {
   m.impl("is_complex", torch::CppFunction::makeFallthrough()); \
   m.impl("is_floating_point", torch::CppFunction::makeFallthrough()); \
   m.impl("requires_grad_", torch::CppFunction::makeFallthrough());
-} // namespace at
+}
 
 #define TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m) \
   m.impl("as_strided", torch::CppFunction::makeFallthrough()); \

@@ -54,7 +54,8 @@ unsigned char _BitScanReverse64(unsigned long* _Index, unsigned __int64 _Mask);
 }
 #endif
 
-namespace c10::llvm {
+namespace c10 {
+namespace llvm {
 /// The behavior an operation has on an input of 0.
 enum ZeroBehavior {
   /// The returned value is undefined.
@@ -895,4 +896,5 @@ SaturatingMultiplyAdd(T X, T Y, T A, bool* ResultOverflowed = nullptr) {
 
 /// Use this rather than HUGE_VALF; the latter causes warnings on MSVC.
 extern const float huge_valf;
-} // namespace c10::llvm
+} // namespace llvm
+} // namespace c10

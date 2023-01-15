@@ -6,9 +6,10 @@
 namespace at {
 class Tensor;
 class OptionalTensorRef;
-} // namespace at
+}
 
-namespace c10::detail {
+namespace c10 {
+namespace detail {
 
 /*
  * Specializations of `IListRefTagImplBase` that implement the default
@@ -183,7 +184,8 @@ class IListRefTagImpl<IListRefTag::Materialized, at::OptionalTensorRef>
           at::OptionalTensorRef,
           MaterializedIListRefElem<at::OptionalTensorRef>> {};
 
-} // namespace c10::detail
+} // namespace detail
+} // namespace c10
 
 namespace at {
 

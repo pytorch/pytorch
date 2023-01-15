@@ -10,7 +10,8 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/irange.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 struct NestedTensorImpl;
 inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt);
 
@@ -278,4 +279,5 @@ inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_nested_size_tensor();
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

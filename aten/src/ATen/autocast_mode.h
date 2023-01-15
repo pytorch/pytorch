@@ -2,7 +2,8 @@
 
 #include <ATen/ATen.h>
 
-namespace at::autocast {
+namespace at {
+namespace autocast {
 
 TORCH_API bool is_enabled();
 TORCH_API void set_enabled(bool enabled);
@@ -262,4 +263,5 @@ inline at::ScalarType type_from_firstarg(
   return (is_eligible(arg) ? to_type : arg.scalar_type());
 }
 
-} // namespace at::autocast
+} // namespace autocast
+} // namespace at

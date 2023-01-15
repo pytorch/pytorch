@@ -8,7 +8,9 @@
 
 struct CUevent_st;
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 // ----------------------------------------------------------------------------
 // -- Annotation --------------------------------------------------------------
@@ -44,4 +46,6 @@ using vulkan_id_t = strong::type<
     strong::convertible_to<int64_t>,
     strong::hashable>;
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

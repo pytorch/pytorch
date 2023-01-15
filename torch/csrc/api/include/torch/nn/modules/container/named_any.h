@@ -19,7 +19,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Stores a type erased `Module` with name.
 ///
@@ -90,4 +91,5 @@ class NamedAnyModule {
   AnyModule module_;
 };
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

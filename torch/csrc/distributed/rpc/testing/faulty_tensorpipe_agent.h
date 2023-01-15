@@ -5,7 +5,9 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 struct TORCH_API FaultyTensorPipeRpcBackendOptions
     : public TensorPipeRpcBackendOptions {
@@ -99,6 +101,8 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
   MessageType messageStringToType(const std::string& messageString) const;
 };
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
 
 #endif // USE_TENSORPIPE

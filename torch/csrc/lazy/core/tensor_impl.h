@@ -6,7 +6,8 @@
 
 #include <torch/csrc/lazy/core/tensor.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 // Tensor implementation class used to be fed to the at::Tensor.
 // Its scope is just to handle an LazyTensor.
@@ -57,4 +58,5 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   size_t generation_{0};
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

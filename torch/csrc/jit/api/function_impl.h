@@ -5,7 +5,8 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct TORCH_API GraphFunction : public Function {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -192,4 +193,5 @@ TORCH_API GraphFunction* tryToGraphFunction(Function&) noexcept;
 TORCH_API GraphFunction& toGraphFunction(Function&);
 TORCH_API const GraphFunction& toGraphFunction(const Function&);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

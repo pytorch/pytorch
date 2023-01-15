@@ -4,7 +4,8 @@
 #include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
@@ -63,4 +64,5 @@ struct NativeResolver : public Resolver {
 inline std::shared_ptr<NativeResolver> nativeResolver() {
   return std::make_shared<NativeResolver>();
 }
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -23,7 +23,8 @@
 
 #define INVARIANT_CHECK_FUNC_API static INLINE FUNCAPI void
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -364,4 +365,5 @@ void validate_compressed_sparse_indices_kernel(
 
 } // namespace
 
-} // namespace at::native
+} // namespace native
+} // namespace at

@@ -5,7 +5,8 @@
 
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class ParameterListImpl : public Cloneable<ParameterListImpl> {
  public:
@@ -165,4 +166,5 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
   void push_back_var() {}
 };
 TORCH_MODULE(ParameterList);
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

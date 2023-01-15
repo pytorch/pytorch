@@ -2,7 +2,7 @@
 
 #pragma once
 
-namespace at::native {
+namespace at { namespace native {
 
 namespace {
 
@@ -43,7 +43,7 @@ private:
   Accessor accessor;
 };
 
-} // namespace
+}
 
 // references_holder is used as a surrogate for the
 // references type from std::iterator_traits in CompositeRandomAccessor.
@@ -260,4 +260,4 @@ protected:
   ValueAccessor values;
 };
 
-} // namespace at::native
+}} // namespace at::native

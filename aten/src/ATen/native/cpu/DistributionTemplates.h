@@ -15,7 +15,10 @@
 #endif
 
 
-namespace at::native::templates::cpu {
+namespace at {
+namespace native {
+namespace templates {
+namespace cpu {
 namespace {
 
 // ==================================================== Random ========================================================
@@ -358,5 +361,4 @@ struct BernoulliKernel {
   }
 };
 
-} // namespace
-} // namespace at::native::templates::cpu
+}}}}}

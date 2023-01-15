@@ -816,8 +816,6 @@ inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& ou
 }
 #endif
 
-} // namespace CPU_CAPABILITY
-} // namespace vec
-} // namespace at
+}}}
 
 #pragma GCC diagnostic pop

@@ -10,7 +10,8 @@
 
 #include <torch/csrc/monitor/events.h>
 
-namespace torch::monitor {
+namespace torch {
+namespace monitor {
 
 constexpr int NUM_AGGREGATIONS = 7;
 
@@ -274,4 +275,5 @@ class Stat {
   const std::chrono::milliseconds windowSize_;
   const int64_t maxSamples_;
 };
-} // namespace torch::monitor
+} // namespace monitor
+} // namespace torch

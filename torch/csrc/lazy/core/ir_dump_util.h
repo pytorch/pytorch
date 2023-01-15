@@ -4,7 +4,8 @@
 
 #include <string>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 class BackendDevice;
 
@@ -27,4 +28,5 @@ class TORCH_API DumpUtil {
       const BackendDevice& device);
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

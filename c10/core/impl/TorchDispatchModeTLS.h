@@ -5,7 +5,8 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
-namespace c10::impl {
+namespace c10 {
+namespace impl {
 
 struct C10_API TorchDispatchModeTLS {
   static void push_onto_stack(std::shared_ptr<SafePyObject> mode);
@@ -22,4 +23,5 @@ struct C10_API TorchDispatchModeTLS {
 
 C10_API bool dispatch_mode_enabled();
 
-} // namespace c10::impl
+} // namespace impl
+} // namespace c10

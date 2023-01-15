@@ -6,7 +6,7 @@
 #include <c10/util/MathConstants.h>
 #include<ATen/NumericUtils.h>
 
-namespace at::native {
+namespace at { namespace native {
 inline namespace CPU_CAPABILITY {
 
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
@@ -247,5 +247,5 @@ inline TYPE min_impl (TYPE a, TYPE b) {
   }
 }
 
-} // namespace CPU_CAPABILITY
-} // namespace at::native
+} // end namespace
+}} //end at::native

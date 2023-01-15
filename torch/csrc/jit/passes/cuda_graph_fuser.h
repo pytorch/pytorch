@@ -7,7 +7,8 @@
 #include <string>
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Register CudaFuseGraph in custom passes
 struct TORCH_API RegisterCudaFuseGraph
@@ -37,4 +38,5 @@ struct CudaFuserComparisonCallback {
 TORCH_API CudaFuserComparisonCallback getCudaFuserComparisonCallback();
 TORCH_API void setCudaFuserComparisonCallback(CudaFuserComparisonCallback);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

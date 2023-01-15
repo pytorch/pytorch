@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Do this clownyness with virtual functions because of the split
 // between ATen core and torch
@@ -25,4 +26,5 @@ class ConcreteSourceRangeUnpickler : public SourceRangeUnpickler {
   std::shared_ptr<SourceRangeRecords> unpickled_records;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

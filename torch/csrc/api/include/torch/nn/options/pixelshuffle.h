@@ -4,7 +4,8 @@
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Options for the `PixelShuffle` module.
 ///
@@ -60,4 +61,5 @@ using PixelShuffleFuncOptions = PixelShuffleOptions;
 using PixelUnshuffleFuncOptions = PixelUnshuffleOptions;
 } // namespace functional
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

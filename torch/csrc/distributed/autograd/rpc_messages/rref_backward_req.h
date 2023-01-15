@@ -4,7 +4,9 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch::distributed::autograd {
+namespace torch {
+namespace distributed {
+namespace autograd {
 
 // Internal system RPC to invoke distributed backward pass on remote nodes when
 // 'rref.backward()' is invoked.
@@ -32,4 +34,6 @@ class TORCH_API RRefBackwardReq : public rpc::RpcCommandBase {
   const bool retainGraph_;
 };
 
-} // namespace torch::distributed::autograd
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

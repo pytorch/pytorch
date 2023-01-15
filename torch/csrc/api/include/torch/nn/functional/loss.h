@@ -4,7 +4,9 @@
 #include <torch/nn/functional/activation.h>
 #include <torch/nn/options/loss.h>
 
-namespace torch::nn::functional {
+namespace torch {
+namespace nn {
+namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -1014,4 +1016,6 @@ inline Tensor binary_cross_entropy_with_logits(
       options.pos_weight());
 }
 
-} // namespace torch::nn::functional
+} // namespace functional
+} // namespace nn
+} // namespace torch

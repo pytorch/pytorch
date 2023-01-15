@@ -4,11 +4,11 @@
 
 namespace at {
 class TensorBase;
-} // namespace at
+}
 
-namespace at::native {
+namespace at { namespace native {
 
 using channel_shuffle_fn = void(*)(TensorBase&, const TensorBase&, int64_t);
 DECLARE_DISPATCH(channel_shuffle_fn, channel_shuffle_kernel);
 
-} // namespace at::native
+}} // at::native

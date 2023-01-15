@@ -10,7 +10,8 @@
 #include <memory>
 #include <utility>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 /// The `clone()` method in the base `Module` class does not have knowledge of
 /// the concrete runtime type of its subclasses. Therefore, `clone()` must
 /// either be called from within the subclass, or from a base class that has
@@ -93,4 +94,5 @@ class Cloneable : public virtual Module {
   }
 };
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

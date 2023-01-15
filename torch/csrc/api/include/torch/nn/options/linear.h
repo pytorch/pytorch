@@ -5,7 +5,8 @@
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Options for the `Linear` module.
 ///
@@ -91,4 +92,5 @@ struct TORCH_API BilinearOptions {
   TORCH_ARG(bool, bias) = true;
 };
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

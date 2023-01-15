@@ -2,7 +2,8 @@
 #include <c10/macros/Export.h>
 #include <c10/core/ScalarType.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // Quantize a float value into a uint value given scale and zero_point
 template <typename T>
@@ -42,4 +43,5 @@ requantize_from_int(double multiplier, int64_t zero_point, int64_t src);
 
 int quantize_val_float_qparams(float scale, float zero_point, float value, int qmin, int qmax);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

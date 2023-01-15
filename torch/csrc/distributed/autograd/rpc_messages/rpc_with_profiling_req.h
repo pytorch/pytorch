@@ -6,7 +6,9 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch::distributed::autograd {
+namespace torch {
+namespace distributed {
+namespace autograd {
 
 class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
  public:
@@ -55,4 +57,6 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
   const torch::autograd::profiler::ProfilerConfig profilerConfig_;
   const rpc::ProfilingId profilingKeyId_;
 };
-} // namespace torch::distributed::autograd
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

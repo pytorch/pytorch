@@ -16,7 +16,8 @@
 
 // Uses a compressed index representation for faster comparisons
 typedef c10::SparseBitVector<256> MemoryLocations;
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Element;
 struct Value;
@@ -170,4 +171,5 @@ struct Element {
   mutable c10::optional<MemoryLocations> cachedAllContainedMemoryLocations_;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

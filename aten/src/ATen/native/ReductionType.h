@@ -2,7 +2,7 @@
 
 #include <c10/core/Scalar.h>
 
-namespace at::native {
+namespace at { namespace native {
 
 enum ReductionType {MAX, MEAN, MIN, SUM, PROD};
 
@@ -37,4 +37,4 @@ static inline ReductionType get_operator_enum(const c10::string_view reduce, boo
   }
 }
 
-} // namespace at::native
+}} // at::native

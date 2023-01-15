@@ -8,7 +8,8 @@
 #include <fbgemm/FbgemmSparse.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 
-namespace ao::sparse {
+namespace ao {
+namespace sparse {
 
 struct TORCH_API PackedLinearWeight
     : public LinearPackedParamsBase {
@@ -85,6 +86,6 @@ struct TORCH_API PackedLinearWeight
       int64_t output_zero_point);
 };
 
-}  // namespace ao::sparse
+}}  // namespace ao::sparse
 
 #endif // USE_FBGEMM

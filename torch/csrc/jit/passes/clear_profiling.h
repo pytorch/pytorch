@@ -6,7 +6,8 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API void unprofileGraphInputs(const std::shared_ptr<Graph>& graph);
 TORCH_API void unprofileBlock(Block* start_block);
@@ -14,4 +15,5 @@ TORCH_API void unprofileBlock(Block* start_block);
 
 TORCH_API void ClearProfilingInformation(const std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

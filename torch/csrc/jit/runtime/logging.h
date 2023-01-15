@@ -7,7 +7,9 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch::jit::logging {
+namespace torch {
+namespace jit {
+namespace logging {
 
 class LoggerBase {
  public:
@@ -83,4 +85,6 @@ inline std::vector<const char*> allRuntimeCounters() {
 
 } // namespace runtime_counters
 
-} // namespace torch::jit::logging
+} // namespace logging
+} // namespace jit
+} // namespace torch

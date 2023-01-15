@@ -26,14 +26,15 @@ struct IValue;
 struct OperatorName;
 } // namespace c10
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // The interpreter run Graphs with Tensor inputs and Tensor outputs
 // a separate component in the autograd handles unwrapping and wrapping
 // variable objects for use in the interpreter.
 namespace interpreter {
 struct CodeImpl;
-} // namespace interpreter
+}
 
 struct Node;
 struct GraphExecutor;
@@ -162,6 +163,7 @@ TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
 TORCH_API std::vector<StackEntry> currentCallstack();
 TORCH_API std::vector<std::string> currentModuleHierarchy();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
 
 C10_CLANG_DIAGNOSTIC_POP()

@@ -19,7 +19,8 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 #endif
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // single character tokens are just the character itself '+'
 // multi-character tokens need an entry here
@@ -570,6 +571,7 @@ struct Lexer {
   std::vector<Token> next_tokens;
   SharedParserData& shared;
 };
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
 
 C10_CLANG_DIAGNOSTIC_POP()

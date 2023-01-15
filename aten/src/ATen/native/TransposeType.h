@@ -1,7 +1,8 @@
 #pragma once
 #include <c10/util/Exception.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // Used as an interface between the different BLAS-like libraries
 enum class TransposeType {
@@ -20,4 +21,4 @@ static inline char to_blas(TransposeType trans) {
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
 
-} // namespace at::native
+}}  // at::native

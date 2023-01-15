@@ -7,7 +7,9 @@
 #include <functional>
 #include <utility>
 
-namespace torch::data::transforms {
+namespace torch {
+namespace data {
+namespace transforms {
 
 /// A `Transform` that is specialized for the typical `Example<Tensor, Tensor>`
 /// combination. It exposes a single `operator()` interface hook (for
@@ -70,4 +72,6 @@ struct Normalize : public TensorTransform<Target> {
 
   torch::Tensor mean, stddev;
 };
-} // namespace torch::data::transforms
+} // namespace transforms
+} // namespace data
+} // namespace torch

@@ -8,7 +8,8 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -897,4 +898,5 @@ class TORCH_API MultiheadAttentionImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(MultiheadAttention);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

@@ -4,7 +4,8 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/accumulate.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -97,4 +98,5 @@ using backward_fn = void (*)(
 DECLARE_DISPATCH(forward_fn, LayerNormKernel);
 DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

@@ -5,5 +5,5 @@ namespace utils {
 
 void initializeLayouts();
 
-} // namespace utils
+}
 } // namespace torch

@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Peephole Optimizes Dict Ops such as len() and __getitem__
 // 1. getitem optimizations
@@ -33,4 +34,5 @@ namespace torch::jit {
 // return true if graph is modified.
 TORCH_API bool PeepholeOptimizeDictIdioms(const std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

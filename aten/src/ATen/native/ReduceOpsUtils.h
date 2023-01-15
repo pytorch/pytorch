@@ -320,7 +320,7 @@ static C10_UNUSED void zero_numel_tensor_resize(Tensor& result, Tensor& result_i
   at::native::resize_output(result_indices, sizes);
 }
 
-} // namespace native
+} // native
 
 namespace meta {
 

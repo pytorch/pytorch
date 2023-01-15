@@ -11,7 +11,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-namespace at::native {
+namespace at { namespace native {
 // Different combinations of row, col, and offset can lead to two cases:
 //
 // Case 1 - Trapezoid (Triangle as a special case): row + offset <= col
@@ -118,4 +118,5 @@ using binary_fn = void (*)(TensorIterator&);
 DECLARE_DISPATCH(binary_fn, complex_stub);
 DECLARE_DISPATCH(binary_fn, polar_stub);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

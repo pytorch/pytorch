@@ -4,7 +4,7 @@
 
 namespace c10 {
 struct TensorImpl;
-} // namespace c10
+}
 
 namespace at {
 class TensorBase;

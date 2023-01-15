@@ -2,7 +2,8 @@
 
 #include <ATen/core/ivalue.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Used in torch.package and TorchScript serialization to coordinate
 // sharing of storages between models. Also used to create deterministic
@@ -80,4 +81,5 @@ class TORCH_API DeserializationStorageContext {
   std::unordered_map<std::string, c10::Storage> name_storage_map_;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

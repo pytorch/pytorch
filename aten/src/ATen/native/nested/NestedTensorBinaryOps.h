@@ -3,7 +3,8 @@
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 enum class NESTED_DENSE_OP: uint8_t {ADD, MUL};
 
@@ -11,4 +12,5 @@ using nested_dense_elementwise_fn = void (*)(Tensor& result, const Tensor & self
 
 DECLARE_DISPATCH(nested_dense_elementwise_fn, nested_dense_elementwise_stub);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

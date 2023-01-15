@@ -7,7 +7,10 @@
 #include <memory>
 #include <vector>
 
-namespace torch::jit::fuser::cuda {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
 class ViewTransform;
 
@@ -115,4 +118,7 @@ TensorDomain* transformView(
     TensorDomain* original_domain,
     const AnalyzeViewResult& view_analysis);
 
-} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

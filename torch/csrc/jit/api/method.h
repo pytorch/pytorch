@@ -6,7 +6,8 @@
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/jit/api/function_impl.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 
@@ -78,4 +79,5 @@ namespace script {
 using Method = ::torch::jit::Method;
 } // namespace script
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

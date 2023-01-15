@@ -19,7 +19,9 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 #include <torch/csrc/jit/tensorexpr/var_substitutor.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 class InterpValue {
  public:
@@ -340,4 +342,6 @@ inline StmtPtr SubstituteInClone(StmtPtr stmt, const VarMapping& var_mapping) {
   return Stmt::clone(std::move(stmt))->accept_mutator(&var_sub);
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

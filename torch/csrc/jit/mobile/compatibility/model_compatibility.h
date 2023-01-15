@@ -7,12 +7,15 @@
 #include <memory>
 #include <unordered_map>
 
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 class PyTorchStreamReader;
 class ReadAdapterInterface;
-} // namespace caffe2::serialize
+} // namespace serialize
+} // namespace caffe2
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // The family of methods below to get bytecode version from a model
 // Throws if not passed in a well formed model
@@ -99,4 +102,5 @@ TORCH_API ModelCompatCheckResult is_compatible(
     RuntimeCompatibilityInfo runtime_info,
     ModelCompatibilityInfo model_info);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

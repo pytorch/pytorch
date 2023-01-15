@@ -8,7 +8,8 @@
 
 #include <c10/core/impl/LocalDispatchKeySet.h>
 
-namespace at::vitals {
+namespace at {
+namespace vitals {
 
 TORCH_API bool torchVitalEnabled();
 
@@ -79,7 +80,8 @@ class TORCH_API APIVitals {
 
 extern TORCH_API APIVitals VitalsAPI;
 
-} // namespace at::vitals
+} // namespace vitals
+} // namespace at
 
 #define TORCH_VITAL_DECLARE(name) \
   TORCH_API at::vitals::TorchVital TorchVital_##name;

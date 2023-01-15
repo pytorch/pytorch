@@ -59,7 +59,7 @@ namespace impl
 {
   template <typename T, typename ... V>
   using WhenConstructible = std::enable_if_t<std::is_constructible<T, V...>::value>;
-} // namespace impl
+}
 
 template <typename M, typename T>
 using modifier = typename M::template modifier<T>;
@@ -81,7 +81,7 @@ namespace impl {
   {
     return true;
   }
-} // namespace impl
+}
 
 template <typename T, typename Tag, typename ... M>
 class type : public modifier<M, type<T, Tag, M...>>...
@@ -155,7 +155,7 @@ namespace impl {
   template <typename T, typename Tag, typename ... Ms>
   constexpr T underlying_type(strong::type<T, Tag, Ms...>*);
 
-} // namespace impl
+}
 
 template <typename T>
 struct is_strong_type : std::integral_constant<bool, impl::is_strong_type_func(static_cast<T *>(nullptr))> {};
@@ -165,7 +165,7 @@ namespace impl {
   using WhenStrongType = std::enable_if_t<is_strong_type<std::decay_t<T>>::value>;
   template <typename T>
   using WhenNotStrongType = std::enable_if_t<!is_strong_type<std::decay_t<T>>::value>;
-} // namespace impl
+}
 
 template <typename T, bool = is_strong_type<T>::value>
 struct underlying_type
@@ -206,7 +206,7 @@ namespace impl {
     return value_of(std::forward<T>(t));
   }
 
-} // namespace impl
+}
 struct equality
 {
   template <typename T>
@@ -292,7 +292,7 @@ namespace impl
       return impl::access(lh) != value_of(rh) ;
     }
   };
-} // namespace impl
+}
 template <typename ... Ts>
 struct equality_with
 {
@@ -387,7 +387,7 @@ namespace impl
       return impl::access(lh) >= value_of(rh) ;
     }
   };
-} // namespace impl
+}
 
 template <typename ... Ts>
 struct ordered_with
@@ -438,7 +438,7 @@ namespace impl
   {
   };
 
-} // namespace impl
+}
 struct semiregular
 {
   template <typename>
@@ -820,7 +820,7 @@ namespace impl
   template <typename T>
   struct subtractable<T, void_t<decltype(std::declval<const T&>() - std::declval<const T&>())>>
   : std::true_type {};
-} // namespace impl
+}
 
 
 template <typename D>
@@ -1564,7 +1564,7 @@ namespace impl {
       return static_cast<D>(value_of(self));
     }
   };
-} // namespace impl
+}
 template <typename ... Ts>
 struct convertible_to
 {
@@ -1590,7 +1590,7 @@ struct formattable
     class modifier{};
 };
 
-} // namespace strong
+}
 
 namespace std {
 template <typename T, typename Tag, typename ... M>
@@ -1649,7 +1649,7 @@ struct formatter<::strong::type<T, Tag, M...>, Char,
 };
 #endif
 
-} // namespace std
+}
 
 #if STRONG_HAS_FMT_FORMAT
 namespace fmt

@@ -6,7 +6,9 @@
 #include <torch/csrc/jit/runtime/interpreter/code_impl.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
-namespace torch::jit::interpreter {
+namespace torch {
+namespace jit {
+namespace interpreter {
 
 // A Frame captures function's state
 // (e.g. `pc` and `base_pointer`)
@@ -37,4 +39,6 @@ struct Frame {
   static size_t genId();
 };
 
-} // namespace torch::jit::interpreter
+} // namespace interpreter
+} // namespace jit
+} // namespace torch

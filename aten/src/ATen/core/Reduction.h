@@ -1,6 +1,7 @@
 #pragma once
 
-namespace at::Reduction {
+namespace at {
+namespace Reduction {
 
 // NB: Keep this in sync with Reduction class in torch/nn/_reduction.py
 // These constants control the reduction behavior of loss functions.
@@ -11,4 +12,5 @@ enum Reduction {
   Sum,              // Sum losses
   END
 };
-} // namespace at::Reduction
+} // namespace Reduction
+} // namespace at

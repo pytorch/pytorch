@@ -7,7 +7,9 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 class VarHandle;
 class Var;
@@ -31,4 +33,6 @@ class TORCH_API UniqueNameManager {
   std::unordered_set<std::string> all_unique_names_;
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

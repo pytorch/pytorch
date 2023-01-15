@@ -3,7 +3,9 @@
 #include <c10/macros/Export.h>
 #include <string>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 class Module;
 namespace quantization {
 /*
@@ -31,4 +33,6 @@ class TORCH_API PTQQuanizationHelper {
       const std::string& method_name);
 };
 } // namespace quantization
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

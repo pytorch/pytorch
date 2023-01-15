@@ -4,7 +4,8 @@
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <memory>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Decl;
 struct ParserImpl;
@@ -28,4 +29,5 @@ struct TORCH_API Parser {
   std::unique_ptr<ParserImpl> pImpl;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -3,11 +3,14 @@
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <memory>
 
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 class PyTorchStreamReader;
-} // namespace caffe2::serialize
+} // namespace serialize
+} // namespace caffe2
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API IValue readArchiveAndTensors(
     const std::string& archive_name,
@@ -24,4 +27,5 @@ TORCH_API IValue readArchiveAndTensors(
 bool check_zip_file(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

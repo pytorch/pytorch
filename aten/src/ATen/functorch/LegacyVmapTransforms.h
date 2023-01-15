@@ -9,7 +9,8 @@
 #include <ATen/functorch/Macros.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 
-namespace at::functorch {
+namespace at {
+namespace functorch {
 
 // This files contains the legacy (now-deprecated) batching rule API.
 // Please try to use the new-style batching rule API (see writing_batch_rules.md)
@@ -183,4 +184,5 @@ struct TORCH_API VmapPhysicalToLogicalMap {
 };
 
 
-} // namespace at::functorch
+}
+} // namespace at

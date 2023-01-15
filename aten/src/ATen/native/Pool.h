@@ -6,7 +6,8 @@
 
 #pragma once
 
-namespace at::native {
+namespace at {
+namespace native {
 
 using max_pool2d_fn = void(*)(const Tensor& output, const Tensor& indices, const Tensor& input,
     int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH);
@@ -329,4 +330,5 @@ avg_pool3d_backward_shape_check(
 
 } // namespace
 
-} // namespace at::native
+} // at::native
+} // at

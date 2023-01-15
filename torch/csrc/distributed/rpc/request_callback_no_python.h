@@ -7,7 +7,9 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 // RequestCallback implementation with no Python dependencies.
 class TORCH_API RequestCallbackNoPython : public RequestCallback {
@@ -112,4 +114,6 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   c10::intrusive_ptr<JitFuture> asFuture(std::exception_ptr err) const;
 };
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

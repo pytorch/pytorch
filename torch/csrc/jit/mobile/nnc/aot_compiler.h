@@ -4,7 +4,10 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/nnc/context.h>
 
-namespace torch::jit::mobile::nnc {
+namespace torch {
+namespace jit {
+namespace mobile {
+namespace nnc {
 
 // Performs Ahead Of Time compilation of a given method in a model
 // returning the compiled function and LLVM assembly code
@@ -15,4 +18,7 @@ TORCH_API std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::vector<at::ScalarType>& types,
     const std::string& kernel_func_name = "func");
 
-} // namespace torch::jit::mobile::nnc
+} // namespace nnc
+} // namespace mobile
+} // namespace jit
+} // namespace torch

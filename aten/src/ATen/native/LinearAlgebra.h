@@ -5,14 +5,14 @@
 
 namespace c10 {
 class Scalar;
-} // namespace c10
+}
 
 namespace at {
 struct TensorIterator;
-} // namespace at
+}
 
-namespace at::native {
+namespace at { namespace native {
 
 using addr_fn = void (*)(TensorIterator &, const Scalar& beta, const Scalar& alpha);
 DECLARE_DISPATCH(addr_fn, addr_stub);
-} // namespace at::native
+}} // namespace at::native

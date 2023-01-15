@@ -1,7 +1,8 @@
 #pragma once
 #include <ATen/core/TensorBase.h>
 
-namespace at::detail {
+namespace at {
+namespace detail {
 
 template <class ArrayRefType>
 inline void check_size_nonnegative(ArrayRefType size) {
@@ -147,4 +148,5 @@ TORCH_API TensorBase empty_strided_symint_meta(
     SymIntArrayRef stride,
     const TensorOptions& options);
 
-} // namespace at::detail
+} // namespace detail
+} // namespace at

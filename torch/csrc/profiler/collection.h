@@ -23,7 +23,9 @@
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/python_stub.h>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 enum class EventType : uint8_t {
   TorchOp = 0,
@@ -602,4 +604,6 @@ class TORCH_API RecordQueue {
   std::unique_ptr<python_tracer::PythonTracerBase> python_tracer_;
 };
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

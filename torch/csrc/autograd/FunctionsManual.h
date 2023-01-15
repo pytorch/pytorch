@@ -12,7 +12,10 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 
-namespace torch::autograd::generated::details {
+namespace torch {
+namespace autograd {
+namespace generated {
+namespace details {
 
 extern const char* kCudnnDoubleBackwardMsg;
 
@@ -1008,4 +1011,7 @@ Tensor to_sparse_backward(
     const c10::Layout self_layout,
     const c10::OptionalArrayRef<c10::SymInt>& self_blocksize);
 
-} // namespace torch::autograd::generated::details
+} // namespace details
+} // namespace generated
+} // namespace autograd
+} // namespace torch

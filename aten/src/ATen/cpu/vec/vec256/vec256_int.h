@@ -1518,6 +1518,4 @@ Vectorized<uint8_t> inline operator>>(const Vectorized<uint8_t>& a, const Vector
 
 #endif
 
-} // namespace CPU_CAPABILITY
-} // namespace vec
-} // namespace at
+}}}

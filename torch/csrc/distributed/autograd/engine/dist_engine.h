@@ -8,7 +8,9 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
 
-namespace torch::distributed::autograd {
+namespace torch {
+namespace distributed {
+namespace autograd {
 
 // Forward declaration.
 class BackwardPassCleanupGuard;
@@ -170,4 +172,6 @@ class BackwardPassCleanupGuard {
   ContextPtr autogradContext_;
 };
 
-} // namespace torch::distributed::autograd
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

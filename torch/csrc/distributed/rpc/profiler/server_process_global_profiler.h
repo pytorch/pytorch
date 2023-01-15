@@ -4,7 +4,11 @@
 
 #include <torch/csrc/autograd/profiler.h>
 
-namespace torch::distributed::rpc::profiler::processglobal {
+namespace torch {
+namespace distributed {
+namespace rpc {
+namespace profiler {
+namespace processglobal {
 
 using namespace torch::autograd::profiler;
 
@@ -125,4 +129,8 @@ TORCH_API void enableServer(const ProfilerConfig& new_config);
 // This enables all RPC threads running server-side request callbacks.
 TORCH_API std::vector<thread_event_lists> disableServer();
 
-} // namespace torch::distributed::rpc::profiler::processglobal
+} // namespace processglobal
+} // namespace profiler
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

@@ -3,7 +3,8 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/tree.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Call {
   std::string fn_name;
@@ -49,4 +50,5 @@ const ErrorReport& operator<<(const ErrorReport& e, const T& t) {
   return e;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

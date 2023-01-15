@@ -3,7 +3,9 @@
 #include <torch/csrc/Export.h>
 #include <cstdint>
 
-namespace torch::distributed::autograd {
+namespace torch {
+namespace distributed {
+namespace autograd {
 
 // This structure represents autograd metadata that we need to pass across
 // different nodes when we call an RPC which needs autograd computation.
@@ -18,4 +20,6 @@ struct TORCH_API AutogradMetadata {
   int64_t autogradMessageId;
 };
 
-} // namespace torch::distributed::autograd
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

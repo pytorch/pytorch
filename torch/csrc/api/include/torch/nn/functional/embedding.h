@@ -2,7 +2,9 @@
 
 #include <torch/nn/options/embedding.h>
 
-namespace torch::nn::functional {
+namespace torch {
+namespace nn {
+namespace functional {
 
 inline Tensor one_hot(const Tensor& tensor, int64_t num_classes = -1) {
   return torch::one_hot(tensor, num_classes);
@@ -215,4 +217,6 @@ inline Tensor embedding_bag(
       options.padding_idx());
 }
 
-} // namespace torch::nn::functional
+} // namespace functional
+} // namespace nn
+} // namespace torch

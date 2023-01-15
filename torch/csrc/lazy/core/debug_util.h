@@ -6,7 +6,8 @@
 
 #include <torch/csrc/lazy/core/tensor.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 TORCH_API std::function<std::vector<SourceLocation>()>&
 GetPythonFramesFunction();
@@ -43,4 +44,5 @@ class TORCH_API DebugUtil {
   static bool ExperimentEnabled(const std::string& name);
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

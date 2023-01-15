@@ -18,7 +18,7 @@ std::pair<K*, V*> radix_sort_parallel(
   TORCH_CHECK(false, "radix_sort_parallel: ATen is not compiled with OpenMP support");
 }
 
-} // namespace at::native
+} // at::native
 
 #else
 

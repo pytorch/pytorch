@@ -3,7 +3,10 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
-namespace torch::jit::mobile::nnc {
+namespace torch {
+namespace jit {
+namespace mobile {
+namespace nnc {
 
 using nnc_kernel_function_type = int(void**);
 
@@ -37,4 +40,7 @@ inline std::unique_ptr<NNCKernel> get_nnc_kernel(const std::string& id) {
 
 } // namespace registry
 
-} // namespace torch::jit::mobile::nnc
+} // namespace nnc
+} // namespace mobile
+} // namespace jit
+} // namespace torch

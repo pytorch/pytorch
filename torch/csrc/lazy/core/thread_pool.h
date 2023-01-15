@@ -11,7 +11,8 @@
 
 #include <c10/macros/Export.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 class TORCH_API Completion {
  public:
@@ -32,4 +33,5 @@ TORCH_API void ScheduleIoClosure(std::function<void()> closure);
 TORCH_API Completion
 ScheduleIoClosureWithCompletion(std::function<void()> closure);
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

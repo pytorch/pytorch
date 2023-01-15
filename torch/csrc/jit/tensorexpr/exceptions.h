@@ -7,10 +7,14 @@
 #include <stdexcept>
 
 // Forward declarations of types
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 class Expr;
 class Stmt;
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
 
 // Forward declarations of functions
 namespace std {
@@ -18,7 +22,9 @@ TORCH_API std::string to_string(const torch::jit::tensorexpr::ExprPtr);
 TORCH_API std::string to_string(const torch::jit::tensorexpr::StmtPtr);
 } // namespace std
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 class unsupported_dtype : public std::runtime_error {
  public:
@@ -80,4 +86,6 @@ class malformed_ir : public std::runtime_error {
 
 TORCH_API std::string buildErrorMessage(const std::string& s = "");
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

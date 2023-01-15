@@ -170,5 +170,4 @@ C10_HOST_DEVICE inline T bernoulli(T val, T p) {
   return val < p;
 }
 
-} // namespace transformation
-} // namespace at
+}} // namespace at::transformation

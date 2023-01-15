@@ -10,8 +10,10 @@
 #include <list>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API void EliminateRedundantGuards(std::shared_ptr<Graph> graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

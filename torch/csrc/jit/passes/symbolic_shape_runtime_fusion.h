@@ -6,7 +6,8 @@
 
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Takes in a TensorExprGraph of static shapes and generalizes the input shapes
 // to symbolic dimensions. Dimensions of value 1 will be preserved, otherwise
@@ -50,4 +51,5 @@ enum class StrideInput {
 TORCH_API std::string toString(StrideInput si);
 TORCH_API StrideInput strideInputFromString(const std::string& si);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

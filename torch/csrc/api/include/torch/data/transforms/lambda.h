@@ -6,7 +6,9 @@
 #include <utility>
 #include <vector>
 
-namespace torch::data::transforms {
+namespace torch {
+namespace data {
+namespace transforms {
 
 /// A `BatchTransform` that applies a user-provided functor to a batch.
 template <typename Input, typename Output = Input>
@@ -49,4 +51,6 @@ class Lambda : public Transform<Input, Output> {
   FunctionType function_;
 };
 
-} // namespace torch::data::transforms
+} // namespace transforms
+} // namespace data
+} // namespace torch

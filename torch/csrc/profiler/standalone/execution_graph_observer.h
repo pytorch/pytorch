@@ -3,7 +3,9 @@
 #include <c10/macros/Export.h>
 #include <string>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 // Adds the execution graph observer as a global callback function, the data
 // will be written to output file path.
@@ -18,4 +20,6 @@ TORCH_API void enableExecutionGraphObserver();
 // Disables execution graph observer.
 TORCH_API void disableExecutionGraphObserver();
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

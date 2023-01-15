@@ -8,7 +8,8 @@
 #include <memory>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using value_list = std::vector<Value*>;
 // clang-format off
@@ -93,4 +94,5 @@ TORCH_API bool isDifferentiable(const Node* n);
 TORCH_API bool isDifferentiable(Graph& g);
 TORCH_API bool isZero(Value* v);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

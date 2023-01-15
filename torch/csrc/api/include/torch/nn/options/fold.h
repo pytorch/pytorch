@@ -5,7 +5,8 @@
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Options for the `Fold` module.
 ///
@@ -95,4 +96,5 @@ namespace functional {
 using UnfoldFuncOptions = UnfoldOptions;
 } // namespace functional
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

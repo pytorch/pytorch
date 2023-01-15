@@ -15,7 +15,10 @@
 //! \todo Add testing of sameAs functions for these nodes
 //!
 
-namespace torch::jit::fuser::cuda {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
 class ViewTransform;
 class Scope;
@@ -1942,4 +1945,7 @@ class TORCH_CUDA_CU_API NamedScalar : public Val {
   std::string name_;
 };
 
-} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

@@ -6,7 +6,7 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
-namespace at::native {
+namespace at { namespace native {
 
 using conv_depthwise2d_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
@@ -63,7 +63,7 @@ DECLARE_DISPATCH(slow_conv_transpose3d_backward_fn, slow_conv_transpose3d_backwa
 
 namespace {
   static bool cudnnv8_heuristic_mode_b = c10::utils::check_env("TORCH_CUDNN_USE_HEURISTIC_MODE_B") == true;
-} // namespace
+}
 
 static inline bool cudnnv8_enabled_check_debug() {
   static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_DISABLED") != true;
@@ -402,4 +402,4 @@ static inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at
   return can_use_thnn_channels_last_2d;
 }
 
-} // namespace at::native
+}} // namespace at::native

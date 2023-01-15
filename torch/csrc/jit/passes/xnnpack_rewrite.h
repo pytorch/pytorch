@@ -4,7 +4,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/mobile_optimizer_type.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API void transformConv1dToConv2d(std::shared_ptr<Graph>& graph);
 TORCH_API void transformConv1dToConv2d(script::Module& module);
@@ -16,4 +17,5 @@ TORCH_API script::Module optimizeForMobile(
     const script::Module& module,
     const std::set<MobileOptimizerType>& optimization_blocklist = {},
     const std::vector<std::string>& preserved_methods = {});
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

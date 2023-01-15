@@ -13,7 +13,8 @@
 #include <string>
 #include <vector>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 using size_t = std::size_t;
 
@@ -228,4 +229,5 @@ hash_t MHash(T value, Targs... Fargs) {
   return HashCombine(Hash(value), MHash(Fargs...));
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

@@ -12,7 +12,10 @@
 //! Nodes in here are intended to be "user facing" users in this sense being
 //! those that want to be able to generate CUDA code.
 
-namespace torch::jit::fuser::cuda {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
 class WelfordResult;
 class ViewTransform;
@@ -162,7 +165,7 @@ class MaxPosCalculator;
 
 namespace ir_utils {
 class TVDomainGuard;
-} // namespace ir_utils
+}
 
 //! TensorView is our primitive Tensor Type used in code generation. It can be
 //! thought of as representing physical memory, however, its dimensionality is
@@ -591,4 +594,7 @@ class TORCH_CUDA_CU_API TensorViewBuilder {
   std::vector<Val*> shape_;
 };
 
-} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

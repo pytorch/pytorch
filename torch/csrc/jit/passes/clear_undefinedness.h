@@ -6,7 +6,8 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Undefinedness makes argument matching fail for regular tensor operations
 // if 1+ arguments are undefined or possibly undefined tensors.
@@ -19,4 +20,5 @@ namespace torch::jit {
 // When this happens, this pass will be removed
 TORCH_API void ClearUndefinedness(const std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

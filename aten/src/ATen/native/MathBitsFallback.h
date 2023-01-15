@@ -14,7 +14,8 @@
 #include <utility>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 // This fallback should only be used for operations that are self inverse and have a corresponding tensor
 // bit (internally implemented using DispatchKey) to maintain the state on tensor using tensor bit.
 // Currently there are two tensor bits that trigger this fallback: conjugate bit and negative bit.
@@ -153,4 +154,5 @@ struct MathOpFallback {
   DispatchKey key;
   string op_name;
 };
-} // namespace at::native
+}
+}// namespace at

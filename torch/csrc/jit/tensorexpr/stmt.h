@@ -8,7 +8,9 @@
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 // The common base between all statement node.
 class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
@@ -1017,4 +1019,6 @@ class TORCH_API ExternalCallWithAlloc : public StmtNode<ExternalCallWithAlloc> {
   std::vector<ExprPtr> args_;
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

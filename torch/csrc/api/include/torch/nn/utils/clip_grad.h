@@ -4,7 +4,9 @@
 
 #include <utility>
 
-namespace torch::nn::utils {
+namespace torch {
+namespace nn {
+namespace utils {
 
 // Clips gradient norm of a vector of Tensors.
 // See
@@ -140,4 +142,6 @@ inline void clip_grad_value_(Tensor parameter, double clip_value) {
   clip_grad_value_(std::move(params), clip_value);
 }
 
-} // namespace torch::nn::utils
+} // namespace utils
+} // namespace nn
+} // namespace torch

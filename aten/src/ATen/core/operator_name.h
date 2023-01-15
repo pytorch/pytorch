@@ -89,4 +89,4 @@ namespace std {
       return std::hash<std::string>()(x.name) ^ (~ std::hash<std::string>()(x.overload_name));
     }
   };
-} // namespace std
+}

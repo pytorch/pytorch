@@ -7,7 +7,8 @@
 #include <torch/csrc/autograd/variable.h>
 #include <vector>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 using optional_variable_list = std::vector<c10::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
@@ -417,4 +418,5 @@ void CppNode<T>::set_ctx_grad_fn(const std::shared_ptr<Node>& node) {
   ctx_.grad_fn_ = node;
 }
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

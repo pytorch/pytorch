@@ -3,7 +3,8 @@
 #include <ATen/core/qualified_name.h>
 #include <torch/csrc/Export.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 /**
  * class NameMangler
@@ -22,4 +23,5 @@ class TORCH_API NameMangler {
   size_t mangleIndex_ = 0;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

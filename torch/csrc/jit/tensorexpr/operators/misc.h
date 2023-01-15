@@ -4,7 +4,9 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 struct TensorInfo {
   std::vector<int64_t> dims;
@@ -91,4 +93,6 @@ Tensor computeEmbedding(
     const c10::optional<ScalarType>& outputType,
     at::Device device);
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

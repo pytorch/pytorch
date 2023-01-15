@@ -4,7 +4,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <memory>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 struct Graph;
 
 // Propagate tensor properties (e.g., dtype, device, is_contiguous, layout)
@@ -12,4 +13,5 @@ struct Graph;
 // propagation
 TORCH_API bool DtypePropagation(std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

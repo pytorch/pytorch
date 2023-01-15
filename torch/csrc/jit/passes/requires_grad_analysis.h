@@ -4,11 +4,13 @@
 
 #include <memory>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Graph;
 struct ArgumentSpec;
 
 TORCH_API void PropagateRequiresGrad(std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -23,7 +23,8 @@
 #include <cstdint>
 #include <utility>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 using SymIntSmallVec = c10::SmallVector<c10::SymInt, c10::kDimVectorStaticSize>;
 using MetadataShape = c10::variant<SymIntSmallVec, at::Tensor>;
@@ -161,4 +162,5 @@ struct InputMetadata {
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
   bool is_tensor_subclass_ = false;
 };
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

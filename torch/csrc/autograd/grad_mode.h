@@ -3,9 +3,11 @@
 #include <ATen/core/grad_mode.h>
 #include <torch/csrc/Export.h>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 using GradMode = at::GradMode;
 using AutoGradMode = at::AutoGradMode;
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

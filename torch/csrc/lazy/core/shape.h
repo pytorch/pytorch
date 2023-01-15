@@ -9,7 +9,8 @@
 
 C10_DECLARE_bool(ltc_enable_symbolic_shapes);
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 class TORCH_API Shape {
  public:
@@ -75,4 +76,5 @@ TORCH_API void applySymbolicShapesOnLT(
     const char* schema_str,
     std::vector<c10::IValue> args,
     std::vector<Shape>& result_shapes);
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

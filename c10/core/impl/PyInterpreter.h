@@ -20,13 +20,16 @@ struct TensorImpl;
 struct SafePyObject;
 } // namespace c10
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 using Stack = std::vector<c10::IValue>;
-} // namespace torch::jit
+}
+} // namespace torch
 
 // Actual implementation
 
-namespace c10::impl {
+namespace c10 {
+namespace impl {
 
 struct C10_API PyInterpreter;
 
@@ -225,4 +228,5 @@ enum class PyInterpreterStatus {
   TAGGED_BY_OTHER,
 };
 
-} // namespace c10::impl
+} // namespace impl
+} // namespace c10

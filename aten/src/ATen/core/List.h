@@ -13,7 +13,7 @@
 
 namespace at {
 class Tensor;
-} // namespace at
+}
 namespace c10 {
 struct IValue;
 template<class T> class List;
@@ -37,7 +37,7 @@ struct ListImpl final : public c10::intrusive_ptr_target {
   }
   friend TORCH_API bool operator==(const ListImpl& lhs, const ListImpl& rhs);
 };
-} // namespace detail
+}
 
 namespace impl {
 
@@ -217,7 +217,7 @@ template<class T> List<T> toTypedList(List<IValue> list);
 template<class T> List<IValue> toList(List<T>&& list);
 template<class T> List<IValue> toList(const List<T>& list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
-} // namespace impl
+}
 
 /**
  * An object of this class stores a list of values of type T.
@@ -484,11 +484,11 @@ inline const IValue* ptr_to_first_element(const GenericList& list) {
   return &list.impl_->list[0];
 }
 
-} // namespace impl
-} // namespace c10
+}
+}
 
 namespace torch {
   template<class T> using List = c10::List<T>;
-} // namespace torch
+}
 
 #include <ATen/core/List_inl.h>  // IWYU pragma: keep

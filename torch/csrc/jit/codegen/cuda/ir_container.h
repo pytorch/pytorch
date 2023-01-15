@@ -9,7 +9,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace torch::jit::fuser::cuda {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
 class IrBuilderPasskey;
 class ExprPasskey;
@@ -165,4 +168,7 @@ class TORCH_CUDA_CU_API IrContainer : public PolymorphicBase {
   std::unique_ptr<NamedScalar> magic_zero_val_;
 };
 
-} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

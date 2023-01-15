@@ -5,7 +5,9 @@
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/frame.h>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 
 struct InterpreterState {
   TORCH_API explicit InterpreterState(const Code& code);
@@ -23,4 +25,6 @@ struct InterpreterState {
 };
 
 const std::vector<DebugHandle>& getInterpretersExceptionDebugHandles();
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

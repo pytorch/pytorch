@@ -14,7 +14,7 @@ inline bool DictKeyEqualTo::operator()(const IValue& lhs, const IValue& rhs) con
   // [container equality])
   return _fastEqualsForContainer(lhs, rhs);
 }
-} // namespace detail
+}
 
 template<class T> decltype(auto) getTypePtr();
 std::string toString(const Type& type);
@@ -33,7 +33,7 @@ template<class Key, class Value>
 GenericDict toGenericDict(Dict<Key, Value> dict) {
   return GenericDict(std::move(dict.impl_));
 }
-} // namespace impl
+}
 
 namespace detail {
 
@@ -62,7 +62,7 @@ inline intrusive_ptr<DictImpl> DictImpl::copy() const {
   return make_intrusive<DictImpl>(dict, elementTypes);
 }
 
-} // namespace detail
+}
 
 template<class Key, class Value>
 Dict<Key, Value>::Dict()
@@ -206,4 +206,4 @@ template <class Key, class Value>
 bool Dict<Key, Value>::is(const Dict& rhs) const {
   return this->impl_ == rhs.impl_;
 }
-} // namespace c10
+}

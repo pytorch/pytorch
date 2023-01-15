@@ -4,7 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010,
 // 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020 Python Software
@@ -23,4 +24,5 @@ TORCH_API int64_t slice_indices_adjust(
     int64_t* stop,
     int64_t step);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

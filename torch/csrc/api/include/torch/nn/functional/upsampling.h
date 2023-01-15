@@ -7,7 +7,9 @@
 #include <cmath>
 #include <utility>
 
-namespace torch::nn::functional {
+namespace torch {
+namespace nn {
+namespace functional {
 
 inline std::vector<int64_t> _interp_output_size(
     int64_t dim,
@@ -273,4 +275,6 @@ inline Tensor interpolate(
       options.antialias());
 }
 
-} // namespace torch::nn::functional
+} // namespace functional
+} // namespace nn
+} // namespace torch

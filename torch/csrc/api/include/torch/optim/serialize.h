@@ -10,7 +10,8 @@
 #include <string>
 #include <vector>
 
-namespace torch::optim {
+namespace torch {
+namespace optim {
 namespace detail {
 // Utility function to save state
 template <typename DerivedOptimizerParamState>
@@ -305,4 +306,5 @@ std::deque<T> list_to_deque(const c10::List<T>& list) {
     name(list_to_deque(list));                            \
   }
 
-} // namespace torch::optim
+} // namespace optim
+} // namespace torch

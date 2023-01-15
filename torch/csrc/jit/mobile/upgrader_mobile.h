@@ -11,7 +11,8 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 struct Instruction;
 struct Upgrader {
   int min_version;
@@ -38,4 +39,5 @@ struct ByteCodeFunctionWithOperator {
 TORCH_API const std::vector<ByteCodeFunctionWithOperator>&
 getUpgraderBytecodeList();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

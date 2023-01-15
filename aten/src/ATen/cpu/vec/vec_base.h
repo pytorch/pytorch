@@ -58,7 +58,8 @@
 #define int_vector __m256i
 #endif // CPU_CAPABILITY_AVX512
 
-namespace at::vec {
+namespace at {
+namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 // at::Half and at::BFloat16 should be treated as floating point
@@ -1037,5 +1038,4 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
   }
 }
 
-} // namespace CPU_CAPABILITY
-} // namespace at::vec
+}}}

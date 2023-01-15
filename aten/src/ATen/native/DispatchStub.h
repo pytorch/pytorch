@@ -42,7 +42,7 @@
 #pragma clang diagnostic ignored "-Wundefined-var-template"
 #endif
 
-namespace at::native {
+namespace at { namespace native {
 
 enum class CPUCapability {
   DEFAULT = 0,
@@ -293,7 +293,7 @@ struct RegisterHIPDispatch {
 #endif
 
 
-} // namespace at::native
+}} // namespace at::native
 
 
 #if defined(__clang__)

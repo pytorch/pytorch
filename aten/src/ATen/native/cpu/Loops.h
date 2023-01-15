@@ -38,7 +38,7 @@
 
 #include <utility>
 
-namespace at::native { inline namespace CPU_CAPABILITY {
+namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -391,5 +391,4 @@ void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& v
   cpu_serial_kernel_vec(iter, op, vop, {0, iter.numel()});
 }
 
-} // namespace CPU_CAPABILITY
-} // namespace at::native
+}}}  // namespace at::native::<anonymous>

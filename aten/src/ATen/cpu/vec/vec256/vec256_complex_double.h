@@ -442,6 +442,4 @@ inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::ne(con
 
 #endif
 
-} // namespace CPU_CAPABILITY
-} // namespace vec
-} // namespace at
+}}}

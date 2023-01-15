@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // This pass removes 'grad_of' nodes, replacing them with conditionals of
 // the form:
@@ -12,4 +13,5 @@ namespace torch::jit {
 //  outputs = undefineds
 TORCH_API void LowerGradOf(Graph& g);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

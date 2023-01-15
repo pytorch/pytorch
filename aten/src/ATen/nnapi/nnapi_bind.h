@@ -8,7 +8,9 @@
 
 #include <ATen/nnapi/nnapi_wrapper.h>
 
-namespace torch::nnapi::bind {
+namespace torch {
+namespace nnapi {
+namespace bind {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern nnapi_wrapper* nnapi;
@@ -57,6 +59,8 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
     int32_t num_outputs_ {};
 };
 
-} // namespace torch::nnapi::bind
+} // namespace bind
+} // namespace nnapi
+} // namespace torch
 
 #endif // NNAPI_BIND_H_

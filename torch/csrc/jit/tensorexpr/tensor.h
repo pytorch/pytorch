@@ -8,7 +8,9 @@
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 class TORCH_API Tensor {
  public:
@@ -322,4 +324,6 @@ inline ExprHandle BufHandle::load(const std::vector<ExprHandle>& args) const {
   return this->template load<ExprHandle>(args);
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

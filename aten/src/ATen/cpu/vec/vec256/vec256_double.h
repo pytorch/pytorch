@@ -421,6 +421,4 @@ Vectorized<double> inline fmsub(const Vectorized<double>& a, const Vectorized<do
 
 #endif
 
-} // namespace CPU_CAPABILITY
-} // namespace vec
-} // namespace at
+}}}

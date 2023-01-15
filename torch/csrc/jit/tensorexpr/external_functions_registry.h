@@ -5,7 +5,9 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 // The external functions that could be called from NNC must have the same
 // signature defined by `NNCExternalFunction`.
@@ -54,4 +56,6 @@ struct RegisterNNCExternalFunction {
   }
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

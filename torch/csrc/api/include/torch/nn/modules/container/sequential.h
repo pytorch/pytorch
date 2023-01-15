@@ -18,7 +18,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// A list of `Module`s that acts as a `Module` itself.
 ///
@@ -389,4 +390,5 @@ class Sequential : public torch::nn::ModuleHolder<SequentialImpl> {
       : ModuleHolder(
             std::make_shared<SequentialImpl>(std::move(named_modules))) {}
 };
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

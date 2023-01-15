@@ -14,7 +14,8 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 
@@ -982,4 +983,5 @@ struct MobileCodeImpl : CodeImpl {
 };
 
 } // namespace interpreter
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

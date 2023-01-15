@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Peephole Optimizes List ops such as len(li) and li[1].
 // 1. Construct/Unpack optimizations
@@ -67,4 +68,5 @@ TORCH_API bool PeepholeOptimizeListIdioms(
     const std::shared_ptr<Graph>& graph,
     bool refine_list_len = false);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

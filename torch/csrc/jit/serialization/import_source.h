@@ -17,7 +17,8 @@
 #include <string>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using SourceLoader = std::function<std::shared_ptr<Source>(const std::string&)>;
 
@@ -98,4 +99,5 @@ struct TORCH_API SourceImporter {
   std::shared_ptr<SourceImporterImpl> pImpl;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

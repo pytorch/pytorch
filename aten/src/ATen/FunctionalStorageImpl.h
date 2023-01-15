@@ -2,7 +2,8 @@
 
 #include <ATen/Tensor.h>
 
-namespace at::functionalization {
+namespace at {
+namespace functionalization {
 
 // See Note [Functionalization Pass In Core]
 
@@ -116,4 +117,5 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   bool frozen_ = false;
 };
 
-} // namespace at::functionalization
+} // namespace functionalization
+} // namespace at

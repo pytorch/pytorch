@@ -2,7 +2,8 @@
 
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 class Normal : public torch::lazy::TsNode {
  public:
@@ -25,4 +26,5 @@ class Normal : public torch::lazy::TsNode {
   double std_;
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

@@ -5,7 +5,8 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor& quantize_tensor_per_tensor_affine(
     const Tensor& rtensor,
@@ -125,4 +126,5 @@ TORCH_API Tensor dequantize_tensor(
     double scale,
     int64_t zero_point);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

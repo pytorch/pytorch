@@ -7,7 +7,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Struct storing metadata of an operator that can be useful for versioning
 struct OperatorInfo {
@@ -39,4 +40,5 @@ TORCH_API std::unordered_set<std::string> _get_mobile_supported_types();
 
 TORCH_API std::unordered_set<std::string> _get_loaded_custom_classes();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -10,7 +10,10 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
-namespace torch::jit::tensorexpr::analysis {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+namespace analysis {
 
 enum class AccessType {
   Input,
@@ -405,4 +408,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   StmtPtr lastStmt_{nullptr};
 };
 
-} // namespace torch::jit::tensorexpr::analysis
+} // namespace analysis
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

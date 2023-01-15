@@ -9,7 +9,8 @@
 #include <numeric>
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 class SourceRangeUnpickler;
 struct SourceRange;
@@ -438,7 +439,8 @@ using SourceRangeRecords = std::vector<TaggedRange>;
 using SourceRangeTagMap =
     std::unordered_map<SourceRange, int64_t, SourceRangeHasher>;
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
 
 namespace std {
 template <>

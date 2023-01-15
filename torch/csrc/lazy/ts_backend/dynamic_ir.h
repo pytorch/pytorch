@@ -21,7 +21,8 @@
 
 C10_DECLARE_bool(ltc_enable_dynamic_shapes);
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 /**
  * The goal of "dynamic" Nodes is to patch a hole in our tracing.
@@ -80,4 +81,5 @@ class TORCH_API SizeDiv : public TsNode, public DimensionNode {
   std::string ToString() const override;
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

@@ -3,7 +3,8 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Graph;
 
@@ -11,4 +12,5 @@ struct Graph;
 // for or while loops
 TORCH_API void CanonicalizeModifiedLoops(std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -10,7 +10,8 @@
 #include <ATen/Tensor.h>
 #include <ATen/functorch/Interpreter.h>
 
-namespace at::functorch {
+namespace at {
+namespace functorch {
 
 // NOTE: [functorch's TensorWrapper]
 //
@@ -104,4 +105,5 @@ TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, const Interpreter& inte
 TORCH_API TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor);
 TORCH_API void dumpTensor(std::ostream & ss, const Tensor& tensor);
 TORCH_API void dumpTensorCout(const Tensor& tensor);
-} // namespace at::functorch
+}
+} // namespace at

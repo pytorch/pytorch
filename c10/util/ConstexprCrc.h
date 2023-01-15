@@ -5,7 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace c10::util {
+namespace c10 {
+namespace util {
 
 namespace detail {
 constexpr uint64_t crc64_table[] = {
@@ -123,7 +124,8 @@ crc64(const char* str, size_t size) {
 inline C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA crc64_t crc64(c10::string_view str) {
   return crc64(str.data(), str.size());
 }
-} // namespace c10::util
+} // namespace util
+} // namespace c10
 
 // Allow usage of crc64_t in std::unordered_set
 C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::crc64_t);

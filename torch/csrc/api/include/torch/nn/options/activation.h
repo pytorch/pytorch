@@ -5,7 +5,8 @@
 #include <torch/enum.h>
 #include <torch/types.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Options for the `ELU` module.
 ///
@@ -709,4 +710,5 @@ struct TORCH_API MultiheadAttentionForwardFuncOptions {
 
 } // namespace functional
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

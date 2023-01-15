@@ -5,7 +5,10 @@
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit::fuser::cuda {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
 void debugPrint(const c10::TensorTypePtr& type);
 
@@ -171,4 +174,7 @@ constexpr unsigned int switch_pair(T t1, T t2) {
 
 std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type);
 
-} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

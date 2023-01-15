@@ -7,7 +7,8 @@
 
 #include <atomic>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 /*
  *  BackendDebugHandleManager is responsible for issuing debug handles to
@@ -135,4 +136,5 @@ class TORCH_API BackendDebugInfoRecorder {
   BackendDebugInfoMapType handles_to_inlined_callstack_ptrs_;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

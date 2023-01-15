@@ -6,7 +6,8 @@
 #include <ATen/cpu/vec/vec256/vec256.h>
 #endif
 
-namespace at::vec {
+namespace at {
+namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -32,5 +33,4 @@ inline Vectorized<bool> Vectorized<bool>::loadu(const void* ptr, int64_t count) 
   return convert_to_bool(Vectorized<int8_t>::loadu(ptr, count));
 }
 
-} // namespace CPU_CAPABILITY
-} // namespace at::vec
+}}} // namespace at::vec::CPU_CAPABILITY

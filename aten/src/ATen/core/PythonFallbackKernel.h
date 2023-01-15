@@ -1,7 +1,8 @@
 #pragma once
 #include <ATen/core/TorchDispatchUtils.h>
 
-namespace at::impl {
+namespace at {
+namespace impl {
 
 struct TORCH_API RestorePythonTLSSnapshot {
   RestorePythonTLSSnapshot();
@@ -23,4 +24,5 @@ private:
   bool value_set_;
 };
 
-} // namespace at::impl
+} // namespace impl
+} // namespace at

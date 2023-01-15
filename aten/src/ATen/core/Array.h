@@ -6,7 +6,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
-namespace at::detail {
+namespace at { namespace detail {
 
 template <typename T, int size_>
 struct Array {
@@ -36,4 +36,4 @@ struct Array {
   }
 };
 
-} // namespace at::detail
+}}

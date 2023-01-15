@@ -10,5 +10,5 @@
 namespace torch {
 namespace dynamo {
 void initDynamoBindings(PyObject* torch);
-} // namespace dynamo
+}
 } // namespace torch

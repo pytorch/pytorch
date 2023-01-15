@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // return true if graph is modified
 TORCH_API bool UnrollLoops(std::shared_ptr<Graph>& graph);
@@ -31,4 +32,5 @@ struct TORCH_API LoopsPeeler {
   std::list<Node*> loops_to_peel_;
   size_t num_iterations_ = 1;
 };
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

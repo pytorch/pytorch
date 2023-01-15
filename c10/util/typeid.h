@@ -49,10 +49,12 @@
 // later.  So the namespace is not fixed at the moment.
 
 // Make at::Half a fundamental type.
-namespace c10::guts {
+namespace c10 {
+namespace guts {
 template <>
 struct is_fundamental<at::Half> : std::true_type {};
-} // namespace c10::guts
+} // namespace guts
+} // namespace c10
 
 namespace caffe2 {
 
@@ -104,7 +106,7 @@ inline std::ostream& operator<<(
 
 namespace at {
 using DataType = caffe2::TypeIdentifier;
-} // namespace at
+}
 
 C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 

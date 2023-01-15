@@ -246,6 +246,6 @@ private:
   void* sym_unboxed_kernel_func_;
 };
 
-} // namespace c10
+}
 
 #include <ATen/core/boxing/KernelFunction_impl.h>

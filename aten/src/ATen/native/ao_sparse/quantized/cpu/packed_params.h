@@ -4,7 +4,8 @@
 
 #include <ATen/core/ivalue.h>
 
-namespace ao::sparse {
+namespace ao {
+namespace sparse {
 
 // <Weight, bias, out_features_block_size, in_features_block_size>
 using LinearPackedSerializationType =
@@ -71,4 +72,4 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
   const int64_t out_features_block_size_, in_features_block_size_;
 };
 
-}  // namespace ao::sparse
+}}  // namespace ao::sparse

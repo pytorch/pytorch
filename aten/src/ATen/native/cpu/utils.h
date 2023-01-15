@@ -8,7 +8,8 @@
 #include <fbgemm/Fbgemm.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 inline namespace CPU_CAPABILITY {
 
@@ -71,7 +72,7 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr)
   return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size()));
 }
 
-} // namespace CPU_CAPABILITY
+} // namespace
 
 namespace utils {
 
@@ -147,4 +148,5 @@ inline void parallel_sparse_csr(
 
 } // namespace utils
 
-} // namespace at::native
+} // namespace native
+} // namespace at

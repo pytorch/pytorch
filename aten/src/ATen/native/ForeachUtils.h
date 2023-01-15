@@ -10,7 +10,8 @@
 #include <ATen/ops/result_type_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 // Check if tensor list has either a boolean tensor or a integer tensor
 bool has_integral_tensor(TensorList tensors, const bool includeBool) {
@@ -172,5 +173,5 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool does_op_p
   return can_use_fast_route({tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
 }
 
-} // namespace
-} // namespace at::native
+}
+}} // at::native

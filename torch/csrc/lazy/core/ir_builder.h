@@ -13,7 +13,8 @@
 // removed without due process The exception to this being the view ops which
 // will be removed soon pending functionalization
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 template <typename T, typename... Args>
 NodePtr ReuseNode(Args&&... args) {
@@ -143,4 +144,5 @@ inline std::vector<int64_t> GetSymIntArrayRefValue(c10::SymIntArrayRef arr) {
   return r;
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

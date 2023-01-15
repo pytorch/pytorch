@@ -10,7 +10,9 @@
 #include <limits>
 #include <utility>
 
-namespace torch::nn::functional {
+namespace torch {
+namespace nn {
+namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -959,4 +961,6 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       options.average_attn_weights());
 }
 
-} // namespace torch::nn::functional
+} // namespace functional
+} // namespace nn
+} // namespace torch

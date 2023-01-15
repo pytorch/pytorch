@@ -2,7 +2,9 @@
 
 #include <sstream>
 
-namespace torch::autograd::utils {
+namespace torch {
+namespace autograd {
+namespace utils {
 
 inline std::string requires_grad_leaf_error(bool requires_grad) {
   std::ostringstream oss;
@@ -15,4 +17,6 @@ inline std::string requires_grad_leaf_error(bool requires_grad) {
   return oss.str();
 }
 
-} // namespace torch::autograd::utils
+} // namespace utils
+} // namespace autograd
+} // namespace torch

@@ -9,7 +9,9 @@
 #include <utility>
 #include <vector>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 using ParameterList = const std::vector<VarHandle>;
 using ReduceInteraction = std::function<ExprHandle(ExprHandle, ExprHandle)>;
@@ -298,4 +300,6 @@ class ReductionExpander : public IRMutator {
   }
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

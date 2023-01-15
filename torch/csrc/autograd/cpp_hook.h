@@ -3,7 +3,8 @@
 #include <functional>
 #include <memory>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 using hooks_list =
     std::vector<std::function<at::TensorBase(const at::TensorBase&)>>;
@@ -15,4 +16,5 @@ struct CppFunctionPreHook : public FunctionPreHook {
   std::shared_ptr<hooks_list> hooks_;
   int value_idx_;
 };
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

@@ -10,7 +10,9 @@
 #include <mutex>
 #include <queue>
 
-namespace torch::data::detail {
+namespace torch {
+namespace data {
+namespace detail {
 
 /// A basic locked, blocking MPMC queue.
 ///
@@ -77,4 +79,6 @@ class Queue {
   std::mutex mutex_;
   std::condition_variable cv_;
 };
-} // namespace torch::data::detail
+} // namespace detail
+} // namespace data
+} // namespace torch

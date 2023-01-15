@@ -46,7 +46,7 @@ static inline DispatchKeySet computeDispatchKeySet(
   return (((ks | local.included_) - local.excluded_) & key_mask);
 }
 
-} // namespace impl
+}
 
 namespace detail {
   // A small gadget to extract the DispatchKeySet from types which are known
@@ -106,7 +106,7 @@ namespace detail {
   DispatchKeySet multi_dispatch_key_set(const Args&... args) {
     return MultiDispatchKeySet().apply(args...).ts;
   }
-} // namespace detail
+}
 
 /**
  * An instance of DispatchKeyExtractor knows how to get a dispatch key given
@@ -239,4 +239,4 @@ private:
   bool requiresBitsetPerBackend_;
 };
 
-} // namespace c10
+}

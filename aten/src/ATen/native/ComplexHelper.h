@@ -13,7 +13,7 @@
 // WARNING: this header contains non-inline functions and should be only
 // included from ONE cpp file
 
-namespace at::native {
+namespace at { namespace native {
 
 // View tensor with new dtype, storage offset, sizes and strides
 inline Tensor view_tensor(
@@ -92,4 +92,4 @@ Tensor view_as_complex(const Tensor& self) {
   return view_tensor(self, complex_type, new_storage_offset, new_sizes, new_strides);
 }
 
-} // namespace at::native
+}} // namespace at::native

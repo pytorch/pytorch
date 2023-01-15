@@ -7,7 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API void populate_upgraders_graph_map();
 
@@ -18,4 +19,5 @@ std::shared_ptr<Graph> create_upgrader_graph(
     const std::string& upgrader_name,
     const std::string& upgrader_body);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

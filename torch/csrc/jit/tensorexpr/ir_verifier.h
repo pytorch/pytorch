@@ -5,7 +5,9 @@
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 class Expr;
 class ExprHandle;
@@ -53,4 +55,6 @@ TORCH_API void verify(StmtPtr);
 TORCH_API void verify(ExprPtr);
 TORCH_API void verify(ExprHandle);
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

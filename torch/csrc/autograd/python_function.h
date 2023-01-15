@@ -19,7 +19,7 @@
 namespace torch {
 namespace jit {
 struct Graph;
-} // namespace jit
+}
 } // namespace torch
 namespace torch {
 namespace autograd {

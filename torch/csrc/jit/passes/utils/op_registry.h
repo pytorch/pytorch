@@ -4,7 +4,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <memory>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 // Moved from shape_analysis.cpp
 
 // Requirements:
@@ -26,4 +27,5 @@ std::shared_ptr<OperatorSet> nn_ops_first_input_preserving();
 //   tensor inputs  : 1
 //   tensor outputs : 1
 std::shared_ptr<OperatorSet> ops_one_tensor_in_shape_transform();
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

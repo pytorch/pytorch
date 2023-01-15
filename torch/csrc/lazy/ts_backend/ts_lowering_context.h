@@ -8,7 +8,8 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
@@ -147,4 +148,5 @@ class TORCH_API TSLoweringContext : public LoweringContext {
   OutputMap<torch::jit::Value*> emitted_outputs_;
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

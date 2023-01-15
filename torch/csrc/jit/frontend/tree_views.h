@@ -10,7 +10,8 @@
 #include <string>
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // clang-format off
 // TreeView provides a statically-typed way to traverse the tree, which should
@@ -1207,7 +1208,8 @@ struct Delete : public Stmt {
   }
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
 
 namespace std {
 

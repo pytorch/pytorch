@@ -6,7 +6,8 @@
 #include <torch/csrc/autograd/utils/warnings.h>
 #include <vector>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 using edge_list = std::vector<Edge>;
 struct ReadyQueue;
@@ -16,7 +17,7 @@ static constexpr int CPU_DEVICE = -1;
 
 namespace {
 std::atomic<uint64_t> graph_task_id{0};
-} // namespace
+}
 
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask : std::enable_shared_from_this<GraphTask> {
@@ -204,4 +205,5 @@ TORCH_API std::vector<Node*> get_current_graph_task_execution_order();
 TORCH_API int get_current_graph_task_id();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

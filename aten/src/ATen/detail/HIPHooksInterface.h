@@ -12,7 +12,7 @@
 
 namespace at {
 class Context;
-} // namespace at
+}
 
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {

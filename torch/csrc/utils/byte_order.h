@@ -6,7 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
 enum THPByteOrder { THP_LITTLE_ENDIAN = 0, THP_BIG_ENDIAN = 1 };
 
@@ -99,4 +100,5 @@ TORCH_API void THP_encodeComplexDoubleBuffer(
     THPByteOrder order,
     size_t len);
 
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch

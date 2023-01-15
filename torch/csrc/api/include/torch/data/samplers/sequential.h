@@ -7,12 +7,16 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch::serialize {
+namespace torch {
+namespace serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace torch::serialize
+} // namespace serialize
+} // namespace torch
 
-namespace torch::data::samplers {
+namespace torch {
+namespace data {
+namespace samplers {
 
 /// A `Sampler` that returns indices sequentially.
 class TORCH_API SequentialSampler : public Sampler<> {
@@ -41,4 +45,6 @@ class TORCH_API SequentialSampler : public Sampler<> {
   size_t index_{0};
 };
 
-} // namespace torch::data::samplers
+} // namespace samplers
+} // namespace data
+} // namespace torch

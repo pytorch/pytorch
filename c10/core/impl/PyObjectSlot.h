@@ -7,7 +7,8 @@
 
 #include <atomic>
 
-namespace c10::impl {
+namespace c10 {
+namespace impl {
 
 struct C10_API PyObjectSlot {
  public:
@@ -167,4 +168,5 @@ struct C10_API PyObjectSlot {
   PyObject* pyobj_;
 };
 
-} // namespace c10::impl
+} // namespace impl
+} // namespace c10

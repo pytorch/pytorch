@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API bool canFuseOnCPULegacy();
 TORCH_API void overrideCanFuseOnCPULegacy(bool value);
@@ -32,4 +33,5 @@ TORCH_API void CustomFuseGraph(
     Symbol kind,
     size_t arg_limit = std::numeric_limits<size_t>::max());
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -4,7 +4,8 @@
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Options for the `BatchNorm` module.
 struct TORCH_API BatchNormOptions {
@@ -90,4 +91,5 @@ struct TORCH_API BatchNormFuncOptions {
 
 } // namespace functional
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

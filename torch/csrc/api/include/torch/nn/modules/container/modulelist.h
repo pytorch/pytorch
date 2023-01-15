@@ -7,7 +7,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// A list of `Module`s that registers its elements.
 ///
@@ -256,4 +257,5 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
 /// module storage semantics.
 TORCH_MODULE(ModuleList);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

@@ -2,7 +2,9 @@
 
 #include <torch/nn/options/fold.h>
 
-namespace torch::nn::functional {
+namespace torch {
+namespace nn {
+namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -95,4 +97,6 @@ inline Tensor unfold(const Tensor& input, const UnfoldFuncOptions& options) {
       options.stride());
 }
 
-} // namespace torch::nn::functional
+} // namespace functional
+} // namespace nn
+} // namespace torch

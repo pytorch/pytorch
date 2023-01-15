@@ -8,7 +8,9 @@
 #include <cstdint>
 #include <functional>
 
-namespace torch::jit::fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 // A thread-safe cache interface.
 
@@ -29,4 +31,6 @@ TORCH_API at::optional<KernelSpec*> retrieve(const int64_t key);
 // Only used for testing.
 TORCH_API int64_t debugNumCachedKernelSpecs();
 
-} // namespace torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch

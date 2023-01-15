@@ -19,7 +19,7 @@ struct THPLayout;
 
 namespace c10 {
 struct Storage;
-} // namespace c10
+}
 
 namespace torch {
 void registerDtypeObject(THPDtype* dtype, at::ScalarType scalarType);

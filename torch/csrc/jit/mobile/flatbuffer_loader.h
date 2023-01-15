@@ -18,7 +18,8 @@
  * types, to avoid leaking those details to PyTorch clients.
  */
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 /// All non-copied data pointers provided to `parse_and_initialize_*` functions
 /// must be aligned to this boundary. Since the Module will point directly into
@@ -131,4 +132,5 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module(
 // no op, TODO(qihan) delete
 TORCH_API bool register_flatbuffer_loader();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

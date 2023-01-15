@@ -14,9 +14,10 @@
 
 namespace ONNX_NAMESPACE {
 class ModelProto;
-} // namespace ONNX_NAMESPACE
+}
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // This map is used to keep track of parameters that should be exported
 // externally. When `defer_weight_export` is true, the returned map contains
@@ -276,4 +277,5 @@ TORCH_API void save_jit_module_to_write_func(
     bool save_mobile_debug_info,
     const std::function<size_t(const void*, size_t)>& writer_func);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

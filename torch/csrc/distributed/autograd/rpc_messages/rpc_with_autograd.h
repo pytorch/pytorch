@@ -4,7 +4,9 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
-namespace torch::distributed::autograd {
+namespace torch {
+namespace distributed {
+namespace autograd {
 
 // Represents an RPC that includes autograd information. This class basically
 // wraps another `RpcCommandBase` object which represents the actual RPC and has
@@ -91,4 +93,6 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
   rpc::DeviceMap deviceMap_;
 };
 
-} // namespace torch::distributed::autograd
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

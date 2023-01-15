@@ -9,7 +9,8 @@
 
 #include <iostream>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 inline void noop(Stack& n) {}
 
@@ -52,4 +53,5 @@ IValue tensorToListRecursive(
     at::IntArrayRef strides,
     size_t element_size);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -2,7 +2,8 @@
 
 #include <ATen/core/Tensor.h>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 // [ Using ForwardGrad ]
 // ForwardGrad needs to be a shared_ptr to satisfy constraints of its inner
@@ -206,4 +207,5 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
   mutable std::mutex mutex_;
 };
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

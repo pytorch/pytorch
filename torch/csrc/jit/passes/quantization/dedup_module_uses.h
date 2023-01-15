@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/api/module.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 /** Recursively deduplicate multiple uses of the same module by
  *  creating an instance clone for each use of the module, which means
@@ -23,4 +24,5 @@ namespace torch::jit {
  */
 TORCH_API void DedupModuleUses(Module& module);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

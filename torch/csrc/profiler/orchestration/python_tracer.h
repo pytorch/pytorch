@@ -10,7 +10,9 @@
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 class RecordQueue;
 struct Result;
@@ -55,4 +57,6 @@ struct TORCH_API PythonTracerBase {
 using MakeFn = std::unique_ptr<PythonTracerBase> (*)(RecordQueue*);
 TORCH_API void registerTracer(MakeFn make_tracer);
 } // namespace python_tracer
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

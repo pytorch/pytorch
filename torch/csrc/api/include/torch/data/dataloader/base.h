@@ -22,7 +22,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::data {
+namespace torch {
+namespace data {
 template <typename Dataset, typename Batch, typename BatchRequest>
 class DataLoaderBase {
  public:
@@ -254,4 +255,5 @@ class DataLoaderBase {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool joined_ = false;
 };
-} // namespace torch::data
+} // namespace data
+} // namespace torch

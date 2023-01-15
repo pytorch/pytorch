@@ -3,7 +3,9 @@
 #include <torch/csrc/Export.h>
 #include <cstddef>
 
-namespace torch::data::samplers {
+namespace torch {
+namespace data {
+namespace samplers {
 /// A base class for custom index types.
 struct TORCH_API CustomBatchRequest {
   virtual ~CustomBatchRequest() = default;
@@ -11,4 +13,6 @@ struct TORCH_API CustomBatchRequest {
   /// The number of elements accessed by this index.
   virtual size_t size() const = 0;
 };
-} // namespace torch::data::samplers
+} // namespace samplers
+} // namespace data
+} // namespace torch

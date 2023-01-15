@@ -3,7 +3,8 @@
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 using TSOpVector = std::vector<torch::jit::Value*>;
 
 TORCH_API TSOpVector LowerTSBuiltin(
@@ -12,4 +13,5 @@ TORCH_API TSOpVector LowerTSBuiltin(
     const std::vector<torch::jit::NamedValue>& arguments,
     const std::vector<torch::jit::NamedValue>& kwarguments = {});
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

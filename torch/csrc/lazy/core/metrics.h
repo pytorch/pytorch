@@ -15,7 +15,8 @@
 
 #include <c10/macros/Export.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 struct TORCH_API Sample {
   Sample() = default;
@@ -277,4 +278,5 @@ class TORCH_API TimedSection {
       new torch::lazy::Metric(name, torch::lazy::MetricFnTime); \
   torch::lazy::TimedSection timed_section(timed_metric)
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

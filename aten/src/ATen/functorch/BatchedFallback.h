@@ -9,7 +9,8 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
 
-namespace at::functorch {
+namespace at {
+namespace functorch {
 
 // This file contains code for the vmap fallback (also known as the
 // BatchedTensor fallback or the Batched fallback). This code runs
@@ -77,4 +78,5 @@ std::tuple<A, B, C> slow_fallback(const c10::OperatorHandle& op, ArrayRef<IValue
 }
 
 
-} // namespace at::functorch
+}
+} // namespace at

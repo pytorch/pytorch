@@ -5,7 +5,8 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 /**
  * \brief A structure describing a match of a pattern in a graph.
@@ -69,4 +70,5 @@ struct Match {
 std::vector<Match> TORCH_API
 findPatternMatches(const Graph& pattern, Graph& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

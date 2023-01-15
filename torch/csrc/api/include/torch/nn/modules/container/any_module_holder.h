@@ -2,7 +2,8 @@
 
 #include <torch/nn/modules/container/any_value.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 class Module;
 
@@ -128,4 +129,5 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   std::shared_ptr<ModuleType> module;
 };
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

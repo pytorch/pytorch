@@ -3,7 +3,9 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
-namespace torch::distributed::autograd {
+namespace torch {
+namespace distributed {
+namespace autograd {
 
 // Empty response for CleanupAutogradContextReq. Send to acknowledge receipt of
 // a CleanupAutogradContextReq.
@@ -16,4 +18,6 @@ class TORCH_API CleanupAutogradContextResp : public rpc::RpcCommandBase {
       const rpc::Message& message);
 };
 
-} // namespace torch::distributed::autograd
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

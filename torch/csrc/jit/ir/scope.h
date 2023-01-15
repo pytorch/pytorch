@@ -7,7 +7,8 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 struct ModuleInstanceInfo;
 constexpr size_t kModuleInstanceInfo = 2;
 
@@ -203,4 +204,5 @@ using DebugInfoTuple =
 constexpr size_t kDebugInfoTupleSourceRangeIndex{0};
 constexpr size_t kDebugInfoTupleNodeNameIndex{1};
 constexpr size_t kDebugInfoTupleInlinedCSIndex{2};
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

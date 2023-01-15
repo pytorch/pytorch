@@ -4,7 +4,7 @@
 #include <ATen/Config.h>
 #include <ATen/native/LinearAlgebraUtils.h>  // For TransposeType
 
-namespace at::native {
+namespace at { namespace native {
 
 // result = beta * result + alpha * gemm(mat1, mat2)
 TORCH_API void mkldnn_matmul(
@@ -29,4 +29,6 @@ bool mkldnn_bf16_gemm(
     float beta,
     c10::BFloat16 *c, int64_t ldc);
 
-} // namespace at::native
+}
+
+}

@@ -3,7 +3,9 @@
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 
-namespace torch::distributed::autograd {
+namespace torch {
+namespace distributed {
+namespace autograd {
 
 using torch::autograd::variable_list;
 
@@ -33,4 +35,6 @@ TORCH_API void backward(
     const variable_list& roots,
     bool retain_graph = false);
 
-} // namespace torch::distributed::autograd
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

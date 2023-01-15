@@ -3,7 +3,9 @@
 #include <torch/nn/options/vision.h>
 #include <torch/types.h>
 
-namespace torch::nn::functional {
+namespace torch {
+namespace nn {
+namespace functional {
 
 inline Tensor affine_grid(
     const Tensor& theta,
@@ -117,4 +119,6 @@ inline Tensor grid_sample(
       options.align_corners());
 }
 
-} // namespace torch::nn::functional
+} // namespace functional
+} // namespace nn
+} // namespace torch

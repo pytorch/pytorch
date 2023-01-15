@@ -5,11 +5,13 @@
 #include <c10/util/either.h>
 #include <string>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API c10::either<c10::OperatorName, c10::FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName);
 TORCH_API c10::FunctionSchema parseSchema(const std::string& schema);
 TORCH_API c10::OperatorName parseName(const std::string& name);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

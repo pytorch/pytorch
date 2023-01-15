@@ -836,6 +836,4 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 
 #endif /* defined(aarch64) */
 
-} // namespace CPU_CAPABILITY
-} // namespace vec
-} // namespace at
+}}}

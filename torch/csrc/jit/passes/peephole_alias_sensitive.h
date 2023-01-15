@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Peephole Optimizes alias sensitive peepholes
 // Currently this is invoked as part of PeepholeOptimize
@@ -12,4 +13,5 @@ TORCH_API bool PeepholeOptimizeAliasSensitive(
     const std::shared_ptr<Graph>& graph,
     bool shape_peepholes);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -9,7 +9,9 @@
 #include <type_traits>
 #include <utility>
 
-namespace torch::data::datasets {
+namespace torch {
+namespace data {
+namespace datasets {
 namespace detail {
 template <bool C, typename T>
 using optional_if_t = typename std::conditional<C, torch::optional<T>, T>::type;
@@ -111,4 +113,6 @@ MapDataset<DatasetType, TransformType> map(
   return {std::move(dataset), std::move(transform)};
 }
 
-} // namespace torch::data::datasets
+} // namespace datasets
+} // namespace data
+} // namespace torch

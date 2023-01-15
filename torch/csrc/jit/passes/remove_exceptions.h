@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Considering prim::RaiseException nodes unreachable, simplify prim::If nodes
 // when one of the branches contains prim::RaiseException.
@@ -18,4 +19,5 @@ namespace torch::jit {
 // exceptions.
 TORCH_API void EliminateExceptions(std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

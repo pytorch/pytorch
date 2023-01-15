@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Fuses Convolution -> Batchnorm into a single Convolution by
 // folding batchnorm weights into conv weights.
@@ -19,4 +20,5 @@ TORCH_API bool FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph);
 // This pass only works on Frozen Graphs; otherwise it is a No-Op.
 TORCH_API bool FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

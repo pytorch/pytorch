@@ -21,7 +21,9 @@
  * of Muls, and each Polynomial into a sequence of Ads.
  */
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 // A bunch of helpers for determine the Dtype of the output of a multi argument
 // Term or Polynomial.
@@ -547,4 +549,6 @@ ExprPtr buf_flat_size(BufPtr v);
 // Returns true if expressions A and B can be simplified to an equal expression.
 TORCH_API bool exprEquals(ExprPtr A, ExprPtr B);
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

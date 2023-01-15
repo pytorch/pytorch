@@ -1,7 +1,8 @@
 #pragma once
 #include <cstddef>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 constexpr size_t BYTECODE_INDEX_INSTRUCTION = 0;
 constexpr size_t BYTECODE_INDEX_OPERATOR = 1;
 constexpr size_t BYTECODE_INDEX_CONSTANT = 2;
@@ -16,4 +17,5 @@ constexpr size_t BYTECODE_INDEX_ARGUMENT_TYPE = 1;
 constexpr size_t BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE = 2;
 
 constexpr size_t BYTECODE_INDEX_MODULE_DEBUG_HANDLES = 0;
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

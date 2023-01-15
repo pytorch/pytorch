@@ -159,14 +159,14 @@ namespace hip {}
 // c10 namespace where possible.
 namespace caffe2 {
 using namespace c10;
-} // namespace caffe2
+}
 namespace at {
 using namespace c10;
-} // namespace at
+}
 namespace at {
 namespace cuda {
 using namespace c10::cuda;
-} // namespace cuda
+}
 } // namespace at
 
 // WARNING!!! THIS IS A GIANT HACK!!!
@@ -180,7 +180,7 @@ using namespace c10::cuda;
 namespace at {
 namespace cuda {
 using namespace c10::hip;
-} // namespace cuda
+}
 } // namespace at
 
 // C10_LIKELY/C10_UNLIKELY

@@ -11,10 +11,12 @@
  * - FoldFrozenLinearBatchnorm
  */
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API void OptimizeFrozenGraph(
     std::shared_ptr<Graph>& graph,
     bool optimize_numerics = true);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

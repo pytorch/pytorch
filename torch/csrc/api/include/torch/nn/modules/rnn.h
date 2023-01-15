@@ -16,7 +16,8 @@
 #include <memory>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 namespace detail {
 /// Base class for all RNN implementations (intended for code sharing).
@@ -408,4 +409,5 @@ class TORCH_API GRUCellImpl : public detail::RNNCellImplBase<GRUCellImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(GRUCell);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

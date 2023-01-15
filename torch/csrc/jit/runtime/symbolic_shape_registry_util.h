@@ -5,8 +5,10 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API const OperatorMap<std::string>& get_tensorexpr_elementwise_set();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

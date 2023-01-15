@@ -9,7 +9,9 @@
 #include <utility>
 #include <vector>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 
 class SGDParamState {
   TORCH_ARG(torch::Tensor, momentum_buffer);
@@ -127,4 +129,6 @@ class TORCH_API SGD {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<SGDOptions> options_;
 };
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

@@ -5,7 +5,7 @@
 
 namespace c10 {
 class Scalar;
-} // namespace c10
+}
 
 namespace at {
 

@@ -9,7 +9,8 @@
 
 #include <algorithm>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 template <typename T>
 static void im2col(
@@ -146,4 +147,5 @@ static void col2im(
   }
 }
 
-} // namespace at::native
+} // native
+} // at

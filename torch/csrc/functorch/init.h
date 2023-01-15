@@ -7,6 +7,6 @@ namespace impl {
 
 void initFuncTorchBindings(PyObject* module);
 
-} // namespace impl
+}
 } // namespace functorch
 } // namespace torch

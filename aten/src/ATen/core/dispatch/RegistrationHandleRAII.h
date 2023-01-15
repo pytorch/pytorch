@@ -33,4 +33,4 @@ private:
   std::function<void()> onDestruction_;
 };
 
-} // namespace c10
+}

@@ -8,9 +8,9 @@ namespace at {
 class Tensor;
 class TensorBase;
 struct TensorIteratorBase;
-} // namespace at
+}
 
-namespace at::native {
+namespace at { namespace native {
 
 using unary_fn = void(*)(TensorIteratorBase&);
 using unary_fn_with_scalar = void(*)(TensorIteratorBase&, const Scalar& a);
@@ -118,4 +118,4 @@ DECLARE_DISPATCH(void (*)(TensorIteratorBase&, int64_t), round_decimals_stub);
 // clone
 // contiguous
 // zero
-} // namespace at::native
+}} // namespace at::native

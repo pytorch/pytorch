@@ -11,13 +11,13 @@
 #include <memory>
 
 // Forward-declares at::cuda::NVRTC
-namespace at::cuda {
+namespace at { namespace cuda {
 struct NVRTC;
-} // namespace at::cuda
+}} // at::cuda
 
 namespace at {
 class Context;
-} // namespace at
+}
 
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {

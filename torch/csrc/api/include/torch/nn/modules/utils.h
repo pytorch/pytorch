@@ -6,7 +6,10 @@
 
 #include <vector>
 
-namespace torch::nn::modules::utils {
+namespace torch {
+namespace nn {
+namespace modules {
+namespace utils {
 
 // Reverse the order of `t` and repeat each element for `n` times.
 // This can be used to translate padding arg used by Conv and Pooling modules
@@ -46,4 +49,7 @@ inline std::vector<int64_t> _list_with_default(
   return ret;
 }
 
-} // namespace torch::nn::modules::utils
+} // namespace utils
+} // namespace modules
+} // namespace nn
+} // namespace torch

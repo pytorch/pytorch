@@ -6,7 +6,9 @@
 
 #include <utility>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 template <typename T>
 class PaddedBuffer;
@@ -249,4 +251,6 @@ class TORCH_API GenericIntrinsicsExpander : public IRMutator {
   ExprPtr mutate(IntrinsicsPtr v) override;
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

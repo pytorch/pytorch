@@ -12,7 +12,7 @@
 
 namespace at {
 class Context;
-} // namespace at
+}
 
 namespace at {
 

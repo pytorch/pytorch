@@ -3,11 +3,14 @@
 #include <memory>
 #include <string>
 
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 class PyTorchStreamReader;
-} // namespace caffe2::serialize
+}
+} // namespace caffe2
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Source;
 
@@ -25,4 +28,5 @@ std::shared_ptr<Source> findSourceInArchiveFromQualifier(
     const std::string& export_prefix,
     const std::string& qualifier);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

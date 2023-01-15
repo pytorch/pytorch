@@ -12,9 +12,10 @@
 
 namespace c10 {
 struct IValue;
-} // namespace c10
+}
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 class Pickler;
 class InlinedCallStackSerializer {
@@ -86,4 +87,5 @@ class TORCH_API CallStackDebugInfoUnpickler {
   InlinedCallStackDeserializer csds_;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

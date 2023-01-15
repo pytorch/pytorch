@@ -6,7 +6,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/memory.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct TORCH_API MutationRemover {
   MutationRemover(
@@ -77,4 +78,5 @@ TORCH_API bool RemoveTensorMutation(
 TORCH_API bool InplaceToFunctionalActivation(
     const std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

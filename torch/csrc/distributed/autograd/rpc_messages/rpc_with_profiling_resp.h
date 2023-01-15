@@ -6,7 +6,9 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-namespace torch::distributed::autograd {
+namespace torch {
+namespace distributed {
+namespace autograd {
 class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
  public:
   // For sending RPCs over the wire
@@ -52,4 +54,6 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
   const std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents_;
   const rpc::ProfilingId profilingId_;
 };
-} // namespace torch::distributed::autograd
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

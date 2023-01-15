@@ -23,13 +23,13 @@
 
 namespace c10 {
 class Scalar;
-} // namespace c10
+}
 
-namespace torch::autograd {
+namespace torch { namespace autograd {
 
 struct Node;
 
-} // namespace torch::autograd
+}} // namespace torch::autograd
 
 namespace at {
 
@@ -49,7 +49,7 @@ inline bool variable_excluded_from_dispatch() {
 #endif
 }
 
-} // namespace impl
+}
 
 // NOTE: [Tensor vs. TensorBase]
 //

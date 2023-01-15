@@ -19,7 +19,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Stores a type erased `Module`.
 ///
@@ -368,4 +369,5 @@ ModuleType& AnyModule::get_(
       c10::demangle(typeid(ModuleType).name()));
 }
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

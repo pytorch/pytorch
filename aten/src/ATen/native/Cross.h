@@ -11,5 +11,4 @@ using cross_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, const int6
 
 DECLARE_DISPATCH(cross_fn, cross_stub);
 
-} // namespace native
-} // namespace at
+}} // namespace at::native

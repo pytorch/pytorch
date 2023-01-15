@@ -20,7 +20,8 @@
 
 #include <ATen/core/List.h>
 
-namespace at::indexing {
+namespace at {
+namespace indexing {
 
 const int64_t INDEX_MIN = c10::SymInt::min_representable_int();
 const int64_t INDEX_MAX = -(INDEX_MIN + 1);
@@ -726,4 +727,5 @@ static inline void set_item(
   return;
 }
 
-} // namespace at::indexing
+} // namespace indexing
+} // namespace at

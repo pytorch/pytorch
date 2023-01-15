@@ -13,7 +13,8 @@
 #include <type_traits>
 #include <utility>
 
-namespace torch::data {
+namespace torch {
+namespace data {
 
 /// Creates a `DataLoader` instance for a stateless `dataset`, a `sampler` and
 /// some `options`.
@@ -53,4 +54,5 @@ std::unique_ptr<StatefulDataLoader<Dataset>> make_data_loader(
   return torch::make_unique<StatefulDataLoader<Dataset>>(
       std::move(dataset), std::move(options));
 }
-} // namespace torch::data
+} // namespace data
+} // namespace torch

@@ -7,7 +7,9 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 class Tensor;
 
@@ -110,7 +112,9 @@ TORCH_API void print(ExprPtr expr);
 TORCH_API void print(StmtPtr stmt);
 TORCH_API void print(const Tensor& t);
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
 
 namespace std {
 

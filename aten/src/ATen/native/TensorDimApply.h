@@ -2,7 +2,8 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 
-namespace at::native {
+namespace at {
+  namespace native {
     //input tensors are non-zero dim and non-empty
     template<typename T1, typename T2, typename Function>
     void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim, Function func) {
@@ -50,4 +51,4 @@ namespace at::native {
         }
       }
     }
-} // namespace at::native
+}}

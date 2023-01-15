@@ -21,7 +21,8 @@
 // Forward declared
 namespace c10 { struct AutogradMetaInterface; }
 
-namespace at::functorch {
+namespace at {
+namespace functorch {
 
 // This file contains the implementation of functorch's interpreter stack.
 // See NOTE: [functorch interpreter stack] first before reading on.
@@ -121,4 +122,5 @@ TORCH_API bool getInplaceRequiresGradAllowed();
 TORCH_API DynamicLayer popDynamicLayer();
 TORCH_API int64_t pushDynamicLayer(DynamicLayer&& layer);
 
-} // namespace at::functorch
+}
+} // namespace at

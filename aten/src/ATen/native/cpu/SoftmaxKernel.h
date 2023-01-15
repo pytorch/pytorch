@@ -24,5 +24,5 @@ DECLARE_DISPATCH(forward_fn_with_dim, softmax_kernel);
 DECLARE_DISPATCH(forward_fn_with_dim, log_softmax_kernel);
 DECLARE_DISPATCH(backward_fn_with_dim, softmax_backward_kernel);
 DECLARE_DISPATCH(backward_fn_with_dim, log_softmax_backward_kernel);
-} // namespace native
-} // namespace at
+}
+}

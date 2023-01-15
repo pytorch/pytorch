@@ -9,7 +9,8 @@
 #include <memory>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 constexpr int kCPUDevice = -1;
 
@@ -51,4 +52,5 @@ TORCH_API std::string debugGetFusedKernelCode(
 
 TORCH_API size_t nCompiledKernels();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -6,7 +6,7 @@
 
 namespace c10 {
 class Scalar;
-} // namespace c10
+}
 
 namespace at {
 class Tensor;
@@ -18,5 +18,4 @@ DECLARE_DISPATCH(void(*)(TensorIterator&, const c10::Scalar&), fill_stub);
 
 Tensor& fill_out(Tensor& self, const Scalar& value);
 
-} // namespace native
-} // namespace at
+}} // namespace at::native

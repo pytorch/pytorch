@@ -5,7 +5,8 @@
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Options for a `D`-dimensional avgpool module.
 template <size_t D>
@@ -568,4 +569,5 @@ namespace functional {
 using LPPool2dFuncOptions = LPPool2dOptions;
 } // namespace functional
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

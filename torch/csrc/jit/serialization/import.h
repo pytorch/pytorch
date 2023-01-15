@@ -8,11 +8,14 @@
 
 #include <istream>
 
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 class ReadAdapterInterface;
-} // namespace caffe2::serialize
+} // namespace serialize
+} // namespace caffe2
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
@@ -143,4 +146,5 @@ TORCH_API Module parse_and_initialize_jit_module(
     ExtraFilesMap& extra_files,
     c10::optional<at::Device> device);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -76,7 +76,7 @@ template<class T>
 impl::GenericList toList(const List<T>& list) {
   return GenericList(list.impl_);
 }
-} // namespace impl
+}
 
 template<class T>
 List<T> List<T>::copy() const {
@@ -114,7 +114,7 @@ namespace detail {
       return std::move(element);
     }
   };
-} // namespace detail
+}
 
 namespace impl {
 
@@ -349,4 +349,4 @@ template <class T>
 void List<T>::unsafeSetElementType(TypePtr t) {
   impl_->elementType = std::move(t);
 }
-} // namespace c10
+}

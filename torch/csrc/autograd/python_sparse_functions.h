@@ -5,5 +5,5 @@ namespace autograd {
 
 void initSparseFunctions(PyObject* module);
 
-} // namespace autograd
+}
 } // namespace torch

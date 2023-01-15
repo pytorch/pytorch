@@ -148,4 +148,4 @@ template <>
       return hash;
     }
   };
-} // namespace std
+}

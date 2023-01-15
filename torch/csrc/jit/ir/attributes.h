@@ -8,7 +8,8 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using ::c10::Symbol;
 
@@ -179,4 +180,5 @@ struct IRAttributeError : public std::exception {
  private:
   std::string msg;
 };
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

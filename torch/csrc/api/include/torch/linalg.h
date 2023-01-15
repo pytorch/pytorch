@@ -2,7 +2,8 @@
 
 #include <ATen/ATen.h>
 
-namespace torch::linalg {
+namespace torch {
+namespace linalg {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -1060,4 +1061,5 @@ inline Tensor& inv_out(Tensor& result, const Tensor& input) {
   return detail::inv_out(result, input);
 }
 
-} // namespace torch::linalg
+} // namespace linalg
+} // namespace torch

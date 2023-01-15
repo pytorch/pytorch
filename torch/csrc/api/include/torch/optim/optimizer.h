@@ -29,7 +29,8 @@ class InputArchive;
 } // namespace torch
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
-namespace torch::optim {
+namespace torch {
+namespace optim {
 
 class TORCH_API OptimizerParamState {
  public:
@@ -207,4 +208,5 @@ TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     Optimizer& optimizer);
 
-} // namespace torch::optim
+} // namespace optim
+} // namespace torch

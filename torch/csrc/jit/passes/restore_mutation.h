@@ -7,7 +7,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/memory.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // A map which stores if an activation operator can perform type promotion
 const std::unordered_map<Symbol, bool> activation_type_promotion_mapping = {
@@ -59,4 +60,5 @@ class FunctionalToInplaceRewriter {
 TORCH_API bool FunctionalToInplaceActivation(
     const std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

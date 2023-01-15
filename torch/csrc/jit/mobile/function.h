@@ -7,7 +7,8 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/mobile/code.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 enum OpCode : uint8_t;
 struct Instruction;
 struct OperatorString;
@@ -81,4 +82,5 @@ c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
 TORCH_API std::string operator_str(const c10::OperatorName& opname);
 
 } // namespace mobile
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

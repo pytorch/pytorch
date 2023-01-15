@@ -18,7 +18,8 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 struct Node;
 struct Value;
 struct Graph;
@@ -413,4 +414,5 @@ TORCH_API autograd::Variable getSizeOf(
 TORCH_API autograd::Variable getNumelOf(const autograd::Variable& var);
 
 } // namespace tracer
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

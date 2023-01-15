@@ -11,7 +11,7 @@
 #include <ATen/ops/arange.h>
 #endif
 
-namespace at::native {
+namespace at { namespace native {
 
 using unfold_backward_fn = void (*)(
   Tensor& grad_in,
@@ -107,6 +107,6 @@ static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_out(
   return iter;
 }
 
-} // namespace
+}
 
-} // namespace at::native
+}} // namespace at::native

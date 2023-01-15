@@ -8,7 +8,8 @@
 #include <functional>
 #include <regex>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using graph_rewrite_helper::getFuncName;
 
@@ -211,4 +212,5 @@ bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

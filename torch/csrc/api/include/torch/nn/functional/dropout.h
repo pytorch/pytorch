@@ -4,7 +4,9 @@
 
 #include <utility>
 
-namespace torch::nn::functional {
+namespace torch {
+namespace nn {
+namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -227,4 +229,6 @@ inline Tensor feature_alpha_dropout(
       std::move(input), options.p(), options.training(), options.inplace());
 }
 
-} // namespace torch::nn::functional
+} // namespace functional
+} // namespace nn
+} // namespace torch

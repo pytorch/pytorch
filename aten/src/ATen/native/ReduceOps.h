@@ -5,14 +5,14 @@
 
 namespace c10 {
 class Scalar;
-} // namespace c10
+}
 
 namespace at {
 struct TensorIterator;
 class Tensor;
-} // namespace at
+}
 
-namespace at::native {
+namespace at { namespace native {
 
 using reduce_fn = void(*)(TensorIterator &);
 
@@ -52,4 +52,4 @@ TORCH_API std::tuple<Tensor&,Tensor&> var_mean_out(
     Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim,
     int64_t correction, bool keepdim);
 
-} // namespace at::native
+}} // namespace at::native

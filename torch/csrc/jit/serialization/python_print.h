@@ -5,7 +5,8 @@
 #include <iostream>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Method;
 struct Module;
@@ -56,4 +57,5 @@ TORCH_API void jitModuleToPythonCodeAndConstants(
     std::vector<IValue>* constants // output
 );
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

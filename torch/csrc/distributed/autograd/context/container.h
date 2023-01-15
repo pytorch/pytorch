@@ -5,7 +5,9 @@
 
 #include <torch/csrc/distributed/autograd/context/context.h>
 
-namespace torch::distributed::autograd {
+namespace torch {
+namespace distributed {
+namespace autograd {
 
 // Singleton class per worker which is responsible for storing the distributed
 // autograd context for each autograd pass and also cleans up data for an
@@ -160,4 +162,6 @@ class TORCH_API DistAutogradContainer {
   int64_t max_id_;
 };
 
-} // namespace torch::distributed::autograd
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

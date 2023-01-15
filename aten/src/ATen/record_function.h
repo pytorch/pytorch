@@ -14,7 +14,7 @@
 
 namespace c10 {
 class TORCH_API OperatorHandle;
-} // namespace c10
+}
 
 namespace at {
 

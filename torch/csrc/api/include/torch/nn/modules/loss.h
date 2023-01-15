@@ -12,7 +12,8 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ L1Loss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -823,4 +824,5 @@ struct TORCH_API BCEWithLogitsLossImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(BCEWithLogitsLoss);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

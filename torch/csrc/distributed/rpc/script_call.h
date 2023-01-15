@@ -7,7 +7,9 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <vector>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 using torch::jit::Operator;
 
@@ -64,4 +66,6 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   const bool isAsyncExecution_;
 };
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

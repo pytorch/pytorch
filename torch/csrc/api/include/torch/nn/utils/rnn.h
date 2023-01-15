@@ -5,7 +5,10 @@
 
 #include <utility>
 
-namespace torch::nn::utils::rnn {
+namespace torch {
+namespace nn {
+namespace utils {
+namespace rnn {
 
 inline Tensor invert_permutation(const Tensor& permutation) {
   if (!permutation.defined()) {
@@ -344,4 +347,7 @@ inline PackedSequence pack_sequence(
       /*enforce_sorted=*/enforce_sorted);
 }
 
-} // namespace torch::nn::utils::rnn
+} // namespace rnn
+} // namespace utils
+} // namespace nn
+} // namespace torch

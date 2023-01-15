@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/api/module.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 /** \brief Fold Conv2d-BatchNorm2d into Conv2d in all methods of this
  * module and all its submodules, forward is included by default.
@@ -32,4 +33,5 @@ struct TORCH_API ConvBNParameters {
 TORCH_API std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
     const ConvBNParameters& p);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

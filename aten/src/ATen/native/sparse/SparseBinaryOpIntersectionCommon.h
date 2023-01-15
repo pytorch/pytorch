@@ -41,7 +41,8 @@
 #define BOOL_TO_INDEX_TYPE3(b2, b1, b0, ...) \
   EXPAND(b2, 2, BOOL_TO_INDEX_TYPE2(b1, b0, __VA_ARGS__))
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -581,4 +582,4 @@ void _sparse_binary_op_intersection_kernel_out(
 
 } // anonymous namespace
 
-} // namespace at::native
+}} // at::native

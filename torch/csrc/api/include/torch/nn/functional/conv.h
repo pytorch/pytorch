@@ -3,7 +3,9 @@
 #include <torch/nn/options/conv.h>
 #include <torch/types.h>
 
-namespace torch::nn::functional {
+namespace torch {
+namespace nn {
+namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -294,4 +296,6 @@ inline Tensor conv_transpose3d(
       options.dilation());
 }
 
-} // namespace torch::nn::functional
+} // namespace functional
+} // namespace nn
+} // namespace torch

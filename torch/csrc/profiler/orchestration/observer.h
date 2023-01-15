@@ -3,7 +3,9 @@
 #include <ATen/record_function.h>
 #include <torch/csrc/Export.h>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 // ----------------------------------------------------------------------------
 // -- Profiler Config ---------------------------------------------------------
@@ -140,4 +142,6 @@ TORCH_API bool profilerEnabled();
 TORCH_API ActiveProfilerType profilerType();
 TORCH_API ProfilerConfig getProfilerConfig();
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

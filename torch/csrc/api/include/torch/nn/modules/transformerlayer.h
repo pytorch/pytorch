@@ -14,7 +14,8 @@
 
 #include <ostream>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ TransformerEncoderLayer
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -194,4 +195,5 @@ class TORCH_API TransformerDecoderLayerImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(TransformerDecoderLayer);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

@@ -6,7 +6,8 @@
 
 #include <vector>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 TORCH_API std::vector<int64_t> InversePermutation(
     c10::ArrayRef<int64_t> input_permutation);
@@ -38,4 +39,5 @@ std::vector<typename Container::value_type> PermuteDimensions(
   return output;
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

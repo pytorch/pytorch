@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Inline Fork and Wait calls. This is used, for example, in ONNX export, where
 // we do not support the explicit parallelism structures and would rather
@@ -11,4 +12,5 @@ namespace torch::jit {
 // produced from the (now-inlined) forked section.
 TORCH_API void InlineForkWait(const std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

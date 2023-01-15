@@ -14,7 +14,10 @@
  * Registration is done in torch/csrc/jit/codegen/cuda/register_interface.cpp
  */
 
-namespace torch::jit::fuser::cuda {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
 TORCH_API std::atomic<bool>& getCudaFusionGuardMode();
 
@@ -77,4 +80,7 @@ struct TORCH_API NVFuserPassManager : public PassManager<NVFuserPassManager> {
   }
 };
 
-} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

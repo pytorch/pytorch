@@ -17,5 +17,4 @@ using _compute_linear_combination_fn = void(*)(
 
 DECLARE_DISPATCH(_compute_linear_combination_fn, _compute_linear_combination_stub);
 
-} // namespace native
-} // namespace at
+}} // namespace at::native

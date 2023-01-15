@@ -7,7 +7,8 @@
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 /**
  * Alias analysis pass.
@@ -315,4 +316,5 @@ class AliasDb {
 // the right thing.
 TORCH_API void Lint(const AliasDb* db);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

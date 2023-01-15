@@ -2,7 +2,8 @@
 #include <ATen/native/TransposeType.h>
 #include <c10/util/complex.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 void mkl_gemm_batched(
     TransposeType trans_A, TransposeType trans_B,
@@ -28,4 +29,4 @@ void mkl_gemm_batched(
     const c10::complex<double>** A, int lda, const c10::complex<double>** B, int ldb,
     c10::complex<double> beta, c10::complex<double>** C, int ldc);
 
-}  // namespace at::native
+}}  // namespace at::native

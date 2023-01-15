@@ -6,10 +6,12 @@
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 struct CompilationUnit;
 struct Function;
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
 
 namespace c10 {
 
@@ -437,4 +439,4 @@ struct TORCH_API ClassType : public NamedType {
   std::vector<std::string> unresolved_class_attributes_;
 };
 
-} // namespace c10
+}

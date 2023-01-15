@@ -7,5 +7,5 @@ namespace onnx {
 
 void initONNXBindings(PyObject* module);
 
-} // namespace onnx
+}
 } // namespace torch

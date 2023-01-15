@@ -25,7 +25,7 @@ using valid_dict_key_types = guts::typelist::typelist<
   bool,
   at::Tensor
 >;
-} // namespace impl
+}
 
 namespace detail {
 
@@ -55,7 +55,7 @@ struct DictImpl final : public c10::intrusive_ptr_target {
   friend TORCH_API bool operator==(const DictImpl& lhs, const DictImpl& rhs);
 };
 
-} // namespace detail
+}
 
 namespace impl {
 template<class Key, class Value, class Iterator> class DictIterator;
@@ -186,7 +186,7 @@ private:
 
 template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue> dict);
 template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value> dict);
-} // namespace impl
+}
 
 /**
  * An object of this class stores a map from Key to Value.
@@ -387,11 +387,11 @@ namespace impl {
 // (maybe except for some internal prim ops).
 using GenericDict = Dict<IValue, IValue>;
 
-} // namespace impl
-} // namespace c10
+}
+}
 
 namespace torch {
   template<class Key, class Value> using Dict = c10::Dict<Key, Value>;
-} // namespace torch
+}
 
 #include <ATen/core/Dict_inl.h>  // IWYU pragma: keep

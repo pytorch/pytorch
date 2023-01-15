@@ -1,7 +1,9 @@
 #pragma once
 #include <torch/csrc/jit/mobile/function.h>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 using c10::IValue;
 TORCH_API void parseInstructions(
     const std::string& function_name,
@@ -18,4 +20,6 @@ TORCH_API void parseRegisterSize(size_t rsize, mobile::Function* function);
 TORCH_API void applyUpgrader(
     mobile::Function* function,
     uint64_t operator_version);
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

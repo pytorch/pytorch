@@ -6,7 +6,8 @@
 
 // A hook that's called on gradients
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 using Variable = at::Tensor;
 using variable_list = std::vector<Variable>;
@@ -23,4 +24,5 @@ struct TORCH_API FunctionPostHook {
       const variable_list& inputs /* grad_outputs */) = 0;
 };
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

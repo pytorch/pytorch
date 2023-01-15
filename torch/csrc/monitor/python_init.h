@@ -7,5 +7,5 @@ namespace monitor {
 
 void initMonitorBindings(PyObject* module);
 
-} // namespace monitor
+}
 } // namespace torch

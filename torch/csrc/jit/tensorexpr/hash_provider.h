@@ -7,7 +7,9 @@
 
 #include <utility>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 struct TORCH_API SimplifierHashType {
   SimplifierHashType() = default;
@@ -22,7 +24,9 @@ struct TORCH_API SimplifierHashType {
   size_t _h{0};
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
 
 namespace std {
 template <>
@@ -34,7 +38,9 @@ struct hash<torch::jit::tensorexpr::SimplifierHashType> {
 
 } // namespace std
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 #define CACHE_GUARD()  \
   if (cachedHash(v)) { \
@@ -293,4 +299,6 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

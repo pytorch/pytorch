@@ -17,7 +17,8 @@
  * modify the IR graph in place.
  */
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // A pass modifies a Graph in place.
 using GraphPass = std::function<void(std::shared_ptr<Graph>&)>;
@@ -131,4 +132,5 @@ struct TORCH_API PassManager {
   virtual ~PassManager() = default;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

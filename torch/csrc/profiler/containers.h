@@ -13,7 +13,9 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 // ============================================================================
 // == AppendOnlyList ==========================================================
@@ -189,4 +191,6 @@ class AppendOnlyList {
   T* end_{nullptr};
 };
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

@@ -2,7 +2,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
 
-namespace at::sparse_csr {
+namespace at {
+namespace sparse_csr {
 Tensor& _sparse_mm_mkl_(
     Tensor& self,
     const SparseCsrTensor& sparse_,
@@ -10,4 +11,5 @@ Tensor& _sparse_mm_mkl_(
     const Tensor& t,
     const Scalar& alpha,
     const Scalar& beta);
-} // namespace at::sparse_csr
+} // namespace native
+} // namespace at

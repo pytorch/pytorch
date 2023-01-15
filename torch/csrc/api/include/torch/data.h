@@ -6,7 +6,9 @@
 #include <torch/data/transforms.h>
 
 // Some "exports".
-namespace torch::data {
+namespace torch {
+namespace data {
 using datasets::BatchDataset;
 using datasets::Dataset;
-} // namespace torch::data
+} // namespace data
+} // namespace torch

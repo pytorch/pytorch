@@ -15,7 +15,8 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 #endif
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // GraphExecutor creates specializations of Graphs for different
 // dimensionalitities and types of inputs.
@@ -167,7 +168,7 @@ struct ArgumentSpec {
 
 namespace {
 static constexpr size_t ARG_SPEC_DEPTH_LIMIT = 128;
-} // namespace
+}
 
 // ArgumentSpecCreator takes an initial graph and comes up with a set
 // of simple instructions to compute the ArgumentSpec given a set of
@@ -465,7 +466,8 @@ inline c10::optional<int8_t> convertOptional(
                 : c10::optional<int8_t>{};
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
 
 namespace std {
 

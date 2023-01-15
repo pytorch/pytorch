@@ -2,7 +2,9 @@
 
 #include <c10/util/TypeTraits.h>
 
-namespace c10::impl {
+namespace c10 {
+
+namespace impl {
   namespace detail {
     template<class FuncType, class ReturnType, class ParameterList> class WrapFunctionIntoRuntimeFunctor_ {};
     template<class FuncType, class ReturnType, class... Parameters>
@@ -19,7 +21,7 @@ namespace c10::impl {
     private:
       FuncType kernel_func_;
     };
-  } // namespace detail
+  }
 
   // WrapFunctionIntoRuntimeFunctor: Wraps any runtime functor into a functor that
   // inherits from c10::OperatorKernel, so it can be used as a c10 kernel.
@@ -32,4 +34,6 @@ namespace c10::impl {
       typename guts::infer_function_traits_t<FuncType>::return_type,
       typename guts::infer_function_traits_t<FuncType>::parameter_types
   >;
-} // namespace c10::impl
+}
+
+}
