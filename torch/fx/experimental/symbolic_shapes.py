@@ -231,7 +231,8 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        return bool(self.shape_env.evaluate_expr(self.expr))
+        # TODO: why is the replace needed here?
+        return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
 
     def bool_(self):
         # TODO: why is the replace needed here?
@@ -474,7 +475,7 @@ def _make_node_magic(method, func):
         setattr(SymNode, method_attr, binary_magic_impl)
 
 def _make_node_sizes_strides(method, func):
-    func = lru_cache(256)(func)
+    # NB: don't LRU cache, lots of arguments
 
     def sizes_strides_impl(self, sizes, strides):
         op = getattr(sys.modules[__name__], method)

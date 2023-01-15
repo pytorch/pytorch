@@ -466,7 +466,7 @@ SymBool TensorImpl::compute_strides_like_channels_last_3d(
         }
         min = strides[d] * sizes[d].max(1);
       }
-      return true;
+      return r;
     }
     case 4:
       // TODO dim == 4 case will be enabled once it is fully tested
