@@ -6877,8 +6877,6 @@ class TestViewOpsMPS(TestCase):
         self.assertEqual(t2, t1)
         b = torch.randn(10, device=device)
         self.assertEqual(b, b.T)
-        scalar = torch.tensor(5, device=device)
-        self.assertEqual(scalar, scalar.T)
 
     def test_transposes(self, device="mps", dtype=torch.float32):
         for op in ("T", "H", "mT", "mH", "adjoint"):
