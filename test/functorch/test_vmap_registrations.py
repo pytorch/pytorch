@@ -180,7 +180,6 @@ xfail_not_implemented = {
     "aten::linalg_slogdet",
     "aten::linalg_svd.U",
     "aten::linalg_tensorsolve",
-    "aten::linalg_vander",
     "aten::linalg_vecdot",
     "aten::linear",
     "aten::log_sigmoid",
