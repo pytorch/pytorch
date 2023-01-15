@@ -263,8 +263,8 @@ def _make_fn_with_patches(
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         with contextlib.ExitStack() as stack:
-            for target, attr, val in patches:
-                stack.enter_context(patch.object(target, attr, val))
+            for module, attr, val in patches:
+                stack.enter_context(patch.object(module, attr, val))
 
             return fn(*args, **kwargs)
 
@@ -275,7 +275,7 @@ def make_test_cls_with_patches(
     cls: Any,  # class object
     make_new_cls: bool,  # or add to existing class
     new_fn_suffix: str,
-    new_cls_prefix: Optional[bool] = None,  # if make_new_cls
+    new_cls_prefix: Optional[str] = None,  # if make_new_cls
     name_pred: Callable[[str], bool] = lambda name: name.startswith("test_"),
     patches=Tuple[Tuple[Any, str, Any]],  # module, attr, val
 ):
