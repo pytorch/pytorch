@@ -1149,7 +1149,6 @@ class TestLinalg(TestCase):
         if dtype != torch.float16 and dtype != torch.bfloat16:
             ord_vector.extend([0.1, -0.1])
         ord_matrix = ['fro', 'nuc', 1, -1, 2, -2, inf, -inf, None]
-        S = 10
 
         if dtype == torch.cfloat:
             norm_dtypes = (torch.cfloat, torch.cdouble)
@@ -1162,10 +1161,10 @@ class TestLinalg(TestCase):
         else:
             raise RuntimeError("Unsupported dtype")
 
-        for ord, keepdim, norm_dtype in product(ord_vector, (True, False), norm_dtypes):
+        for S, ord, keepdim, norm_dtype in product((10, 512), ord_vector, (True, False), norm_dtypes):
             run_test_case((S,) , ord, keepdim, norm_dtype)
 
-        for ord, keepdim, norm_dtype in product(ord_matrix, (True, False), norm_dtypes):
+        for S, ord, keepdim, norm_dtype in product((10, 512), ord_matrix, (True, False), norm_dtypes):
             if ord in [2, -2, 'nuc']:
                 # We need torch.svdvals
                 if dtype == torch.float16 or dtype == torch.bfloat16:

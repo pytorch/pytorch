@@ -235,21 +235,18 @@ static void norm_kernel_tensor_iterator_impl(
   if (val == 0) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
       using acc_t = typename scalar_value_type<scalar_t>::type;
+      using real_acc_t = at::opmath_type<acc_t>;
       binary_kernel_reduce(
-        iter,
-        NormZeroOps<scalar_t, acc_t>(),
-        acc_t(0)
-      );
+          iter, NormZeroOps<scalar_t, real_acc_t>(), real_acc_t(0));
     });
   } else if (val == 1) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
-      using acc_t = typename scalar_value_type<scalar_t>::type;
-      binary_kernel_reduce(
-        iter,
-        NormOneOps<scalar_t, acc_t>(),
-        acc_t(0)
-      );
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+          using acc_t = typename scalar_value_type<scalar_t>::type;
+          using real_acc_t = at::opmath_type<acc_t>;
+          binary_kernel_reduce(
+              iter, NormOneOps<scalar_t, real_acc_t>(), real_acc_t(0));
+        });
   } else if (val == 2) {
     // If we can vectorize over the last dimension and the dtype
     // of the output is the same as that of the input,
@@ -290,38 +287,32 @@ static void norm_kernel_tensor_iterator_impl(
     }
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
       using acc_t = typename scalar_value_type<scalar_t>::type;
+      using real_acc_t = at::opmath_type<acc_t>;
       binary_kernel_reduce(
-        iter,
-        NormTwoOps<scalar_t, acc_t>(),
-        acc_t(0)
-      );
+          iter, NormTwoOps<scalar_t, real_acc_t>(), real_acc_t(0));
     });
   } else if (val == INFINITY) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
       using acc_t = typename scalar_value_type<scalar_t>::type;
+      using real_acc_t = at::opmath_type<acc_t>;
       binary_kernel_reduce(
-        iter,
-        AbsMaxOps<scalar_t, acc_t>(),
-        acc_t(0)
-      );
+          iter, AbsMaxOps<scalar_t, real_acc_t>(), real_acc_t(0));
     });
   } else if (val == -INFINITY) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
       using acc_t = typename scalar_value_type<scalar_t>::type;
+      using real_acc_t = at::opmath_type<acc_t>;
       binary_kernel_reduce(
-        iter,
-        AbsMinOps<scalar_t, acc_t>(),
-        std::numeric_limits<acc_t>::infinity()
-      );
+          iter,
+          AbsMinOps<scalar_t, real_acc_t>(),
+          std::numeric_limits<real_acc_t>::infinity());
     });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
       using acc_t = typename scalar_value_type<scalar_t>::type;
+      using real_acc_t = at::opmath_type<acc_t>;
       binary_kernel_reduce(
-        iter,
-        NormOps<scalar_t, acc_t> { acc_t(val) },
-        acc_t(0)
-      );
+          iter, NormOps<scalar_t, real_acc_t>{real_acc_t(val)}, real_acc_t(0));
     });
   }
 

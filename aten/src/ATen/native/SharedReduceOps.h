@@ -201,8 +201,8 @@ struct AbsMinOps {
     return MIN(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
+  inline C10_DEVICE scalar_t project(acc_t a) const {
+    return static_cast<scalar_t>(a);
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
@@ -231,8 +231,8 @@ struct AbsMaxOps {
     return MAX(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
+  inline C10_DEVICE scalar_t project(acc_t a) const {
+    return static_cast<scalar_t>(a);
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
@@ -262,8 +262,9 @@ struct NormOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return compat_pow(a, static_cast<acc_t>(1.0) / norm_);
+  inline C10_DEVICE scalar_t project(acc_t a) const {
+    auto re = compat_pow(a, static_cast<acc_t>(1.0) / norm_);
+    return static_cast<scalar_t>(re);
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
@@ -294,8 +295,8 @@ struct NormZeroOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
+  inline C10_DEVICE scalar_t project(acc_t a) const {
+    return static_cast<scalar_t>(a);
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
@@ -324,8 +325,8 @@ struct NormOneOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
+  inline C10_DEVICE scalar_t project(acc_t a) const {
+    return static_cast<scalar_t>(a);
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
@@ -373,8 +374,9 @@ struct NormTwoOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return device_sqrt(a);
+  inline C10_DEVICE scalar_t project(acc_t a) const {
+    auto re = device_sqrt(a);
+    return static_cast<scalar_t>(re);
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
@@ -520,8 +522,8 @@ struct MinMaxOps {
     return {min_val, max_val};
   }
 
-  inline C10_DEVICE acc_t project(acc_t acc) const {
-    return acc;
+  inline C10_DEVICE scalar_t project(acc_t acc) const {
+    return static_cast<scalar_t>(acc);
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
