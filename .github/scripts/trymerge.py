@@ -34,6 +34,7 @@ from gitutils import (
     get_git_repo_dir,
     patterns_to_regex,
 )
+from export_pytorch_labels import get_pytorch_labels
 from trymerge_explainer import (
     TryMergeExplainer,
     get_revert_message,
@@ -1342,6 +1343,15 @@ def validate_land_time_checks(org: str, project: str, commit: str) -> None:
 def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
 
+def get_release_notes_labels() -> List[str]:
+    return [label for label in get_pytorch_labels() if label.lstrip().startswith("release notes:")]
+
+def has_required_labels(pr: GitHubPR) -> bool:
+    pr_labels = pr.get_labels()
+    # Check if PR is not user facing
+    is_not_user_facing_pr = any(label.strip() == "topic: not user facing" for label in pr_labels)
+    return is_not_user_facing_pr or any(label.strip() in get_release_notes_labels() for label in pr_labels)
+
 def categorize_checks(check_runs: Dict[str, WorkflowCheckState],
                       required_checks: Iterable[str]) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
     pending_checks: List[Tuple[str, Optional[str]]] = []
@@ -1509,6 +1519,16 @@ def main() -> None:
 
     if pr.is_cross_repo() and pr.is_ghstack_pr():
         gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
+        return
+
+    if not has_required_labels(pr):
+        gh_post_pr_comment(
+            org,
+            project,
+            args.pr_num,
+            "Can't merge without required labels, see CI job check_labels comment for details",
+            dry_run=args.dry_run,
+        )
         return
 
     try:

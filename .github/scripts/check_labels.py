@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """check_labels.py"""
 
-from typing import Any, List
+from typing import Any
 
-from export_pytorch_labels import get_pytorch_labels
 from gitutils import (
     get_git_remote_name,
     get_git_repo_dir,
@@ -12,6 +11,7 @@ from gitutils import (
 from trymerge import (
     _fetch_url,
     gh_post_pr_comment,
+    has_required_labels,
     GitHubPR,
 )
 
@@ -27,20 +27,9 @@ ERR_MSG = (
 )
 
 
-def get_release_notes_labels() -> List[str]:
-    return [label for label in get_pytorch_labels() if label.lstrip().startswith("release notes:")]
-
-
 def delete_comment(comment_id: int) -> None:
     url = f"https://api.github.com/repos/pytorch/pytorch/issues/comments/{comment_id}"
     _fetch_url(url, method="DELETE")
-
-
-def has_required_labels(pr: GitHubPR) -> bool:
-    pr_labels = pr.get_labels()
-    # Check if PR is not user facing
-    is_not_user_facing_pr = any(label.strip() == "topic: not user facing" for label in pr_labels)
-    return is_not_user_facing_pr or any(label.strip() in get_release_notes_labels() for label in pr_labels)
 
 
 def delete_comments(pr: GitHubPR) -> None:
@@ -76,7 +65,6 @@ def main() -> None:
         if not has_required_labels(pr):
             print(ERR_MSG)
             add_comment(pr)
-            exit(1)
         else:
             delete_comments(pr)
     except Exception as e:
