@@ -210,7 +210,7 @@ class TritonOverrides(OpOverrides):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
         return ops.where(
-            new_mask, result, TritonOverrides.constant(other, torch.float32)
+            new_mask, result, triton_constant(other)
         )
 
     @staticmethod
