@@ -716,10 +716,8 @@ def logsumexp(
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
     maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
     maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)  # type: ignore[arg-type]
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
 
@@ -3380,8 +3378,11 @@ def softmax(
     result_dtype = dtype or a.dtype
     computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
-    a_max = amax(a_, dim, keepdim=True)
-    a_exp = exp(a_ - a_max)
+    if a.numel() == 0:
+        a_exp = exp(a_)
+    else:
+        a_max = amax(a_, dim, keepdim=True)
+        a_exp = exp(a_ - a_max)
     return _maybe_convert_to_dtype(
         true_divide(a_exp, sum(a_exp, dim, keepdim=True)), result_dtype
     )  # type: ignore[return-value]
