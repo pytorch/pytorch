@@ -325,7 +325,7 @@ magic_methods = {
 }
 
 sizes_strides_methods = {
-    'is_non_overlapping_and_dense': IsNonOverlappingAndDenseIndicator,
+    'is_non_overlapping_and_dense': lambda *args: IsNonOverlappingAndDenseIndicator(*args),
 }
 
 def eval_is_non_overlapping_and_dense(sizes, strides):
