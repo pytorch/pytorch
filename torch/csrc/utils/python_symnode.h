@@ -35,19 +35,19 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   c10::SymNode wrap_int(int64_t num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap_int")(num);
-    return c10::make_intrusive<PythonSymNodeImpl>(r);
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
   }
 
   c10::SymNode wrap_float(double num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap_float")(num);
-    return c10::make_intrusive<PythonSymNodeImpl>(r);
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
   }
 
   c10::SymNode wrap_bool(bool num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap_bool")(num);
-    return c10::make_intrusive<PythonSymNodeImpl>(r);
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
   }
 
   c10::SymNode is_non_overlapping_and_dense(
@@ -55,7 +55,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
       c10::ArrayRef<c10::SymNode> strides) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("is_non_overlapping_and_dense")(sizes, strides);
-    return c10::make_intrusive<PythonSymNodeImpl>(r);
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
   }
 
   bool bool_() override {
