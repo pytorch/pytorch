@@ -1136,16 +1136,16 @@ class MultiThreadedTestCase(TestCase):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
 
-    def assertEqualOnRank(self, x, y, rank=0):
+    def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
         """
         The reason why we have this util function instead of
         self.assertEqual is all threads are sharing one CPU RNG
         so the assertion result is only reliable on rank 0
         """
         if self.rank == rank:
-            self.assertEqual(x, y)
+            self.assertEqual(x, y, msg)
 
-    def assertNotEqualOnRank(self, x, y, rank):
+    def assertNotEqualOnRank(self, x, y, msg=None, *, rank=0):
         if self.rank == rank:
             self.assertNotEqual(x, y)
 
