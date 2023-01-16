@@ -225,10 +225,7 @@ void TensorImpl::HandleResize() {
 }
 
 template <typename T>
-bool _compute_contiguous(
-    ArrayRef<T> sizes,
-    ArrayRef<T> strides,
-    T numel) {
+bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   bool is_contiguous = true;
   if (numel == 0)
     return is_contiguous;
@@ -252,14 +249,18 @@ bool TensorImpl::compute_contiguous(identity<bool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_contiguous<int64_t>(sizes_and_strides_.sizes_arrayref(), sizes_and_strides_.strides_arrayref(), numel_);
+  return _compute_contiguous<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref(),
+      numel_);
 }
 
 SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_contiguous<c10::SymInt>(extra_meta_->sizes_, extra_meta_->strides_, extra_meta_->numel_);
+  return _compute_contiguous<c10::SymInt>(
+      extra_meta_->sizes_, extra_meta_->strides_, extra_meta_->numel_);
 }
 
 template <typename T>
@@ -295,14 +296,18 @@ bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_channels_last_contiguous_2d<int64_t>(sizes_and_strides_.sizes_arrayref(), sizes_and_strides_.strides_arrayref());
+  return _compute_channels_last_contiguous_2d<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
-SymBool TensorImpl::compute_channels_last_contiguous_2d(identity<SymBool>) const {
+SymBool TensorImpl::compute_channels_last_contiguous_2d(
+    identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_channels_last_contiguous_2d<c10::SymInt>(extra_meta_->sizes_, extra_meta_->strides_);
+  return _compute_channels_last_contiguous_2d<c10::SymInt>(
+      extra_meta_->sizes_, extra_meta_->strides_);
 }
 
 template <typename T>
@@ -338,42 +343,54 @@ bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_channels_last_contiguous_3d<int64_t>(sizes_and_strides_.sizes_arrayref(), sizes_and_strides_.strides_arrayref());
+  return _compute_channels_last_contiguous_3d<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
-SymBool TensorImpl::compute_channels_last_contiguous_3d(identity<SymBool>) const {
+SymBool TensorImpl::compute_channels_last_contiguous_3d(
+    identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_channels_last_contiguous_3d<c10::SymInt>(extra_meta_->sizes_, extra_meta_->strides_);
+  return _compute_channels_last_contiguous_3d<c10::SymInt>(
+      extra_meta_->sizes_, extra_meta_->strides_);
 }
 
 bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_2d<int64_t>(sizes_and_strides_.sizes_arrayref(), sizes_and_strides_.strides_arrayref());
+  return is_channels_last_strides_2d<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
-SymBool TensorImpl::compute_strides_like_channels_last_2d(identity<SymBool>) const {
+SymBool TensorImpl::compute_strides_like_channels_last_2d(
+    identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_2d<c10::SymInt>(extra_meta_->sizes_, extra_meta_->strides_);
+  return is_channels_last_strides_2d<c10::SymInt>(
+      extra_meta_->sizes_, extra_meta_->strides_);
 }
 
 bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_3d<int64_t>(sizes_and_strides_.sizes_arrayref(), sizes_and_strides_.strides_arrayref());
+  return is_channels_last_strides_3d<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
-SymBool TensorImpl::compute_strides_like_channels_last_3d(identity<SymBool>) const {
+SymBool TensorImpl::compute_strides_like_channels_last_3d(
+    identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_3d<c10::SymInt>(extra_meta_->sizes_, extra_meta_->strides_);
+  return is_channels_last_strides_3d<c10::SymInt>(
+      extra_meta_->sizes_, extra_meta_->strides_);
 }
 
 template <typename T>
@@ -416,14 +433,17 @@ bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_non_overlapping_and_dense<int64_t>(sizes_and_strides_.sizes_arrayref(), sizes_and_strides_.strides_arrayref());
+  return _compute_non_overlapping_and_dense<int64_t>(
+      sizes_and_strides_.sizes_arrayref(),
+      sizes_and_strides_.strides_arrayref());
 }
 
 SymBool TensorImpl::compute_non_overlapping_and_dense(identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_non_overlapping_and_dense<c10::SymInt>(extra_meta_->sizes_, extra_meta_->strides_);
+  return _compute_non_overlapping_and_dense<c10::SymInt>(
+      extra_meta_->sizes_, extra_meta_->strides_);
 }
 
 void TensorImpl::release_resources() {
