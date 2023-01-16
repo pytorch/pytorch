@@ -196,10 +196,10 @@ struct QuantizedCellParams : public CellParamsBase {
       Tensor _packed_hh,
       Tensor _col_offsets_ih,
       Tensor _col_offsets_hh,
-      const Scalar& _scale_ih,
-      const Scalar& _scale_hh,
-      const Scalar& _zero_point_ih,
-      const Scalar& _zero_point_hh)
+      Scalar _scale_ih,
+      Scalar _scale_hh,
+      Scalar _zero_point_ih,
+      Scalar _zero_point_hh)
       : w_ih(std::move(_w_ih)),
         w_hh(std::move(_w_hh)),
         b_ih_(std::move(_b_ih)),
@@ -208,13 +208,9 @@ struct QuantizedCellParams : public CellParamsBase {
         packed_hh(std::move(_packed_hh)),
         col_offsets_ih(std::move(_col_offsets_ih)),
         col_offsets_hh(std::move(_col_offsets_hh)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         scale_ih(std::move(_scale_ih)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         scale_hh(std::move(_scale_hh)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         zero_point_ih(std::move(_zero_point_ih)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         zero_point_hh(std::move(_zero_point_hh)) {}
 
   const Tensor w_ih;
@@ -259,11 +255,8 @@ struct QuantizedCellParams : public CellParamsBase {
                                                zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(tensors_to_serialize),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(doubles_to_serialize),
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(longs_to_serialize),
         {});
   }
