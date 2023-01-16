@@ -484,15 +484,23 @@ class TestDecomp(TestCase):
                 decomposition = decomposition_table[func]
 
                 do_relative_check = test_dtype in [torch.float16, torch.bfloat16]
-                real_out_unflat = func(*args, **kwargs)
-                real_out, _ = tree_flatten(real_out_unflat)
-
                 if run_all:
                     # Execute recursively via DFS, to find the root of a possible error first
                     with self:
                         decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
                 else:
                     decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+
+                # At this stage we should not be decomposing an in-place op
+                # We'd like to have decompositions that decompose out-of-place ops into out-of-place ops
+                #  because decompositions are run after functionalisation and we would not like them to
+                #  de-functionalise the graph, as that would break AoTAutograd
+                # We run the real function *after* the decomposition to make sure that the
+                # decomposition does not modify any of the inputs in-place. If it does
+                # real_out should be differen than decom_out so we should catch this
+                real_out_unflat = func(*args, **kwargs)
+                real_out, _ = tree_flatten(real_out_unflat)
+
                 assert len(real_out) == len(decomp_out)
 
                 if do_relative_check:
