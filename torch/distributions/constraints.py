@@ -3,6 +3,8 @@ The following constraints are implemented:
 
 - ``constraints.boolean``
 - ``constraints.cat``
+- ``constraints.complex``
+- ``constraints.complex_vector``
 - ``constraints.corr_cholesky``
 - ``constraints.dependent``
 - ``constraints.greater_than(lower_bound)``
@@ -305,9 +307,18 @@ class _Real(Constraint):
     Trivially constrain to the extended real line `[-inf, inf]`.
     """
     def check(self, value):
-        return value == value  # False for NANs.
+        return not torch.is_complex(value) and value == value  # False for NaNs.
 
+    
+class _Complex(Constraint):
+    """
+    Trivially constrain to the extended real line `[-inf, inf]` for both the
+    real and imaginary part.
+    """
+    def check(self, value):
+        return torch.is_complex(value) and value == value  # False for NaNs.
 
+    
 class _GreaterThan(Constraint):
     """
     Constrain to a real half line `(lower_bound, inf]`.
@@ -588,6 +599,8 @@ positive_integer = _IntegerGreaterThan(1)
 integer_interval = _IntegerInterval
 real = _Real()
 real_vector = independent(real, 1)
+complex = _Complex()
+complex_vector = independent(complex, 1)
 positive = _GreaterThan(0.)
 nonnegative = _GreaterThanEq(0.)
 greater_than = _GreaterThan
