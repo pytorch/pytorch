@@ -377,6 +377,7 @@ class TestModuleHooks(TestCase):
             forward_pre_hook_handle.id in model._forward_pre_hooks_with_kwargs
         )
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_bw_hook_warning_for_non_tensor_or_tuple(self):
         # Test to verify that backward hook raises warning
         # if result is not a Tensor or tuple of Tensors.
