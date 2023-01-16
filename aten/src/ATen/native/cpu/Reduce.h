@@ -118,9 +118,10 @@ static inline void vectorized_outer_reduction(char** data, int64_t inner_stride,
 template<typename traits, typename res_t>
 static void set_result(const int index, const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
   // static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
+  using out_t = typename traits::arg2_t;
   if (index < num_outputs) {
     char *out = (char *) iter.data_ptr(index);
-    *(res_t *) out = result;
+    *(out_t *) out =  static_cast<out_t>(result);
   }
 }
 
