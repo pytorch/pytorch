@@ -1171,6 +1171,7 @@ void initJITBindings(PyObject* module) {
       SYMNODE_BINARY(floordiv)
       SYMNODE_BINARY(mod)
       SYMNODE_BINARY(eq)
+      SYMNODE_BINARY(ne)
       SYMNODE_BINARY(gt)
       SYMNODE_BINARY(lt)
       SYMNODE_BINARY(le)

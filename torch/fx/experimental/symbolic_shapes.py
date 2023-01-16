@@ -1,5 +1,5 @@
 import torch
-from typing import Set, Dict, List, Type, Optional, cast
+from typing import Set, Dict, List, Type, Optional, cast, Union
 import sys
 import itertools
 import operator
@@ -312,6 +312,7 @@ magic_methods = {
     **reflectable_magic_methods,
     'sym_not': lambda a: ~a,
     'eq': lambda a, b: sympy.Eq(a, b),
+    'ne': lambda a, b: sympy.Ne(a, b),
     'gt': lambda a, b: sympy.Gt(a, b),
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
@@ -386,7 +387,7 @@ magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
 always_int_magic_methods = {"ceil", "floor"}
-always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge", "and", "or", "sym_not", "is_non_overlapping_and_dense"}
+always_bool_magic_methods = {"eq", "ne", "gt", "lt", "le", "ge", "and", "or", "sym_not", "is_non_overlapping_and_dense"}
 
 def wrap_node(x):
     # TODO: let C++ also take advantage of this
@@ -1077,14 +1078,22 @@ class ShapeEnv(object):
         return self.replacements[a]
 
     @lru_cache(256)
-    def _maybe_guard_eq(self, expr: "sympy.Eq") -> None:
+    def _maybe_guard_eq(self, expr: Union["sympy.Eq", "sympy.Ne"]) -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
         simplify shapes (i.e. a == b or a % 5 == 0)
         """
         concrete_bool = bool(self.size_hint(expr))
-        if not concrete_bool:
-            return
+        if isinstance(expr, sympy.Eq):
+            if not concrete_bool:
+                return
+        # NB: Apparently this is load bearing; to see what test fails if
+        # you comment it out run:
+        # python test/functorch/test_aotdispatch.py -k
+        # test_aot_autograd_symbolic_module_exhaustive_nn_LazyConv3d_cpu_float32
+        elif isinstance(expr, sympy.Ne):
+            if concrete_bool:
+                return
         free = list(expr.free_symbols)
 
         assert len(free) > 0, "The expression should not be static by this point"
@@ -1127,7 +1136,7 @@ class ShapeEnv(object):
         if static_expr is not None:
             return static_expr
 
-        if isinstance(expr, sympy.Eq):
+        if isinstance(expr, (sympy.Eq, sympy.Ne)):
             self._maybe_guard_eq(expr)
             # TODO: If we successfully eliminate a symbol via equality, it
             # is not actually necessary to save a guard for the equality,
