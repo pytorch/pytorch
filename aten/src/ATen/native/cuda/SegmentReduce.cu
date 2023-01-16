@@ -17,8 +17,7 @@
 #include <ATen/ops/cumsum.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 struct CustomMax {
@@ -620,5 +619,4 @@ REGISTER_DISPATCH(
   _segment_reduce_offsets_backward_stub,
   &_segment_reduce_offsets_backward_cuda_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
