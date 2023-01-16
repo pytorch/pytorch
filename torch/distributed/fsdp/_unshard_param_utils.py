@@ -42,33 +42,29 @@ def _writeback_to_local_shard(
     padded unsharded flattened parameter.
     """
     for handle in handles:
-        # For `NO_SHARD`, `_local_shard` is the unsharded flattened
-        # parameter and `grad` is the unsharded gradient, so there is no
-        # need to writeback for either
-        if not handle.uses_sharded_strategy:
-            continue
-        assert (
-            handle.flat_param.ndim == 1
-        ), f"Expects `flat_param` to be flattened but got {handle.flat_param.shape}"
 
-        # Get the unpadded shard instead of the padded shard to persist
-        # user changes to the padding (though FSDP does not explicitly
-        # support this)
-        param_shard, _ = FlatParamHandle._get_unpadded_shard(
-            handle.flat_param,
-            handle.rank,
-            handle.world_size,
-        )
+        def _get_shard(flat_param_or_grad: torch.Tensor) -> torch.Tensor:
+            if handle.uses_sharded_strategy:
+                # For sharded strategies, get the *unpadded* shard instead of
+                # the *padded* shard to persist user changes to the padding
+                # (though FSDP does not explicitly support this)
+                shard, _ = FlatParamHandle._get_unpadded_shard(
+                    flat_param_or_grad,
+                    handle.rank,
+                    handle.world_size,
+                )
+                return shard
+            # For `NO_SHARD`, the `flat_param` or its gradient may be modified,
+            # so we write it back directly
+            return flat_param_or_grad
+
+        param_shard = _get_shard(handle.flat_param)
         handle.flat_param._local_shard[: param_shard.numel()].copy_(param_shard)  # type: ignore[attr-defined]
         if writeback_grad:
             existing_grad = handle.sharded_grad
             if existing_grad is not None:
                 assert handle.flat_param.grad is not None
-                grad_shard, _ = FlatParamHandle._get_unpadded_shard(
-                    handle.flat_param.grad,
-                    handle.rank,
-                    handle.world_size,
-                )
+                grad_shard = _get_shard(handle.flat_param.grad)
                 existing_grad[: grad_shard.numel()].copy_(grad_shard)
 
 
@@ -138,10 +134,18 @@ def _validate_unshard_params_args(
             f"offload_to_cpu={offload_to_cpu} "
             f"is not supported yet"
         )
+    if offload_to_cpu and any(
+        not handle.uses_sharded_strategy for handle in state._handles
+    ):
+        raise NotImplementedError(
+            "offload_to_cpu=True and NO_SHARD is not supported yet"
+        )
     if writeback and rank0_only:
         # TODO: Rank 0 can broadcast the `FlatParameter` to allow all ranks to
         # persist the changes.
-        raise ValueError("writeback=True and rank0_only=True is not supported yet")
+        raise NotImplementedError(
+            "writeback=True and rank0_only=True is not supported yet"
+        )
     if offload_to_cpu and not rank0_only:
         warnings.warn(
             "offload_to_cpu=True and rank0_only=False may result in the"
@@ -179,8 +183,9 @@ def _unshard_fsdp_state_params(
         return
 
     for handle in handles:
-        if handle._training_state != HandleTrainingState.IDLE:
-            raise ValueError(f"Current handle state is {handle._training_state}")
+        assert (
+            handle._training_state == HandleTrainingState.IDLE
+        ), f"Expects the handle training to be IDLE but got {handle._training_state}"
 
     for handle in handles:
         handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
@@ -243,6 +248,7 @@ def _unshard_params_recurse(
     """
     This is a helper for :func:`_unshard_params` that recursively calls
     :func:`_unshard_fsdp_state_params` on FSDP states if ``recurse=True``.
+    NOTE: This runs lazy initialization.
     """
     _validate_unshard_params_args(
         state, writeback, rank0_only, offload_to_cpu, with_grads
@@ -269,6 +275,14 @@ def _unshard_params_recurse(
             yield
         return
     _lazy_init(state, module)
+    if state.training_state == TrainingState.FORWARD_BACKWARD:
+        raise AssertionError(
+            "Cannot manually unshard parameters during forward/backward"
+        )
+    elif state.training_state == TrainingState.SUMMON_FULL_PARAMS:
+        raise AssertionError(
+            "Cannot manually unshard parameters when already unsharding parameters"
+        )
     with _unshard_fsdp_state_params(
         module=module,
         state=state,
