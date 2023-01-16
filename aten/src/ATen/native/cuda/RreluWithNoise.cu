@@ -14,7 +14,7 @@
 #endif
 
 
-namespace at { namespace native {
+namespace at::native {
 
 template <typename scalar_t, int unroll_factor, typename F>
 #if __CUDA_ARCH__ >= 350 || defined USE_ROCM
@@ -192,4 +192,4 @@ Tensor& rrelu_with_noise_cuda_(
       self, noise, lower, upper, training, generator, self);
 }
 
-}}  // namespace at::native
+}  // namespace at::native
