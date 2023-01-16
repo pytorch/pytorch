@@ -484,10 +484,10 @@ def gen_pyi(
                 ),
             ],
             "full": [
-                "def full(size: _size, fill_value: Number, *,"
+                "def full(size: _size, fill_value: Union[Number, _complex], *,"
                 " out: Optional[Tensor]=None,"
                 " layout: _layout=strided, {}) -> Tensor: ...".format(FACTORY_PARAMS),
-                "def full(size: _size, fill_value: Number, *,"
+                "def full(size: _size, fill_value: Union[Number, _complex], *,"
                 " names: List[Union[str, None]],"
                 " layout: _layout=strided, {}) -> Tensor: ...".format(FACTORY_PARAMS),
             ],
