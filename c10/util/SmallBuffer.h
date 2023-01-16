@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <type_traits>
 
 /** Helper class for allocating temporary fixed size arrays with SBO.
@@ -19,7 +20,7 @@ class SmallBuffer {
       std::is_trivial<T>::value,
       "SmallBuffer is intended for POD types");
 
-  T storage_[N];
+  std::array<T, N> storage_;
   size_t size_{};
   T* data_{};
 
@@ -42,9 +43,7 @@ class SmallBuffer {
       data_ = rhs.data_;
       rhs.data_ = nullptr;
     } else {
-      for (size_t i = 0; i < N; i++) {
-        storage_[i] = rhs.storage_[i];
-      }
+      storage_ = std::move(rhs.storage_);
       data_ = &storage_[0];
     }
   }
