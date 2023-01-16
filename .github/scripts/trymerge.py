@@ -921,6 +921,14 @@ class GitHubPR:
         msg += f"Approved by: {approved_by_urls}\n"
         return msg
 
+    def add_numbered_label(self, label_base: str) -> None:
+        labels = self.get_labels()
+        label = label_base
+        for i in range(len(labels) if labels is not None else 0):
+            if label in labels:
+                label = f"{label_base}X{i+2}"
+        gh_add_labels(self.org, self.project, self.pr_num, [label])
+
     def merge_into(self, repo: GitRepo, *,
                    skip_mandatory_checks: bool = False,
                    dry_run: bool = False,
@@ -939,9 +947,9 @@ class GitHubPR:
         if not dry_run:
             if land_check_commit:
                 self.delete_land_time_check_branch(repo)
-            gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
+            self.add_numbered_label("merged")
             for pr in additional_merged_prs:
-                gh_add_labels(self.org, self.project, pr.pr_num, ["merged"])
+                pr.add_numbered_label("merged")
 
     def merge_changes(self,
                       repo: GitRepo,
@@ -1292,7 +1300,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
     repo.push(pr.default_branch(), dry_run)
     post_comment(f"@{pr.get_pr_creator_login()} your PR has been successfully reverted.")
     if not dry_run:
-        gh_add_labels(pr.org, pr.project, pr.pr_num, ["reverted"])
+        pr.add_numbered_label("reverted")
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
 
 
