@@ -3,7 +3,6 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
 #include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -59,10 +58,6 @@
 // the best algo and the updated descriptor. If we don't update the descriptor but just run
 // with the best algo, under the hood, cudnn will run with the slower kernel
 // since it sees fastest algorithm combination with a sub optimal mathType.
-
-// Note [blocklist fft algorithms for strided dgrad]
-// This is a workaround for a CuDNN bug that gave wrong results in certain strided convolution
-// gradient setups. Check Issue #16610 for bug details. Bug is there for CUDNN version < 7.5 .
 
 constexpr size_t operator "" _TiB(unsigned long long n) {
   return size_t(n) * 1024 * 1024 * 1024 * 1024;
@@ -225,15 +220,6 @@ size_t getMaxWorkspaceSize(
 template<typename perf_t>
 std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArgs& args, int n_algo) {
 
-// See Note [blocklist fft algorithms for strided dgrad]
-#if CUDNN_VERSION < 7500
-  bool blocklist = std::is_same<decltype(perfResults[0].algo), cudnnConvolutionBwdDataAlgo_t>::value;
-  int stride_dim = args.input.dim() - 2;
-  blocklist &= std::any_of(std::begin(args.params.stride),
-                            std::begin(args.params.stride) + stride_dim,
-                            [=](int n){return n != 1;});
-#endif
-
   std::vector<perf_t> result;
   result.reserve(n_algo);
   for (const auto i : c10::irange(n_algo)) {
@@ -243,16 +229,6 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
     // Double check documentation for cudnnFindConvolutionForwardAlgorithmEx
     if (perf.status == CUDNN_STATUS_SUCCESS) {
       if (!args.params.deterministic || perf.determinism == CUDNN_DETERMINISTIC) {
-
-        // See Note [blocklist fft algorithms for strided dgrad]
-#if CUDNN_VERSION < 7500
-        bool skip = blocklist;
-        skip &= (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING ||
-                  static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT);
-        if (skip) {
-          continue;
-        }
-#endif
 
         result.push_back(perf);
       }
@@ -493,11 +469,9 @@ public:
       perfResults[0].mathType = CUDNN_TENSOR_OP_MATH;
     } else {
       perfResults[0].mathType = CUDNN_DEFAULT_MATH;
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
       if (args.params.dataType == CUDNN_DATA_FLOAT && !args.params.allow_tf32) {
         perfResults[0].mathType = CUDNN_FMA_MATH;
       }
-#endif
     }
     search::getWorkspaceSize(args, perfResults[0].algo, &(perfResults[0].memory));
     return perfResults;
@@ -610,14 +584,10 @@ static inline void split_batch_dim_to_32bit_out(
 }
 
 
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
 #define ASSERT_CORRECT_PRECISION(math_type)                                     \
 if (args.params.dataType == CUDNN_DATA_FLOAT) {                                 \
   TORCH_INTERNAL_ASSERT(args.params.allow_tf32 || math_type == CUDNN_FMA_MATH); \
 }
-#else
-#define ASSERT_CORRECT_PRECISION(math_type)
-#endif  // CUDNN_VERSION >= 8000
 
 
 // ---------------------------------------------------------------------
@@ -672,11 +642,7 @@ void raw_cudnn_convolution_forward_out_32bit(
 }
 
 
-#if !HAS_CUDNN_V8()
-void raw_cudnn_convolution_forward_out(
-#else
 void raw_cudnn_convolution_forward_out_v7(
-#endif
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
@@ -734,11 +700,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
   );
 }
 
-#if !HAS_CUDNN_V8()
-void raw_cudnn_convolution_backward_input_out(
-#else
 void raw_cudnn_convolution_backward_input_out_v7(
-#endif
     const at::Tensor& grad_input,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
@@ -797,11 +759,7 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
   );
 }
 
-#if !HAS_CUDNN_V8()
-void raw_cudnn_convolution_backward_weight_out(
-#else
 void raw_cudnn_convolution_backward_weight_out_v7(
-#endif
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
@@ -853,12 +811,7 @@ void raw_cudnn_convolution_backward_weight_out_v7(
   TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
-#if !HAS_CUDNN_V8()
-void raw_cudnn_convolution_add_relu_out(
-#else
 void raw_cudnn_convolution_add_relu_out_v7(
-#endif
-
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,
