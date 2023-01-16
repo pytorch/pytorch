@@ -80,8 +80,8 @@ PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.r
 
 ## Developing PyTorch
 
-A full set of instructions on installing PyTorch from source is here:
-https://github.com/pytorch/pytorch#from-source
+A full set of instructions on installing PyTorch from source can be found here:
+https://github.com/pytorch/pytorch#from-source.
 
 To develop PyTorch on your machine, here are some tips:
 
