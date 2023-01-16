@@ -690,7 +690,7 @@ int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Ten
 //     S: Source sequence length
 //     L: Target sequence length
 //     E: Embedding dimension
-Tensor _scaled_dot_product_attention(
+Tensor scaled_dot_product_attention(
     const Tensor& query_,
     const Tensor& key,
     const Tensor& value,

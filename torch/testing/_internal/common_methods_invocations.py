@@ -12541,9 +12541,9 @@ op_db: List[OpInfo] = [
             ), ],
     ),
     OpInfo(
-        'nn.functional._scaled_dot_product_attention',
+        'nn.functional.scaled_dot_product_attention',
         op=lambda *args, **kwargs:
-               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
+               wrapper_set_seed(torch.nn.functional.scaled_dot_product_attention, *args, **kwargs),
         sample_inputs_func=sample_inputs_scaled_dot_product_attention,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),

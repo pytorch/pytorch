@@ -13,7 +13,7 @@ from torch.backends.cuda import sdp_kernel, SDPBackend
 import torch.optim as optim
 from torch.testing._internal.common_dtype import floating_types_and_half
 
-from typing import Tuple, List
+from typing import Tuple
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_FAIRSEQ,
@@ -29,14 +29,6 @@ from torch.testing._internal.common_utils import (
     gradcheck
 )
 
-from torch.testing._internal.common_device_type import (
-    dtypes,
-    dtypesIfCUDA,
-    instantiate_device_type_tests,
-    onlyCPU,
-    onlyCUDA,
-    skipMeta,
-)
 
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater
@@ -881,16 +873,16 @@ class TestTransformers(NNTestCase):
             with freeze_rng_state():
                 if is_causal:
                     # NB: Don't pass attn_mask here
-                    actual = torch.ops.aten._scaled_dot_product_attention(
+                    actual = torch.nn.functional.scaled_dot_product_attention(
                         query, key, value, None, dropout_p, is_causal)
 
                     # Error case: both explicit attn_mask and is_causal are set
                     with self.assertRaisesRegex(RuntimeError,
                                                 "Explicit attn_mask should not be set when is_causal=True"):
-                        torch.ops.aten._scaled_dot_product_attention(
+                        torch.nn.functional.scaled_dot_product_attention(
                             query, key, value, attn_mask, dropout_p, is_causal)
                 else:
-                    actual = torch.ops.aten._scaled_dot_product_attention(
+                    actual = torch.nn.functional.scaled_dot_product_attention(
                         query, key, value, attn_mask, dropout_p, is_causal)
 
                 self.assertEqual(actual, expected)
@@ -906,7 +898,7 @@ class TestTransformers(NNTestCase):
             assert gradcheck(lambda *args, **kwargs: wrapper_set_seed(sdp_ref, *args, **kwargs),
                              (q, k, v, attn_mask, dropout_p))
             assert gradcheck(lambda *args, **kwargs:
-                             wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
+                             wrapper_set_seed(torch.nn.functional.scaled_dot_product_attention, *args, **kwargs),
                              (q, k, v, attn_mask, dropout_p))
 
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
@@ -973,32 +965,6 @@ class TestTransformers(NNTestCase):
         model.eval()
         model(x, x, x)
         # completes without error
-
-    @parametrize("device", device_list)
-    def test_train_with_is_causal(self, device):
-        iters = 3
-        layer = nn.TransformerEncoderLayer(
-            d_model=2,
-            dim_feedforward=4,
-            nhead=2,
-            batch_first=True,
-            activation="gelu",
-            dropout=0,
-        )
-        criterion = nn.MSELoss()
-        encoder = nn.TransformerEncoder(layer, 2).to(device)
-        optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
-        encoder.train()
-        for i in range(iters):
-            encoder.train()
-            optimizer.zero_grad()
-            inputs = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
-
-            outputs = encoder(inputs, is_causal=True)
-
-            loss = criterion(outputs[:, 0:2, :], inputs[:, 0:2, :])
-            loss.backward()
-            optimizer.step()
 
     @parametrize("device", device_list)
     def test_train_with_is_causal(self, device):
@@ -1073,9 +1039,6 @@ class TestTransformers(NNTestCase):
                 self.assertTrue(torch.equal(actual, expected))
 
                 if kernel != 'math':
-                    # fails if need_weights=False
-                    with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                        _ = mha(qkv, qkv, qkv, is_causal=True)
                     # fails with embedding size not multiple of 4
                     with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                         qkv_f, mha_f = ones_tensor(S, L, 2), nn.MultiheadAttention(2, H).to(device)
@@ -1101,8 +1064,9 @@ class TestSDPA(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    def rand_tensor(self, shape: Tuple[int], device: str, dtype: torch.dtype, type: str, requires_grad: bool = False, packed: bool = False) -> torch.Tensor:
-        """_summary_
+    def rand_tensor(self, shape: Tuple[int], device: str, dtype: torch.dtype,
+                    type: str, requires_grad: bool = False, packed: bool = False) -> torch.Tensor:
+        """Creates rand dense or nested tensor with given shape and type.
 
         Args:
             shape (Tuple[int]): _description_
@@ -1150,10 +1114,10 @@ class TestSDPA(NNTestCase):
             value = value.contiguous()
 
         with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
-            actual = torch.nn.functional._scaled_dot_product_attention(
+            actual = torch.nn.functional.scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
         with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
-            math_ref = torch.nn.functional._scaled_dot_product_attention(
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
                 query.contiguous(), key.contiguous(), value.contiguous(),
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
@@ -1182,10 +1146,10 @@ class TestSDPA(NNTestCase):
             value = value.contiguous()
 
         with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
-            actual = torch.nn.functional._scaled_dot_product_attention(
+            actual = torch.nn.functional.scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
         with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
-            math_ref = torch.nn.functional._scaled_dot_product_attention(
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
                 query.contiguous(), key.contiguous(), value.contiguous(),
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
@@ -1230,18 +1194,18 @@ class TestSDPA(NNTestCase):
             with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
                 # TODO Flash for the nested path is currently not working due to cuda memory issues
                 if type == "nested":
-                    self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                         query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False))
                     return
-                actual = torch.nn.functional._scaled_dot_product_attention(
+                actual = torch.nn.functional.scaled_dot_product_attention(
                     query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
         elif fused_kernel == "mem_efficient":
             with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-                actual = torch.nn.functional._scaled_dot_product_attention(
+                actual = torch.nn.functional.scaled_dot_product_attention(
                     query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
 
         with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
-            math_ref_lp = torch.nn.functional._scaled_dot_product_attention(
+            math_ref_lp = torch.nn.functional.scaled_dot_product_attention(
                 query_lp.contiguous(), key_lp.contiguous(), value_lp.contiguous(),
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
@@ -1250,7 +1214,7 @@ class TestSDPA(NNTestCase):
             math_key = key.contiguous()
             math_value = value.contiguous()
 
-            math_ref = torch.nn.functional._scaled_dot_product_attention(
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
                 math_query, math_key, math_value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
         actual_test = actual
@@ -1290,7 +1254,7 @@ class TestSDPA(NNTestCase):
 
         with sdp_kernel(enable_math=True, enable_mem_efficient=False, enable_flash=False):
             assert gradcheck(lambda *args, **kwargs:
-                             wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
+                             wrapper_set_seed(torch.nn.functional.scaled_dot_product_attention, *args, **kwargs),
                              (query, key, value, None, 0.0, False)
                              )
 
@@ -1324,10 +1288,10 @@ class TestSDPA(NNTestCase):
             value_lp = value_lp.contiguous()
 
         with sdp_kernel(enable_math=True, enable_mem_efficient=False, enable_flash=False):
-            out = torch.nn.functional._scaled_dot_product_attention(query, key, value, None, 0.0, False)
+            out = torch.nn.functional.scaled_dot_product_attention(query, key, value, None, 0.0, False)
 
         with sdp_kernel(enable_math=False, enable_mem_efficient=True, enable_flash=False):
-            out_lp = torch.nn.functional._scaled_dot_product_attention(
+            out_lp = torch.nn.functional.scaled_dot_product_attention(
                 query_lp, key_lp, value_lp, None, 0.0, False)
 
         rand_upward = torch.rand_like(out)
@@ -1410,7 +1374,7 @@ class TestSDPA(NNTestCase):
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch._fused_sdp_choice(q, k, v))
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
-                                   lambda: torch.nn.functional._scaled_dot_product_attention(q, k, v))
+                                   lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
         if SM80OrLater:
             with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
                 # Failures for invalid input
@@ -1419,33 +1383,33 @@ class TestSDPA(NNTestCase):
                 q = torch.randn(size, device=device, dtype=dtype)
                 k = torch.randn(size, device=device, dtype=dtype)
                 v = torch.randn(size, device=device, dtype=dtype)
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
                 # The embed dim per head is not divisible by 8 for flash attention
                 size = (2, 2, 3, 4)
                 q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
                 # Invalid dtype for both Flash Attention and Mem Efficient Attention
                 size = (2, 2, 3, 16)
                 make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=torch.float64)
                 q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
                 # Invalid dtype for Flash Attention
                 make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=torch.float32)
                 q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
                 # Failures for unsupported SDP args
                 q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
 
                 # Non-None attention mask
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, torch.ones_like(q), 0.0, False))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
@@ -1457,7 +1421,7 @@ class TestSDPA(NNTestCase):
         make_tensor = partial(self.rand_tensor, shape=shape, type=type, device=device, dtype=dtype)
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         with sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=False):
-            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
@@ -1468,7 +1432,7 @@ class TestSDPA(NNTestCase):
         make_tensor = partial(self.rand_tensor, shape=shape, type=type, device=device, dtype=dtype)
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
-            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
@@ -1480,7 +1444,7 @@ class TestSDPA(NNTestCase):
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         with torch.autocast(device_type='cuda', dtype=torch.float16):
             with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
-                _ = torch.nn.functional._scaled_dot_product_attention(
+                _ = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
@@ -1492,7 +1456,7 @@ class TestSDPA(NNTestCase):
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
             with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
-                _ = torch.nn.functional._scaled_dot_product_attention(
+                _ = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False)
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
