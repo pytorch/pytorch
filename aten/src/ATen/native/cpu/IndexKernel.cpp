@@ -530,7 +530,7 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
 
 
 template<int size0>
-int64_t vectorized_cpu_hflip_channels_last_uint8(char * C10_RESTRICT *data, const int64_t size, const int64_t stride) {
+int64_t vectorized_cpu_hflip_channels_last_i8(char * C10_RESTRICT *data, const int64_t size, const int64_t stride) {
 
   int64_t i = 0;
 #ifdef CPU_CAPABILITY_AVX2
@@ -605,7 +605,6 @@ int64_t vectorized_cpu_hflip_channels_last_uint8(char * C10_RESTRICT *data, cons
       auto b0 = _mm256_castsi128_si256(a0);
       auto a1 = _mm_loadu_si128((__m128i *) (input_ptr + usable_vec_half_stride));
       data_vec = _mm256_inserti128_si256(b0, a1, 1);
-
       input_ptr += usable_vec_stride;
 
       reversed_vec = _mm256_shuffle_epi8(data_vec, mask);
@@ -626,7 +625,7 @@ int64_t vectorized_cpu_hflip_channels_last_uint8(char * C10_RESTRICT *data, cons
   return i;
 }
 
-void cpu_hflip_channels_last_uint8_C(at::TensorIterator& iter) {
+void cpu_hflip_channels_last_i8_C(at::TensorIterator& iter) {
 
   auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
 
@@ -649,19 +648,19 @@ void cpu_hflip_channels_last_uint8_C(at::TensorIterator& iter) {
     int64_t i = 0;
 
     if (c == 2) {
-      i += vectorized_cpu_hflip_channels_last_uint8<2>(data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_i8<2>(data, size, stride);
     } else if (c == 3) {
-      i += vectorized_cpu_hflip_channels_last_uint8<3>(data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_i8<3>(data, size, stride);
     } else if (c == 4) {
-      i += vectorized_cpu_hflip_channels_last_uint8<4>(data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_i8<4>(data, size, stride);
     } else if (c == 5) {
-      i += vectorized_cpu_hflip_channels_last_uint8<5>(data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_i8<5>(data, size, stride);
     } else if (c == 6) {
-      i += vectorized_cpu_hflip_channels_last_uint8<6>(data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_i8<6>(data, size, stride);
     } else if (c == 7) {
-      i += vectorized_cpu_hflip_channels_last_uint8<7>(data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_i8<7>(data, size, stride);
     } else if (c == 8) {
-      i += vectorized_cpu_hflip_channels_last_uint8<8>(data, size, stride);
+      i += vectorized_cpu_hflip_channels_last_i8<8>(data, size, stride);
     }
 
     auto data_stride = size0 * stride;
@@ -754,9 +753,10 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       // a) channels last hflip on (N, C, H, W) and dtype=kByte, C in [2, 8]
       // b) flip dim=-2 on (N, ..., M, C) and dtype=kByte, C in [2, 8]
       auto output_strides = iter.strides(0);
+      auto iter_dtype = iter.dtype();
       auto c = -output_strides[1];
-      if (iter.dtype() == at::kByte && (c >= 2 && c <= 8)) {
-        return cpu_hflip_channels_last_uint8_C(iter);
+      if ((iter_dtype == at::kByte || iter_dtype == at::kChar) && (c >= 2 && c <= 8)) {
+        return cpu_hflip_channels_last_i8_C(iter);
       }
       // Special case: vertical flip using memcpy (faster than generic cpu_kernel_vec)
       return cpu_vflip_memcpy(iter);
