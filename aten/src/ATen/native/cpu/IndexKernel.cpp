@@ -609,13 +609,12 @@ int64_t vectorized_cpu_hflip_channels_last_uint8(char * C10_RESTRICT *data, cons
       input_ptr += usable_vec_stride;
 
       reversed_vec = _mm256_shuffle_epi8(data_vec, mask);
-      reversed_vec = _mm256_permute2x128_si256(reversed_vec, reversed_vec, 1);
 
       // write output in two parts
       output_ptr -= usable_vec_stride;
-      auto rev_vec_h = _mm256_extracti128_si256(reversed_vec, 1);
+      auto rev_vec_h = _mm256_extracti128_si256(reversed_vec, 0);
       _mm_storeu_si128((__m128i *) (output_ptr + usable_vec_half_stride), rev_vec_h);
-      auto rev_vec_l = _mm256_extracti128_si256(reversed_vec, 0);
+      auto rev_vec_l = _mm256_extracti128_si256(reversed_vec, 1);
       _mm_storeu_si128((__m128i *) output_ptr, rev_vec_l);
     }
     output_ptr -= (size0 - delta/2) * stride;
