@@ -761,11 +761,11 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
     const auto union_values = at::cat(
         {intersection._values(), at::zeros({1}, t._values().options()).expand_as(mask._values())},
         /*dim=*/0);
-    const auto union_sparse_t = at::sparse_coo_tensor(
+    const auto union_sparse_tensor = at::sparse_coo_tensor(
         union_indices,
         union_values,
         t.sizes());
-    return union_sparse_t;
+    return union_sparse_tensor;
   }
 
   const auto mask_values = mask._values();
