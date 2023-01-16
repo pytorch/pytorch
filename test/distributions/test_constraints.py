@@ -31,6 +31,8 @@ EXAMPLES = [
 CONSTRAINTS = [
     (constraints.real,),
     (constraints.real_vector,),
+    (constraints.complex,),
+    (constraints.complex_vector,),
     (constraints.positive,),
     (constraints.greater_than, [-10., -2, 0, 2, 10]),
     (constraints.greater_than, 0),
