@@ -91,8 +91,8 @@ from ._unshard_param_utils import (
     _deregister_orig_params,
     _register_flat_param,
     _register_orig_params,
+    _unshard_fsdp_state_params,
     _unshard_params,
-    _unshard_params_recurse,
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter
@@ -493,28 +493,16 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Returns:
             Module: self
         """
-        uninitialized = self._is_root is None
         self._assert_state(TrainingState.IDLE)
-        # TODO: Do we actually need to perform lazy initialization? If not,
-        # then replace with `_unshard_fsdp_state_params()`.
-        with _unshard_params_recurse(
-            self,
-            self,
-            recurse=False,
+        with _unshard_fsdp_state_params(
+            module=self,
+            state=self,
             writeback=True,
             rank0_only=False,
             offload_to_cpu=False,
             with_grads=False,
         ):
             ret = super().apply(fn)
-
-        # Reset lazy init called in `_unshard_params_recurse()` since `apply()`
-        # may have been called on FSDP instance that is not truly a root, in
-        # which case it will be incorrectly marked as one.
-        if uninitialized and self._is_root:
-            for module in traversal_utils._get_fsdp_states(self):
-                module._reset_lazy_init()
-
         return ret
 
     def _mixed_precision_enabled_for_buffers(self) -> bool:
