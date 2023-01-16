@@ -2094,7 +2094,7 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    f(X=k) = p^{k - 1} (1 - p)
+    f(X=k) = (1 - p)^{k - 1} p
 
 """,
 )
