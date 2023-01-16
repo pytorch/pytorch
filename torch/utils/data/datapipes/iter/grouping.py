@@ -216,6 +216,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
     Args:
         datapipe: Iterable datapipe to be grouped
         group_key_fn: Function used to generate group key from the data of the source datapipe
+        keep_key: Option to yield the matching key along with the items in a tuple,
+            resulting in `(key, item)`        
         buffer_size: The size of buffer for ungrouped data
         group_size: The max size of each group, a batch is yielded as soon as it reaches this size
         guaranteed_group_size: The guaranteed minimum group size to be yielded in case the buffer is full
@@ -245,6 +247,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                  datapipe: IterDataPipe[T_co],
                  group_key_fn: Callable,
                  *,
+                 keep_key: bool = False,                 
                  buffer_size: int = 10000,
                  group_size: Optional[int] = None,
                  guaranteed_group_size: Optional[int] = None,
@@ -253,6 +256,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.datapipe = datapipe
         self.group_key_fn = group_key_fn
 
+        self.keep_key = keep_key        
         self.max_buffer_size = buffer_size
         self.buffer_elements: DefaultDict[Any, List] = defaultdict(list)
         self.curr_buffer_size = 0
@@ -295,19 +299,24 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.curr_buffer_size += 1
 
             if self.group_size is not None and self.group_size == len(self.buffer_elements[key]):
-                yield self.wrapper_class(self.buffer_elements[key])
+                result = self.wrapper_class(self.buffer_elements[key])
+                yield (key, result) if self.keep_key else result
                 self.curr_buffer_size -= len(self.buffer_elements[key])
                 del self.buffer_elements[key]
 
             if self.curr_buffer_size == self.max_buffer_size:
                 result_to_yield = self._remove_biggest_key()
                 if result_to_yield is not None:
-                    yield self.wrapper_class(result_to_yield)
+                    result = self.wrapper_class(result_to_yield)
+                    yield (key, result) if self.keep_key else result
 
         for key in tuple(self.buffer_elements.keys()):
             res = self.buffer_elements.pop(key)
             self.curr_buffer_size -= len(res)
-            yield self.wrapper_class(res)
+            if self.keep_key:
+                yield key, self.wrapper_class(res)
+            else:
+                yield self.wrapper_class(res)
 
     def reset(self) -> None:
         self.curr_buffer_size = 0
@@ -317,6 +326,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         state = (
             self.datapipe,
             self.group_key_fn,
+            self.keep_key,
             self.max_buffer_size,
             self.group_size,
             self.guaranteed_group_size,
@@ -333,6 +343,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         (
             self.datapipe,
             self.group_key_fn,
+            self.keep_key,            
             self.max_buffer_size,
             self.group_size,
             self.guaranteed_group_size,
