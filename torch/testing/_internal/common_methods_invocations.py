@@ -14292,8 +14292,6 @@ op_db: List[OpInfo] = [
                                     'TestCommon', 'test_noncontiguous_samples',
                                     device_type='cuda')],
            skips=(
-               # need to add pin_memory support to primTorch
-               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -14320,8 +14318,6 @@ op_db: List[OpInfo] = [
                                     'TestCommon', 'test_noncontiguous_samples',
                                     device_type='cuda')],
            skips=(
-               # need to add pin_memory support to primTorch
-               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -15004,8 +15000,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-               # Reference doesn't support the pin_memory parameter
-               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
                # CPU randn generates different values based on the strides of out tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
                # randn fails to warn when resizing its out tensor
