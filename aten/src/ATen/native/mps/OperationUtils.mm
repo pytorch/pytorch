@@ -3,9 +3,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/mps/MPSAllocator.h>
 
-namespace at {
-namespace native {
-namespace mps {
+namespace at::native::mps {
 
 void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
   mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
@@ -409,6 +407,4 @@ private:
 
 REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallback);
 
-} // namespace mps
-} // namespace native
-} // namespace at
+} // namespace at::native::mps

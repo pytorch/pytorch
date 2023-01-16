@@ -4,9 +4,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 bool SimplifierHashType::operator==(const SimplifierHashType& other) const {
   return _h == other._h;
@@ -351,6 +349,4 @@ void HashProvider::visit(MinTermPtr v) {
   putHash(v, hash);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
