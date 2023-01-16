@@ -318,7 +318,7 @@ class _Complex(Constraint):
     real and imaginary part.
     """
     def check(self, value):
-        return torch.is_complex(value) and value == value  # False for NaNs.
+        return torch.is_complex(value) & torch.isnan(value).logical_not()
 
 
 class _GreaterThan(Constraint):
