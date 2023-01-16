@@ -1991,7 +1991,7 @@ class TestSparse(TestSparseBase):
             exp_v = torch.empty(4, 2, 0)
             expected = self.sparse_tensor(i, exp_v, torch.Size([5, 4, 2, 0]))
             self.assertEqual(res_dense_lhs.coalesce(), expected.coalesce())
-            #self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
+            self.assertEqual(res_sparse_lhs.coalesce(), expected.coalesce())
 
         _test_sparse_mask_hybrid_fixed()
 
