@@ -1456,7 +1456,9 @@ class CudaNonDefaultStream():
             self.beforeStreams.append(torch.cuda.current_stream(d))
             deviceStream = torch.cuda.Stream(device=d)
             self.beforeStreams[-1].synchronize()
-            torch._C._cuda_setStream(deviceStream._cdata)
+            torch._C._cuda_setStream(stream_id=deviceStream.stream_id,
+                                     device_index=deviceStream.device_index,
+                                     device_type=deviceStream.device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
     def __exit__(self, exec_type, exec_value, traceback):
@@ -1464,7 +1466,9 @@ class CudaNonDefaultStream():
         # CUDA devices.
         beforeDevice = torch.cuda.current_device()
         for d in range(torch.cuda.device_count()):
-            torch._C._cuda_setStream(self.beforeStreams[d]._cdata)
+            torch._C._cuda_setStream(stream_id=self.beforeStreams[d].stream_id,
+                                     device_index=self.beforeStreams[d].device_index,
+                                     device_type=self.beforeStreams[d].device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
 class CudaMemoryLeakCheck():
@@ -2215,6 +2219,29 @@ class TestCase(expecttest.TestCase):
     def setUp(self):
         check_if_enable(self)
         set_rng_seed(SEED)
+
+        # Save global check sparse tensor invariants state that can be
+        # restored from tearDown:
+        self._check_invariants = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+
+        # Enable invariant checks for all sparse tensors constructions
+        # including the unsafe ones. If this is not desired for some
+        # test case, use check_invariants=False optional argument to
+        # sparse tensor constructors or
+        # @torch.sparse.check_sparse_tensor_invariants(False)
+        # decorator to disable the invariant checks.
+        torch.sparse.check_sparse_tensor_invariants.enable()
+
+    def tearDown(self):
+        # There exists test cases that override TestCase.setUp
+        # definition, so we cannot assume that _check_invariants
+        # attribute is defined in general.
+        if hasattr(self, '_check_invariants'):
+            # Restore the global check sparse tensor invariants state
+            if self._check_invariants:
+                torch.sparse.check_sparse_tensor_invariants.enable()
+            else:
+                torch.sparse.check_sparse_tensor_invariants.disable()
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
@@ -4097,9 +4124,10 @@ def outs_and_grads(fn, graph_inps, inps):
     for out in pytree.tree_flatten(outs)[0]:
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
     for inp in pytree.tree_flatten(inps)[0]:
-        inp.grad = None
+        if isinstance(inp, torch.Tensor):
+            inp.grad = None
     return outs, grads
 
 def compare_equal_outs_and_grads(test, m1, m2, inps):
