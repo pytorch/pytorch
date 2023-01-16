@@ -380,7 +380,7 @@ public:
     return map(std::exp);
   }
   Vectorized<T> exp2() const {
-    return map([](T x) -> T { return exp2_impl(x); });
+    return map(exp2_impl);
   }
   Vectorized<T> expm1() const {
     return map(std::expm1);
