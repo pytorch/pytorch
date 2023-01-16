@@ -7,8 +7,7 @@
 #include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/native/TensorFactories.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 struct RandomCachedGraph : public MPSCachedGraph
@@ -636,5 +635,4 @@ Tensor multinomial_mps(
   return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
