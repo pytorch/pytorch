@@ -28,13 +28,6 @@ bool MulOp::apply(bool a, bool b) {
   return a && b;
 }
 
-struct LhsProjOp {
-  template <typename scalar_t>
-  static scalar_t apply(scalar_t a, scalar_t b) {
-    return a;
-  }
-};
-
 template <typename binary_op_t>
 struct CPUValueSelectionIntersectionKernel {
   static Tensor apply(
@@ -103,16 +96,6 @@ void mul_sparse_sparse_out_cpu_kernel(
   );
 }
 
-void sparse_mask_intersection_out_cpu_kernel(
-    Tensor& result,
-    const Tensor& x,
-    const Tensor& y) {
-  using CPUValueLhsProjKernel = CPUValueSelectionIntersectionKernel<LhsProjOp>;
-  _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, CPUValueLhsProjKernel>(
-      result, x, y
-  );
-}
-
 }
 
 REGISTER_ARCH_DISPATCH(mul_sparse_sparse_out_stub, DEFAULT, &mul_sparse_sparse_out_cpu_kernel);
@@ -121,9 +104,4 @@ REGISTER_AVX2_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cpu_ke
 REGISTER_VSX_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cpu_kernel);
 REGISTER_ZVECTOR_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cpu_kernel);
 
-REGISTER_ARCH_DISPATCH(sparse_mask_intersection_out_stub, DEFAULT, &sparse_mask_intersection_out_cpu_kernel);
-REGISTER_AVX512_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
-REGISTER_AVX2_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
-REGISTER_VSX_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
-REGISTER_ZVECTOR_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
 }}
