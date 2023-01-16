@@ -5462,7 +5462,10 @@ if HAS_CPU:
                 graph_lowering
             ):
                 # The moset inner loop variable is used in the index_expr
-                with CppVecKernelChecker(args=None, num_threads=1) as vec_checker:
+                tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+                with CppVecKernelChecker(
+                    args=None, num_threads=1, tiling_factor=tiling_factor
+                ) as vec_checker:
                     i32_iinfo = np.iinfo(np.int32)
                     f32_iinfo = np.finfo(np.float32)
                     InterpreterShim(_graph, submodules).run(
@@ -5544,8 +5547,12 @@ if HAS_CPU:
                 graph_lowering
             ):
                 itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
+
+                tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
                 # The moset inner loop variable is used in the index_expr
-                with CppVecKernelChecker(args=None, num_threads=1) as vec_checker:
+                with CppVecKernelChecker(
+                    args=None, num_threads=1, tiling_factor=tiling_factor
+                ) as vec_checker:
 
                     def get_index():
                         return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
@@ -5558,7 +5565,9 @@ if HAS_CPU:
                     self.assertFalse(vec_checker.simd_vec)
 
                 # Most inner loop variable irrevalant
-                with CppVecKernelChecker(args=None, num_threads=1) as vec_checker:
+                with CppVecKernelChecker(
+                    args=None, num_threads=1, tiling_factor=tiling_factor
+                ) as vec_checker:
 
                     def get_index():
                         return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
@@ -5575,7 +5584,9 @@ if HAS_CPU:
                 ranges = [_max_value, _max_value, _max_value]
                 # Most inner loop variable irrevalant but max value is greater than
                 # the max value of INT32
-                with CppVecKernelChecker(args=None, num_threads=1) as vec_checker:
+                with CppVecKernelChecker(
+                    args=None, num_threads=1, tiling_factor=tiling_factor
+                ) as vec_checker:
 
                     def get_index():
                         return itervars[0]
@@ -5588,7 +5599,9 @@ if HAS_CPU:
 
                 # Most inner loop variable irrevalant but min value is greater than
                 # the min value of INT32
-                with CppVecKernelChecker(args=None, num_threads=1) as vec_checker:
+                with CppVecKernelChecker(
+                    args=None, num_threads=1, tiling_factor=tiling_factor
+                ) as vec_checker:
 
                     def get_index():
                         return -itervars[0] - 2
