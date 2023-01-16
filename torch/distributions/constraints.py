@@ -38,6 +38,8 @@ __all__ = [
     'Constraint',
     'boolean',
     'cat',
+    'complex',
+    'complex_vector',
     'corr_cholesky',
     'dependent',
     'dependent_property',
