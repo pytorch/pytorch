@@ -500,7 +500,7 @@ class TestDecomp(TestCase):
                     real_out_double, _ = tree_flatten(
                         func(*tree_map(upcast, args), **tree_map(upcast, kwargs))
                     )
-                    for i, orig, decomp, ref in zip(range(len(real_out)), real_out, decomp_out, real_out_double):
+                    for i, (orig, decomp, ref) in enumerate(zip(real_out, decomp_out, real_out_double)):
                         if not isinstance(orig, torch.Tensor):
                             assert type(orig) == type(decomp)
                             assert orig == decomp

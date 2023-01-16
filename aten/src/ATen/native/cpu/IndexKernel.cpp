@@ -15,7 +15,7 @@
 #include <c10/util/irange.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 using namespace vec;
@@ -584,4 +584,4 @@ REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
 REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
 REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
-}} // namespace at::native
+} // namespace at::native
