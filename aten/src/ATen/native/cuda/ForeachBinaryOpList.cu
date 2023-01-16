@@ -17,7 +17,7 @@
 #include <ATen/ops/empty_like_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 template<typename T, template<class> class Op>
 std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, TensorList tensors2, const Scalar& alpha = 1) {
@@ -133,4 +133,4 @@ FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, div, std::divides, 
 FOREACH_BINARY_OP_LIST(all_types_half_bfloat16, clamp_max, minimum, /*division_op*/ false);
 FOREACH_BINARY_OP_LIST(all_types_half_bfloat16, clamp_min, maximum, /*division_op*/ false);
 
-}} // namespace at::native
+} // namespace at::native

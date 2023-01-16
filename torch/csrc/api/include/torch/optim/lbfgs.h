@@ -77,11 +77,8 @@ class TORCH_API LBFGS : public Optimizer {
     }
     _numel_cache = c10::nullopt;
   }
-  explicit LBFGS(
-      std::vector<Tensor> params,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      LBFGSOptions defaults = {})
-      : LBFGS({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit LBFGS(std::vector<Tensor> params, LBFGSOptions defaults = {})
+      : LBFGS({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   Tensor step(LossClosure closure) override;
   void save(serialize::OutputArchive& archive) const override;
