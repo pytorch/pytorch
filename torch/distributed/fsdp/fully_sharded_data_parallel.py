@@ -495,8 +495,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """
         uninitialized = self._is_root is None
         self._assert_state(TrainingState.IDLE)
-        # TODO: Do we actually need to perform lazy initialization? If not,
-        # then replace with `_unshard_fsdp_state_params()`.
+        # Use `_unshard_params_recurse()` with `recurse=False` instead of
+        # `_unshard_fsdp_state_params()` directly to perform lazy
+        # initialization, which is needed to initialize `FlatParameter`
+        # parameter attributes as required by the unshard logic
         with _unshard_params_recurse(
             self,
             self,
