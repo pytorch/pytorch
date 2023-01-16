@@ -195,9 +195,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" OFF
     "USE_CUDA" OFF)
-cmake_dependent_option(
-    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
-    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -529,6 +526,16 @@ if(MSVC)
     string(APPEND ${flag_var} " /ignore:4049 /ignore:4217 /ignore:4099")
   endforeach(flag_var)
 
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS)
+    # https://github.com/pytorch/pytorch/issues/91933: Don't set the manifest filename
+    # explicitly helps fix the linker error when linking torch_python.dll. The manifest
+    # file would still be there in the correct format torch_python.dll.manifest
+    if(${flag_var} MATCHES "/MANIFESTFILE:.*\\.manifest")
+      string(REGEX REPLACE "/MANIFESTFILE:.*\\.manifest" "" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+
   # Try harder
   string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /w -w")
 
@@ -795,6 +802,7 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=bool-operation" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnarrowing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
