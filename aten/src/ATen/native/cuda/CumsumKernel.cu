@@ -5,7 +5,7 @@
 #include <ATen/native/cuda/ScanKernels.h>
 #include <ATen/native/cuda/ScanUtils.cuh>
 
-namespace at { namespace native {
+namespace at::native {
 
 void launch_cumsum_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
@@ -22,4 +22,4 @@ void launch_cumsum_cuda_kernel(const TensorBase& result, const TensorBase& self,
       });
 }
 
-}} // namespace at::native
+} // namespace at::native
