@@ -13,7 +13,7 @@
 #include <string>
 #include <thread>
 
-#define C10_CUDA_CHECK_WO_DSA(EXPR)                                        \
+#define C10_CUDA_CHECK_WO_DSA(EXPR)                                 \
   do {                                                              \
     const cudaError_t __err = EXPR;                                 \
     c10::cuda::c10_cuda_check_implementation(                       \
