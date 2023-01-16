@@ -662,8 +662,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
-        value = importlib.import_module(module_name)
-        alias = f"__import_{module_name.replace('.', '_dot_')}"
+        if "torch_package" in module_name:
+            value = torch.package.package_importer._package_imported_modules[
+                module_name
+            ]
+            alias = (
+                module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
+            )
+        else:
+            value = importlib.import_module(module_name)
+            alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.root_globals
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -1788,9 +1796,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
-        except TypeError as exc:
+        except TypeError as e:
             log.warning(
-                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {exc}"
+                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {e}"
             )
             unimplemented("arg mismatch inlining")
 
@@ -1814,7 +1822,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
 
-        tracer.run()
+        try:
+            tracer.run()
+        except exc.SkipFrame as e:
+            msg = f"SKIPPED INLINING {code}: {e}"
+            log.debug(msg)
+            raise Unsupported(msg) from e
+        except Exception as e:
+            log.debug(f"FAILED INLINING {code}")
+            raise
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
 
