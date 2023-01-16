@@ -60,7 +60,7 @@ def list_backends():
     """
     from .optimizations import BACKENDS
 
-    return [*sorted([*BACKENDS.keys(), "inductor"])]
+    return sorted(BACKENDS.keys())
 
 
 def allow_in_graph(fn):

@@ -1220,11 +1220,13 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 
 class _TorchCompileInductorWrapper:
+    compiler_name = "inductor"
+
     def __init__(self, mode, passes):
         from torch._dynamo.eval_frame import lookup_backend
         from torch._inductor.config import InductorConfigContext
 
-        self.compile_fn = lookup_backend("inductor")
+        self.compile_fn = lookup_backend(self.compiler_name)
         self.cm = InductorConfigContext(mode if mode is not None else passes)
         self._torchdynamo_orig_callable = self.compile_fn
 
