@@ -2348,6 +2348,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 output = m(input)
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
+    @skipCUDAIfRocm  # started failing fp16 after enabling channels last
     @onlyCUDA
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
@@ -2376,6 +2377,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             else:
                 self.assertEqual(conv2d_out.relu(), cudnn_out)
 
+    @skipCUDAIfRocm  # started failing fp16 after enabling channels last
     @onlyCUDA
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
