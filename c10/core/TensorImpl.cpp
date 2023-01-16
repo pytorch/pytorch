@@ -404,10 +404,10 @@ SymBool TensorImpl::compute_strides_like_channels_last_2d(
       SymInt min = 0;
       SymBool r = true;
       // special case for trivial C dimension. default to NCHW
-      r = r & strides[1].sym_neq(0);
+      r = r & strides[1].sym_ne(0);
       // loop strides indices
       for (auto& d : {1, 3, 2, 0}) {
-        r = r & sizes[d].sym_neq(0) & strides[d].sym_ge(min);
+        r = r & sizes[d].sym_ne(0) & strides[d].sym_ge(min);
         // Fallback to NCHW as default layout for ambiguous cases
         // This is the flaw of implicit memory_format from strides.
         // N111 tensor with identical strides for size 1 dimension;
@@ -416,7 +416,7 @@ SymBool TensorImpl::compute_strides_like_channels_last_2d(
         // b. N11W contiguous Tensor sliced on the W-dimension.
         // ([N,1,1,1]@[W,W,W,W])
         if (d == 0) {
-          r = r & min.sym_neq(strides[1]);
+          r = r & min.sym_ne(strides[1]);
         }
         // This is necessary to:
         // 1. distinguish the memory_format of N1H1;
@@ -458,11 +458,11 @@ SymBool TensorImpl::compute_strides_like_channels_last_3d(
     case 5: {
       SymInt min = 0;
       SymBool r = true;
-      r = r & strides[1].sym_neq(0);
+      r = r & strides[1].sym_ne(0);
       for (auto& d : {1, 4, 3, 2, 0}) {
-        r = r & sizes[d].sym_neq(0) & strides[d].sym_ge(min);
+        r = r & sizes[d].sym_ne(0) & strides[d].sym_ge(min);
         if (d == 0) {
-          r = r & min.sym_neq(strides[1]);
+          r = r & min.sym_ne(strides[1]);
         }
         min = strides[d] * sizes[d].max(1);
       }
