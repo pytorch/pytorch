@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import operator
 from typing import Dict, List
 from unittest.mock import patch
 
@@ -88,12 +89,14 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(torch.ones(6, 4))
 
+        from torch._guards import GuardSource
+
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
         hit = False
         for guard in out_guards:
-            if guard.name == "symbolic_shape_expression":
+            if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                self.assertTrue("x.size()[0] <= 10" in guard.code_list)
+                self.assertTrue("x.size()[0] <= 10" in guard.code_list[0])
 
         self.assertTrue(hit)
 
@@ -867,29 +870,39 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     def test_export_with_stack_trace(self):
         inp = torch.tensor([0.1, 0.1])
-        linear = torch.nn.Linear(2, 2)
 
-        def func(x):
-            x = x + 1
-            y = x.t()
-            y = y.relu()
-            y = linear(y)
-            return y
+        class MyBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
 
-        exported = torch._dynamo.export(func, inp, aten_graph=False)
+            def forward(self, x):
+                return torch.cos(x).relu()
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = MyBlock()
+
+            def forward(self, x):
+                out = self.block(x)
+                return out
+
+        exported = torch._dynamo.export(MyModule(), inp, aten_graph=False)
         out_graph = exported[0]
 
         for node in out_graph.graph.nodes:
             if node.op not in {"placeholder", "output"}:
                 self.assertTrue(node.stack_trace is not None)
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
 
         torch._dynamo.reset()
 
-        exported = torch._dynamo.export(func, inp, aten_graph=True)
+        exported = torch._dynamo.export(MyModule(), inp, aten_graph=True)
         out_graph = exported[0]
         for node in out_graph.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(node.stack_trace is not None)
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
 
     def test_export_compare_optimize_with_make_fx(self):
         inp = torch.tensor([0.1, 0.1])
@@ -1467,6 +1480,165 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         gm, _ = torch._dynamo.export(f, *inp, aten_graph=True, tracing_mode="symbolic")
 
         self.assertEqual(gm(*inp), f(*inp))
+
+    def test_export_symbolic_shape(self):
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty(x.shape[0] * 2)
+
+        inp = (torch.randn(6, 5),)
+        gm, _ = torch._dynamo.export(f, *inp, aten_graph=True, tracing_mode="symbolic")
+
+        has_sym_size = False
+        for node in gm.graph.nodes:
+            if node.target is torch.ops.aten.sym_size:
+                has_sym_size = True
+
+        self.assertTrue(has_sym_size)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing(self):
+        def f(x):
+            return x[: x.shape[0] - 2, x.shape[1] - 1 :: 2]
+
+        gm_aten_mode, _ = torch._dynamo.export(
+            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        inp = torch.randn(6, 7)
+        self.assertEqual(gm_aten_mode(inp).shape, f(inp).shape)
+
+        count = 0
+        # aten graph should flatten getitem calls to actual
+        # slice kernel call.
+        for node in gm_aten_mode.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.slice.Tensor
+            ):
+                count += 1
+
+        self.assertEqual(count, 2)
+
+        gm_torch_mode, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=False)
+
+        # In torch mode, the graph should contain 3 getitem methods
+        # one for x.shape[0]-2 and one for x.shape[1]-1 and one for slice
+        # this is because Tensor class has its' own getitem method
+        # which gets translated to aten.Slice later.
+        count = 0
+        for node in gm_torch_mode.graph.nodes:
+            if node.op == "call_function" and node.target == operator.getitem:
+                count += 1
+
+        self.assertEqual(count, 3)
+        self.assertEqual(gm_torch_mode(inp).shape, f(inp).shape)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing_invalid(self):
+        def g(x, y):
+            return x[y : x.shape[0]]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamic slicing on data-dependent value is not supported",
+        ):
+            torch._dynamo.export(
+                g,
+                torch.randn(4, 5),
+                torch.tensor(2),
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_slicing_simple(self):
+        def f(x):
+            return x[slice(None, None, None)]
+
+        gm, _ = torch._dynamo.export(
+            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        inp = torch.randn(6, 7)
+        self.assertEqual(gm(inp), f(inp))
+
+    def test_export_with_kwargs(self):
+        def fn_with_kwargs(pos0, tuple0, *myargs, mykw0=None, **mykwargs):
+            out = pos0
+            for arg in tuple0:
+                out *= arg
+            for arg in myargs:
+                out *= arg
+            out *= mykw0
+            out *= mykwargs["input0"] * mykwargs["input1"]
+            return out
+
+        mykwargs = {"input0": torch.randn(4), "input1": torch.randn(4)}
+        tuple0 = (torch.randn(4), torch.randn(4))
+        mykw0 = torch.randn(4)
+        pos0 = torch.randn(4)
+        myargs = [torch.randn(4), torch.randn(4)]
+
+        torch._dynamo.reset()
+        exported = torch._dynamo.export(
+            fn_with_kwargs,
+            pos0,
+            tuple0,
+            *myargs,
+            aten_graph=False,
+            mykw0=mykw0,
+            **mykwargs,
+        )
+
+        out_graph = exported[0]
+        dynamo_result = out_graph(pos0, tuple0, *myargs, mykw0=mykw0, **mykwargs)
+        real_result = fn_with_kwargs(pos0, tuple0, *myargs, mykw0=mykw0, **mykwargs)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_with_kwargs_and_empty_args(self):
+        def fn_with_kwargs(mykw0=None, **mykwargs):
+            out = mykw0
+            out *= mykwargs["input0"] * mykwargs["input1"]
+            return out
+
+        mykwargs = {"input0": torch.randn(4), "input1": torch.randn(4)}
+        mykw0 = torch.randn(4)
+
+        torch._dynamo.reset()
+        exported = torch._dynamo.export(
+            fn_with_kwargs,
+            aten_graph=False,
+            mykw0=mykw0,
+            **mykwargs,
+        )
+
+        out_graph = exported[0]
+        dynamo_result = out_graph(mykw0=mykw0, **mykwargs)
+        real_result = fn_with_kwargs(mykw0=mykw0, **mykwargs)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_with_args_and_empty_kwargs(self):
+        def fn_with_kwargs(pos0, tuple0, *myargs):
+            out = pos0
+            for arg in tuple0:
+                out *= arg
+            for arg in myargs:
+                out *= arg
+            return out
+
+        tuple0 = (torch.randn(4), torch.randn(4))
+        pos0 = torch.randn(4)
+        myargs = [torch.randn(4), torch.randn(4)]
+
+        torch._dynamo.reset()
+        exported = torch._dynamo.export(
+            fn_with_kwargs, pos0, tuple0, *myargs, aten_graph=False
+        )
+
+        out_graph = exported[0]
+        dynamo_result = out_graph(pos0, tuple0, *myargs)
+        real_result = fn_with_kwargs(pos0, tuple0, *myargs)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
 
 if __name__ == "__main__":
