@@ -8,7 +8,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 void addr_kernel(TensorIterator &iter,
                  const Scalar& beta, const Scalar& alpha) {
@@ -86,4 +86,4 @@ void addr_kernel(TensorIterator &iter,
 } // anonymous namespace
 
 REGISTER_DISPATCH(addr_stub, &addr_kernel);
-}} // namespace at::native
+} // namespace at::native

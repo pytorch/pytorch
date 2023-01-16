@@ -8,8 +8,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 IValue ScriptDictIterator::next() {
   if (iter_ == end_) {
@@ -198,5 +197,4 @@ void initScriptDictBindings(PyObject* module) {
                                    // long as the iterator
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
