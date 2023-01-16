@@ -1618,7 +1618,7 @@ TEST_F(FunctionalTest, CELU) {
       auto x_bf16 = x.clone().to(torch::kBFloat16);
       auto y_exp = torch::max(torch::zeros_like(x), x) +
           torch::min(torch::zeros_like(x),
-                     alpha * (torch::exp(x / alpha) - 1.0));
+                     alpha * torch::expm1(x / alpha));
       auto y = F::celu(x, F::CELUFuncOptions().alpha(alpha).inplace(inplace));
       auto y_bf16 =
           F::celu(x_bf16, F::CELUFuncOptions().alpha(alpha).inplace(inplace));
