@@ -311,7 +311,7 @@ class _Real(Constraint):
     def check(self, value):
         return not torch.is_complex(value) and value == value  # False for NaNs.
 
-    
+
 class _Complex(Constraint):
     """
     Trivially constrain to the extended real line `[-inf, inf]` for both the
@@ -320,7 +320,7 @@ class _Complex(Constraint):
     def check(self, value):
         return torch.is_complex(value) and value == value  # False for NaNs.
 
-    
+
 class _GreaterThan(Constraint):
     """
     Constrain to a real half line `(lower_bound, inf]`.
