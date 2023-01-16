@@ -250,8 +250,7 @@ if HAS_SYMPY:
     # NOTE [ SymPy eval and assumptions ]
     # In eval, we only return values in cases where we always want to evaluate.
     # In other cases, the result will just be FloorDiv(a, b), which needs to be
-    # evaluated later if necessary. We implement additional eval strategies in
-    # doit, which is automatically called by sympy.simplify.
+    # evaluated later if necessary.
     #
     # We also define is_real=True and provide _eval_* methods to make the SymPy
     # assumptions system aware of Python floordiv semantics. For instance, this
@@ -323,6 +322,8 @@ if HAS_SYMPY:
                 return sympy.floor(base)
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
+            if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
+                return sympy.floor(base / divisor)
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 
@@ -331,19 +332,6 @@ if HAS_SYMPY:
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
-
-        # For further evaluation. Automatically called by sympy.simplify.
-        def doit(self, deep=False, **hints):
-            base = self.base
-            divisor = self.divisor
-            if deep:
-                base = base.doit(deep=deep, **hints)
-                divisor = divisor.doit(deep=deep, **hints)
-
-            if len(self.free_symbols) == 0:
-                return sympy.floor(base / divisor)
-            else:
-                return FloorDiv(base, divisor)
 
 
 # Methods that have a `__foo__` as well as `__rfoo__`
@@ -997,10 +985,6 @@ class ShapeEnv(object):
 
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
-        # sympy.simplify calls doit by default, so we do it here to further
-        # evaluate exprs like FloorDiv.
-        # See NOTE [ SymPy eval and assumptions ]
-        expr = expr.doit(deep=True)
         expr = self.replace(expr)
         if expr.has(FloorDiv):
             self._update_divisible()
@@ -1102,11 +1086,9 @@ class ShapeEnv(object):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        expr = self.simplify(expr)
-        # NB: Needs to call simplify first for this short-circuit to work.
-        # See NOTE [ SymPy eval and assumptions ]
         if len(expr.free_symbols) == 0:
             return expr
+        expr = self.simplify(expr)
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
             return static_expr

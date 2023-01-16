@@ -675,13 +675,10 @@ class TestFloorDiv(TestCase):
         expr = FloorDiv(6.28, (FloorDiv(6.28, 3.14)))
         shape_env = ShapeEnv()
 
-        # Makes sure the expr is not automatically simplified.
-        self.assertEqual(type(expr), FloorDiv)
-        # Simplifies only the outer expr.
-        self.assertEqual(type(expr.doit(deep=False)), sympy.floor)
-        # Simplifies everything.
+        # All these should return the same result.
+        self.assertEqual(expr, 3)  # fully eval'd automatically
+        self.assertEqual(expr.doit(deep=False), 3)
         self.assertEqual(expr.doit(deep=True), 3)
-        # Tests other functions that should use doit.
         self.assertEqual(sympy.simplify(expr), 3)
         self.assertEqual(shape_env.simplify(expr), 3)
         self.assertEqual(shape_env.evaluate_expr(expr), 3)
