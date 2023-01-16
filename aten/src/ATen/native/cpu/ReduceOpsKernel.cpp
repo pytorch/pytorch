@@ -23,7 +23,7 @@
 #include <c10/util/irange.h>
 #include <ATen/AccumulateType.h>
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 using namespace vec;
 
@@ -497,4 +497,4 @@ REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
 REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
 
-}}  // namespace at::native
+}  // namespace at::native
