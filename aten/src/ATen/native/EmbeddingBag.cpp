@@ -233,76 +233,39 @@ index_select_add(
       offsets_data = offsets_include_last.data();
     }
 #if defined(USE_FBGEMM)
-    if (std::is_same<data_t, at::Half>::value) {
-      using float16 = uint16_t;
-      auto kernel_fp16_index_t = fbgemm_kernel_cache
-          ? fbgemm_kernel_cache
-                ->getCallback</* has_weight */ false, index_t, float16>(ddim)
-          : fbgemm::GenerateEmbeddingSpMDM<float16, index_t, index_t, float16>(
-                /* block_size */ ddim,
-                /* has_weight */ false,
-                /* normalize_by_lengths */ false,
-                /* prefetch */ 16,
-                /* is_weight_positional */ false,
-                /* use_offsets */ true);
-      at::parallel_for(
-          0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
-            bool success = kernel_fp16_index_t(
-                /* output_size */ end_idx - start_idx,
-                /* index_size */ offsets_data[end_idx] -
-                    offsets_data[start_idx],
-                /* data_size */ src.size(0),
-                /* input */ reinterpret_cast<const float16*>(src_data),
-                /* indices */ select_indices_data + offsets_data[start_idx],
-                /* offsets_or_lengths */ offsets_data + start_idx,
-                /* weights */ nullptr,
-                /* output */
-                reinterpret_cast<float16*>(output_data + start_idx * ddim));
-            if (!success) {
-              fbgemm_spmdm_report_error_(
-                  end_idx - start_idx,
-                  offsets_data[end_idx] - offsets_data[start_idx],
-                  src.size(0),
-                  offsets_data + start_idx,
-                  select_indices_data + offsets_data[start_idx]);
-            }
-          });
-    } else {
-      using bfloat16 = int16_t;
-      auto kernel_bf16_index_t = fbgemm_kernel_cache
-          ? fbgemm_kernel_cache
-                ->getCallback</* has_weight */ false, index_t, bfloat16>(ddim)
-          : fbgemm::
-                GenerateEmbeddingSpMDM<bfloat16, index_t, index_t, bfloat16>(
-                    /* block_size */ ddim,
-                    /* has_weight */ false,
-                    /* normalize_by_lengths */ false,
-                    /* prefetch */ 16,
-                    /* is_weight_positional */ false,
-                    /* use_offsets */ true);
-      at::parallel_for(
-          0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
-            bool success = kernel_bf16_index_t(
-                /* output_size */ end_idx - start_idx,
-                /* index_size */ offsets_data[end_idx] -
-                    offsets_data[start_idx],
-                /* data_size */ src.size(0),
-                /* input */ reinterpret_cast<const bfloat16*>(src_data),
-                /* indices */ select_indices_data + offsets_data[start_idx],
-                /* offsets_or_lengths */ offsets_data + start_idx,
-                /* weights */ nullptr,
-                /* output */
-                reinterpret_cast<bfloat16*>(output_data + start_idx * ddim));
-            if (!success) {
-              fbgemm_spmdm_report_error_(
-                  end_idx - start_idx,
-                  offsets_data[end_idx] - offsets_data[start_idx],
-                  src.size(0),
-                  offsets_data + start_idx,
-                  select_indices_data + offsets_data[start_idx]);
-            }
-          });
-    }
+    bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
+    auto kernel_16bit_index_t = fbgemm_kernel_cache
+        ? fbgemm_kernel_cache
+              ->getCallback</* has_weight */ false, index_t, uint16_t>(ddim)
+        : fbgemm::GenerateEmbeddingSpMDM<uint16_t, index_t, index_t, uint16_t>(
+              /* block_size */ ddim,
+              /* has_weight */ false,
+              /* normalize_by_lengths */ false,
+              /* prefetch */ 16,
+              /* is_weight_positional */ false,
+              /* use_offsets */ true,
+              /* isbf16*/ isbf16);
+    at::parallel_for(
+        0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
+          bool success = kernel_16bit_index_t(
+              /* output_size */ end_idx - start_idx,
+              /* index_size */ offsets_data[end_idx] - offsets_data[start_idx],
+              /* data_size */ src.size(0),
+              /* input */ reinterpret_cast<const uint16_t*>(src_data),
+              /* indices */ select_indices_data + offsets_data[start_idx],
+              /* offsets_or_lengths */ offsets_data + start_idx,
+              /* weights */ nullptr,
+              /* output */
+              reinterpret_cast<uint16_t*>(output_data + start_idx * ddim));
+          if (!success) {
+            fbgemm_spmdm_report_error_(
+                end_idx - start_idx,
+                offsets_data[end_idx] - offsets_data[start_idx],
+                src.size(0),
+                offsets_data + start_idx,
+                select_indices_data + offsets_data[start_idx]);
+          }
+        });
 #else
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 = at::zeros({output_size, ddim}, output.options().dtype(at::kFloat));
@@ -324,10 +287,10 @@ index_select_add(
               /*normalize_by_lengths=*/false,
               /*out=*/output_data_fp32 + start_idx * ddim);
           for (int64_t i = start_idx; i < end_idx; i++) {
-            // Convert FP32 intermediate buffer result back to FP16/BF16 for
+            // Convert FP32 intermediate buffer result back to 16bit/BF16 for
             // output dtype
             if (std::is_same<data_t, at::Half>::value) {
-              // FP16
+              // 16bit
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
                     static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
@@ -403,7 +366,7 @@ index_select_add(
       }
     }
     for (const auto i : c10::irange(output.size(0))) {
-      // Convert FP32 intermediate buffer result back to FP16/BF16 for output
+      // Convert FP32 intermediate buffer result back to 16bit/BF16 for output
       // dtype
       for (const auto d : c10::irange(ddim)) {
         (output_data + output_stride0 * i)[d * output_stride1] =
@@ -643,84 +606,49 @@ index_select_scale_add(
     auto* scale_data_fp32 = scale_fp32.data_ptr<float>();
 
 #if defined(USE_FBGEMM)
-    if (std::is_same<data_t, at::Half>::value) {
-      using float16 = uint16_t;
-      fbgemm::Float16ToFloat_simd(
-          reinterpret_cast<const float16*>(scale_data),
-          scale_data_fp32,
-          scale_fp32.numel());
-      auto kernel_fp16_index_t = fbgemm_kernel_cache
-          ? fbgemm_kernel_cache
-                ->getCallback</* has_weight */ true, index_t, float16>(ddim)
-          : fbgemm::GenerateEmbeddingSpMDM<float16, index_t, index_t, float16>(
-                /* block_size */ ddim,
-                /* has_weight */ true,
-                /* normalize_by_lengths */ false,
-                /* prefetch */ 16,
-                /* is_weight_positional */ false,
-                /* use_offsets */ true);
-      at::parallel_for(
-          0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
-            bool success = kernel_fp16_index_t(
-                /* output_size */ end_idx - start_idx,
-                /* index_size */ offsets_data[end_idx] -
-                    offsets_data[start_idx],
-                /* data_size */ src.size(0),
-                /* input */ reinterpret_cast<const float16*>(src_data),
-                /* indices */ select_indices_data + offsets_data[start_idx],
-                /* offsets_or_lengths */ offsets_data + start_idx,
-                /* weights */ scale_data_fp32 + offsets_data[start_idx],
-                /* output */
-                reinterpret_cast<float16*>(output_data + start_idx * ddim));
-            if (!success) {
-              fbgemm_spmdm_report_error_(
-                  end_idx - start_idx,
-                  offsets_data[end_idx] - offsets_data[start_idx],
-                  src.size(0),
-                  offsets_data + start_idx,
-                  select_indices_data + offsets_data[start_idx]);
-            }
-          });
-    } else {
-      using bfloat16 = int16_t;
+    bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
+    if (isbf16) {
       fbgemm::Bfloat16ToFloat_simd(
-          reinterpret_cast<const bfloat16*>(scale_data),
+          reinterpret_cast<const uint16_t*>(scale_data),
           scale_data_fp32,
           scale_fp32.numel());
-      auto kernel_fp16_index_t = fbgemm_kernel_cache
-          ? fbgemm_kernel_cache
-                ->getCallback</* has_weight */ true, index_t, bfloat16>(ddim)
-          : fbgemm::
-                GenerateEmbeddingSpMDM<bfloat16, index_t, index_t, bfloat16>(
-                    /* block_size */ ddim,
-                    /* has_weight */ true,
-                    /* normalize_by_lengths */ false,
-                    /* prefetch */ 16,
-                    /* is_weight_positional */ false,
-                    /* use_offsets */ true);
-      at::parallel_for(
-          0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
-            bool success = kernel_fp16_index_t(
-                /* output_size */ end_idx - start_idx,
-                /* index_size */ offsets_data[end_idx] -
-                    offsets_data[start_idx],
-                /* data_size */ src.size(0),
-                /* input */ reinterpret_cast<const bfloat16*>(src_data),
-                /* indices */ select_indices_data + offsets_data[start_idx],
-                /* offsets_or_lengths */ offsets_data + start_idx,
-                /* weights */ scale_data_fp32 + offsets_data[start_idx],
-                /* output */
-                reinterpret_cast<bfloat16*>(output_data + start_idx * ddim));
-            if (!success) {
-              fbgemm_spmdm_report_error_(
-                  end_idx - start_idx,
-                  offsets_data[end_idx] - offsets_data[start_idx],
-                  src.size(0),
-                  offsets_data + start_idx,
-                  select_indices_data + offsets_data[start_idx]);
-            }
-          });
+    } else {
+      fbgemm::Float16ToFloat_simd(
+          reinterpret_cast<const uint16_t*>(scale_data),
+          scale_data_fp32,
+          scale_fp32.numel());
     }
+    auto kernel_16bit_index_t = fbgemm_kernel_cache
+        ? fbgemm_kernel_cache
+              ->getCallback</* has_weight */ true, index_t, uint16_t>(ddim)
+        : fbgemm::GenerateEmbeddingSpMDM<uint16_t, index_t, index_t, uint16_t>(
+              /* block_size */ ddim,
+              /* has_weight */ true,
+              /* normalize_by_lengths */ false,
+              /* prefetch */ 16,
+              /* is_weight_positional */ false,
+              /* use_offsets */ true);
+    at::parallel_for(
+        0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
+          bool success = kernel_16bit_index_t(
+              /* output_size */ end_idx - start_idx,
+              /* index_size */ offsets_data[end_idx] - offsets_data[start_idx],
+              /* data_size */ src.size(0),
+              /* input */ reinterpret_cast<const uint16_t*>(src_data),
+              /* indices */ select_indices_data + offsets_data[start_idx],
+              /* offsets_or_lengths */ offsets_data + start_idx,
+              /* weights */ scale_data_fp32 + offsets_data[start_idx],
+              /* output */
+              reinterpret_cast<uint16_t*>(output_data + start_idx * ddim));
+          if (!success) {
+            fbgemm_spmdm_report_error_(
+                end_idx - start_idx,
+                offsets_data[end_idx] - offsets_data[start_idx],
+                src.size(0),
+                offsets_data + start_idx,
+                select_indices_data + offsets_data[start_idx]);
+          }
+        });
 #else
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 =
@@ -746,10 +674,10 @@ index_select_scale_add(
               /*normalize_by_lengths=*/false,
               /*out=*/output_data_fp32 + start_idx * ddim);
           for (int64_t i = start_idx; i < end_idx; i++) {
-            // Convert FP32 intermediate buffer result back to FP16/BF16 for
+            // Convert FP32 intermediate buffer result back to 16bit/BF16 for
             // output dtype
             if (std::is_same<data_t, at::Half>::value) {
-              // FP16
+              // 16bit
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
                     static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
@@ -817,7 +745,7 @@ index_select_scale_add(
       }
     }
     for (const auto i : c10::irange(output.size(0))) {
-      // Convert FP32 intermediate buffer result back to FP16/BF16 for output
+      // Convert FP32 intermediate buffer result back to 16bit/BF16 for output
       // dtype
       for (const auto d : c10::irange(ddim)) {
         (output_data + output_stride0 * i)[d * output_stride1] =

@@ -105,11 +105,7 @@ using _EmbeddingBagKernelCache = _EmbeddingBagKernelCacheImpl<
     _CallbackAndBlockSize<true, int32_t, unsigned short>,
     _CallbackAndBlockSize<false, int32_t, unsigned short>,
     _CallbackAndBlockSize<true, int64_t, unsigned short>,
-    _CallbackAndBlockSize<false, int64_t, unsigned short>,
-    _CallbackAndBlockSize<true, int32_t, int16_t>,
-    _CallbackAndBlockSize<false, int32_t, int16_t>,
-    _CallbackAndBlockSize<true, int64_t, int16_t>,
-    _CallbackAndBlockSize<false, int64_t, int16_t>>;
+    _CallbackAndBlockSize<false, int64_t, unsigned short>>;
 #else
 struct _EmbeddingBagKernelCache {
     explicit _EmbeddingBagKernelCache(c10::optional<int64_t> /* maybe_block_size */) {}
