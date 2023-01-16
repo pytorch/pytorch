@@ -9,8 +9,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Create convolution descriptor
 void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
@@ -532,5 +531,4 @@ std::tuple<Tensor,Tensor> mps_convolution_transpose_backward(
 }
 
 
-} // namespace native
-} // namespace at
+} // namespace at::native
