@@ -6044,7 +6044,25 @@ if HAS_CPU:
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
-        def test_input_is_inplace_view(self):
+        def test_inplace_unsqueeze(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
+                return unsqueeze_
+
+            args = [
+                ((1, 1, 1, 12, 11, 3), (396, 396, 396, 33, 3, 1), torch.int64, "cpu")
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            out = fn(*args)
+            assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+            assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+            assert out.equal(args[0])
+
+        @patch.object(config, "dynamic_shapes", True)
+        @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+        @patch.object(functorch_config, "use_dynamic_shapes", True)
+        def test_inplace_unsqueeze_dynamic_shape(self):
             @torch._dynamo.optimize("inductor")
             def fn(a):
                 unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
