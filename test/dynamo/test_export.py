@@ -1562,6 +1562,84 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
 
+    def test_export_with_kwargs(self):
+        def fn_with_kwargs(pos0, tuple0, *myargs, mykw0=None, **mykwargs):
+            out = pos0
+            for arg in tuple0:
+                out *= arg
+            for arg in myargs:
+                out *= arg
+            out *= mykw0
+            out *= mykwargs["input0"] * mykwargs["input1"]
+            return out
+
+        mykwargs = {"input0": torch.randn(4), "input1": torch.randn(4)}
+        tuple0 = (torch.randn(4), torch.randn(4))
+        mykw0 = torch.randn(4)
+        pos0 = torch.randn(4)
+        myargs = [torch.randn(4), torch.randn(4)]
+
+        torch._dynamo.reset()
+        exported = torch._dynamo.export(
+            fn_with_kwargs,
+            pos0,
+            tuple0,
+            *myargs,
+            aten_graph=False,
+            mykw0=mykw0,
+            **mykwargs,
+        )
+
+        out_graph = exported[0]
+        dynamo_result = out_graph(pos0, tuple0, *myargs, mykw0=mykw0, **mykwargs)
+        real_result = fn_with_kwargs(pos0, tuple0, *myargs, mykw0=mykw0, **mykwargs)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_with_kwargs_and_empty_args(self):
+        def fn_with_kwargs(mykw0=None, **mykwargs):
+            out = mykw0
+            out *= mykwargs["input0"] * mykwargs["input1"]
+            return out
+
+        mykwargs = {"input0": torch.randn(4), "input1": torch.randn(4)}
+        mykw0 = torch.randn(4)
+
+        torch._dynamo.reset()
+        exported = torch._dynamo.export(
+            fn_with_kwargs,
+            aten_graph=False,
+            mykw0=mykw0,
+            **mykwargs,
+        )
+
+        out_graph = exported[0]
+        dynamo_result = out_graph(mykw0=mykw0, **mykwargs)
+        real_result = fn_with_kwargs(mykw0=mykw0, **mykwargs)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_with_args_and_empty_kwargs(self):
+        def fn_with_kwargs(pos0, tuple0, *myargs):
+            out = pos0
+            for arg in tuple0:
+                out *= arg
+            for arg in myargs:
+                out *= arg
+            return out
+
+        tuple0 = (torch.randn(4), torch.randn(4))
+        pos0 = torch.randn(4)
+        myargs = [torch.randn(4), torch.randn(4)]
+
+        torch._dynamo.reset()
+        exported = torch._dynamo.export(
+            fn_with_kwargs, pos0, tuple0, *myargs, aten_graph=False
+        )
+
+        out_graph = exported[0]
+        dynamo_result = out_graph(pos0, tuple0, *myargs)
+        real_result = fn_with_kwargs(pos0, tuple0, *myargs)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
