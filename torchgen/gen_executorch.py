@@ -46,7 +46,7 @@ from torchgen.utils import (
 
 
 def static_dispatch(
-    sig: ExecutorchCppSignature,
+    sig: Union[CppSignature, ExecutorchCppSignature],
     f: NativeFunction,
     backend_indices: List[BackendIndex],
 ) -> str:
@@ -99,12 +99,16 @@ class ComputeFunction:
             return None
         if Variant.function not in f.variants:
             return None
-
-        if self.use_aten_lib:
-            comma = ", "
-            sig = CppSignatureGroup.from_native_function(
+        sig: Union[CppSignature, ExecutorchCppSignature] = (
+            CppSignatureGroup.from_native_function(
                 f, method=False, fallback_binding=f.manual_cpp_binding
             ).most_faithful_signature()
+            if self.use_aten_lib
+            else ExecutorchCppSignature.from_native_function(f)
+        )
+        if self.use_aten_lib and f.namespace == "aten":
+            comma = ", "
+
             return f"""
 // {f.namespace}::{f.func}
 TORCH_API inline {sig.decl()} {{
@@ -114,7 +118,7 @@ TORCH_API inline {sig.decl()} {{
 
         else:
             return static_dispatch(
-                ExecutorchCppSignature.from_native_function(f),
+                sig,
                 f,
                 backend_indices=self.static_dispatch_backend_indices,
             )
@@ -280,9 +284,12 @@ def gen_headers(
     cpu_fm.write(
         "Functions.h",
         lambda: {
-            "static_dispatch_extra_headers": "#include <ATen/Functions.h>"
+            "static_dispatch_extra_headers": [
+                '#include "CustomOpsNativeFunctions.h"',
+                "#include <ATen/Functions.h>",
+            ]
             if use_aten_lib
-            else '#include "NativeFunctions.h"',
+            else ['#include "NativeFunctions.h"'],
             "Functions_declarations": gen_functions_declarations(
                 native_functions=native_functions,
                 static_dispatch_idx=static_dispatch_idx,
@@ -314,7 +321,6 @@ def gen_custom_ops(
     cpu_fm: FileManager,
     rocm: bool,
 ) -> None:
-
     dispatch_key = DispatchKey.CPU
     backend_index = backend_indices[dispatch_key]
     (
@@ -327,10 +333,21 @@ def gen_custom_ops(
         rocm=rocm,
     )
     cpu_fm.write_with_template(
+        "CustomOpsNativeFunctions.h",
+        "NativeFunctions.h",
+        lambda: {
+            "nativeFunctions_declarations": get_native_function_declarations(
+                grouped_native_functions=native_functions,
+                backend_indices=backend_indices,
+                native_function_decl_gen=dest.compute_native_function_declaration,
+            ),
+        },
+    )
+    cpu_fm.write_with_template(
         f"Register{dispatch_key}CustomOps.cpp",
         "RegisterDispatchKeyCustomOps.cpp",
         lambda: {
-            "ops_headers": '#include "NativeFunctions.h"',
+            "ops_headers": '#include "CustomOpsNativeFunctions.h"',
             "DispatchKey": dispatch_key,
             "dispatch_namespace": dispatch_key.lower(),
             "dispatch_namespaced_definitions": "",
@@ -482,35 +499,35 @@ def parse_yaml_files(
             native_yaml_path = os.path.join(tmpdirname, "functions.yaml")
             with open(native_yaml_path, "w"):
                 pass
-
-        # If custom_ops_yaml_path exists, combine both files.
-        if custom_ops_yaml_path and os.path.exists(custom_ops_yaml_path):
-            combined_yaml_path = os.path.join(tmpdirname, "combined.yaml")
-            with open(combined_yaml_path, "w") as tmp:
-                with open(native_yaml_path, "r") as native:
-                    for line in native:
-                        tmp.write(line)
-                with open(custom_ops_yaml_path, "r") as custom:
-                    for line in custom:
-                        tmp.write(line)
-            custom_ops_parsed_yaml = parse_native_yaml(
-                custom_ops_yaml_path, tags_yaml_path, None, skip_native_fns_gen=True
-            )
-        else:
-            # No custom_ops; just parse native_yaml_path.
-            custom_ops_parsed_yaml = None
-            combined_yaml_path = native_yaml_path
+        # Translate native_yaml_path to the same format of native_functions.yaml
         translated_yaml_path = os.path.join(tmpdirname, "translated.yaml")
         with open(translated_yaml_path, "w") as translated:
             translate_native_yaml(
                 tags_yaml_path,
                 aten_yaml_path,
-                combined_yaml_path,
+                native_yaml_path,
                 use_aten_lib,
                 translated,
             )
+        # If custom_ops_yaml_path doesn't exist, point to an empty file.
+        if not custom_ops_yaml_path or not os.path.exists(custom_ops_yaml_path):
+            custom_ops_yaml_path = os.path.join(tmpdirname, "custom_ops.yaml")
+            with open(custom_ops_yaml_path, "w"):
+                pass
+        combined_yaml_path = os.path.join(tmpdirname, "combined.yaml")
+        with open(combined_yaml_path, "w") as tmp, open(
+            translated_yaml_path, "r"
+        ) as native, open(custom_ops_yaml_path, "r") as custom:
+            for line in native.readlines():
+                tmp.write(line)
+            for line in custom.readlines():
+                tmp.write(line)
+        custom_ops_parsed_yaml = parse_native_yaml(
+            custom_ops_yaml_path, tags_yaml_path, None, skip_native_fns_gen=True
+        )
+
         parsed_yaml = parse_native_yaml(
-            translated_yaml_path,
+            combined_yaml_path,
             tags_yaml_path,
             None,
             skip_native_fns_gen=(not gen_native_fns),

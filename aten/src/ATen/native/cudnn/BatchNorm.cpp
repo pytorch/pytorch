@@ -59,11 +59,7 @@ cudnnBatchNormMode_t getCudnnBatchNormMode(bool training, at::MemoryFormat memor
     return CUDNN_BATCHNORM_PER_ACTIVATION;
   } else if (training && memory_format == at::MemoryFormat::ChannelsLast) {
 
-#if CUDNN_VERSION >= 7400
     return CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-#else
-    return CUDNN_BATCHNORM_SPATIAL;
-#endif // CUDNN_VERSION >= 7400
 
   } else if (training && memory_format == at::MemoryFormat::ChannelsLast3d) {
 
@@ -152,7 +148,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     save_mean = at::empty({ num_features }, weight_t.options());
     save_var = at::empty({ num_features }, weight_t.options());
 
-#if CUDNN_VERSION >= 7400
     auto op = CUDNN_BATCHNORM_OPS_BN;
     size_t workspace_size;
     AT_CUDNN_CHECK(cudnnGetBatchNormalizationForwardTrainingExWorkspaceSize(
@@ -204,22 +199,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         workspace_size,
         reserve.data_ptr(),
         reserve_size));
-#else
-    reserve = at::empty({0}, input->options().dtype(kByte));
-    AT_CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
-      handle, mode, &one, &zero,
-      idesc.desc(), input->data_ptr(),
-      idesc.desc(), output->data_ptr(),
-      wdesc.desc(),
-      weight->data_ptr(),
-      bias->data_ptr(),
-      exponential_average_factor,
-      at::maybe_data_ptr(running_mean),
-      at::maybe_data_ptr(running_var),
-      epsilon,
-      save_mean.data_ptr(),
-      save_var.data_ptr()));
-#endif // CUDNN_VERSION >= 7400
   } else {
     reserve = at::empty({0}, input->options().dtype(kByte));
     // This keeps a consistent output with native_batch_norm
@@ -317,7 +296,6 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
-#if CUDNN_VERSION >= 7400
   auto op = CUDNN_BATCHNORM_OPS_BN;
 
   size_t workspace_size;
@@ -354,19 +332,6 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     workspace_size,
     reserve->data_ptr(),
     reserve->numel()));
-#else
-  AT_CUDNN_CHECK(cudnnBatchNormalizationBackward(
-    handle, mode, &one, &zero, &one, &zero,
-    idesc.desc(), input->data_ptr(),
-    odesc.desc(), grad_output->data_ptr(),
-    idesc.desc(), grad_input_t.data_ptr(),
-    wdesc.desc(), weight->data_ptr(),
-    grad_weight_t.data_ptr(),
-    grad_bias_t.data_ptr(),
-    epsilon,
-    save_mean->data_ptr(),
-    save_var->data_ptr()));
-#endif // CUDNN_VERSION >= 7400
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }

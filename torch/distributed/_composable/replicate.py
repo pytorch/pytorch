@@ -79,7 +79,7 @@ class _ReplicateState:
 
         self._ddp = _ddp.DistributedDataParallel(self._param_list, **self.kwargs)
 
-    def forward_pre_hook(self, module: nn.Module, input: Tuple[torch.Tensor]) -> None:
+    def forward_pre_hook(self, module: nn.Module, input: Tuple[torch.Tensor, ...]) -> None:
         self.init_helper()
         self._ddp.pre_forward()
 
