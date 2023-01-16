@@ -16,8 +16,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // -----------------------------------
 // glu forward
@@ -139,5 +138,4 @@ void launch_glu_backward_kernel(
 REGISTER_DISPATCH(glu_stub, &glu_kernel);
 REGISTER_DISPATCH(glu_jvp_stub, &glu_jvp_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
