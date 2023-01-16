@@ -3,15 +3,19 @@ import warnings
 from typing import cast, Generator, List
 
 import torch
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _has_fsdp_params,
     _module_handles,
     HandleTrainingState,
+    TrainingState,
 )
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
+    _get_fsdp_root_states_with_modules,
+    _lazy_init,
     _reshard,
     _reshard_grads,
     _unshard,
@@ -120,38 +124,49 @@ def _unflatten_as_params(state: _FSDPState, module: nn.Module) -> Generator:
                 _register_flat_param(state, module)
 
 
-@contextlib.contextmanager
-def _unshard_params(
-    module: nn.Module,
+def _validate_unshard_params_args(
     state: _FSDPState,
-    writeback: bool = True,
-    rank0_only: bool = False,
-    offload_to_cpu: bool = False,
-    with_grads: bool = False,
-):
+    writeback: bool,
+    rank0_only: bool,
+    offload_to_cpu: bool,
+    with_grads: bool,
+) -> None:
     if with_grads and (offload_to_cpu or not state._use_orig_params):
         raise NotImplementedError(
-            f"with_grads={with_grads} "
-            f"use_orig_params={state._use_orig_params} "
+            f"with_grads={with_grads}, "
+            f"use_orig_params={state._use_orig_params}, "
             f"offload_to_cpu={offload_to_cpu} "
             f"is not supported yet"
         )
     if writeback and rank0_only:
-        raise ValueError(
-            "writeback=True and rank0_only=True is not supported, as model "
-            "parameter shapes will be different across ranks, and writing "
-            "to them can lead to inconsistencies across ranks when the "
-            "context is exited."
-        )
+        # TODO: Rank 0 can broadcast the `FlatParameter` to allow all ranks to
+        # persist the changes.
+        raise ValueError("writeback=True and rank0_only=True is not supported yet")
     if offload_to_cpu and not rank0_only:
         warnings.warn(
-            "offload_to_cpu and rank0_only=False will result in "
-            "full parameters being redundantly copied to CPU memory for "
-            "GPUs that reside on the same machine, which may incur the risk of "
-            "CPU OOM. It is recommended to use ``offload_to_cpu`` with "
-            "rank0_only=True."
+            "offload_to_cpu=True and rank0_only=False may result in the"
+            "unsharded parameters being redundantly copied to CPU memory for "
+            "GPUs sharing the same CPU memory, which risks CPU OOM. We "
+            "recommend using offload_to_cpu=True with rank0_only=True."
         )
 
+
+@contextlib.contextmanager
+def _unshard_fsdp_state_params(
+    module: nn.Module,
+    state: _FSDPState,
+    writeback: bool,
+    rank0_only: bool,
+    offload_to_cpu: bool,
+    with_grads: bool,
+):
+    """
+    This unshards the parameters for a single FSDP state ``state`` that
+    corresponds to ``module``.
+    """
+    _validate_unshard_params_args(
+        state, writeback, rank0_only, offload_to_cpu, with_grads
+    )
     torch.cuda.synchronize()
     # If handles are shared by other module(s), the handle may be already unsharded.
     handles = [
@@ -196,11 +211,10 @@ def _unshard_params(
             for handle in handles:
                 if offload_to_cpu and handle.uses_sharded_strategy:
                     stack.enter_context(handle.to_cpu())
-                    # TODO (awgu): Since PyTorch enforces that a parameter
-                    # and its gradients need to match metadata (e.g.
-                    # device), we must move gradients to CPU *after* we
-                    # move parameters.
-            # TODO (awgu): This FPW call assumes 1 `FlatParameter`
+                    # NOTE: Since PyTorch enforces that a parameter and its
+                    # gradients need to match metadata (e.g. device), we must
+                    # move gradients to CPU *after* we move parameters.
+            # NOTE: This assumes 1 `FlatParameter`
             if not state._use_orig_params:
                 stack.enter_context(_unflatten_as_params(state, module))
             try:
@@ -214,6 +228,93 @@ def _unshard_params(
                     _reshard_grads(handles)
                 for handle in handles:
                     handle._training_state = HandleTrainingState.IDLE
+
+
+@contextlib.contextmanager
+def _unshard_params_recurse(
+    module: nn.Module,
+    state: _FSDPState,
+    recurse: bool,
+    writeback: bool,
+    rank0_only: bool,
+    offload_to_cpu: bool,
+    with_grads: bool,
+):
+    """
+    This is a helper for :func:`_unshard_params` that recursively calls
+    :func:`_unshard_fsdp_state_params` on FSDP states if ``recurse=True``.
+    """
+    _validate_unshard_params_args(
+        state, writeback, rank0_only, offload_to_cpu, with_grads
+    )
+    if recurse:
+        with contextlib.ExitStack() as stack:
+            # TODO (awgu): The traversal function does not traverse through
+            # incompatible composable APIs. Verify if this is the desired
+            # behavior for this function.
+            for state, fsdp_module in zip(
+                *traversal_utils._get_fsdp_states_with_modules(module)
+            ):
+                stack.enter_context(
+                    _unshard_params_recurse(
+                        module=fsdp_module,
+                        state=state,
+                        recurse=False,
+                        writeback=writeback,
+                        rank0_only=rank0_only,
+                        offload_to_cpu=offload_to_cpu,
+                        with_grads=with_grads,
+                    )
+                )
+            yield
+        return
+    _lazy_init(state, module)
+    with _unshard_fsdp_state_params(
+        module=module,
+        state=state,
+        writeback=writeback,
+        rank0_only=rank0_only,
+        offload_to_cpu=offload_to_cpu,
+        with_grads=with_grads,
+    ):
+        try:
+            state.training_state = TrainingState.SUMMON_FULL_PARAMS
+            yield
+        finally:
+            state.training_state = TrainingState.IDLE
+
+
+@contextlib.contextmanager
+def _unshard_params(
+    module: nn.Module,
+    recurse: bool,
+    writeback: bool,
+    rank0_only: bool,
+    offload_to_cpu: bool,
+    with_grads: bool,
+):
+    """
+    This unshards FSDP-managed parameters for all modules with FSDP applied in
+    the module tree rooted at ``module``.
+    """
+    root_fsdp_states, root_fsdp_modules = _get_fsdp_root_states_with_modules(module)
+    with contextlib.ExitStack() as stack:
+        for root_fsdp_state, root_fsdp_module in zip(
+            root_fsdp_states, root_fsdp_modules
+        ):
+            stack.enter_context(
+                _unshard_params_recurse(
+                    module=root_fsdp_module,
+                    state=root_fsdp_state,
+                    recurse=recurse,
+                    writeback=writeback,
+                    rank0_only=rank0_only,
+                    offload_to_cpu=offload_to_cpu,
+                    with_grads=with_grads,
+                )
+            )
+        yield
+    return
 
 
 def _deregister_orig_params(state: _FSDPState, module: nn.Module) -> None:
