@@ -60,7 +60,9 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
     return state
 
 
-def _get_module_fsdp_state_if_comm_module(module: nn.Module) -> Optional[_FSDPState]:
+def _get_module_fsdp_state_if_fully_sharded_module(
+    module: nn.Module,
+) -> Optional[_FSDPState]:
     state = _get_module_fsdp_state(module)
     if state is None:
         return None

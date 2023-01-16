@@ -91,7 +91,9 @@ from ._unshard_param_utils import (
     _deregister_orig_params,
     _register_flat_param,
     _register_orig_params,
+    _unshard_fsdp_state_params,
     _unshard_params,
+    _validate_unshard_params_args,
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter
@@ -684,7 +686,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     @staticmethod
     @contextlib.contextmanager
     def summon_full_params(
-        module,
+        module: nn.Module,
         recurse: bool = True,
         writeback: bool = True,
         rank0_only: bool = False,
@@ -755,9 +757,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         root_fsdp_modules = _get_fsdp_root_states(module)
         # Summon all params for all FSDP instances
         with contextlib.ExitStack() as stack:
-            for module in root_fsdp_modules:
+            for root_fsdp_module in root_fsdp_modules:
                 stack.enter_context(
-                    module._summon_full_params(
+                    _unshard_params(
+                        module=root_fsdp_module,
+                        state=root_fsdp_module,
                         recurse=recurse,
                         writeback=writeback,
                         rank0_only=rank0_only,
@@ -769,68 +773,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             yield
         # Exiting from the ExitStack will reshard all params.
         return
-
-    @contextlib.contextmanager
-    def _summon_full_params(
-        self,
-        recurse: bool = True,
-        writeback: bool = True,
-        rank0_only: bool = False,
-        offload_to_cpu: bool = False,
-        with_grads: bool = False,
-    ):
-        if with_grads and (offload_to_cpu or not self._use_orig_params):
-            raise NotImplementedError(
-                f"with_grads={with_grads} "
-                f"use_orig_params={self._use_orig_params} "
-                f"offload_to_cpu={offload_to_cpu} "
-                f"is not supported yet"
-            )
-        if writeback and rank0_only:
-            raise ValueError(
-                "writeback=True and rank0_only=True is not supported, as model "
-                "parameter shapes will be different across ranks, and writing "
-                "to them can lead to inconsistencies across ranks when the "
-                "context is exited."
-            )
-        if offload_to_cpu and not rank0_only:
-            warnings.warn(
-                "offload_to_cpu and rank0_only=False will result in "
-                "full parameters being redundantly copied to CPU memory for "
-                "GPUs that reside on the same machine, which may incur the risk of "
-                "CPU OOM. It is recommended to use ``offload_to_cpu`` with "
-                "rank0_only=True."
-            )
-
-        if recurse:
-            with contextlib.ExitStack() as stack:
-                for module in traversal_utils._get_fsdp_states(self):
-                    stack.enter_context(
-                        module._summon_full_params(
-                            recurse=False,
-                            writeback=writeback,
-                            rank0_only=rank0_only,
-                            offload_to_cpu=offload_to_cpu,
-                            with_grads=with_grads,
-                        )
-                    )
-                yield
-            return
-
-        _lazy_init(self, self)
-        with _unshard_params(
-            module=self,
-            state=self,
-            writeback=writeback,
-            rank0_only=rank0_only,
-            offload_to_cpu=offload_to_cpu,
-            with_grads=with_grads,
-        ):
-            try:
-                self.training_state = TrainingState.SUMMON_FULL_PARAMS
-                yield
-            finally:
-                self.training_state = TrainingState.IDLE
 
     @contextlib.contextmanager
     def _deregister_orig_params_ctx(self):
@@ -1161,7 +1103,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 model, False, False
             )
 
-        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
+            0
+        ]._use_orig_params
         assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
@@ -1209,7 +1153,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim,
         )
 
-        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[0]._use_orig_params
+        use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
+            0
+        ]._use_orig_params
         assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
