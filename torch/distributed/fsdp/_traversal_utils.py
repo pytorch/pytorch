@@ -50,11 +50,11 @@ def _get_fsdp_states_with_modules(
     traversal order (which is assumed to remain depth-first).
     2. A corresponding list of the modules owning the states in the first list.
 
-    For the wrapper code path, this returns a list of all
-    ``FullyShardedDataParallel`` instances, and both lists are the same. For
-    the composable code path, this returns a list of all composable state
-    instances and a list of the corresponding fully sharded modules. See [Note:
-    Fully Sharded Module].
+    For the wrapper code path, both returned lists are the same, each
+    containing all ``FullyShardedDataParallel`` instances. For the composable
+    code path, this returns a list of all composable state instances and a list
+    of the corresponding fully sharded modules. See [Note: Fully Sharded
+    Module].
 
     NOTE: The traversal does not proceed into any module annotated by an
     incompatible API (e.g. ``replicate``).

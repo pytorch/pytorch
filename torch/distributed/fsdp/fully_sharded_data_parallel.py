@@ -91,9 +91,7 @@ from ._unshard_param_utils import (
     _deregister_orig_params,
     _register_flat_param,
     _register_orig_params,
-    _unshard_fsdp_state_params,
     _unshard_params,
-    _validate_unshard_params_args,
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter
