@@ -12,6 +12,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -53,6 +54,19 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
     torch._shape_as_tensor,
 ]
 
+constant_fold_functions = [
+    torch._assert,
+    torch._utils._get_device_index,
+    torch.cuda.is_available,
+    torch.device,
+    torch.distributed.is_available,
+    torch.finfo,
+    torch.iinfo,
+    torch.is_floating_point,
+    torch.nn.functional._Reduction.get_enum,
+]
+if torch.distributed.is_available():
+    constant_fold_functions.append(torch.distributed.is_initialized)
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
@@ -158,16 +172,7 @@ class TorchVariable(VariableTracker):
         return self.value
 
     def can_constant_fold_through(self):
-        if self.value in (
-            torch._assert,
-            torch.device,
-            torch.finfo,
-            torch.iinfo,
-            torch.is_floating_point,
-            torch.cuda.is_available,
-            torch.nn.functional._Reduction.get_enum,
-            torch._utils._get_device_index,
-        ):
+        if self.value in constant_fold_functions:
             return True
         return getattr(self.value, "__module__", None) == "math"
 
@@ -745,7 +750,7 @@ class TorchPyOperator(VariableTracker):
                 # equal
                 comparable_state = state._replace(
                     output=state.output._replace(
-                        guards=set(),
+                        guard_state=GuardsCheckpointState(set()),
                         nn_modules=None,
                         # Timestamp is monotonically increasing so we don't
                         # care about divergence
@@ -781,8 +786,8 @@ class TorchPyOperator(VariableTracker):
                 unimplemented(true_cmp.diff(false_cmp))
 
             # Add guards
-            tx.output.guards |= false_guards
-            tx.output.guards |= true_guards
+            tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
+            tx.output.tracing_context.guards_context.dynamo_guards |= true_guards
 
             true_name = add_subgraph(
                 "true", torch.fx.GraphModule(true_nn_modules, true_graph)

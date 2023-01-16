@@ -1567,7 +1567,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
 
   if (self.is_mkldnn()) {
-    return at::_mkldnn_reshape(self, c10::asIntArrayRefSlow(shape));
+    return at::_mkldnn_reshape(self, C10_AS_INTARRAYREF_SLOW(shape));
   }
 
   // `computeStride` returns the proper strides to use if this
@@ -3141,7 +3141,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
   }
   // TODO: quantized Tensor support for SymInt needs to be added but basic building blocs
   // are missing for now.
-  auto result = make_qtensor(self, c10::asIntArrayRefSlow(sizes), c10::asIntArrayRefSlow(strides), std::move(quantizer));
+  auto result = make_qtensor(self, C10_AS_INTARRAYREF_SLOW(sizes), C10_AS_INTARRAYREF_SLOW(strides), std::move(quantizer));
   if (dim.has_value()) {
     namedinference::propagate_names_except(result, self, {dim.value()});
   } else {

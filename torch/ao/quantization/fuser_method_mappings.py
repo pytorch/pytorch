@@ -190,16 +190,6 @@ def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     assert fuser_method is not None, "did not find fuser method for: {} ".format(op_list)
     return fuser_method
 
-def _reverse_sequential_wrapper2(sequential):
-    """ Given a sequential class for two modules, return a function that takes
-    is_qat, and then two modules as argument, that ignores the is_qat flag
-    and always returns the sequential that combines the two input modules, with
-    the order of two inputs reversed
-    """
-    def fuser_method(is_qat, m1, m2):
-        return sequential(m2, m1)
-    return fuser_method
-
 def _reverse2(f):
     def reversed(is_qat, x, y):
         return f(is_qat, y, x)
@@ -210,25 +200,6 @@ def _reverse3(f):
         y, z = w
         return f(is_qat, z, y, x)
     return reversed
-
-_DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] = {
-    (nn.BatchNorm1d, nn.Conv1d): _reverse2(fuse_conv_bn),
-    (nn.ReLU, (nn.BatchNorm1d, nn.Conv1d)): _reverse3(fuse_conv_bn_relu),
-    (nn.BatchNorm2d, nn.Conv2d): _reverse2(fuse_conv_bn),
-    (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d)): _reverse3(fuse_conv_bn_relu),
-    (nn.BatchNorm3d, nn.Conv3d): _reverse2(fuse_conv_bn),
-    (nn.ReLU, (nn.BatchNorm3d, nn.Conv3d)): _reverse3(fuse_conv_bn_relu),
-    (nn.ReLU, nn.Conv1d): _reverse_sequential_wrapper2(nni.ConvReLU1d),
-    (nn.ReLU, nn.Conv2d): _reverse_sequential_wrapper2(nni.ConvReLU2d),
-    (nn.ReLU, nn.Conv3d): _reverse_sequential_wrapper2(nni.ConvReLU3d),
-    (nn.BatchNorm1d, nn.Linear): _reverse2(fuse_linear_bn),
-    (nn.ReLU, nn.Linear): _reverse_sequential_wrapper2(nni.LinearReLU),
-    (nn.ReLU, nn.BatchNorm2d): _reverse_sequential_wrapper2(nni.BNReLU2d),
-    (nn.ReLU, nn.BatchNorm3d): _reverse_sequential_wrapper2(nni.BNReLU3d),
-    (nn.BatchNorm1d, nn.ConvTranspose1d): _reverse2(fuse_convtranspose_bn),
-    (nn.BatchNorm2d, nn.ConvTranspose2d): _reverse2(fuse_convtranspose_bn),
-    (nn.BatchNorm3d, nn.ConvTranspose3d): _reverse2(fuse_convtranspose_bn),
-}
 
 def _get_valid_patterns(op_pattern):
     """
@@ -263,13 +234,10 @@ def _get_valid_patterns(op_pattern):
 
 def get_fuser_method_new(
         op_pattern: Pattern,
-        fuser_method_mapping: Optional[Dict[Pattern, Union[nn.Sequential, Callable]]] = None):
-    """ This will be made defult after we deparate the get_fuser_method
+        fuser_method_mapping: Dict[Pattern, Union[nn.Sequential, Callable]]):
+    """ This will be made defult after we deprecate the get_fuser_method
     Would like to implement this first and have a separate PR for deprecation
     """
-    if fuser_method_mapping is None:
-        fuser_method_mapping = _DEFAULT_PATTERN_TO_FUSER_METHOD
-
     op_patterns = _get_valid_patterns(op_pattern)
     fuser_method = None
     for op_pattern in op_patterns:

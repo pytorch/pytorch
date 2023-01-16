@@ -942,6 +942,9 @@ if TEST_WITH_TORCHDYNAMO:
     # TODO: Remove this; this is grandfathered in because we suppressed errors
     # on test suite previously
     torch._dynamo.config.suppress_errors = True
+    if TEST_WITH_TORCHINDUCTOR:
+        import torch._inductor.config
+        torch._inductor.config.fallback_random = True
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):

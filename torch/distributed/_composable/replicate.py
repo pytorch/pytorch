@@ -68,7 +68,7 @@ class _ReplicateState:
         return self._ddp.post_forward(output)
 
 
-@contract
+@contract()
 def replicate(
     module: nn.Module,  # NOTE: contract now supports single module only
     **kwargs,

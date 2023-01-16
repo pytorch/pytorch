@@ -220,10 +220,13 @@ std::ostream& operator<<(
     std::vector<std::string> dtype_strs;
     std::vector<std::string> device_type_strs;
     std::vector<std::string> size_strs;
+    dtype_strs.reserve(collective_fingerprint.tensor_dtypes_.size());
     for (const auto& tensor_dtype : collective_fingerprint.tensor_dtypes_) {
       dtype_strs.emplace_back(
           c10::toString(static_cast<at::ScalarType>(tensor_dtype)));
     }
+    device_type_strs.reserve(
+        collective_fingerprint.tensor_device_types_.size());
     for (const auto& tensor_device_type :
          collective_fingerprint.tensor_device_types_) {
       device_type_strs.emplace_back(

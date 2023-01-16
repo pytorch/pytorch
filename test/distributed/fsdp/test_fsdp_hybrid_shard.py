@@ -1,19 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-from functools import partial
-from collections import Counter
 import sys
+from collections import Counter
+from functools import partial
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
+import torch.nn as nn
 
 from torch.distributed.distributed_c10d import _rank_not_in_group
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-    ShardingStrategy,
-)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -54,6 +51,7 @@ def patch_allreduce(new_allreduce):
     finally:
         dist.all_reduce = orig_ar
 
+
 @contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter):
     """
@@ -74,6 +72,7 @@ class MyModel(nn.Module):
         self.lin1 = nn.Linear(10, 10)
         self.lin2 = nn.Linear(10, 10)
         self.lin3 = nn.Linear(10, 10)
+
 
 class TestFSDPHybridShard(FSDPTest):
     @property
@@ -97,24 +96,29 @@ class TestFSDPHybridShard(FSDPTest):
         with err_ctx:
             model = FSDP(model, sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2)
 
-
     @skip_if_lt_x_gpu(2)
     def test_hybrid_shard_strategy_mismatch_raises(self):
         for sharding_strategy in [
             ShardingStrategy._HYBRID_SHARD_ZERO2,
-            ShardingStrategy.HYBRID_SHARD
+            ShardingStrategy.HYBRID_SHARD,
         ]:
             with self.subTest(sharding_strategy=sharding_strategy):
                 model = MyModel().cuda()
                 intra_pg = self.process_group
                 inter_pg = dist.new_group(ranks=[self.rank])
-                model.lin1 = FSDP(model.lin1, process_group=(intra_pg, inter_pg), sharding_strategy=sharding_strategy)
+                model.lin1 = FSDP(
+                    model.lin1,
+                    process_group=(intra_pg, inter_pg),
+                    sharding_strategy=sharding_strategy,
+                )
                 self.assertEqual(model.lin1.process_group, intra_pg)
                 self.assertEqual(model.lin1._inter_node_pg, inter_pg)
                 model = FSDP(model, process_group=intra_pg)
                 inp = torch.randn(4, 10)
                 # Errors during _lazy_init
-                with self.assertRaisesRegex(ValueError, "expect sharding strategies to be the same"):
+                with self.assertRaisesRegex(
+                    ValueError, "expect sharding strategies to be the same"
+                ):
                     model(inp)
 
     @skip_if_lt_x_gpu(2)
@@ -124,25 +128,37 @@ class TestFSDPHybridShard(FSDPTest):
         inter_pg = dist.new_group(ranks=[self.rank])
         # Mismatched process groups for intra-node
         model.lin1 = FSDP(
-            model.lin1, process_group=(intra_pg, inter_pg), sharding_strategy=ShardingStrategy.HYBRID_SHARD
+            model.lin1,
+            process_group=(intra_pg, inter_pg),
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
         )
         model = FSDP(
-            model, process_group=(dist.new_group(), dist.new_group()), sharding_strategy=ShardingStrategy.HYBRID_SHARD
+            model,
+            process_group=(dist.new_group(), dist.new_group()),
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
         )
         # Errors during _lazy_init
         inp = torch.randn(4, 10)
-        with self.assertRaisesRegex(ValueError, "intra-node process groups do not match"):
+        with self.assertRaisesRegex(
+            ValueError, "intra-node process groups do not match"
+        ):
             model(inp)
 
         # Mismatched process groups for inter-node
         model = MyModel().cuda()
         model.lin1 = FSDP(
-            model.lin1, process_group=(intra_pg, inter_pg), sharding_strategy=ShardingStrategy.HYBRID_SHARD
+            model.lin1,
+            process_group=(intra_pg, inter_pg),
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
         )
         model = FSDP(
-            model, process_group=(intra_pg, dist.new_group()), sharding_strategy=ShardingStrategy.HYBRID_SHARD
+            model,
+            process_group=(intra_pg, dist.new_group()),
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
         )
-        with self.assertRaisesRegex(ValueError, "inter-node process groups do not match"):
+        with self.assertRaisesRegex(
+            ValueError, "inter-node process groups do not match"
+        ):
             model(inp)
 
     @skip_if_lt_x_gpu(2)
@@ -150,14 +166,13 @@ class TestFSDPHybridShard(FSDPTest):
         pol = ModuleWrapPolicy({nn.Linear})
         model = MyModel().cuda()
         with self.assertRaisesRegex(
-            ValueError,
-            "Expected process_group to be passed in"
+            ValueError, "Expected process_group to be passed in"
         ):
             model = FSDP(
                 model,
                 auto_wrap_policy=pol,
                 process_group=self.process_group,
-                sharding_strategy=ShardingStrategy.HYBRID_SHARD
+                sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             )
 
     # TODO - add test for ZeRO-2 style sharding ensure params are not
@@ -172,7 +187,8 @@ class TestFSDPHybridShard(FSDPTest):
             3. reduce_scatter and allreduce called the expected no. of times
         """
         for sharding_strategy in [
-            ShardingStrategy.HYBRID_SHARD, ShardingStrategy._HYBRID_SHARD_ZERO2
+            ShardingStrategy.HYBRID_SHARD,
+            ShardingStrategy._HYBRID_SHARD_ZERO2,
         ]:
             with self.subTest(sharding_strategy=sharding_strategy):
                 auto_wrap_policy = ModuleWrapPolicy(
@@ -199,16 +215,14 @@ class TestFSDPHybridShard(FSDPTest):
                     # whole world here.
                     self.assertEqual(
                         dist.get_world_size(mod.process_group),
-                        dist.get_world_size(self.process_group)
+                        dist.get_world_size(self.process_group),
                     )
                     intra_node_pgs.add(mod.process_group)
                     inter_node_pg = mod._inter_node_pg
                     inter_node_pgs.add(inter_node_pg)
                     self.assertEqual(1, dist.get_world_size(inter_node_pg))
                     self.assertFalse(_rank_not_in_group(inter_node_pg))
-                    self.assertEqual(
-                        sharding_strategy, mod.sharding_strategy
-                    )
+                    self.assertEqual(sharding_strategy, mod.sharding_strategy)
                 # All fsdp modules should share the same process groups
                 self.assertEqual(1, len(intra_node_pgs))
                 self.assertEqual(1, len(inter_node_pgs))
@@ -233,6 +247,7 @@ class TestFSDPHybridShard(FSDPTest):
                 self.assertEqual(num_flat_params, cntr[orig_ar])
                 self.assertEqual(num_flat_params, cntr[orig_rs])
                 dist.barrier()
+
 
 instantiate_parametrized_tests(TestFSDPHybridShard)
 

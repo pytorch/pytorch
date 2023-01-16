@@ -1,0 +1,42 @@
+name: inductor-A100-perf
+
+on:
+  schedule:
+    - cron: 45 1,9,17 * * *
+  push:
+    tags:
+      - ciflow/nightly/*
+  pull_request:
+    paths:
+      - .github/workflows/inductor-perf-test-nightly.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  linux-bionic-cuda11_6-py3_10-gcc7-inductor-build:
+    name: cuda11.6-py3.10-gcc7-sm80
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm80
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
+      cuda-arch-list: '8.0'
+      test-matrix: |
+        { include: [
+          { config: "inductor_huggingface_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "inductor_timm_perf", shard: 1, num_shards: 2, runner: "linux.gcp.a100" },
+          { config: "inductor_timm_perf", shard: 2, num_shards: 2, runner: "linux.gcp.a100" },
+          { config: "inductor_torchbench_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+        ]}
+
+  linux-bionic-cuda11_6-py3_10-gcc7-inductor-test:
+    name: cuda11.6-py3.10-gcc7-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_6-py3_10-gcc7-inductor-build
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm80
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
